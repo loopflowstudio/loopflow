@@ -23,12 +23,12 @@ ol li { margin:.5rem 0; }
 <body>
 <main>
 <header>
-<p>LOO-672 · concept-review step, ninth pass · November 5, 2026</p>
+<p>LOO-672 · concept-review step, tenth pass · November 5, 2026</p>
 <p>Built from <code>scratch/loo-672-ready-conversations.md</code>, <code>scratch/questions.md</code>, <code>scratch/loo-672-load-prefetch.md</code>, <code>swift/LoopflowMac/WorkModel.swift</code>, <code>swift/LoopflowMac/WorkProjection.swift</code>, <code>swift/LoopflowMac/Views/WorkspacePanesView.swift</code>, <code>swift/LoopflowMac/Views/DashboardView.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, <code>swift/LoopflowTests/WorkDestinationTests.swift</code>, <code>rust/loopflow/src/ops/human_session.rs</code> and the three session skills.</p>
 </header>
 
-<h1>The tile rule stops one board short. Tiles on the repository page and a Wave view still navigate.</h1>
-<p>The eighth pass's direction is in the tree: one <code>ConversationPlaceholder</code> serves pane and tile, the tile's own views are gone, and a primary's Retry and a Dashboard tile's button enter the registry opener in place. Reading the other boards shows the rule's condition was written narrower than the rule. The repository page and a Wave view open their Task tiles through the same <code>presentWaveTiles</code> → <code>openTiles</code> → <code>present(open:)</code> as a Dashboard, with the same zoom control, but <code>selectedViewPlan</code> is nil for both, so <code>inTile</code> is false there and the shared placeholder's <strong>Retry</strong> selects the Task and leaves the board. The repository page is the one in Jack Heart's screenshot.</p>
+<h1>Nothing left to change. The next step is the native proof, not another review.</h1>
+<p>The ninth pass's one finding is in the tree: <code>inTile</code> keys on any presented board, <code>selectedViewPlan</code> or <code>navigation.waveView</code>, so a tile's <strong>Retry</strong> attaches in place on the Dashboard, the repository page and a Wave view alike, and <code>repositoryPageTileRetriesInPlace</code> holds the board and the selection still. The five concepts below are each owned in one place, the three session skills and <code>PRIMARY_MESSAGE</code> agree, and the working tree is clean. What remains is what Jack Heart asked for in the operator correction: a fresh candidate with a Wave, live providers observed before any selection, and no Graph or operator work launched.</p>
 
 <h2>What the person does</h2>
 <table>
@@ -38,8 +38,7 @@ ol li { margin:.5rem 0; }
 <tr><td>Select an unstarted Task</td><td>Start beside its brief; it has no checkout, so there is no conversation to open. A tile does the same.</td></tr>
 <tr><td>Select a finished Task</td><td>Its record, until a reveal presents its history. Toggle reaches the placeholder, where Rust's Start is the one action when history is absent.</td></tr>
 <tr><td>A selected Task's opening fails</td><td><strong>Conversation failed to open</strong>, the error, and <strong>Retry</strong>.</td></tr>
-<tr><td>A Dashboard tile's opening fails</td><td>The same placeholder; <strong>Retry</strong> attaches in the tile and the Dashboard stays.</td></tr>
-<tr><td>A repository-page or Wave-view tile's opening fails</td><td>Today: the same placeholder and the same <strong>Retry</strong>, but pressing it selects the Task and leaves the board. <span class="proposed">Proposed: it attaches in the tile and the board stays, like a Dashboard's.</span></td></tr>
+<tr><td>A tile's opening fails, on the Dashboard, the repository page or a Wave view</td><td>The same placeholder; <strong>Retry</strong> attaches in the tile and the board stays.</td></tr>
 <tr><td>Select a conversation held elsewhere</td><td>Passive: last screen and <strong>Take back</strong>.</td></tr>
 <tr><td>Close a pane</td><td>Closed here until a deliberate reselection or a press of its button, either of which reopens it. Close is the one way to keep a selected Work unopened.</td></tr>
 </table>
@@ -49,7 +48,7 @@ ol li { margin:.5rem 0; }
 <tr><th>Concept</th><th>Owner</th></tr>
 <tr><td>Which Work opens itself</td><td><code>RoadmapTask.conversationIntent</code>: working → Start, else reveal; primaries always Start. <code>awaitsStart</code> is unstarted and open.</td></tr>
 <tr><td>What a selected Task shows</td><td><code>showsTerminals</code>: not a Task, or working, or chosen. <code>presentSession</code> chooses terminals when a conversation arrives.</td></tr>
-<tr><td>What a Work with no conversation here offers</td><td><code>ConversationPlaceholder</code> → <code>ConversationOpenButton</code> → <code>WorkModel.openConversation(in:store:)</code>, labelled Start, Retry or Open. In place through the registry opener for a primary or a visible tile; through the Task link for a selected Task's pane. <span class="proposed">Proposed: "visible tile" means a tile of any presented board, <code>selectedViewPlan</code> or <code>navigation.waveView</code>, not a view plan alone.</span></td></tr>
+<tr><td>What a Work with no conversation here offers</td><td><code>ConversationPlaceholder</code> → <code>ConversationOpenButton</code> → <code>WorkModel.openConversation(in:store:)</code>, labelled Start, Retry or Open. In place through the registry opener for a primary or a tile of any presented board; through the Task link for a selected Task's pane.</td></tr>
 <tr><td>What may open, and in what order</td><td><code>warmWork</code>: selected, visible tiles, <code>warmPrimaries</code>, <code>recentTasks</code>; <code>prefetchPrimary</code>, <code>prefetch</code>, two slots.</td></tr>
 <tr><td>When a provider starts</td><td><code>SessionsStore</code> on <code>.prepared</code>, through <code>GhosttySurfacePool.start</code>; the pane adopts, never launches.</td></tr>
 <tr><td>Who may take input</td><td><code>open_without_replacing</code>, taking one <code>SessionOpenIntent</code>; only Take back replaces a holder.</td></tr>
@@ -58,8 +57,8 @@ ol li { margin:.5rem 0; }
 
 <h2>Counterexamples that held</h2>
 <ul>
-<li>A Dashboard's focused tile is the selected Work, so "in place when not selected" would have left the Dashboard; the proposal keeps "a board is presented", which <code>boardPlan</code> already maps for every board.</li>
-<li>An entered tile (<code>.entered</code>) is full Work, not a tile; its Retry navigates, unchanged.</li>
+<li>A Dashboard's focused tile is the selected Work, so "in place when not selected" would have left the Dashboard; the rule is "a board is presented and the tile is visible".</li>
+<li>An entered tile (<code>.entered</code>) is full Work, not a tile; <code>waveView</code> is nil there, so its Retry navigates, unchanged.</li>
 <li>A closed selected Task's button readmits it: the link route reaches <code>focus(deliberate: true)</code>, which clears the closed key, and <code>WorkspaceRetentionTests</code> covers Close then a deliberate reopen for a Task and a primary.</li>
 <li>An unknown Machine never shows a gate: <code>SessionsRootView</code> renders "Workspace unavailable" or progress instead of the content, so the placeholder's generic note cannot appear there.</li>
 <li>A Wave's <code>machine</code> is its Tasks' default Machine, not where its primary lives; prefetching every visible Wave's primary in the local checkout is right.</li>
@@ -67,10 +66,10 @@ ol li { margin:.5rem 0; }
 </ul>
 
 <h2>Settled here</h2>
-<p>Next implement, recorded in the plan: <code>inTile</code> is a presented board (<code>selectedViewPlan != nil || navigation.waveView != nil</code>) and a visible tile, with one <code>WorkDestinationTests</code> case where a repository-page or Wave-view tile whose opening failed retries in place and the board stays selected. No code changed in this pass.</p>
+<p>No implement iteration and no new product choice. The plan records this pass and corrects one note: PR #1816's published head predates the in-place tile route, so the next publication carries it.</p>
 
 <h2>Next proof</h2>
-<p>Native, still owed: a fresh load with no saved history opens the repository and each Wave conversation unselected; selection reveals the started Session; no operator pass or Graph launched; returning to an existing Task conversation keeps it; a started Task nobody owns opens; an unstarted Task offers Start; a finished Task shows its record until revealed; a failed tile on each board retries in place.</p>
+<p>Native, still owed and now first in line: a fresh load with no saved history opens the repository and each Wave conversation unselected; selection reveals the started Session; no operator pass or Graph launched; returning to an existing Task conversation keeps it; a started Task nobody owns opens; an unstarted Task offers Start; a finished Task shows its record until revealed; a failed tile on each board retries in place. <code>prepare-redemo.py</code> needs a Wave in the loaded repository for the primaries case.</p>
 
 <h2>For the demo</h2>
 <ol>

@@ -50,9 +50,9 @@ reveals the already started Session, returning to an existing Task conversation
 keeps it, and no operator pass or Graph launched (`loo-672-demo.md`, required
 demonstration). `prepare-redemo.py` needs a Wave in the loaded repository for that
 case. PR #1816's head (`7deedb0306`, `lf pr open`) carries the primaries change
-through the in-place tile route, and its body describes the expanded scope; the
-two commits after it (the inlined intent action and these plan records) are
-unpublished. `demo.html` still describes the November 4 candidate (`7b23c50c20`,
+and the ninth-review record, and its body describes the expanded scope; the
+commits after it (the in-place tile route, the inlined intent action and these
+plan records) are unpublished. `demo.html` still describes the November 4 candidate (`7b23c50c20`,
 “Prefetch still needs repair”), and the November 5 native candidates predate the
 primaries change.
 
@@ -333,6 +333,16 @@ repository-page tile retries in place and the page stays; `.entered` keeps the
 pane's navigating Retry. Checked and unchanged: a Wave's `machine` is its Tasks'
 default Machine, so every visible Wave's primary prefetches in the local checkout;
 the pane overlay's Retry runs the same opener. Open choices unchanged.
+
+Concept review, November 5 (tenth pass, against the ninth-review tile route): the
+experience and its five concepts hold, and the tree matches the plan: `inTile` keys
+on `selectedViewPlan` or `navigation.waveView` plus visibility,
+`repositoryPageTileRetriesInPlace` asserts the board and selection unchanged, one
+`PRIMARY_MESSAGE` and one `ConversationPlaceholder` remain, and the working tree is
+clean at `4a73d37b86`. Nothing to change and no new product choice; the five demo
+questions stand as recorded defaults. Per Jack Heart's operator correction in
+`loo-672-load-prefetch.md`, the next work is the native repository, Wave and Task
+startup proof in `loo-672-demo.md`, not further review.
 
 ## Verification
 

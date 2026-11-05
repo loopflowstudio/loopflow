@@ -547,6 +547,32 @@ pub(super) async fn receive(cmd: &MachineCredentialCommand) -> Result<()> {
                 .map_err(|_| anyhow!("invalid credential transfer"))?;
             install(&store, credential).await?;
         }
+        MachineCredentialCommand::Renew => renew_rentals(&store).await?,
+    }
+    Ok(())
+}
+
+/// Each live rental gets the next Claude access token once its own is near
+/// expiry, from the logins the laptop holds for rentals. Unattended: a rental
+/// whose login needs a browser approval is reported and left to a foreground
+/// `lf machine connect`.
+async fn renew_rentals(store: &SharedStore) -> Result<()> {
+    for machine_id in store
+        .sqlite
+        .rentals(None)?
+        .into_iter()
+        .filter(|rental| rental.state.is_live())
+        .filter_map(|rental| rental.machine_id)
+    {
+        let Some(machine) = store.sqlite.machine_by_id(&machine_id)? else {
+            continue;
+        };
+        if let Err(error) = connect_claude_accounts(&machine, true).await {
+            eprintln!(
+                "Could not renew Claude on {}: {error:#}",
+                machine_name(&machine)
+            );
+        }
     }
     Ok(())
 }

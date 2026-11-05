@@ -116,8 +116,17 @@ Checks (implement, Nov 5, items 7–9): `--lib` provider_account::, machine_cred
 Compress (Nov 5, items 7–9): the legacy-home reader is `provider_session_account_home` (its unused async wrapper deleted); tests share `record_account_home_conversation` for legacy rows; the refresh-token refusal message says what it refuses. `--lib machine_credentials transcript:: provider_conversation codex_connection` and the shared-home resume test pass; clippy clean.
 Realign (Nov 5, after items 7–9): isolation grep over `rust/loopflow/src` returns 0, `AccountCommand` has no `Token`, user docs carry no isolation or token text; nothing rerun.
 
+## Concept review (November 5, 2026, headless, after items 7–9)
+Item 7 makes the login a property of the Machine, not of a Session: one shared home per provider, one login at a time. Three consequences the accepted decisions already settle; built November 5 (`moves_bulk::follow_login`, `lf machine credentials renew` on the install schedule):
+1. **An account move reports everyone it moves.** `lf session move <selector> --account <email>` and `lf account <provider> drain` switch the provider's login once, so every open interactive Session of that provider follows, selected or not. Today `move_login` lists only the selected Sessions (`--blocked --account work@` silently moves the unblocked ones too). The selector keeps choosing the provider and stays required; the report lists every open interactive Session of that provider as following, and the target login's own blocked-ness for those Sessions' models is shown, not hidden. `docs/sessions.md` (the `--on jack@ --account work@` line) says "switch the shared login; every open Claude follows". `-a` moves stay per Session.
+2. **Stale promises from before items 7 and 9.** `docs/sessions.md` "A resumed Session stays on the login it started with" becomes "runs on the active login"; `docs/architecture/machines.md` (`--rent`) installs each Claude account's rental access token, not a long-lived token.
+3. **Rental renewal on a schedule.** Accepted in item 9 ("a scheduled out-of-band job", "every few hours") and not yet built: only connect and the launch prefix renew. Reuse the one schedule owner lf already has (`lf self install schedule`: LaunchAgent, crontab on Linux) for an entry that renews and resends to live rentals every 2 hours and does nothing when none are live; the rental logins are file-backed, so the LaunchAgent needs no Keychain. No new scheduler.
+
+Still Jack's at demo, not blocking here: `scratch/questions.md` 3, 4, 11 and 16.
+Checks (implement, Nov 5, after concept review): `--lib human_session::moves_bulk::` (1) and `install::published::` (17) pass; clippy clean. Gate: `dto_fixtures::`, `served_reads`, docs check.
+
 ## Remaining
-- Scheduled rental renewal: no laptop scheduler exists, so renewal is the explicit connect or the launch prefix; a rental idle past ~8h needs a connect before its next launch. A schedule (launchd job running the connect for live rentals) is undesigned.
+- Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.
 - Laptop-side status per Machine is `lf --machine <m> account`; a single laptop view across Machines is not built.
 - Removal Task e1f359 (`isolate:`, long-lived token columns, `provider_session_accounts.isolated`) exists locally; its Linear export was rate-limited on November 5 and still awaits confirmation.

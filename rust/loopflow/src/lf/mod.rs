@@ -1338,7 +1338,7 @@ impl MachineCommand {
             Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive => true,
+                MachineCredentialCommand::Receive | MachineCredentialCommand::Renew => true,
             },
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
@@ -2349,7 +2349,8 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux)
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
+    /// and renew rental logins every 2 hours
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -2677,7 +2678,7 @@ pub enum MachineCommand {
         #[arg(long)]
         chrome_profile: Option<String>,
     },
-    /// Inspect or receive a machine credential (credential bytes use stdin only).
+    /// Inspect, receive or renew machine credentials (credential bytes use stdin only).
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
@@ -2822,6 +2823,10 @@ pub enum MachineCredentialCommand {
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
+    /// Send each live rental its next Claude access token when the one it
+    /// holds is near expiry; nothing when no rental is live. `lf install
+    /// schedule` runs it every 2 hours.
+    Renew,
 }
 
 #[derive(Debug, Subcommand)]

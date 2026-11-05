@@ -111,7 +111,10 @@ tail ~/.lf/logs/refresh.log    # what each scheduled update did
 Installing a build schedules `lf install` on your stream: daily at 09:00 local
 time, or the cadence already set. On macOS this is the LaunchAgent
 `com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
-it is a crontab line.
+it is a crontab line. The same schedule renews rental Claude logins every 2
+hours (`com.loopflow.rental-renewal`, the crontab line ending `# loopflow rental
+renewal`; logs in `~/.lf/logs/rental-renewal.log`); with no live rental it does
+nothing.
 
 Turn it off on macOS:
 

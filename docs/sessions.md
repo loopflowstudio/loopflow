@@ -160,24 +160,24 @@ lf --only-account claude=personal@ -b task run LOO-12 # this login only, for eve
 ```
 
 A new launch tries the repository's account route, then your default route,
-then any eligible login with room. A resumed Session stays on the login it
-started with. A Graph carries its selection to every step; run a fresh Graph to
-choose again. Connecting logins and setting routes: [Ops](ops.md).
+then any eligible login with room. A resumed Session runs on the active login.
+A Graph carries its selection to every step; run a fresh Graph to choose again. Connecting logins and setting routes: [Ops](ops.md).
 
 ## Move what a limit blocks
 
 ```bash
 lf session list --blocked                    # whose next message would fail
 lf session move --blocked -a claude:opus     # continue them on Opus
-lf session move --on jack@ --account work@   # switch the shared login they run on
+lf session move --on jack@ --account work@   # switch the shared login; every open Claude follows
 lf account claude drain jack@                # stop routing to a login; its Sessions go to the route's next one
 ```
 
-`--blocked` and `--on <account|harness[:model]>` select Sessions; `list` is
-the preview of what `move` does. An idle Session continues on the new agent at
+`--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
+previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-A login switch is one act every open Claude follows. Interactive Sessions only;
-nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
+A login switch is one act every open Claude follows, selected or not, so
+`move` lists each of them and says when the new login cannot take a Session's
+model either. Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Reference
 

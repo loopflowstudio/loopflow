@@ -244,7 +244,7 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, then the price from the provider's published per-second rates), writes
 the rental as `requested` with its sandbox name `lf-<id>` before the create,
 creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
-and installs every Claude account's long-lived token (and, when the repository
+and installs each Claude account's rental access token (and, when the repository
 plans in Linear, a freshly refreshed Linear access token), clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,

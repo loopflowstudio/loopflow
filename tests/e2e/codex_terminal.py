@@ -35,9 +35,12 @@ class Model(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         request = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         self.requests.append(request)
-        answer = "FOLLOWUP_DONE" if b"typed reconnect follow-up" in request else "FIXTURE_DONE"
+        answer, call_id = "FIXTURE_DONE", "tool-initial"
+        if b"typed reconnect follow-up" in request:
+            answer, call_id = "FOLLOWUP_DONE", "tool-followup"
+        if b"AFTER_NEW_PROMPT" in request:
+            answer, call_id = "NEW_THREAD_DONE", "tool-new"
         payload = json.loads(request)
-        call_id = "tool-followup" if answer == "FOLLOWUP_DONE" else "tool-initial"
         tool_finished = any(
             item.get("type") == "function_call_output" and item.get("call_id") == call_id
             for item in payload.get("input", [])
@@ -146,6 +149,7 @@ def _terminal(
     follow_up: bool = False,
     transport_failure: bool = False,
     outcomes: tuple[bytes, ...] = (),
+    new_thread: bool = False,
 ) -> int:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -164,6 +168,8 @@ def _terminal(
     submit_at = None
     exit_at = None
     pending_follow_up = follow_up
+    pending_new = new_thread
+    prompt_at = None
     waiting_for_transport = False
     transport_edit_at = None
     outcomes = outcomes or (b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE",)
@@ -182,6 +188,10 @@ def _terminal(
                 os.write(master, b"/exit")
                 submit_at = time.monotonic() + 0.3
                 exit_at = None
+            if prompt_at is not None and time.monotonic() >= prompt_at:
+                os.write(master, b"\x1b[200~AFTER_NEW_PROMPT\x1b[201~")
+                submit_at = time.monotonic() + 0.3
+                prompt_at = None
             if submit_at is not None and time.monotonic() >= submit_at:
                 os.write(master, b"\r")
                 submit_at = None
@@ -215,11 +225,23 @@ def _terminal(
                         os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
                         submit_at = time.monotonic() + 0.3
                     pending_follow_up = False
+                # The person starts a new conversation in their client and talks in it.
+                if pending_new and b"FIXTURE_DONE" in output and b"fixture default" in output:
+                    time.sleep(0.5)
+                    os.write(master, b"/new")
+                    submit_at = time.monotonic() + 0.5
+                    prompt_at = time.monotonic() + 2.5
+                    pending_new = False
                 if not exiting and any(outcome in output for outcome in outcomes):
                     exit_at = time.monotonic() + 1
                     exiting = True
             if child.poll() is not None:
                 break
+        # The terminal closes before lf finishes settling its exit.
+        try:
+            child.wait(timeout=max(deadline - time.monotonic(), 0.1))
+        except subprocess.TimeoutExpired:
+            pass
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
         assert any(outcome in output for outcome in outcomes), (
             "terminal never displayed the completed turn"
@@ -257,6 +279,7 @@ def _case(
     context_repo: Path | None = None,
     cmux_wrapper: Path | None = None,
     transport_failure: bool = False,
+    new_thread: bool = False,
 ) -> None:
     root.mkdir()
     Model.requests.clear()
@@ -474,11 +497,56 @@ trust_level="trusted"
         )
         == 2
     )
+    if new_thread:
+        _follow_new_thread(root, lf, env, session_id, native_id)
     print(
         f"{'wrapped' if wrapped else 'plain'}: captured two turns in {native_id}, "
         f"reconnected {session_id}, zero live providers",
         flush=True,
     )
+
+
+def _follow_new_thread(
+    root: Path, lf: Path, env: dict[str, str], session_id: str, first: str
+) -> None:
+    """`/new` in the client moves the Session; `lf resume` reopens the new conversation."""
+    status = _terminal(
+        [str(lf), "session", "resume", session_id],
+        env,
+        root,
+        root / "new.txt",
+        outcomes=(b"NEW_THREAD_DONE",),
+        new_thread=True,
+    )
+    assert status == 0, (status, root / "new.txt")
+    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
+        selected = database.execute(
+            "SELECT provider_thread FROM agent_sessions WHERE id=?", (session_id,)
+        ).fetchone()[0]
+        moves = database.execute(
+            "SELECT json_extract(payload,'$.provider_thread'),"
+            "json_extract(payload,'$.next_provider_thread'),json_extract(payload,'$.source') "
+            "FROM session_events WHERE session_id=? "
+            "AND json_extract(payload,'$.type')='agent_session_selected'",
+            (session_id,),
+        ).fetchall()
+        answered = database.execute(
+            "SELECT count(*) FROM session_events WHERE session_id=? AND kind='output' "
+            "AND json_extract(payload,'$.text')='NEW_THREAD_DONE'",
+            (session_id,),
+        ).fetchone()[0]
+    assert selected != first, ("Session still selects the first conversation", selected)
+    assert (first, selected, "new") in moves, moves
+    assert answered == 1, answered
+    status = _terminal(
+        [str(lf), "session", "resume", session_id],
+        env,
+        root,
+        root / "after-new.txt",
+        outcomes=(b"NEW_THREAD_DONE",),
+    )
+    assert status == 0, (status, root / "after-new.txt")
+    print(f"followed /new from {first} to {selected}; lf resume reopened it", flush=True)
 
 
 def main() -> None:
@@ -493,6 +561,11 @@ def main() -> None:
         "--transport-failure",
         action="store_true",
         help="Drop the renderer socket during draft entry instead of failing a title refresh",
+    )
+    parser.add_argument(
+        "--new-thread",
+        action="store_true",
+        help="Start a new conversation with /new; lf resume must reopen it",
     )
     options = parser.parse_args()
     if options.context_repo and not options.context_repo.is_dir():
@@ -512,6 +585,7 @@ def main() -> None:
                 options.context_repo,
                 options.cmux_wrapper,
                 options.transport_failure,
+                options.new_thread,
             )
     finally:
         server.shutdown()

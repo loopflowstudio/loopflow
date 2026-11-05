@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review: Codex Sessions talk to app-server directly</title>
+<style>
+  :root { --fg:#1d1d1f; --muted:#5b5b60; --bg:#fbfbf8; --line:#deddd6; --new:#1f6f43; --newbg:#e8f3ec; --old:#8a3b2e; --code:#f1f0ea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e9e8e3; --muted:#a3a29c; --bg:#17171a; --line:#34343a; --new:#7fd3a2; --newbg:#1c2c22; --old:#e8a091; --code:#232328; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 ui-serif, Georgia, serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.5rem 0 .75rem; }
+  .meta { color:var(--muted); font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  code, pre { font:13.5px/1.5 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; }
+  code { padding:.1em .3em; }
+  pre { padding:.9rem 1rem; overflow-x:auto; }
+  .lead { font-size:1.08rem; border-left:3px solid var(--new); padding-left:1rem; margin:2rem 0; }
+  table { border-collapse:collapse; width:100%; font:14.5px/1.45 ui-sans-serif, system-ui, sans-serif; }
+  td, th { border-top:1px solid var(--line); padding:.55rem .5rem; vertical-align:top; text-align:left; }
+  .proposed { background:var(--newbg); color:var(--new); }
+  .gap { color:var(--old); }
+  ol li { margin:.6rem 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Codex Sessions talk to app-server directly</h1>
+<p class="meta">Task 430c74 · concept-review step (headless) · 2026-11-05<br>
+Built from <code>scratch/jack-heart-430c74-codex-sessions-talk.md</code>, <code>scratch/questions.md</code>,
+<code>rust/loopflow/src/harness/codex_connection.rs</code>, <code>rust/loopflow/src/lf/commands/context.rs</code>,
+and a two-client probe against codex-cli 0.166.0.</p>
+
+<p class="lead">No new product choice is needed. The accepted model already says a Session follows its
+conversation when the person starts a new one. The direct path made <code>/new</code> and
+<code>/fork</code> work in Codex but doesn't follow them yet. Next step: implement the following.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<tr><th>The person does</th><th>Concept</th><th>What changes state</th></tr>
+<tr><td>Starts or resumes a Codex Session</td><td>LfSession → selected AgentSession (thread)</td><td><code>open_thread</code>: <code>thread/start</code> + <code>thread/name/set</code>, then the TUI joins with <code>--remote</code></td></tr>
+<tr><td>Types, runs tools, approves</td><td>Turns on that thread</td><td>TUI ↔ app-server directly; the observer records from the side</td></tr>
+<tr><td>Gets a Task update</td><td>Interjection</td><td>Observer <code>turn/start</code> with <code>toolOutput</code> while idle</td></tr>
+<tr><td>Moves the Session elsewhere</td><td>Attachment</td><td>Observer ends the old TUI</td></tr>
+<tr class="gap"><td>Types <code>/new</code> or <code>/fork</code></td><td>Should be: the Session selects the new AgentSession</td><td>Today: nothing. The observer keeps watching the old thread, and <code>lf resume</code> reopens it</td></tr>
+<tr class="proposed"><td>Types <code>/new</code> or <code>/fork</code> (proposed)</td><td>Same LfSession, new selection; the earlier one stays in history</td><td>Observer sees a top-level <code>thread/started</code> → selects it as Claude's <code>/clear</code> does (<code>NativeBoundary::Select</code>) → <code>thread/resume</code> → records</td></tr>
+</table>
+
+<h2>The mismatch</h2>
+<p>Claude's <code>/clear</code> fires <code>SessionStart</code>, and lf selects the new conversation.
+In Codex, <code>/new</code> now gets past lf (the relay used to refuse it), but lf goes on
+recording the first thread. When the person comes back, <code>lf resume</code> opens the
+conversation they left. A transparent session manager shouldn't do that.</p>
+
+<h2>Evidence: Codex already reports the switch</h2>
+<pre>client b: thread/resume t1, nothing else
+client a: thread/start          → b gets thread/started {id: t2, parentThreadId: null}
+client a: thread/fork t1        → b gets thread/started {id: t3, forkedFromId: t1, parentThreadId: null}</pre>
+<p>On a Session's private app-server, lf opens its own threads before the observer subscribes.
+So every top-level start the observer sees after that point comes from the person's client.</p>
+
+<h2>Still open (a fact to check, not a product choice)</h2>
+<p>A thread the TUI starts uses the TUI's own config, not lf's prepared instructions and hooks.
+If <code>codex --remote</code> accepts <code>-c</code> overrides for its <code>thread/start</code>,
+lf context reaches the new thread. If not, that limit is Codex's, and the design says so.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Should <code>/fork</code> follow the same way as <code>/new</code>?
+  <br>a. Yes, both change the selection (implied by the model; this is what goes forward)
+  <br>b. Only <code>/new</code>; a fork stays in Codex's history and lf doesn't record it</li>
+<li>If Codex can't carry lf's context onto a thread the TUI starts:
+  <br>a. Follow anyway, with no lf context on the new thread (proposed)
+  <br>b. Follow it and also inject context as an observer interjection on its first idle moment</li>
+</ol>
+</main>
+</body>
+</html>

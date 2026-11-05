@@ -379,6 +379,12 @@ struct Recorder {
     /// A turn is running, or may be; updates wait for it.
     busy: bool,
     update_request: Option<(Value, TaskUpdate)>,
+    /// The person moved to this thread and the store has not recorded it yet.
+    selection: Option<&'static str>,
+    /// Not yet subscribed to the selected thread on this connection, and the
+    /// request that is trying.
+    following: bool,
+    resume_request: Option<Value>,
 }
 
 impl Recorder {
@@ -406,6 +412,9 @@ impl Recorder {
             updates: TaskUpdates::default(),
             busy: true,
             update_request: None,
+            selection: None,
+            following: false,
+            resume_request: None,
         }
     }
 
@@ -444,10 +453,8 @@ impl Recorder {
         let thread = self.observer.thread.clone();
         let result =
             rpc_request(&mut upstream, "thread/resume", json!({"threadId":thread})).await?;
-        self.busy = result
-            .pointer("/thread/turns")
-            .and_then(Value::as_array)
-            .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"));
+        self.busy = turn_running(&result);
+        (self.following, self.resume_request) = (false, None);
         self.record(&json!({"result":result})).await;
         if let Some((store, _)) = self.stream() {
             let store = store.clone();
@@ -482,6 +489,9 @@ impl Recorder {
     }
 
     async fn record(&mut self, rpc: &Value) {
+        // Selection first: the decoder would otherwise set the thread with no
+        // history and leave the resume reference behind.
+        self.select();
         let thread = self.observer.thread.clone();
         let Some((_, history)) = self.stream() else {
             return;
@@ -522,13 +532,17 @@ impl Recorder {
                 message = incoming.recv() => {
                     let Some(text) = message else { break };
                     match serde_json::from_str::<Value>(&text) {
-                        Ok(rpc) => self.observe_message(&rpc).await,
+                        Ok(rpc) => self.observe_message(&rpc, &mut writer).await,
                         Err(error) => tracing::warn!(%error, "undecodable Codex message"),
                     }
                 }
                 _ = clock.tick() => {
                     if self.attachment_moved() {
                         break;
+                    }
+                    self.select();
+                    if self.following && self.resume_request.is_none() {
+                        self.resume(&mut writer).await;
                     }
                     if !self.busy && self.update_request.is_none() {
                         self.deliver_update(&mut writer).await;
@@ -539,7 +553,27 @@ impl Recorder {
         reading.abort();
     }
 
-    async fn observe_message(&mut self, rpc: &Value) {
+    async fn observe_message(&mut self, rpc: &Value, writer: &mut SplitSink<Upstream, Message>) {
+        if rpc["method"] == "thread/started" {
+            if let Some((thread, source)) =
+                person_started(rpc).filter(|(thread, _)| *thread != self.observer.thread)
+            {
+                self.follow(thread, source, writer).await;
+            }
+            return;
+        }
+        if self.resume_request.is_some() && rpc.get("id") == self.resume_request.as_ref() {
+            self.resume_request = None;
+            match rpc.get("result") {
+                Some(result) => {
+                    self.following = false;
+                    self.busy = turn_running(result);
+                }
+                // A thread has no rollout to resume until its first turn; the
+                // next tick asks again, and history fills what came before.
+                None => tracing::debug!(error = %rpc["error"], "Codex thread not yet resumable"),
+            }
+        }
         let params = &rpc["params"];
         let ours = params["threadId"].as_str() == Some(self.observer.thread.as_str());
         match rpc["method"].as_str() {
@@ -580,6 +614,75 @@ impl Recorder {
                     self.gap(&error);
                 }
             }
+        }
+    }
+
+    /// The person started or forked a conversation in their client. The Session
+    /// follows it, as Claude's `/clear` does, and the earlier one stays in its
+    /// selection history.
+    async fn follow(
+        &mut self,
+        thread: AgentSessionId,
+        source: &'static str,
+        writer: &mut SplitSink<Upstream, Message>,
+    ) {
+        tracing::info!(
+            session = self.observer.session,
+            from = %self.observer.thread,
+            to = %thread,
+            source,
+            "Codex conversation changed; following it"
+        );
+        self.observer.thread = thread;
+        self.selection = Some(source);
+        self.select();
+        (self.busy, self.following) = (true, true);
+        self.resume(writer).await;
+    }
+
+    async fn resume(&mut self, writer: &mut SplitSink<Upstream, Message>) {
+        let id = json!(format!("lf-follow-{}", uuid::Uuid::new_v4()));
+        let request =
+            json!({"id":id,"method":"thread/resume","params":{"threadId":self.observer.thread}});
+        match writer.send(Message::Text(request.to_string().into())).await {
+            Ok(()) => self.resume_request = Some(id),
+            // The connection is gone; the rejoin subscribes to this thread.
+            Err(error) => tracing::debug!(%error, "Codex observer could not resume"),
+        }
+    }
+
+    /// Record the followed thread as the Session's AgentSession. A lost
+    /// attachment has nothing to select; a broken store tries again later.
+    fn select(&mut self) {
+        let Some(source) = self.selection else {
+            return;
+        };
+        let (session, attachment) = (
+            self.observer.session.clone(),
+            self.observer.attachment.clone(),
+        );
+        let thread = self.observer.thread.clone();
+        let Some((store, _)) = self.stream() else {
+            return;
+        };
+        let store = store.clone();
+        let selected = store
+            .reserve_steer_adapter(&session, &attachment)
+            .and_then(|adapter| {
+                store.with_provider_context(
+                    &adapter,
+                    thread.as_str(),
+                    crate::steer::NativeBoundary::Select { source },
+                    || Ok(()),
+                )
+            });
+        match selected {
+            Ok(()) => self.selection = None,
+            Err(StoreError::InvalidAuthority(error)) => {
+                tracing::debug!(%error, "Codex conversation change has no attachment to select");
+                self.selection = None;
+            }
+            Err(error) => self.gap(&error),
         }
     }
 
@@ -679,6 +782,32 @@ impl Recorder {
             Err(error) => self.gap(&error),
         }
     }
+}
+
+/// A conversation the person's client started (`/new`) or forked (`/fork`). On
+/// a Session's private app-server lf opens its own thread before the observer
+/// subscribes, so every later lasting top-level start is the person's. Codex
+/// subagents name their parent and stay part of the selected conversation; its
+/// own helpers, such as the title writer, are ephemeral and never resumable.
+fn person_started(rpc: &Value) -> Option<(AgentSessionId, &'static str)> {
+    let thread = &rpc["params"]["thread"];
+    if !thread["parentThreadId"].is_null() || thread["ephemeral"] == true {
+        return None;
+    }
+    let source = if thread["forkedFromId"].is_null() {
+        "new"
+    } else {
+        "fork"
+    };
+    Some((thread["id"].as_str()?.into(), source))
+}
+
+/// A resumed thread with a turn in progress, or one whose turns are unknown.
+fn turn_running(result: &Value) -> bool {
+    result
+        .pointer("/thread/turns")
+        .and_then(Value::as_array)
+        .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"))
 }
 
 async fn rpc_request(upstream: &mut Upstream, method: &str, params: Value) -> Result<Value> {
@@ -873,6 +1002,96 @@ mod tests {
         assert!(store
             .session_turn_completed("conversation", &"native-thread".into(), "typed")
             .unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_session_follows_a_conversation_the_person_starts() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let (store, attachment, database) = fixture(home.path());
+        store
+            .record_session_agent_session("conversation", &attachment, &"native-thread".into())
+            .unwrap();
+        let selected = || -> String {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT provider_thread FROM agent_sessions WHERE id='conversation'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let client = client();
+        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
+        let watching = tokio::spawn(observe(
+            observer(home.path(), database, attachment, client.id()),
+            || {},
+        ));
+        let mut provider = subscribed(&listener).await;
+        // Subagents name their parent, and Codex's title writer is ephemeral:
+        // neither moves the Session.
+        send(
+            &mut provider,
+            json!({"method":"thread/started","params":{"thread":
+            {"id":"subagent","parentThreadId":"native-thread","forkedFromId":null}}}),
+        )
+        .await;
+        send(
+            &mut provider,
+            json!({"method":"thread/started","params":{"thread":
+            {"id":"title","parentThreadId":null,"ephemeral":true,"threadSource":"thread_title"}}}),
+        )
+        .await;
+        send(
+            &mut provider,
+            json!({"method":"thread/started","params":{"thread":
+            {"id":"fresh","parentThreadId":null,"forkedFromId":null}}}),
+        )
+        .await;
+        let resume = receive(&mut provider).await;
+        assert_eq!(resume["method"], "thread/resume");
+        assert_eq!(resume["params"], json!({"threadId":"fresh"}));
+        assert_eq!(selected(), "fresh");
+        // A thread with no rollout yet is asked again.
+        send(
+            &mut provider,
+            json!({"id":resume["id"],"error":{"message":"no rollout found"}}),
+        )
+        .await;
+        let resume = receive(&mut provider).await;
+        assert_eq!(resume["params"], json!({"threadId":"fresh"}));
+        send(
+            &mut provider,
+            json!({"id":resume["id"],"result":{"thread":{"id":"fresh","turns":[]}}}),
+        )
+        .await;
+        let fresh = |method: &str, status: &str| {
+            json!({"method":method,"params":{"threadId":"fresh",
+                "turn":{"id":"after-new","status":status,"items":[]}}})
+        };
+        send(&mut provider, fresh("turn/started", "inProgress")).await;
+        send(&mut provider, fresh("turn/completed", "completed")).await;
+        eventually(|| {
+            store
+                .session_turn_completed("conversation", &"fresh".into(), "after-new")
+                .unwrap()
+        })
+        .await;
+        let history = store.session_history("conversation", 0, 0).unwrap();
+        let selection = history
+            .iter()
+            .find(|event| event.payload["type"] == "agent_session_selected")
+            .expect("the change is in selection history");
+        assert_eq!(selection.payload["provider_thread"], "native-thread");
+        assert_eq!(selection.payload["next_provider_thread"], "fresh");
+        assert_eq!(selection.payload["source"], "new");
+        assert_eq!(selected(), "fresh");
+        drop(listener);
+        drop(provider);
+        end(client);
+        watching.await.unwrap().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

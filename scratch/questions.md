@@ -1,9 +1,10 @@
 # Open questions
 
-- Codex `/new` and `/fork` now work inside a Session (the relay refused them). The
-  observer records only the Session's thread, so a conversation started that way
-  goes unrecorded and `lf resume` returns to the original. Assumed acceptable for
-  this Task; following a new thread is a separate decision for Jack Heart.
+- Codex `/new` and `/fork`: the Session follows the new thread the way Claude's
+  `/clear` does (implemented 2026-11-05). A thread the person starts carries no lf
+  instructions or hooks: `codex --remote` ignores `-c` for its own `thread/start`.
+  Followed anyway (concept review option a); an observer interjection carrying
+  context (option b) remains open for Jack Heart.
 - Killing the terminal owner still ends the TUI: it holds the PTY, for Claude too.
   The brief's "kill the lf owner" demo is met for the launcher and observer, which
   are the processes that hosted the relay.

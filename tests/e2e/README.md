@@ -115,6 +115,10 @@ draft is visible. The same PTY reconnects, accepts another edit, and submits the
 exact Unicode draft once. Native history must retain one conversation, two turns
 and two tools. `session_launch_contract` covers the warning output boundary with
 deterministic Claude, Codex and OpenCode stand-ins.
+Add `--new-thread` to continue each case: the resumed TUI types `/new` and a
+prompt, the Session must select the new conversation with one `new` selection
+(Codex's ephemeral title thread must not move it) and record its answer, and a
+further `lf session resume` must reopen it.
 
 ## Released capture-history preservation
 

@@ -1,7 +1,7 @@
 # Codex Sessions talk to app-server directly (430c74)
 
-Status: implemented, compressed, synced onto main through #1826 and realigned,
-2026-11-05; awaiting gate.
+Status: implemented, compressed, synced onto main through #1826, realigned;
+thread following implemented and compressed (no cuts), 2026-11-05; awaiting gate.
 Jack Heart: lf is a transparent session manager on top of the harness, never a
 middleman; Codex is the last harness with lf in the byte path.
 
@@ -55,6 +55,32 @@ Every relay target is gone: `CodexConnection`, relay diagnostics, `client.sock`,
 `--planning-peers`, which was already broken on main (scratch/questions.md). It
 goes with that fixture's disposition, not this Task.
 
+## The Session follows the conversation (concept review, implemented 2026-11-05)
+
+An LfSession selects one AgentSession at a time; replacement keeps earlier
+selections in history, as Claude's `/clear` does through `SessionStart`.
+`lf __codex-observe` now does this for Codex `/new` and `/fork`:
+
+- An initialized client receives `thread/started` for threads other clients start
+  or fork (verified 0.166.0). On a Session's private app-server lf opens its own
+  thread before the observer subscribes, so a later lasting top-level start is the
+  person's. Subagents (`parentThreadId` set) and Codex's own helpers
+  (`ephemeral: true`; the title writer, `threadSource: "thread_title"`, starts ~2 s
+  after the first prompt) are skipped.
+- The observer selects the thread through `with_provider_context` with
+  `NativeBoundary::Select { source: "new" | "fork" }`: one `agent_session_selected`
+  event, the resume reference moves. Then it `thread/resume`s the thread on its
+  connection, asking again each tick while Codex has no rollout to resume. The
+  resume reply pins the account. A broken store keeps the selection pending.
+- `thread/started` no longer reaches the decoder from the observer: its
+  `SessionObserved` used to overwrite `provider_thread` with no history, including
+  for subagent threads.
+- Limit, Codex's: `codex --remote` ignores `-c` overrides for its own
+  `thread/start` (0.166.0: a `developer_instructions` marker reached the model from
+  a local TUI, not through `--remote`). A thread the person starts runs without
+  lf's prepared instructions and hooks until Codex offers per-thread configuration
+  to remote clients. lf still records it and delivers Task updates to it.
+
 ## Remaining
 
 - Gate: affected suites once.
@@ -75,6 +101,8 @@ Checks: real Codex 0.166.0 `codex_terminal.py` plain and `--transport-failure` a
 demo below passed before compress; after merging main, `codex_connect.py --launch
 --graph-decision-retry replace` passed. Two real-Codex fixtures fail for reasons that
 predate this Task; see scratch/questions.md.
+Thread following: `cargo test -p loopflow --lib harness::codex_connection` 6 passed;
+real Codex 0.166.0 `codex_terminal.py --new-thread` passed plain and wrapped.
 Realign after syncing #1826: `cargo test -p loopflow --lib -- harness::codex_connection only_provider_side_commands_are_hidden` 6 passed; gate owns the rest.
 
 ## Demo

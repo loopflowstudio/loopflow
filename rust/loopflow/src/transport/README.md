@@ -48,7 +48,10 @@ give a locked store: the owner retries every 100 ms without polling the
 writable PTY between attempts, while output, control queries and viewer return
 remain responsive. A store that fails the record or stays locked past that
 second (an install's migration transaction) delivers the bytes anyway, holds
-the Session in memory until the native client ends, and logs the gap once;
+the Session in memory until the store records them, and logs the gap once.
+The owner keeps the unrecorded bytes and offers them ahead of the next record,
+or on its own every two seconds while nothing is typed, so a quiet draft is
+known to `lf resume`, rollover and the idle ending once the store answers;
 later input delivers at once until a record succeeds and closes the gap.
 Returning to the Session does not resubmit queued input. This cannot recover an
 editor from a dead provider. A quit returns the provider's own exit within a

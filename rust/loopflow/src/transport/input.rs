@@ -1,6 +1,7 @@
 //! Input stays queued while retention is busy, for at most the hook budget, then
 //! advances only by bytes written. A failed or locked store never holds a
-//! person's input; the owner holds it instead.
+//! person's input; the owner holds it instead, and offers the store the bytes
+//! again until it records them.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -20,9 +21,11 @@ pub(super) struct PendingInput {
     /// for hooks, and every later busy answer delivers at once until it records.
     busy_since: Option<Instant>,
     failure: RecordingGap,
-    /// Bytes reached the provider without a retention record. The owner holds
-    /// them in memory until the native client ends, since the store cannot.
-    unrecorded: bool,
+    /// Bytes the provider has and the store does not. They go ahead of the next
+    /// record and, while nothing is typed, are offered again at the lifetime
+    /// policy's cadence, so a quiet draft becomes known when the store answers.
+    unrecorded: Vec<u8>,
+    replay_at: Option<Instant>,
 }
 
 /// What retaining queued bytes in the store came to.
@@ -51,13 +54,14 @@ impl PendingInput {
     }
 
     /// Input that keeps this owner alive: queued bytes, or delivered bytes the
-    /// store never recorded.
+    /// store has not recorded yet.
     pub fn holds_owner(&self) -> bool {
-        !self.is_empty() || self.unrecorded
+        !self.is_empty() || !self.unrecorded.is_empty()
     }
 
+    /// When the store should next be offered bytes it has not taken.
     pub fn retry_at(&self) -> Option<Instant> {
-        self.retry_at
+        self.retry_at.into_iter().chain(self.replay_at).min()
     }
 
     pub fn needs_write(&self) -> bool {
@@ -65,20 +69,34 @@ impl PendingInput {
     }
 
     pub fn forward(&mut self, input: &mut impl Write, owner: &LfProcessId, terminal: bool) {
-        if self.is_empty() || self.retry_at.is_some_and(|at| Instant::now() < at) {
+        let now = Instant::now();
+        if self.is_empty() {
+            if terminal && !self.unrecorded.is_empty() && self.replay_at.is_none_or(|at| at <= now)
+            {
+                self.replay_at = match self.retain(owner) {
+                    Retained::Recorded => None,
+                    Retained::Busy | Retained::Failed => Some(now + super::lifetime::POLL),
+                };
+            }
+            return;
+        }
+        if self.retry_at.is_some_and(|at| now < at) {
             return;
         }
         if terminal && self.recorded < self.bytes.len() {
             match self.retain(owner) {
-                Retained::Recorded => {
-                    self.busy_since = None;
-                    self.failure.recovered();
-                }
+                Retained::Recorded => {}
                 Retained::Busy => {
-                    self.retry_at = Some(Instant::now() + Duration::from_millis(100));
+                    self.retry_at = Some(now + Duration::from_millis(100));
                     return;
                 }
-                Retained::Failed => self.unrecorded = true,
+                Retained::Failed => {
+                    let fresh = &self.bytes.make_contiguous()[self.recorded..];
+                    let over = (self.unrecorded.len() + fresh.len()).saturating_sub(super::LIMIT);
+                    self.unrecorded.drain(..over.min(self.unrecorded.len()));
+                    self.unrecorded.extend(fresh);
+                    self.replay_at = Some(now + super::lifetime::POLL);
+                }
             }
         }
         self.retry_at = None;
@@ -96,12 +114,27 @@ impl PendingInput {
         }
     }
 
+    /// Offer the store every byte it has not recorded: the ones already
+    /// delivered, then the queued ones past `recorded`.
     fn retain(&mut self, owner: &LfProcessId) -> Retained {
-        let bytes = &self.bytes.make_contiguous()[self.recorded..];
+        let fresh = &self.bytes.make_contiguous()[self.recorded..];
+        let replay;
+        let bytes = if self.unrecorded.is_empty() {
+            fresh
+        } else {
+            replay = [self.unrecorded.as_slice(), fresh].concat();
+            &replay
+        };
         match crate::journal::process_ledger()
             .and_then(|store| store.try_record_owner_input(owner, bytes))
         {
-            Ok(true) => Retained::Recorded,
+            Ok(true) => {
+                self.unrecorded.clear();
+                self.replay_at = None;
+                self.busy_since = None;
+                self.failure.recovered();
+                Retained::Recorded
+            }
             Ok(false) => {
                 let since = *self.busy_since.get_or_insert_with(Instant::now);
                 if since.elapsed() < HOOK_BUSY_TIMEOUT {
@@ -128,6 +161,7 @@ impl PendingInput {
             tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
         }
         self.recorded = 0;
-        self.unrecorded = false;
+        self.unrecorded.clear();
+        self.replay_at = None;
     }
 }

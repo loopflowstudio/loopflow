@@ -1,6 +1,7 @@
 //! Exercise a failed or locked store through the real descriptor loop in an
 //! isolated process: input the store cannot retain still reaches the provider,
-//! once, and a locked store holds it no longer than the hook budget.
+//! once, a locked store holds it no longer than the hook budget, and the
+//! restored store learns of the delivered draft without another keystroke.
 
 use std::cell::Cell;
 use std::io::{Read, Write};
@@ -10,6 +11,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use super::wire::{frame, Incoming, Request, Tag};
+use crate::store::sqlite::sessions::OwnerRetention;
 
 thread_local! {
     static POLLS: Cell<usize> = const { Cell::new(0) };
@@ -52,6 +54,10 @@ fn run_fixture(store: &str) {
 /// Delivery may take the one-second hook budget while the store stays locked.
 const DELIVERY: Duration = Duration::from_secs(2);
 
+/// A restored store hears the delivered draft at the owner's next replay, one
+/// lifetime poll away.
+const CATCH_UP: Duration = super::lifetime::POLL.saturating_add(Duration::from_secs(3));
+
 /// Break the store under the owner the way `kind` names, until restored.
 fn break_store(kind: &str, db: &Path) -> rusqlite::Connection {
     let sql = rusqlite::Connection::open(db).unwrap();
@@ -85,7 +91,13 @@ fn input_store_fixture() {
         let broken = break_store(&kind, &guard.home().join("loopflow.db"));
         let endpoint = super::endpoint(&owner)?;
         let marker = guard.home().join("delivered");
-        let receipt = marker.clone();
+        let release = guard.home().join("released");
+        let (receipt, released, db) = (
+            marker.clone(),
+            release.clone(),
+            guard.home().join("loopflow.db"),
+        );
+        let typed = owner.clone();
         let peer = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut socket = loop {
@@ -125,6 +137,25 @@ fn input_store_fixture() {
                 std::thread::sleep(Duration::from_millis(20));
             }
             restore_store(broken);
+            // Nothing more is typed; the owner offers the delivered draft again
+            // and the store, now answering, records it as retained input.
+            let store = crate::store::sqlite::SqliteStore::open_existing_processes(
+                &db,
+                Duration::from_secs(1),
+            )
+            .unwrap();
+            let deadline = Instant::now() + CATCH_UP;
+            loop {
+                if let Ok(Some(OwnerRetention::NativeInput)) = store.owner_retention(&typed) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the restored store never learned of the delivered draft"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            std::fs::write(released, "1").unwrap();
             let mut output = Vec::new();
             socket.read_to_end(&mut output).unwrap();
         });
@@ -133,9 +164,12 @@ fn input_store_fixture() {
             &[
                 "/bin/bash".into(),
                 "-c".into(),
-                "IFS= read -r -t 10 answer && printf '%s' \"$answer\" > \"$1\"".into(),
+                "IFS= read -r -t 10 answer && printf '%s' \"$answer\" > \"$1\" \
+                 && until [ -e \"$2\" ]; do sleep 0.05; done"
+                    .into(),
                 "fixture".into(),
                 marker.to_string_lossy().into_owned(),
+                release.to_string_lossy().into_owned(),
             ],
             true,
         );

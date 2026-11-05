@@ -525,6 +525,15 @@ impl CodexConnection {
             }
             tokio::select! {
                 _ = update_clock.tick(), if subscribed && client_open && !busy && initial_request.is_none() && update_request.is_none() => {
+                    // An idle tick is also when a reading the store refused catches
+                    // up, and when a closed gap enters the Session's history.
+                    let caught_up = match history.writer.catch_up() {
+                        Ok(()) | Err(StoreError::InvalidAuthority(_)) => true,
+                        Err(error) => {
+                            store_failure.note("Session activity", &error);
+                            false
+                        }
+                    };
                     let pending = match &self.attachment {
                         Some(attachment) => self.store.with_session_attachment(&self.session_id, attachment,
                             || updates.pending(&self.store, &self.session_id)),
@@ -532,7 +541,11 @@ impl CodexConnection {
                     };
                     let pending = match pending {
                         Ok(pending) => {
-                            store_failure.recovered();
+                            if caught_up {
+                                if let Err(error) = self.store.close_recording_gap(&self.session_id, &mut store_failure) {
+                                    store_failure.note("recording gap", &error);
+                                }
+                            }
                             pending
                         }
                         Err(StoreError::InvalidAuthority(_)) => None,
@@ -1213,6 +1226,37 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(read["id"], 2);
+        // The store answers again: the relay's gap enters the Session's history
+        // once, at the idle tick, with nothing typed.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions_gone RENAME TO agent_sessions")
+            .unwrap();
+        let observations = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM session_events WHERE session_id='conversation'
+                     AND kind='observed' AND json_extract(payload,'$.source')='store-gap'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while observations() == 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the restored store never heard of the relay's gap"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(observations(), 1, "a closed gap is recorded once");
         terminal.close(None).await.unwrap();
         drop(terminal);
         relay.await.unwrap().unwrap();

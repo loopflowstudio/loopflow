@@ -47,10 +47,9 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   memory, the gap is noted once with the lock as its reason, and every later
   busy answer delivers at once until a record succeeds and closes the gap.
   LOO-709's "record before deliver" keeps its purpose (no idle ending while a
-  draft exists) through the in-memory hold. Unbounded, the busy wait would hold
+  draft exists) through the in-memory hold, which lasts until the store records
+  the bytes (see the catch-up section). Unbounded, the busy wait would hold
   every keystroke for the whole of an install's exclusive migration transaction.
-  Revised below: the hold lasts until the store records the bytes, not until
-  the native client ends.
 - Exit: `settle` and the launcher's return record best-effort. The exit code is
   the provider's own; the resume hint is already printed by the owner.
   `SessionCapture::finish` writes `terminal.json` and treats its store
@@ -136,65 +135,38 @@ written principle. The `store-gap`
 observation is stored and not yet rendered by `lf session` or Desktop
 (questions.md); showing it is a later Task, not a question for this one.
 
-## Next: a gap closes when the record catches up (concept review, 2026-11-05)
+## A gap closes when the record catches up (concept review, 2026-11-05)
 
-Third pass, against the implemented change. The contract holds in the moment:
-no store state ends, stalls or fails a conversation. It fails afterwards, in
-recovery: two of the three gaps never catch the store up once it answers, and
+Third pass found the contract holding in the moment and failing in recovery:
 `lf resume` (`human_session::attaches`), `lf monitor rollover`
-(`owner_disposition`) and the idle ending judge from the store, not from the
-owner's memory.
+(`owner_disposition`) and the idle ending judge from the store, and two gaps
+never caught the store up once it answered. Implemented the same day:
 
-- Typed draft (`transport/input.rs`). Past the budget the bytes go to the
-  provider and `recorded` advances past them, so the store's `native_input`
-  state machine never sees them; later keystrokes replay only themselves.
-  Counterexample, and it is this Task's own scenario: a person types during an
-  install's migration and stops with a draft in the editor; the install
-  finishes, so the owner is now superseded; `lf resume` reads no retention,
-  ends the owner, prints "Moved … off …", and the draft is gone. Rollover does
-  the same. The in-memory hold protects only the owner's own idle ending.
-  Jack's steer says the draft record "follows best-effort"; a record that never
-  follows is abandoned, not best-effort.
-- Codex turn evidence (`harness/fact_writer.rs`). `SessionActivityTracker::
-  reading` marks a reading saved before `record_session_activity` runs, and
-  readings are produced only on signals. A yielded reading lost to the gap
-  leaves the previous busy row in place until the next turn: the Session shows
-  busy, `owner_retention` answers `LiveTurn`, the idle ending never comes, and
-  resume and rollover treat the owner as holding work. The inverse failure,
-  same cause. For Claude, Pi and OpenCode the hook writes the `store-gap`
-  observation so the missed Stop reads as unknown; the relay's gap closes with
-  a log line only.
-
-Direction, implied by the accepted decisions (no product choice):
-
-1. `PendingInput` keeps the unrecorded bytes, not a flag: `unrecorded: Vec<u8>`
-   under the same 4 MiB `LIMIT`, replayed ahead of the next bytes in `retain`
-   and retried on the serve loop's existing `retry_at` at the lifetime policy's
-   2 s cadence while the queue is empty, so a quiet draft becomes known without
-   another keystroke and a store that stays broken is not asked ten times a
-   second. A successful replay closes the gap; `native_ended` drops the bytes.
-   `transport/README.md`: "until the store records it", not "until the native
-   client ends".
-2. The tracker marks a reading saved only when the write succeeds, and the
-   relay's one-second idle tick re-offers the last unsaved reading, so the
-   activity row catches up at the store's first answer. The relay's
-   `RecordingGap` then closes the way the hook's does: one `store-gap`
-   observation (first and last miss) for the Session before `recovered()`.
-   Move `close_gap` out of `lf/commands/context.rs` into the concept (a
-   `SqliteStore` method taking the Session and the gap) so hook and relay
-   share one writer.
-3. Fixtures: `failed_input_store_delivers_the_queued_bytes_unrecorded` grows a
-   recovery leg (restore the store, type nothing more, `owner_retention` reads
-   `NativeInput` within one poll); a fact-writer test where a yielded save
-   fails and the next tick records it; the relay test closes its gap into the
-   Session's history.
+- Typed draft (`transport/input.rs`). `PendingInput` keeps the delivered,
+  unrecorded bytes (`unrecorded: Vec<u8>`, oldest dropped past the 4 MiB
+  `LIMIT`) and offers them ahead of the next record; while nothing is typed it
+  offers them on its own at the lifetime policy's `POLL` (2 s), so a quiet draft
+  typed during an install's migration is known to resume and rollover once the
+  store answers, and a store broken for the life of a Session is asked twice a
+  second at most. A successful record closes the gap; `native_ended` drops the
+  bytes. The replay timer is separate from the 100 ms busy retry, so new input
+  never waits on it.
+- Codex turn evidence (`harness/fact_writer.rs`). The tracker marks a reading
+  saved only when the write succeeds and keeps the refused one; the relay's
+  one-second idle tick calls `FactWriter::catch_up`, so a yielded reading lost to
+  the gap lands at the store's first answer and the Session stops reading as a
+  live turn. The relay then closes its `RecordingGap` the way the hook does:
+  `SqliteStore::close_recording_gap` (moved from `lf/commands/context.rs`) writes
+  one `store-gap` observation before `recovered()`, shared by both.
 
 Kept: the bounded wait, the unfenced turn, the receipt gate on saved input and
-the provider's own exit. Nothing here reopens them.
+the provider's own exit.
 
 ## Delete — do not maintain
 
-All done; nothing left to remove. Gone: `transport::lifetime::warn_changed`,
+All done; nothing left to remove. Gone: `lf/commands/context.rs::close_gap`
+(now `SqliteStore::close_recording_gap`), `PendingInput::unrecorded: bool`,
+`transport::lifetime::warn_changed`,
 `codex_connection::store_unavailable`/`store_recovered`, `context::store_gap`/
 `store_recovered`/`gap_marker`, Pi's toast-raising `recordingGap` and its
 task-update toasts, `codex_delivery_path` (now `native_delivery_path`), the
@@ -209,7 +181,9 @@ and `successor_handoff_*` integration tests. Surviving behavior is pinned by
 `settlement_without_a_store_keeps_the_providers_own_exit`,
 `failed_input_store_delivers_the_queued_bytes_unrecorded`,
 `locked_input_store_delivers_the_queued_bytes_within_the_hook_budget`,
-`a_recovered_gap_enters_the_sessions_history_once` and
+`a_recovered_gap_enters_the_sessions_history_once` (now in
+`store/sqlite/session_events.rs`),
+`a_yielded_reading_the_store_refused_is_saved_when_it_answers` and
 `a_marked_gap_survives_processes_and_closes_with_its_file`.
 
 ## Not changed
@@ -232,4 +206,4 @@ Not runnable headless here; fixtures below stand in.
 
 ## Checks
 
-After the 2026-11-05 compress pass: `cargo test -p loopflow --lib -- store::recording_gap:: lf::commands::context:: transport::lifetime:: transport::lifetime_tests:: transport::input_retry_tests:: harness::codex_connection:: harness::task_updates::` 35 passed; `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since the previous pass: `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Realign (2026-11-05, after compress): no code changed, so those results stand; memory now records the bounded typed-input wait, `lf context` 15998/16000 tokens, scratch under budget. Gate owns the affected suites; the Demo needs the installed build and is for Jack.
+Catch-up implementation (2026-11-05): `cargo test -p loopflow --lib -- store::recording_gap:: store::sqlite::session_events::tests::a_recovered_gap lf::commands::context:: transport::lifetime:: transport::input_retry_tests:: harness::codex_connection:: harness::fact_writer::tests::a_yielded_reading harness::fact_writer::tests::an_unchanged_reading harness::task_updates::` 35 passed (both input fixtures now carry the restored-store recovery leg; the relay test closes its gap into Session history); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean. Unchanged since earlier passes: `cargo test -p loopflow --test transport_tests -- sessions_keep_serving_when_their_lf_executable_goes` 1 passed, `cargo test -p loopflow --test integration context_block_tests::` 2 passed, the other four `transport_tests` exit fixtures 5 passed, `node --check` on both JS hooks. Gate owns the affected suites; the Demo needs the installed build and is for Jack.

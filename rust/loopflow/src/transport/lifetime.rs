@@ -27,7 +27,7 @@ use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::RecordingGap;
 
 /// How often an owner looks at the clock.
-const POLL: Duration = Duration::from_secs(2);
+pub(super) const POLL: Duration = Duration::from_secs(2);
 
 /// Activity accepted by the serving owner. Revisions include changes whose
 /// notification is still queued or throttled on its way to the policy.

@@ -701,7 +701,8 @@ additive tails. Lesson: store skew must surface as an error naming the skew and
 `lf install`, never as an empty registry (agents take "nothing here" as fact). `open_existing_store` is the one opener (`Ok(None)` only when no file).
 A refusal names one fix: callers prefix who refused and the path and pass the
 store's error verbatim (`lf doctor` after it installs nothing). Task 337044 (2026-11-05, Jack Heart) deletes the reader floor:
-older lf opens any newer store; staging replaces it (MIGRATIONS.md). `lf self
+older lf opens any newer store; staging replaces it (MIGRATIONS.md). Released
+builds still read `reader_floor`, so new rows carry the newest one (f5981e removes). `lf self
 install preflight` reads `~/.lf/loopflow.db` whatever `LF_HOME` says.
 
 ## One main Home (LOO-342, curated 2026-10-10)

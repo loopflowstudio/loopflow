@@ -108,8 +108,8 @@ in the store tolerates fields it does not know.
 
 `schema_migrations.reader_floor` is shipped history this build never reads. Each
 new row repeats the ledger's newest floor, because builds released before its
-deletion refuse a store whose newest row has none; Task f5981e removes the write
-30 days after that release.
+deletion check every row past their own head and refuse one with none; Task
+f5981e removes the write 30 days after that release.
 
 ## What the check enforces
 

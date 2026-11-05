@@ -93,9 +93,9 @@ age out inside the 30-day window a contract waits for anyway.
 
 - Gate: affected suites once (whole `store::`, install, rollover, `ops::release`,
   `test_release_publisher.py`), Swift build for the `AppUpdater.swift` deletion.
-- Rebase onto 843f5c when it lands (its branch now carries the additive-or-contract
-  rule in `scripts/check_migrations.py`, `-- expand:`/`-- exports:` markers and a
-  rewritten staging section; it still has three implement items, then gate). Both
+- Rebase onto 843f5c when it lands (PR #1827, open at its demo step on 2026-11-05,
+  carries the additive-or-contract rule in `scripts/check_migrations.py`,
+  `-- expand:`/`-- exports:` markers and a rewritten staging section). Both
   branches edit `MIGRATIONS.md`, `install.rs`, `rollover.rs`, `migrations.rs`,
   `lf.rs`, `docs/architecture-reference.md`, `scratch/questions.md` and the LOO-656
   section of Wave memory, which both trimmed to fit 16000 tokens; the second to
@@ -130,6 +130,5 @@ age out inside the 30-day window a contract waits for anyway.
 
 Compress (2026-11-05): `cargo nextest` over `migration_build`, `store::migrations`,
 `frontier_tests`, rollover, `compatibility_tests`: 154 passed; `pytest
-python/tests/test_release_publisher.py` 38 passed; clippy and fmt clean. Realign:
-`cargo check -p loopflow --all-targets` clean; whole `store::` deferred to gate.
-Implement (2026-11-05, floor write): `cargo test -p loopflow --lib store::migrations::` 126 passed; demo as in PR notes; clippy and whole `store::` to gate.
+python/tests/test_release_publisher.py` 38 passed; clippy and fmt clean. Implement (2026-11-05, floor write): `cargo test -p loopflow --lib store::migrations::` 126 passed; demo as in PR notes; clippy and whole `store::` to gate.
+Realign (2026-11-05, after the floor write): `cargo test -p loopflow --lib reader_floor` and `a_ledger_with_no_recorded_floor` 2 passed; wording edits only otherwise.

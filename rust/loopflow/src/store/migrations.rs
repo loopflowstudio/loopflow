@@ -900,10 +900,11 @@ fn insert_applied_migration(
     carry_reader_floor(conn, migration)
 }
 
-/// Builds released before the floor's deletion still read a row's `reader_floor`,
-/// and refuse a store whose newest row has none. This build reads it for nothing:
-/// the new row repeats the ledger's newest floor so those builds stay admitted past
-/// additive migrations. Task f5981e removes this 30 days after that release.
+/// Builds released before the floor's deletion read `reader_floor` on every row past
+/// their own head, and a row with none names itself, so one NULL there refuses them.
+/// This build reads it for nothing: the new row repeats the ledger's newest floor so
+/// those builds stay admitted past additive migrations. Task f5981e removes this 30
+/// days after that release.
 fn carry_reader_floor(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
     if ledger_has_reader_floor(conn)? {
         conn.execute(

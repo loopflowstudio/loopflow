@@ -1,4 +1,6 @@
-//! Resolve shared pane intent into native tool argv; hosts retain their active geometry.
+//! Render one Task's layout into a host's native split format. The source is the
+//! Task's saved Desktop layout, else its configured `task_layout`, else the
+//! builtin. Hosts own the result; nothing here is persisted.
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -6,30 +8,38 @@ use serde_json::{json, Value};
 
 use super::{observer, tool_cwd, viewer_argv, Presentation, SqliteStore, ViewContent};
 use crate::transport::local_directory_report;
-use crate::work::selection::{BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis};
+use crate::work::selection::{
+    BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
+};
 
-// Render each host directly. Neither host's wire format is shared layout state.
+// Render each host directly. No host's wire format is shared layout state.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Host<'a> {
-    /// A server, and the destination its Conversation observers report to.
-    Rex(&'a str, Option<&'a str>),
+    /// A Rex server endpoint, carried into every tool's environment.
+    Rex(&'a str),
     Herdr,
+    Cmux,
 }
 
 impl Host<'_> {
-    pub(super) fn conversation(self, cwd: &Path, session: &str) -> Result<Value> {
+    /// A passive observer of an existing conversation. With `observer`, the
+    /// viewer reports its attachment for this command's readiness receipt.
+    pub(super) fn conversation(
+        self,
+        cwd: &Path,
+        session: &str,
+        observer: Option<&str>,
+    ) -> Result<Value> {
         let mut words = vec!["session", "view", session];
-        if let Self::Rex(_, Some(key)) = self {
+        if let Some(key) = observer {
             words.extend(["--observer", key]);
+            observer::expect(key, session)?;
         }
         let mut block = self.block("Conversation", cwd, viewer_argv(cwd, &words)?);
-        if let Self::Rex(_, key) = self {
-            // Keep history and failed preparation visible for Task and Wave
-            // conversations. Observer exit never invites command replay.
+        if let Self::Rex(_) = self {
+            // Keep history and failed preparation visible. Observer exit never
+            // invites command replay.
             block["block"]["options"]["exit"] = json!({"on_completion": false});
-            if let Some(key) = key {
-                observer::expect(key, session)?;
-            }
         }
         Ok(block)
     }
@@ -39,7 +49,7 @@ impl Host<'_> {
     /// only directory a native split can inherit.
     pub(super) fn block(self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
         let argv = match (self, local_directory_report(cwd)) {
-            (Self::Rex(..), Some(report)) => [
+            (Self::Rex(_), Some(report)) => [
                 "/bin/sh".into(),
                 "-c".into(),
                 r#"printf %s "$1"; shift; exec "$@""#.into(),
@@ -58,19 +68,24 @@ impl Host<'_> {
     /// process cwd, and a report made at launch would outlive its first `cd`.
     fn terminal(self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
         match self {
-            Self::Rex(server, _) => {
+            Self::Rex(server) => {
                 // Rex omits its endpoint from native child environments. Carry it
                 // through argv so tools and their shells return to this server.
                 argv.splice(0..0, ["env".into(), format!("REX_SERVER={server}")]);
                 json!({"block":{"flavor":"com.superlogical.terminal.shell","label":label,"options":{"cwd":cwd,"shell":"none","command":argv}}})
             }
             Self::Herdr => json!({"type":"pane","label":label,"cwd":cwd,"command":argv,"env":{}}),
+            // cmux types a surface command into a fresh shell. Enter the
+            // checkout first and leave that shell behind when the tool exits.
+            Self::Cmux => json!({"pane":{"surfaces":[{"type":"terminal","name":label,
+                "command":format!("cd {} && {}", shell_quote(&cwd.to_string_lossy()),
+                    argv.iter().map(|word| shell_quote(word)).collect::<Vec<_>>().join(" "))}]}}),
         }
     }
 
     fn split(self, axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
         match self {
-            Self::Rex(..) => json!({"split":{
+            Self::Rex(_) => json!({"split":{
                 "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
                 "ratio": ratio, "before": before, "after": after,
             }}),
@@ -78,25 +93,41 @@ impl Host<'_> {
                 "direction": if axis == SplitAxis::Vertical { "right" } else { "down" },
                 "ratio":ratio,"first":before,"second":after,
             }),
+            Self::Cmux => json!({
+                "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
+                "split": ratio, "children": [before, after],
+            }),
         }
     }
+}
+
+fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', r"'\''"))
 }
 
 struct Tools<'a> {
     host: Host<'a>,
     content: &'a ViewContent,
     cwd: &'a Path,
+    observer: Option<&'a str>,
 }
 
+/// The native layout for one Task, and how many fresh shells it starts.
 pub(super) fn layout(
     store: &SqliteStore,
     content: &ViewContent,
     repo: &Path,
+    template: Option<&TaskLayoutTemplate>,
     presentation: Presentation<'_>,
     host: Host<'_>,
 ) -> Result<(Value, usize)> {
     let cwd = tool_cwd(content, repo);
-    let tools = Tools { host, content, cwd };
+    let tools = Tools {
+        host,
+        content,
+        cwd,
+        observer: presentation.observer,
+    };
     let Some(location) = &content.location else {
         return Ok((tools.task_view()?, 0));
     };
@@ -109,9 +140,6 @@ pub(super) fn layout(
         cwd.is_dir(),
         "Recorded Task checkout is unavailable; no home-directory fallback"
     );
-    if presentation.passive {
-        return Ok((tools.task_view()?, 0));
-    }
     if presentation.session.is_some() || presentation.diff {
         let conversation = tools.conversation(presentation.session)?;
         return Ok((
@@ -134,11 +162,19 @@ pub(super) fn layout(
             0,
         ));
     }
-    let Some(saved) = store.pane_layout(&content.work)? else {
+    let source = match store.pane_layout(&content.work)? {
+        Some(saved) => Some(saved),
+        None => template
+            .map(|template| {
+                template
+                    .instantiate(content.work.clone())
+                    .map_err(anyhow::Error::msg)
+                    .context("task_layout setting")
+            })
+            .transpose()?,
+    };
+    let Some(source) = source else {
         let conversation = tools.conversation(None)?;
-        if presentation.omit_shells {
-            return Ok((conversation, 0));
-        }
         let shell = tools.tool("shell", None, None)?;
         // Without a conversation the main pane already shows Task & workflow.
         let secondary = if content.primary_session.is_some() {
@@ -152,12 +188,7 @@ pub(super) fn layout(
         ));
     };
     let mut shells = 0;
-    let tree = tools.render_tree(
-        &saved.tree,
-        &saved.hidden,
-        &mut shells,
-        !presentation.omit_shells,
-    )?;
+    let tree = tools.render_tree(&source.tree, &source.hidden, &mut shells)?;
     Ok((
         match tree {
             Some(tree) => tree,
@@ -178,7 +209,7 @@ impl Tools<'_> {
 
     fn conversation(&self, session: Option<&str>) -> Result<Value> {
         match session.or(self.content.primary_session.as_deref()) {
-            Some(session) => self.host.conversation(self.cwd, session),
+            Some(session) => self.host.conversation(self.cwd, session, self.observer),
             None => self.task_view(),
         }
     }
@@ -219,7 +250,6 @@ impl Tools<'_> {
         tree: &PaneTree,
         hidden: &std::collections::BTreeSet<String>,
         shells: &mut usize,
-        new_shells: bool,
     ) -> Result<Option<Value>> {
         Ok(match tree {
             PaneTree::Pane { id, .. } if hidden.contains(id) => None,
@@ -230,8 +260,8 @@ impl Tools<'_> {
                 second,
             } => {
                 match (
-                    self.render_tree(first, hidden, shells, new_shells)?,
-                    self.render_tree(second, hidden, shells, new_shells)?,
+                    self.render_tree(first, hidden, shells)?,
+                    self.render_tree(second, hidden, shells)?,
                 ) {
                     (Some(before), Some(after)) => {
                         Some(self.host.split(*axis, *ratio, before, after))
@@ -239,22 +269,14 @@ impl Tools<'_> {
                     (first, second) => first.or(second),
                 }
             }
-            PaneTree::Pane { content: pane, .. } => self.render_pane(pane, shells, new_shells)?,
+            PaneTree::Pane { content: pane, .. } => self.render_pane(pane, shells)?,
         })
     }
 
-    fn render_pane(
-        &self,
-        pane: &PaneIntent,
-        shells: &mut usize,
-        new_shells: bool,
-    ) -> Result<Option<Value>> {
+    fn render_pane(&self, pane: &PaneIntent, shells: &mut usize) -> Result<Option<Value>> {
         Ok(Some(match pane {
             PaneIntent::Session { session_id, .. } => self.conversation(session_id.as_deref())?,
             PaneIntent::Shell { tabs, selected } => {
-                if !new_shells {
-                    return Ok(None);
-                }
                 if let Some(tab) = tabs.iter().find(|tab| Some(&tab.id) == selected.as_ref()) {
                     anyhow::ensure!(
                         tab.location
@@ -328,20 +350,17 @@ mod tests {
             argv: None,
             unavailable: vec![],
         };
-        for host in [Host::Rex("unix:///task.sock", None), Host::Herdr] {
+        for host in [Host::Rex("unix:///task.sock"), Host::Herdr] {
             let tools = Tools {
                 host,
                 content: &content,
                 cwd: Path::new("/repo/task"),
+                observer: None,
             };
-            for (hidden, new_shells, expected_shells) in [
-                (saved.hidden.clone(), true, 0),
-                (Default::default(), false, 0),
-                (Default::default(), true, 1),
-            ] {
+            for (hidden, expected_shells) in [(saved.hidden.clone(), 0), (Default::default(), 1)] {
                 let mut shells = 0;
                 let native = tools
-                    .render_tree(&saved.tree, &hidden, &mut shells, new_shells)
+                    .render_tree(&saved.tree, &hidden, &mut shells)
                     .unwrap()
                     .unwrap();
                 assert_eq!(shells, expected_shells);
@@ -372,6 +391,7 @@ mod tests {
                         };
                         (&native["first"], second, files)
                     }
+                    Host::Cmux => unreachable!("cmux has its own test"),
                 };
                 let reports = |pane: &serde_json::Value| {
                     pane["command"].as_array().unwrap().iter().any(|word| {
@@ -407,5 +427,26 @@ mod tests {
                 assert!(!secondary.to_string().contains("README.md"));
             }
         }
+    }
+
+    #[test]
+    fn cmux_surfaces_enter_the_checkout_with_quoted_argv() {
+        let pane = Host::Cmux.terminal(
+            "Files",
+            Path::new("/repo/it's"),
+            vec!["lf".into(), "task".into(), "a b".into()],
+        );
+        assert_eq!(
+            pane["pane"]["surfaces"][0]["command"],
+            r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
+        );
+        let split = Host::Cmux.split(
+            crate::work::selection::SplitAxis::Vertical,
+            0.6,
+            pane.clone(),
+            pane,
+        );
+        assert_eq!(split["direction"], "horizontal");
+        assert_eq!(split["children"].as_array().unwrap().len(), 2);
     }
 }

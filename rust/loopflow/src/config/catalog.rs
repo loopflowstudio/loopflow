@@ -214,6 +214,7 @@ definitions! {
     accounts: BTreeMap<String, BTreeMap<String, placement::AccountDeclaration>> = "{}", Personal, Merge, Portable, NextRead, Accounts, "Declared account identity, routing eligibility and subscription dates; credentials and observations stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
+    task_layout: Option<crate::work::selection::TaskLayoutTemplate> = "null", General, Replace, Portable, NextLaunch, Desktop, "Tools and splits for Task workspaces without a saved Desktop layout; the winning scope replaces the whole layout";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
     planning: Option<PlanningConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Tagged planning transport configuration";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";

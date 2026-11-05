@@ -1,8 +1,7 @@
 # Launch your Task layout in a terminal host
 
-> Accepted design, revised November 5, 2026; not yet implemented in full.
-> The current branch still stores host destinations and reuses them on repeat open.
-> It must change to the fresh-launch behavior below and read templates from config.
+> Accepted design, revised November 5, 2026. Fresh launch, config templates and the
+> Rex, Herdr and cmux renderers are implemented; gaps are marked where they apply.
 
 ```bash
 lf open --host rex --task LOO-498     # launch this Task's layout in Rex
@@ -15,16 +14,20 @@ Use the current or explicitly selected Rex session as its container. Fresh Task
 opening need not create another session. Return to an existing tab through Rex;
 rename, rearrange, close and restore it using Rex's own controls. Running the
 command again creates another Task tab from LF's current source layout; it does
-not search for, repair or change the earlier tab. Container-selection defaults
-are still being designed; no persistent LF mapping supplies them.
+not search for, repair or change the earlier tab.
+
+Container choice comes from where you are, never from a stored mapping. Inside a
+Rex session or Herdr workspace, a Task tab joins it; in cmux, a Task workspace
+joins your window. Outside one, or when opening a repository or Wave, `lf open`
+creates a new container named for the Wave or repository.
 
 Opening presents existing Work. It does not start a Task's Graph, create a provider
 conversation, submit a turn or take conversation input. A Shell tool creates a
 fresh shell; it does not copy jobs, shell variables or editor memory.
 
-From a repository checkout, select its working set, grouped by Wave. From a Task
-checkout, select that Task. Tasks without a Wave have their own group. Use `--wave`
-or `--task` explicitly to select another scope. Backlog Tasks appear only when
+From a repository checkout, select its started, unfinished Tasks in one container.
+From a Task checkout, select that Task. Use `--wave` or `--task` explicitly to
+select another scope. Backlog Tasks appear only when
 explicitly selected; opening them starts no execution.
 
 Inside Rex, resolve the current host/server and caller context, including when an
@@ -35,8 +38,7 @@ local replacement shells. Fresh launch does not mean another host or Machine.
 
 ## Use the host you are in
 
-**Design target; adapters are not yet at parity.** `lf open` detects the current
-host for direct callers and agent tools. `--host` overrides that choice. Resolve
+`lf open` detects the current host for direct callers and agent tools. `--host` overrides that choice. Resolve
 an agent's current attached viewer rather than its stale launch environment. In
 nested terminals, use the actual inner host. A host that is merely installed or
 running is not evidence that the caller belongs to it.
@@ -60,8 +62,11 @@ below the Task. Groups provide the outer container.
 An explicit native window/container can also supply the outer grouping. The
 adapter creates native resources and reports capability differences. It does
 not persist their identities or copy their state into LF. Failure to reach the
-selected host must not silently send work to another host. Without current-host
-context, use the configured/default route or an explicit `--host`.
+selected host never sends work to another host: inside Rex, Herdr, tmux or cmux,
+that host is the only route. Without current-host context, Desktop then a plain
+terminal, or an explicit `--host`. Herdr and cmux open on this Machine only; a
+remote Task fails rather than opening locally. cmux opens through its bundled CLI
+when `cmux` is not on PATH; its renderer has fixture coverage, not native proof.
 
 ## Templates, current layouts, and native workspaces
 
@@ -94,8 +99,7 @@ Desktop's saved state; they are not copied into native shell commands.
 
 ## Configure a Wave's default
 
-**Accepted direction; layout setting syntax is not implemented yet.** Use the
-existing configuration scopes:
+Set `task_layout` in the existing configuration scopes:
 
 - `.lf/wave/<name>/config.yaml` for a shared Wave template.
 - `lf.config.local.yaml` for private repository and Wave overrides.
@@ -103,15 +107,43 @@ existing configuration scopes:
 
 Task worktrees share the repository's private configuration, using the existing
 Wave identity and precedence rules. See [Configuration](config.md#where-settings-live).
-Do not create a separate host-layout file or database preference layer.
+There is no separate host-layout file or database preference layer.
+
+```yaml
+# .lf/wave/product/config.yaml
+task_layout:
+  hidden: [conversation]          # pane IDs to leave out
+  tree:
+    kind: split
+    axis: vertical
+    ratio: 0.6
+    first:
+      kind: pane
+      id: changes
+      content:
+        kind: browser
+        location: null
+        tabs: [{kind: changes, id: changes, comparison: {kind: working_tree, base: parent}}]
+        selected: changes
+    second:
+      kind: split
+      axis: horizontal
+      ratio: 0.5
+      first: {kind: pane, id: conversation, content: {kind: session, session_id: null, location: null}}
+      second:
+        kind: pane
+        id: shell
+        content: {kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}
+```
+
+The tree uses Desktop's pane shape: one conversation, one shell and one browser
+pane, each hideable. A template that names a Session, location or open file is
+rejected when a launch reads it.
 
 Changing a template affects future launches that use it. It neither rearranges
 Desktop's saved Task layout nor modifies existing Rex workspaces. A saved Task
-layout continues to take precedence. The proposed config implementation selects
-one whole layout at the winning scope rather than merging pieces of split trees.
-
-The branch's SQLite-backed `desktop layout wave-default:<id>` interface is
-superseded by this design; it is not the target configuration interface.
+layout continues to take precedence. The winning configuration scope supplies
+the whole layout; split trees are never merged across scopes.
 
 ## One Task tab, shared tools
 
@@ -152,26 +184,26 @@ changes. `--head <sha>` selects the committed comparison explicitly.
 
 ## New Tasks arrive without taking focus
 
-**Requirement retained; implementation must stop using persisted host records.**
-A live repository/Wave workspace follower adds newly started Tasks without taking
-focus, starting another provider or adding backlog Tasks. A single-Task launch
-does not follow sibling Tasks.
+In Rex, a repository or Wave launch includes a Workspace tab that adds newly
+started Tasks without taking focus, starting another provider or adding backlog
+Tasks. A single-Task launch does not follow sibling Tasks. Herdr and cmux launches
+do not follow yet.
 
-**Working interpretation for review:** new Tasks arrive as normal Task tabs with
-their configured workspace splits. This removes the special preview-and-expand
-step. Ordinary tools selected by the template may start; another provider does
-not. The accepted repository/Wave → session, Task → tab, workspace → splits
-hierarchy is explicit; immediate full tool materialization is still the proposed
-interpretation of that hierarchy.
+**Implementation choice, still open for review:** new Tasks arrive as normal Task
+tabs with their configured splits. There is no preview-and-expand step. Ordinary
+tools selected by the template start; another provider does not. The accepted
+repository/Wave → session, Task → tab, workspace → splits hierarchy is explicit;
+immediate full tool materialization is the stated interpretation of it.
 
-The follower may remember its current target and seen Tasks in memory while it
-runs. Closing a Task tab stays respected during that live follower. The host owns
+The follower keeps its session and seen Tasks in memory, from its own command
+line, while it runs. Closing a Task tab stays respected during that live follower. The host owns
 its native tabs and process restoration. LF does not keep a registry to repair or
 reconstruct that workspace after the follower exits.
 
-Another `lf open --wave product` launches fresh Task tabs for the current
-started, unfinished set in its native session container. Starting a Task does not open a closed host app. Remote
-arrivals must use the recorded execution Machine, without local fallback.
+Another `lf open --wave product` launches a new session with fresh Task tabs for
+the current started, unfinished set. Starting a Task does not open a closed host
+app. Each Machine's launch follows its own Tasks; a Task that first starts on a
+Machine where this launch opened nothing arrives with the next open.
 
 ## Split where you are working
 
@@ -208,8 +240,10 @@ A failed attachment must preserve the existing provider, drafts and pending
 requests; it must not restart or replay them to make a new view appear ready.
 
 LF Session execution and input ownership remain LF state. Rex workspace identity
-and arrangement remain Rex state. The branch's persistent, destination-keyed
-observer retry records must be revised to preserve that boundary.
+and arrangement remain Rex state. Readiness belongs to one `lf open`: its records
+are removed once that command reports. To view a conversation again, the receipt
+offers another fresh launch (`lf open … --session <id>`); it never touches the
+earlier tab.
 
 ## Failure and recovery
 
@@ -235,20 +269,21 @@ hold, subject to other holds and normal cleanup conditions. Unavailable host
 evidence is unknown, not absence. LF automatically closes only Desktop-owned
 shells; Rex shells remain Rex's responsibility.
 
-This integration remains unfinished. The implementation must obtain evidence from
-the host and the shared LF Session lifetime owner without storing a parallel host
-workspace inventory. Requested work, drafts and pending requests remain protected.
-Closing an unfinished Task view does not delete its checkout or branches.
+This integration remains unfinished, and nothing enforces it today. Live
+conversation viewers in Rex are attached viewers, so the shared Session lifetime
+owner already sees them. A retained Rex tab whose programs stopped has no source
+LF can associate with its Task without a host inventory, which this design
+removes; that capability gap is open, not resolved as absence. Requested work,
+drafts and pending requests remain protected. Closing an unfinished Task view does
+not delete its checkout or branches.
 
 ## Delivery boundaries
 
-The target fresh-layout hosts are Rex, Herdr and cmux, selected through shared
-host detection. Desktop retains its current saved-layout behavior. The current
-branch implements a Rex renderer, a bounded local selected-Task Herdr renderer,
-and conversation opening in cmux; it does not yet deliver this common fresh-layout
-contract. Installed Herdr 0.9.3 and cmux 0.65.0 expose the required grouping and
-split APIs; that alone proves no LF integration. Existing tmux/plain-terminal
-conversation routes remain, with full-layout capability differences reported.
+Rex, Herdr and cmux render fresh layouts, selected through shared host detection.
+Desktop retains its current saved-layout behavior. Isolated native tests cover Rex
+(fresh launches, Task directories, in-Rex caller, arrivals, closed arrivals) and
+Herdr (fresh launches); cmux has fixture coverage only. tmux and plain-terminal
+routes still open the conversation alone.
 
 Before acceptance, demonstrate config templates, two fresh launches preserving
 independent native edits, actual native splits after automatic and manual entry,

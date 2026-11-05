@@ -854,7 +854,7 @@ pub enum DesktopCommand {
     },
     /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete revision-checked record from stdin
     Layout {
-        /// repository, wave:<durable-id>, wave-default:<durable-id>, task:<durable-id> or query:ID
+        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
         work: String,
         /// Replace the record from JSON on stdin instead of reading it (a Dashboard's: slots, null for the default)
         #[arg(long)]

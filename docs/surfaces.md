@@ -15,21 +15,19 @@ lf open --available                            # every conversation available fo
 lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
 ```
 
-From Rex, `lf open` opens a native workspace for the selected Work. It uses
-current viewer placement, otherwise the caller's server environment or the Rex
-ancestor's explicit listener. Unavailable caller context reports an error;
-`--server` selects an endpoint explicitly. The complete agent-tool path still
-needs demonstration; known Rex failures never fall through to Desktop.
-From a Herdr pane, `lf open --task LOO-12` adds a Herdr workspace; from tmux, a new window
-right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
-macOS, then a plain terminal. Host context comes from viewer placement, the host's
-environment or Rex process ancestry; opening never scans running apps.
-`--host desktop|rex|cmux|herdr|tmux|terminal` picks one explicitly.
+From Rex, Herdr or cmux, `lf open` launches a fresh Task tab with its splits in
+the host you are in: inside a Rex session or Herdr workspace, a Task joins it; a
+repository or Wave gets its own session, workspace or cmux group. Each open is a
+new launch; return to earlier tabs through the host. From tmux it opens a new
+window right after this one. Otherwise it opens in Desktop on macOS, then a plain
+terminal. Host context comes from viewer placement, the host's environment or Rex
+process ancestry; opening never scans running apps, and failure in your host never
+falls through to another. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one
+explicitly.
 
-Rex and Herdr open passive conversation views. Other terminal routes focus an
-existing conversation in that host or report it as `elsewhere`, with the
-`lf resume` command that moves input. Opening never steals input. Repeated
-opening reuses the workspace.
+Rex, Herdr and cmux show passive conversation views. tmux and terminal routes
+focus an existing conversation in that host or report it as `elsewhere`, with
+the `lf resume` command that moves input. Opening never steals input.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.

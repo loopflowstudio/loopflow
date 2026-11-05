@@ -1,6 +1,7 @@
-//! Per-Conversation observer receipts. Only the viewer process reports its own
-//! attachment; native create and display replies never establish readiness.
-//! Its OS lock proves it still runs, so a record cannot outlive a host restart.
+//! Per-Conversation readiness for one opening command. Only the viewer process
+//! reports its own attachment; native create and display replies never establish
+//! readiness. Records are keyed by a fresh launch key and removed once the
+//! command has read them, so no host destination is ever recorded.
 use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -11,7 +12,6 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use super::super::{ConversationReadiness, ObserverState};
-use super::identity;
 
 /// How long opening waits for observers it launched. A slower attachment is
 /// reported as uncertain and settles in the terminal.
@@ -49,8 +49,8 @@ pub(super) struct Observer {
 }
 
 impl Observer {
-    /// Whether a new observer may join it. A pending record may yet be running
-    /// after a lost reply, and saved history has nothing to connect to.
+    /// Whether viewing again in another fresh tab may help. A pending record may
+    /// yet be running after a lost reply, and saved history has nothing to connect to.
     pub fn retryable(&self) -> bool {
         !self.running && !matches!(self.recorded, Recorded::Pending | Recorded::History)
     }
@@ -103,7 +103,9 @@ fn directory(key: &str) -> PathBuf {
 }
 
 fn path(key: &str, session: &str) -> PathBuf {
-    directory(key).join(identity(session))
+    directory(key).join(hex::encode(
+        &<sha2::Sha256 as sha2::Digest>::digest(session.as_bytes())[..16],
+    ))
 }
 
 fn read_record(file: &mut File) -> Option<Record> {
@@ -171,11 +173,11 @@ pub(super) fn confirm(key: &str) {
     }
 }
 
-/// A destination created from the template owes nothing to its predecessor.
-pub(super) fn clear(key: &str) -> Result<()> {
-    match std::fs::remove_dir_all(directory(key)) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
-        _ => Ok(()),
+/// Remove this command's records once read. A viewer that reports later writes
+/// to an unlinked file, which no one reads.
+pub(super) fn clear(key: &str) {
+    if let Err(error) = std::fs::remove_dir_all(directory(key)) {
+        tracing::debug!(%error, "observer records were not removed");
     }
 }
 

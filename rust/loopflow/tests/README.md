@@ -710,8 +710,9 @@ them one at a time: together they can miss a follower's arrival deadline.
 
 ```bash
 export LOOPFLOW_TEST_REX="$(command -v rex)"
-cargo test -p loopflow --test integration rex_restart_reuses -- --ignored
-cargo test -p loopflow --test transport_tests rex_failed_observer -- --ignored
+cargo test -p loopflow --test integration rex_native_fresh -- --ignored
+cargo test -p loopflow --test transport_tests rex_unconfirmed_observer -- --ignored
+LOOPFLOW_TEST_HERDR="$(command -v herdr)" cargo test -p loopflow --test integration herdr_native -- --ignored
 ```
 
 ### Test without an installed Loopflow

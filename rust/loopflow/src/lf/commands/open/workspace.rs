@@ -1,42 +1,36 @@
-//! Native Rex workspaces. The registry keeps locators and creation receipts;
-//! Rex alone owns geometry and ordinary processes. Reads never execute resume argv.
+//! Fresh native workspaces. Every `lf open` launches new Task tabs, each with its
+//! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
+//! afterwards: LF records no host, container, tab or creation state. Native
+//! handles live only in this command, or in a Rex follower while it runs.
+mod cmux;
 mod herdr;
-mod hold;
 mod layout;
 mod observer;
 
-pub(super) use herdr::open_herdr;
 use layout::{layout, Host};
 pub(crate) use observer::ObserverReport;
 
 use std::collections::{BTreeSet, HashMap};
-use std::io::{IsTerminal, Read, Write};
-use std::path::Path;
+use std::io::{IsTerminal, Read};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 use super::{
     ConversationReadiness, ObserverState, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus,
-    Opening, Resolved, ViewHold,
+    Opening, Resolved,
 };
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::journal::OsProcess;
-use crate::store::sqlite::{
-    host_workspaces::{HostCreation, HostOccurrence, HostWorkspace},
-    SqliteStore,
-};
+use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
-    Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, ViewContent,
-    ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
+    Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState,
+    TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 
-fn now() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
-}
 /// Where a Task's tools run: its recorded checkout, else the repository.
 fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
     content
@@ -45,14 +39,15 @@ fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
         .map_or(repo, |location| Path::new(&location.cwd))
 }
 
-fn identity(value: &str) -> String {
-    hex::encode(&Sha256::digest(value.as_bytes())[..16])
-}
 fn selection(expression: SelectionExpression) -> Selection {
     Selection {
         id: SelectionId("workspace".into()),
         expression,
     }
+}
+
+fn label(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).take(80).collect()
 }
 
 fn workspace_plan(
@@ -79,7 +74,11 @@ fn workspace_plan(
     Ok(plan)
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+// ---------------------------------------------------------------------------
+// Rex
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct RexLocation {
     pub server: String,
     pub session: String,
@@ -145,44 +144,12 @@ fn listening_endpoint(args: &[String]) -> Option<String> {
     None
 }
 
+#[derive(Clone)]
 struct Rex {
     server: String,
     caller: Option<RexLocation>,
 }
 
-#[derive(Clone, Copy, Default)]
-struct Presentation<'a> {
-    passive: bool,
-    omit_shells: bool,
-    session: Option<&'a str>,
-    diff: bool,
-    retry_observers: bool,
-}
-
-#[derive(Debug)]
-struct Materialized {
-    window: String,
-    created: bool,
-    shells: usize,
-    observers: String,
-    retried: usize,
-}
-
-#[derive(Clone, Copy)]
-enum Follow {
-    Local,
-    All,
-}
-
-fn following(args: &OpenArgs) -> Option<Follow> {
-    if args.arrive_task.is_some() {
-        None
-    } else if args.local_workspace {
-        Some(Follow::Local)
-    } else {
-        Some(Follow::All)
-    }
-}
 impl Rex {
     fn call(&self, method: &str, args: Value) -> Result<Value> {
         let mut command = Command::new("rex");
@@ -192,12 +159,13 @@ impl Rex {
             .map_err(|error| anyhow::anyhow!("Rex {method}: {}", error.reason()))?;
         serde_json::from_str(&output).context("Rex reply is unreadable; outcome is unknown")
     }
+
+    /// The current viewer's Rex, else the caller's terminal, else `--server`.
     fn local(server: Option<&str>) -> Result<Self> {
-        let viewed = super::viewed_placement();
         let location = if server.is_some() {
             None
         } else {
-            match viewed {
+            match super::viewed_placement() {
                 Some((OpenHost::Rex, value)) => Some(
                     serde_json::from_str::<RexLocation>(&value)
                         .context("Current Rex viewer placement is unreadable")?
@@ -236,6 +204,7 @@ impl Rex {
         }
         Ok(rex)
     }
+
     fn endpoint(server: Option<&str>) -> Result<String> {
         let mut command = Command::new("rex");
         for name in ["REX_SERVER", "REX_SESSION", "REX_BLOCK"] {
@@ -256,9 +225,11 @@ impl Rex {
         anyhow::ensure!(server.starts_with("unix://") && who["principal"]["transport"] == "unix", "Rex is connected to another Machine; run lf open on the Task's recorded Machine with its local Rex server");
         Ok(server.into())
     }
+
     fn sessions(&self) -> Result<Vec<Value>> {
         array(self.call("session.list", json!({}))?, "sessions")
     }
+
     fn windows(&self, container: &str) -> Result<Vec<Value>> {
         let view = self.call("session.view", json!({"session_id":container}))?;
         // Rex omits windows for an empty session. Its identity and revision
@@ -271,10 +242,7 @@ impl Rex {
         }
         array(view, "windows")
     }
-    /// Add a pane to a retained window, leaving its native edits and focus alone.
-    fn split_beside(&self, container: &str, window: &str, layout: Value) -> Result<Value> {
-        self.call("session.new_split", json!({"session_id":container,"window_id":window,"direction":"horizontal","side":"after","focus":false,"layout":layout}))
-    }
+
     fn focus(&self, container: &str, window: &str) -> Result<String> {
         self.call(
             "session.focus_window",
@@ -317,36 +285,207 @@ fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {
     }
 }
 
-/// The item recorded under `key` as `id`, else the one LF labelled `[lf:<owner>]`.
-/// Native labels may change, so the recorded identity wins over the marker.
-fn find_native<'a>(
-    items: &'a [Value],
-    key: &str,
-    id: Option<&str>,
-    owner: &str,
-) -> Option<&'a Value> {
-    let marker = format!("[lf:{owner}]");
-    items
-        .iter()
-        .find(|item| id.is_some_and(|id| item[key] == id))
-        .or_else(|| {
-            items.iter().find(|item| {
-                item["label"]
-                    .as_str()
-                    .is_some_and(|label| label.ends_with(&marker))
-            })
-        })
+// ---------------------------------------------------------------------------
+// Native hosts
+// ---------------------------------------------------------------------------
+
+/// One host and its caller context, resolved for this command only.
+enum Native {
+    Rex(Rex),
+    Herdr(herdr::Herdr),
+    Cmux(cmux::Cmux),
 }
 
-pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
-    anyhow::ensure!(
-        args.copy
-            .as_ref()
-            .is_none_or(|copy| !copy.trim().is_empty()),
-        "A workspace copy needs a name"
-    );
-    if let Some(id) = &args.watch_workspace {
-        return follow(id, args);
+/// The outer container for this launch: a Rex session, Herdr workspace or cmux
+/// group. `None` in cmux means the caller's window.
+#[derive(Debug, Clone)]
+struct Container {
+    id: Option<String>,
+    /// Herdr creates a workspace with one empty tab; the first Task fills it.
+    spare_tab: Option<String>,
+}
+
+impl Native {
+    fn resolve(host: OpenHost, server: Option<&str>) -> Result<Self> {
+        Ok(match host {
+            OpenHost::Rex => Self::Rex(Rex::local(server)?),
+            OpenHost::Herdr => Self::Herdr(herdr::Herdr::local()?),
+            OpenHost::Cmux => Self::Cmux(cmux::Cmux::local()?),
+            other => bail!("{} has no native workspace renderer", other.label()),
+        })
+    }
+
+    fn open_host(&self) -> OpenHost {
+        match self {
+            Self::Rex(_) => OpenHost::Rex,
+            Self::Herdr(_) => OpenHost::Herdr,
+            Self::Cmux(_) => OpenHost::Cmux,
+        }
+    }
+
+    fn renderer(&self) -> Host<'_> {
+        match self {
+            Self::Rex(rex) => Host::Rex(&rex.server),
+            Self::Herdr(_) => Host::Herdr,
+            Self::Cmux(_) => Host::Cmux,
+        }
+    }
+
+    fn server(&self) -> Option<&str> {
+        match self {
+            Self::Rex(rex) => Some(&rex.server),
+            _ => None,
+        }
+    }
+
+    /// The container the caller is in, when there is one.
+    fn here(&self) -> Result<Option<Container>> {
+        Ok(match self {
+            Self::Rex(rex) => rex.caller.as_ref().map(|caller| Container {
+                id: Some(caller.session.clone()),
+                spare_tab: None,
+            }),
+            Self::Herdr(herdr) => herdr.here()?.map(|id| Container {
+                id: Some(id),
+                spare_tab: None,
+            }),
+            // cmux places a new workspace in the caller's window by default.
+            Self::Cmux(_) => Some(Container {
+                id: None,
+                spare_tab: None,
+            }),
+        })
+    }
+
+    fn create_container(&self, name: &str, cwd: &Path) -> Result<Container> {
+        let name = label(name);
+        match self {
+            Self::Rex(rex) => {
+                let created =
+                    rex.call("session.create", json!({"label":name,"initial_windows":[]}))?;
+                Ok(Container {
+                    id: Some(
+                        created["session_id"]
+                            .as_str()
+                            .context(
+                                "Rex create reply omitted session identity; outcome is unknown",
+                            )?
+                            .into(),
+                    ),
+                    spare_tab: None,
+                })
+            }
+            Self::Herdr(herdr) => {
+                let (workspace, tab) = herdr.create_workspace(&name, cwd)?;
+                Ok(Container {
+                    id: Some(workspace),
+                    spare_tab: Some(tab),
+                })
+            }
+            Self::Cmux(cmux) => Ok(Container {
+                id: Some(cmux.create_group(&name, cwd)?),
+                spare_tab: None,
+            }),
+        }
+    }
+
+    /// Add one Task tab (or Wave conversation tab) with its splits.
+    fn add_tab(
+        &self,
+        container: &mut Container,
+        name: &str,
+        cwd: &Path,
+        layout: Value,
+    ) -> Result<String> {
+        let name = label(name);
+        match self {
+            Self::Rex(rex) => {
+                let session = container
+                    .id
+                    .as_deref()
+                    .context("Rex session is unavailable")?;
+                let created = rex.call(
+                    "session.new_window",
+                    json!({"session_id":session,"window_label":name,"focus":false,"layout":layout}),
+                )?;
+                Ok(created["window_id"]
+                    .as_str()
+                    .context("Rex create reply omitted window identity; outcome is unknown")?
+                    .into())
+            }
+            Self::Herdr(herdr) => {
+                let tab = match container.spare_tab.take() {
+                    Some(tab) => tab,
+                    None => herdr.create_tab(
+                        container
+                            .id
+                            .as_deref()
+                            .context("Herdr workspace is unavailable")?,
+                        &name,
+                        cwd,
+                    )?,
+                };
+                herdr.apply(&tab, &name, layout)
+            }
+            Self::Cmux(cmux) => cmux.create_workspace(container.id.as_deref(), &name, cwd, &layout),
+        }
+    }
+
+    /// Add one Task's tab with its splits; returns the tab and its new shell count.
+    fn add_task_tab(
+        &self,
+        store: &SqliteStore,
+        container: &mut Container,
+        content: &ViewContent,
+        repo: &Path,
+        template: Option<&TaskLayoutTemplate>,
+        presentation: Presentation<'_>,
+    ) -> Result<(String, usize)> {
+        let (native_layout, shells) = layout(
+            store,
+            content,
+            repo,
+            template,
+            presentation,
+            self.renderer(),
+        )?;
+        let tab = self.add_tab(
+            container,
+            &content.title,
+            tool_cwd(content, repo),
+            native_layout,
+        )?;
+        Ok((tab, shells))
+    }
+
+    fn focus(&self, container: &Container, tab: &str) -> String {
+        let result = match self {
+            Self::Rex(rex) => rex.focus(
+                container.id.as_deref().expect("Rex tabs have a session"),
+                tab,
+            ),
+            Self::Herdr(herdr) => herdr.focus(tab).map(|()| "Selected in Herdr".into()),
+            Self::Cmux(cmux) => cmux.focus(tab).map(|()| "Selected in cmux".into()),
+        };
+        result.unwrap_or_else(|error| format!("Created; display selection failed: {error:#}"))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Opening
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Default)]
+struct Presentation<'a> {
+    session: Option<&'a str>,
+    diff: bool,
+    /// The readiness key this tab's conversation observers report under.
+    observer: Option<&'a str>,
+}
+
+pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
+    if let Some(session) = &args.follow {
+        return follow(cli, session, args);
     }
     let (targets, unknown) = super::targets(cli, args)?;
     crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
@@ -358,13 +497,13 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     for target in &targets {
         // The same opening lock protects ordinary and workspace opening.
         let _opening = Opening::lock(target)?;
-        match open_machines(&store, target, args) {
+        match open_machines(&store, host, target, args) {
             Ok(opened) => {
                 report.receipts.extend(opened.receipts);
                 report.unknown.extend(opened.unknown);
             }
             Err(error) => report.receipts.push(target.receipt(
-                Some(OpenHost::Rex),
+                Some(host),
                 None,
                 OpenStatus::Failed,
                 Some(format!("{error:#}")),
@@ -385,9 +524,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
                     .map(|id| format!(" ({id})"))
                     .unwrap_or_default()
             );
-            if let Some(hold) = receipt.rex_hold {
-                println!("  Rex views: {}", hold_text(hold));
-            }
             for conversation in &receipt.conversations {
                 print_conversation(conversation);
             }
@@ -408,14 +544,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     Ok(())
 }
 
-fn hold_text(hold: ViewHold) -> &'static str {
-    match hold {
-        ViewHold::Held => "present",
-        ViewHold::Released => "confirmed closed",
-        ViewHold::Unknown => "unreadable",
-    }
-}
-
 fn print_conversation(conversation: &ConversationReadiness) {
     let state = match conversation.state {
         ObserverState::Connected => "connected",
@@ -434,51 +562,34 @@ fn print_conversation(conversation: &ConversationReadiness) {
             .unwrap_or_default()
     );
     if !conversation.retry_argv.is_empty() {
-        println!("  To retry: {}", conversation.retry_argv.join(" "));
+        println!("  To view it again: {}", conversation.retry_argv.join(" "));
     }
 }
 
-/// Repeats this opening with an explicit retry. Retries never take focus.
-fn retry_argv(target: &Resolved, args: &OpenArgs, server: Option<&str>) -> Vec<String> {
+/// Another fresh launch showing one conversation. It never touches the earlier tab.
+fn view_again_argv(url: &str, host: OpenHost, server: Option<&str>, session: &str) -> Vec<String> {
     let mut argv = vec![
         "lf".into(),
         "open".into(),
-        target.url.to_string(),
+        url.into(),
         "--host".into(),
-        "rex".into(),
+        host.label().to_lowercase(),
+        "--session".into(),
+        session.into(),
     ];
-    if let Some(session) = &target.session {
-        argv.extend(["--session".into(), session.clone()]);
-    }
-    if let Some(copy) = &args.copy {
-        argv.extend(["--copy".into(), copy.clone()]);
-    }
     if let Some(server) = server {
         argv.extend(["--server".into(), server.into()]);
     }
-    argv.extend(["--no-focus".into(), "--retry-observers".into()]);
+    argv.push("--no-focus".into());
     argv
 }
 
-/// Launch a new observer for each failed Conversation at a destination. The
-/// retained pane keeps its error; the new one starts passive, so it takes no
-/// input. A lost reply stays pending and fences a duplicate.
-fn retry_conversations(
-    rex: &Rex,
-    key: &str,
-    cwd: &Path,
-    mut launch: impl FnMut(Value) -> Result<Value>,
-) -> Result<usize> {
-    let mut retried = 0;
-    for failed in observer::read(key).iter().filter(|o| o.retryable()) {
-        launch(Host::Rex(&rex.server, Some(key)).conversation(cwd, &failed.session)?)?;
-        observer::confirm(key);
-        retried += 1;
-    }
-    Ok(retried)
-}
-
-fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Result<OpenReport> {
+fn open_machines(
+    store: &SqliteStore,
+    host: OpenHost,
+    target: &Resolved,
+    args: &OpenArgs,
+) -> Result<OpenReport> {
     let repository = target
         .repository_id
         .as_deref()
@@ -495,15 +606,10 @@ fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Res
         .iter()
         .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
         .filter(|content| target.task.is_some() || !content.states.contains(&SelectionState::Done))
-        .filter(|content| {
-            args.arrive_task
-                .as_ref()
-                .is_none_or(|id| *id == content.work.id)
-        })
     {
         match store.task_execution_route(&TaskId::parse(&content.work.id)?) {
             Ok(route) if route.machine_id == local => {
-                if eligible(content, target.task.is_some() && args.arrive_task.is_none()) {
+                if eligible(content, target.task.is_some()) {
                     local_tasks.push(content);
                 }
             }
@@ -516,31 +622,39 @@ fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Res
             )),
         }
     }
-    anyhow::ensure!(
-        args.arrive_task.is_none() || peers.is_empty(),
-        "Arriving Task belongs to another Machine; no local fallback"
-    );
     if !args.local_workspace {
         for peer in peers {
             let mut remote_args = args.clone();
             remote_args.session = target.session.clone();
             remote_args.diff |= target.url.diff;
-            let result = remote_open(store, peer.as_str(), repository, &selected, &remote_args);
-            match result {
+            match remote_open(
+                store,
+                host,
+                peer.as_str(),
+                repository,
+                &selected,
+                &remote_args,
+            ) {
                 Ok(mut report) => {
                     // The peer's own command means nothing on this Machine.
-                    let retry = retry_argv(target, args, args.server.as_deref());
-                    report
+                    for conversation in report
                         .receipts
                         .iter_mut()
                         .flat_map(|receipt| &mut receipt.conversations)
                         .filter(|conversation| !conversation.retry_argv.is_empty())
-                        .for_each(|conversation| conversation.retry_argv = retry.clone());
+                    {
+                        conversation.retry_argv = view_again_argv(
+                            &target.url.to_string(),
+                            host,
+                            args.server.as_deref(),
+                            &conversation.session,
+                        );
+                    }
                     receipts.append(&mut report.receipts);
                     unknown.append(&mut report.unknown);
                 }
                 Err(error) => receipts.push(target.receipt(
-                    Some(OpenHost::Rex),
+                    Some(host),
                     None,
                     OpenStatus::Failed,
                     Some(format!("Machine {peer}: {error:#}; no local fallback")),
@@ -548,25 +662,34 @@ fn open_machines(store: &SqliteStore, target: &Resolved, args: &OpenArgs) -> Res
             }
         }
     }
-    // A broad local workspace keeps watching even when its working set is empty.
-    if !local_tasks.is_empty() || (target.task.is_none() && !args.local_workspace) {
-        let result = Rex::local(args.server.as_deref())
-            .and_then(|rex| open(store, &rex, target, args, &plan.selection, &local_tasks));
+    // A broad Rex workspace keeps following even when its working set is empty.
+    let follows = host == OpenHost::Rex && target.task.is_none();
+    if !local_tasks.is_empty() || follows {
+        let result = Native::resolve(host, args.server.as_deref())
+            .and_then(|native| launch(store, &native, target, &selected, args, &local_tasks));
         match result {
             Ok(mut opened) => receipts.append(&mut opened),
             Err(error) => receipts.push(target.receipt(
-                Some(OpenHost::Rex),
+                Some(host),
                 None,
                 OpenStatus::Failed,
                 Some(format!("{error:#}")),
             )),
         }
+    } else if receipts.is_empty() {
+        receipts.push(target.receipt(
+            Some(host),
+            None,
+            OpenStatus::Opening,
+            Some("No started, unfinished Tasks to open here; nothing was created".into()),
+        ));
     }
     Ok(OpenReport { receipts, unknown })
 }
 
 fn remote_open(
     store: &SqliteStore,
+    host: OpenHost,
     machine: &str,
     repository: &str,
     selection: &Selection,
@@ -582,7 +705,7 @@ fn remote_open(
         repository.into(),
         "open".into(),
         "--host".into(),
-        "rex".into(),
+        host.label().to_lowercase(),
         "--local-workspace".into(),
         "--json".into(),
     ];
@@ -592,12 +715,6 @@ fn remote_open(
         SelectionExpression::Repository => {}
         _ => bail!("This workspace selection cannot be routed"),
     }
-    if let Some(copy) = &args.copy {
-        argv.extend(["--copy".into(), copy.clone()]);
-    }
-    if args.new_shells {
-        argv.push("--new-shells".into());
-    }
     if let Some(session) = &args.session {
         argv.extend(["--session".into(), session.clone()]);
     }
@@ -606,12 +723,6 @@ fn remote_open(
     }
     if args.no_focus {
         argv.push("--no-focus".into());
-    }
-    if args.retry_observers {
-        argv.push("--retry-observers".into());
-    }
-    if let Some(task) = &args.arrive_task {
-        argv.extend(["--arrive-task".into(), task.clone()]);
     }
     let bytes = tokio::runtime::Runtime::new()?
         .block_on(super::super::ssh::request(&machine, &argv, None))?;
@@ -639,331 +750,209 @@ fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
     }))
 }
 
-fn workspace(
-    store: &SqliteStore,
-    rex: &Rex,
-    repository: &str,
-    selected: Selection,
-    copy: Option<&str>,
-) -> Result<HostWorkspace> {
-    let id = identity(&format!(
-        "{repository}\n{}\n{}\n{}",
-        rex.server,
-        serde_json::to_string(&selected.expression)?,
-        copy.unwrap_or("")
-    ));
-    Ok(store.host_workspace(&id)?.unwrap_or(HostWorkspace {
-        id,
-        repository_id: repository.into(),
-        host: "rex".into(),
-        server: rex.server.clone(),
-        selection: selected,
-        copy_name: copy.map(str::to_owned),
-        container_id: None,
-        creation_pending: false,
-        updated_at: now(),
-    }))
+/// Configured `task_layout` per Wave, read once per launch.
+struct Templates<'a> {
+    store: &'a SqliteStore,
+    repo: &'a Path,
+    read: HashMap<Option<WaveId>, Option<TaskLayoutTemplate>>,
 }
 
-fn ensure_container(
-    store: &SqliteStore,
-    rex: &Rex,
-    workspace: &mut HostWorkspace,
-    label: &str,
-    follow: Option<Follow>,
-    cwd: &Path,
-) -> Result<()> {
-    let _opening = Opening::lock_key(&format!("host-workspace:{}", workspace.id))?;
-    if let Some(current) = store.host_workspace(&workspace.id)? {
-        *workspace = current;
-    }
-    let inventory = rex.sessions()?;
-    let recorded = workspace.container_id.as_deref();
-    let found = find_native(&inventory, "session_id", recorded, &workspace.id);
-    let retained = found.filter(|item| recorded.is_some_and(|id| item["session_id"] == id));
-    if let Some(item) = found {
-        workspace.container_id = Some(
-            item["session_id"]
-                .as_str()
-                .context("Rex session has no identity")?
-                .into(),
-        );
-    } else {
-        anyhow::ensure!(
-            !workspace.creation_pending || workspace.container_id.is_some(),
-            "Workspace creation outcome is unknown; inspect Rex before retrying this occurrence"
-        );
-        workspace.container_id = None;
-        workspace.creation_pending = true;
-        workspace.updated_at = now();
-        store.save_host_workspace(workspace)?;
-        let label = match &workspace.copy_name {
-            Some(copy) => format!("{label} · {copy}"),
-            None => label.into(),
-        };
-        let label: String = label.chars().filter(|c| !c.is_control()).take(80).collect();
-        let mut windows = Vec::new();
-        if let SelectionExpression::Wave { wave } = &workspace.selection.expression {
-            if let Some(session) =
-                store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
-            {
-                observer::clear(&workspace.id)?;
-                let host = Host::Rex(&rex.server, Some(&workspace.id));
-                windows.push(json!({"window_label":"Conversation","layout":host.conversation(cwd,session.id.as_str())?}));
-            }
+impl Templates<'_> {
+    fn for_task(&mut self, task: &TaskId) -> Result<Option<TaskLayoutTemplate>> {
+        let wave = self
+            .store
+            .task(task)?
+            .context("Task is unavailable")?
+            .wave_id;
+        if let Some(template) = self.read.get(&wave) {
+            return Ok(template.clone());
         }
-        let result = rex.call(
-            "session.create",
-            json!({"label":format!("{label} [lf:{}]", workspace.id),"initial_windows":windows}),
-        )?;
-        workspace.container_id = Some(
-            result["session_id"]
-                .as_str()
-                .context("Rex create reply omitted session identity; outcome is unknown")?
-                .into(),
-        );
-        observer::confirm(&workspace.id);
+        let slug = wave
+            .as_ref()
+            .map(|wave| self.store.get_wave(wave))
+            .transpose()?
+            .flatten()
+            .map(|wave| wave.slug().to_owned());
+        let template = crate::config::load_wave_config(Some(self.repo), slug.as_deref())?
+            .and_then(|config| config.task_layout);
+        self.read.insert(wave, template.clone());
+        Ok(template)
     }
-    if retained.is_none() {
-        workspace.creation_pending = false;
-        workspace.updated_at = now();
-        store.save_host_workspace(workspace)?;
-    }
-    if let Some(follow) = follow {
-        ensure_follower(rex, workspace, cwd, follow)?;
-    }
-    Ok(())
 }
 
-fn open(
+/// The container's name: the selected Wave, else the Task's Wave, else the repository.
+fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) -> Result<String> {
+    let wave = match &selected.expression {
+        SelectionExpression::Wave { wave } => Some(wave.clone()),
+        SelectionExpression::Work { work } => store
+            .task(&TaskId::parse(&work.id)?)?
+            .and_then(|task| task.wave_id),
+        _ => None,
+    };
+    Ok(
+        match wave
+            .map(|wave| store.get_wave(&wave))
+            .transpose()?
+            .flatten()
+        {
+            Some(wave) => wave.slug().to_owned(),
+            None => target.repository_path.file_name().map_or_else(
+                || target.label.clone(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
+        },
+    )
+}
+
+fn launch(
     store: &SqliteStore,
-    rex: &Rex,
+    native: &Native,
     target: &Resolved,
-    args: &OpenArgs,
     selected: &Selection,
+    args: &OpenArgs,
     local_tasks: &[&ViewContent],
 ) -> Result<Vec<OpenReceipt>> {
-    let repo = target
-        .repository_id
-        .as_deref()
-        .context("Repository has no Work identity")?;
-    let mut root = workspace(store, rex, repo, selected.clone(), args.copy.as_deref())?;
+    let host = native.open_host();
+    let repo = target.repository_path.as_path();
     let explicit = target.task.is_some();
-    if let Some(task) = target
-        .task
-        .as_ref()
-        .filter(|_| root.container_id.is_none() && !root.creation_pending)
-    {
-        let inventory = rex.sessions()?;
-        for existing in store.task_host_workspaces(&task.id, "rex", &rex.server)? {
-            if existing.copy_name != args.copy {
-                continue;
-            }
-            if let Some(container) = &existing.container_id {
-                if inventory
-                    .iter()
-                    .any(|item| item["session_id"] == *container)
-                {
-                    root = existing;
-                    break;
-                }
-            }
-        }
-        if root.container_id.is_none() && args.copy.is_none() {
-            if let Some(caller) = &rex.caller {
-                root.container_id = Some(caller.session.clone());
-                store.save_host_workspace(&root)?;
-            }
+    // A Task joins the container the caller is in; a repository or Wave gets its own.
+    let mut container = match native.here()?.filter(|_| explicit) {
+        Some(here) => here,
+        None => native.create_container(&container_name(store, target, selected)?, repo)?,
+    };
+    let mut receipts = Vec::new();
+    let mut launched = Vec::new();
+    if let SelectionExpression::Wave { wave } = &selected.expression {
+        if let Some(session) =
+            store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
+        {
+            let key = uuid::Uuid::new_v4().to_string();
+            let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
+            receipt.label = "Wave conversation".into();
+            let opened = native
+                .renderer()
+                .conversation(repo, session.id.as_str(), Some(&key))
+                .and_then(|layout| native.add_tab(&mut container, "Conversation", repo, layout));
+            settle_receipt(&mut receipt, opened, &key, &mut launched);
+            receipts.push((receipt, key));
         }
     }
-    ensure_container(
+    let mut templates = Templates {
         store,
-        rex,
-        &mut root,
-        &target.label,
-        if explicit { None } else { following(args) },
-        &target.repository_path,
-    )?;
-    let mut receipts = Vec::new();
-    let mut groups = HashMap::new();
-    let mut launched = Vec::new();
-    let mut observed = Vec::new();
+        repo,
+        read: HashMap::new(),
+    };
+    let mut focused = args.no_focus;
+    let mut seen = Vec::new();
     for content in local_tasks {
         let task = store
             .task(&TaskId::parse(&content.work.id)?)?
             .context("Task is unavailable")?;
-        // Explicit opening may reuse an occurrence in a repository or Wave
-        // container. Its current membership must not move that native view.
-        let destination = if explicit {
-            Ok(root.clone())
-        } else {
-            task_workspace(
-                store,
-                rex,
-                &root,
-                task.wave_id.as_ref(),
-                &target.repository_path,
-                &mut groups,
-                following(args),
-            )
-        };
-        let result = destination.and_then(|destination| {
-            materialize(
-                store,
-                rex,
-                &destination,
-                content,
-                &target.repository_path,
-                Presentation {
-                    passive: args.arrive_task.is_some(),
-                    omit_shells: args.copy.is_some() && !args.new_shells,
-                    session: target.session.as_deref(),
-                    diff: args.diff || target.url.diff,
-                    retry_observers: args.retry_observers,
-                },
-            )
-            .map(|opened| (destination, opened))
-        });
-        let mut receipt = target.receipt(Some(OpenHost::Rex), None, OpenStatus::Opening, None);
+        seen.push(task.id.to_string());
+        let key = uuid::Uuid::new_v4().to_string();
+        let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
         receipt.label = format!("{} · {}", task.identifier, task.title);
         receipt.url = crate::work::link::WorkUrl::new(
             target.url.repository.clone(),
-            crate::work::link::WorkTarget::Task(task.identifier),
+            crate::work::link::WorkTarget::Task(task.identifier.clone()),
         )
         .to_string();
-        match result {
-            Ok((destination, opened)) => {
-                let window = opened.window;
-                receipt.destination = Some(window.clone());
-                if opened.created || opened.retried > 0 {
-                    launched.push(opened.observers.clone());
-                }
-                observed.push((receipts.len(), opened.observers));
-                let focus = !args.no_focus && args.arrive_task.is_none() && receipts.is_empty();
-                let showing = if focus {
-                    rex.focus(
-                        destination
-                            .container_id
-                            .as_deref()
-                            .expect("container created"),
-                        &window,
-                    )
-                    .unwrap_or_else(|error| {
-                        format!("Materialized; display selection failed: {error}")
-                    })
-                } else {
-                    "Focus preserved".into()
-                };
-                let retried = match opened.retried {
-                    0 => String::new(),
-                    count => format!("; {count} new Conversation observers beside retained panes"),
-                };
-                receipt.reason = Some(format!(
-                    "{}; {} new native shells{retried}; {showing}",
-                    if opened.created {
-                        "Created"
-                    } else {
-                        "Reused native layout without replaying commands"
-                    },
-                    opened.shells
-                ));
-            }
-            Err(error) => {
-                receipt.status = OpenStatus::Failed;
-                receipt.reason = Some(format!("{error:#}"));
-            }
-        }
-        receipt.rex_hold = hold::task_hold(store, &task.id).unwrap_or_else(|error| {
-            tracing::debug!(%error, "Task occurrences are unreadable; the hold stays");
-            Some(ViewHold::Unknown)
+        let opened = templates.for_task(&task.id).and_then(|template| {
+            native.add_task_tab(
+                store,
+                &mut container,
+                content,
+                repo,
+                template.as_ref(),
+                Presentation {
+                    session: target.session.as_deref(),
+                    diff: args.diff || target.url.diff,
+                    observer: Some(&key),
+                },
+            )
         });
-        receipts.push(receipt);
-    }
-    if receipts.is_empty() && !explicit {
-        receipts.push(target.receipt(
-            Some(OpenHost::Rex),
-            root.container_id.clone(),
-            OpenStatus::Opening,
-            Some("Workspace is following started Tasks; no eligible local Tasks yet".into()),
-        ));
-    }
-    // Wave containers carry their own conversation; a Task opened explicitly
-    // inside one reports only itself.
-    if !explicit {
-        for workspace in std::iter::once(&root).chain(groups.values()) {
-            let Some(container) = workspace.container_id.as_deref() else {
-                continue;
+        let opened = opened.map(|(tab, shells)| {
+            let showing = if focused {
+                "Focus preserved".into()
+            } else {
+                focused = true;
+                native.focus(&container, &tab)
             };
-            let key = &workspace.id;
-            let mut receipt = target.receipt(
-                Some(OpenHost::Rex),
-                Some(container.into()),
-                OpenStatus::Opening,
-                None,
-            );
-            receipt.label = "Wave conversation".into();
-            if args.retry_observers {
-                match retry_conversations(rex, key, &target.repository_path, |layout| {
-                    rex.call("session.new_window", json!({"session_id":container,"window_label":"Conversation","focus":false,"layout":layout}))
-                }) {
-                    Ok(0) => {}
-                    Ok(_) => launched.push(key.clone()),
-                    Err(error) => {
-                        receipt.status = OpenStatus::Failed;
-                        receipt.reason = Some(format!("{error:#}"));
-                    }
+            receipt.reason = Some(format!(
+                "Created a new Task tab; {shells} new shells; {showing}"
+            ));
+            tab
+        });
+        settle_receipt(&mut receipt, opened, &key, &mut launched);
+        receipts.push((receipt, key));
+    }
+    if let (Native::Rex(rex), false) = (native, explicit) {
+        let session = container.id.clone().expect("Rex containers are sessions");
+        let mut receipt =
+            target.receipt(Some(host), Some(session.clone()), OpenStatus::Opening, None);
+        receipt.label = "Following".into();
+        let url = target.url.to_string();
+        receipt.reason = Some(
+            match start_follower(rex, &session, &url, repo, args, &seen) {
+                Ok(()) => {
+                    "Newly started Tasks arrive in this Rex session while its Workspace tab runs"
+                        .into()
                 }
-            }
-            if !observer::read(key).is_empty() {
-                observed.push((receipts.len(), key.clone()));
-                receipts.push(receipt);
-            }
-        }
+                Err(error) => {
+                    receipt.status = OpenStatus::Failed;
+                    format!("Follower was not started: {error:#}")
+                }
+            },
+        );
+        receipts.push((receipt, String::new()));
     }
     observer::settle(&launched);
-    let retry = retry_argv(target, args, Some(&rex.server));
-    for (index, key) in observed {
-        receipts[index].conversations = observer::read(&key)
-            .iter()
-            .map(|observer| observer.readiness(&retry))
-            .collect();
-    }
-    Ok(receipts)
+    Ok(receipts
+        .into_iter()
+        .map(|(mut receipt, key)| {
+            if !key.is_empty() {
+                receipt.conversations = observer::read(&key)
+                    .iter()
+                    .map(|observer| {
+                        observer.readiness(&view_again_argv(
+                            &receipt.url,
+                            host,
+                            native.server(),
+                            &observer.session,
+                        ))
+                    })
+                    .collect();
+                // Readiness belongs to this command; nothing outlives it.
+                observer::clear(&key);
+            }
+            receipt
+        })
+        .collect())
 }
 
-/// Repository selection groups Tasks by Wave; explicit Task/Wave selections stay put.
-fn task_workspace(
-    store: &SqliteStore,
-    rex: &Rex,
-    root: &HostWorkspace,
-    wave: Option<&WaveId>,
-    repo: &Path,
-    groups: &mut HashMap<WaveId, HostWorkspace>,
-    follow: Option<Follow>,
-) -> Result<HostWorkspace> {
-    if !matches!(root.selection.expression, SelectionExpression::Repository) {
-        return Ok(root.clone());
+/// Record a tab's native result. A lost reply is reported, never retried.
+fn settle_receipt(
+    receipt: &mut OpenReceipt,
+    opened: Result<String>,
+    key: &str,
+    launched: &mut Vec<String>,
+) {
+    match opened {
+        Ok(tab) => {
+            observer::confirm(key);
+            launched.push(key.into());
+            receipt.destination = Some(tab);
+            if receipt.reason.is_none() {
+                receipt.reason = Some("Created".into());
+            }
+        }
+        Err(error) => {
+            receipt.status = OpenStatus::Failed;
+            receipt.reason = Some(format!(
+                "{error:#}; nothing was retried, so inspect the host before opening again"
+            ));
+        }
     }
-    let Some(wave) = wave else {
-        return Ok(root.clone());
-    };
-    if let Some(group) = groups.get(wave) {
-        return Ok(group.clone());
-    }
-    let mut group = workspace(
-        store,
-        rex,
-        &root.repository_id,
-        selection(SelectionExpression::Wave { wave: wave.clone() }),
-        root.copy_name.as_deref(),
-    )?;
-    let label = store
-        .get_wave(wave)?
-        .map(|wave| wave.slug().to_owned())
-        .unwrap_or_else(|| wave.to_string());
-    ensure_container(store, rex, &mut group, &label, follow, repo)?;
-    groups.insert(wave.clone(), group.clone());
-    Ok(group)
 }
 
 fn eligible(content: &ViewContent, explicit: bool) -> bool {
@@ -980,164 +969,42 @@ fn eligible(content: &ViewContent, explicit: bool) -> bool {
             }))
 }
 
-fn materialize(
-    store: &SqliteStore,
+// ---------------------------------------------------------------------------
+// Following
+// ---------------------------------------------------------------------------
+
+/// The follower's argv carries everything it needs: server, session, the Work
+/// address and the Tasks this launch already opened. Nothing is written for it.
+fn start_follower(
     rex: &Rex,
-    workspace: &HostWorkspace,
-    content: &ViewContent,
+    session: &str,
+    url: &str,
     repo: &Path,
-    presentation: Presentation<'_>,
-) -> Result<Materialized> {
-    let container = workspace
-        .container_id
-        .as_deref()
-        .context("Workspace is unavailable")?;
-    let id = identity(&format!(
-        "{}\n{}\n{}\n{}",
-        workspace.id,
-        content.work.id,
-        presentation.session.unwrap_or(""),
-        presentation.diff
-    ));
-    let _opening = Opening::lock_key(&format!("host-occurrence:{id}"))?;
-    let observers = id.clone();
-    let mut occurrence = store.host_occurrence(&id)?.unwrap_or(HostOccurrence {
-        id,
-        workspace_id: workspace.id.clone(),
-        task_id: TaskId::parse(&content.work.id)?,
-        destination_id: None,
-        creation: HostCreation::Complete,
-    });
-    let inventory = rex.windows(container)?;
-    let recorded = occurrence.destination_id.as_deref();
-    let existing = find_native(&inventory, "window_id", recorded, &occurrence.id);
-    let retained = existing.filter(|window| recorded.is_some_and(|id| window["window_id"] == id));
-    if retained.is_none() && presentation.passive && recorded.is_some() {
-        bail!("Task view was explicitly closed; following leaves it closed");
+    args: &OpenArgs,
+    seen: &[String],
+) -> Result<()> {
+    let mut words = vec![
+        "open".to_owned(),
+        url.into(),
+        "--host".into(),
+        "rex".into(),
+        "--server".into(),
+        rex.server.clone(),
+        "--follow".into(),
+        session.into(),
+    ];
+    if !seen.is_empty() {
+        words.extend(["--seen".into(), seen.join(",")]);
     }
-    if let Some(window) = existing {
-        if retained.is_none() {
-            occurrence.destination_id = Some(
-                window["window_id"]
-                    .as_str()
-                    .context("Window has no identity")?
-                    .to_string(),
-            );
-            // Recover identity without turning an uncertain creation into replay permission.
-            store.save_host_occurrence(&occurrence)?;
-        }
-        anyhow::ensure!(
-            occurrence.creation != HostCreation::ToolsPending,
-            "Tool activation outcome is unknown; no duplicate was attempted"
-        );
-        if presentation.passive
-            || occurrence.creation != HostCreation::Passive
-            || content.location.is_none()
-        {
-            let window = occurrence
-                .destination_id
-                .expect("retained window has an identity");
-            let retried = if presentation.retry_observers {
-                retry_conversations(rex, &observers, tool_cwd(content, repo), |layout| {
-                    rex.split_beside(container, &window, layout)
-                })?
-            } else {
-                0
-            };
-            return Ok(Materialized {
-                window,
-                created: false,
-                shells: 0,
-                observers,
-                retried,
-            });
-        }
-    } else {
-        anyhow::ensure!(
-            occurrence.creation != HostCreation::Pending || occurrence.destination_id.is_some(),
-            "Task window creation outcome is unknown; no duplicate was attempted"
-        );
-        observer::clear(&observers)?;
+    if args.local_workspace {
+        words.push("--local-workspace".into());
     }
-
-    let host = Host::Rex(&rex.server, Some(&observers));
-    let (layout, shells) = layout(store, content, repo, presentation, host)?;
-    let id = if existing.is_some() {
-        let id = occurrence
-            .destination_id
-            .as_deref()
-            .expect("retained window has an identity");
-        occurrence.creation = HostCreation::ToolsPending;
-        store.save_host_occurrence(&occurrence)?;
-        rex.split_beside(container, id, layout)?;
-        id.to_owned()
-    } else {
-        occurrence.destination_id = None;
-        occurrence.creation = HostCreation::Pending;
-        store.save_host_occurrence(&occurrence)?;
-        let label: String = content
-            .title
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(80)
-            .collect();
-        let result = rex.call("session.new_window", json!({"session_id":container,"window_label":format!("{label} [lf:{}]", occurrence.id),"focus":false,"layout":layout}))?;
-        result["window_id"]
-            .as_str()
-            .context("Rex create reply omitted window identity; outcome is unknown")?
-            .to_owned()
-    };
-    observer::confirm(&observers);
-    occurrence.destination_id = Some(id.clone());
-    occurrence.creation = if presentation.passive || content.location.is_none() {
-        HostCreation::Passive
-    } else {
-        HostCreation::Complete
-    };
-    store.save_host_occurrence(&occurrence)?;
-    Ok(Materialized {
-        window: id,
-        created: true,
-        shells,
-        observers,
-        retried: 0,
-    })
-}
-
-// The OS lock proves follower liveness, including after a host restart. Native
-// window/block identities alone cannot prove that their commands survived.
-fn follower_file(id: &str) -> Result<std::fs::File> {
-    let directory = crate::store::lf_home_dir().join("open");
-    std::fs::create_dir_all(&directory)?;
-    Ok(std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join(format!("{}.follower", identity(id))))?)
-}
-
-fn ensure_follower(rex: &Rex, workspace: &HostWorkspace, cwd: &Path, follow: Follow) -> Result<()> {
-    use fs2::FileExt;
-    let mut file = follower_file(&workspace.id)?;
-    match file.try_lock_exclusive() {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-        Err(error) => return Err(error.into()),
-    }
-    let mut pending = String::new();
-    file.read_to_string(&mut pending)?;
-    anyhow::ensure!(
-        pending.is_empty(),
-        "Workspace follower launch is pending or unknown; no duplicate was attempted"
-    );
-    file.write_all(b"pending")?;
-    file.sync_all()?;
-    let mut words = vec!["open", "--host", "rex", "--watch-workspace", &workspace.id];
-    if matches!(follow, Follow::Local) {
-        words.push("--local-workspace");
-    }
-    rex.call("session.new_window", json!({"session_id":workspace.container_id,"window_label":"Workspace","focus":false,"layout":Host::Rex(&rex.server,None).block("Workspace",cwd,viewer_argv(cwd,&words)?)}))?;
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    rex.call(
+        "session.new_window",
+        json!({"session_id":session,"window_label":"Workspace","focus":false,
+            "layout":Host::Rex(&rex.server).block("Workspace",repo,viewer_argv(repo,&words)?)}),
+    )?;
     Ok(())
 }
 
@@ -1162,32 +1029,38 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
     Ok(argv)
 }
 
-fn follow(id: &str, args: &OpenArgs) -> Result<()> {
-    use fs2::FileExt;
-    let follower = follower_file(id)?;
-    // The creator briefly owns this lock until the native launch returns.
-    follower.lock_exclusive()?;
-    follower.set_len(0)?;
-    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    // Creation records the pending occurrence before starting this native block.
-    let mut workspace = store
-        .host_workspace(id)?
-        .context("Workspace occurrence is unavailable")?;
+/// Add newly started local Tasks to one Rex session while this tab runs. Seen
+/// Tasks, including tabs someone closed, stay in memory and never reappear here.
+/// Other Machines' Tasks arrive in the session opened on their own Machine.
+fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
+    let server = args
+        .server
+        .as_deref()
+        .context("A follower needs its Rex server")?;
     let rex = Rex {
-        server: workspace.server.clone(),
+        server: server.into(),
         caller: None,
     };
-    println!("Loopflow workspace · {id}\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
-    let repo = store
-        .repository_path(&RepositoryId::parse(&workspace.repository_id)?)?
-        .context("Repository location is unavailable")?;
-    let selected = workspace.selection.clone();
-    let repository = RepositoryId::parse(&workspace.repository_id)?;
+    let (targets, _) = super::targets(cli, args)?;
+    let target = targets
+        .first()
+        .context("Follower selection is unavailable")?;
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let selected = scope(&store, target)?;
+    let repository = RepositoryId::parse(
+        target
+            .repository_id
+            .as_deref()
+            .context("Repository has no Work identity")?,
+    )?;
+    let repo: PathBuf = target.repository_path.clone();
+    println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
+    let watched = repository.clone();
     let subscription = super::super::watch::start(
         selected,
         super::super::watch::Watched::every(super::super::watch::ACTIVITY_CLOCK),
         move |store, selected| {
-            let repository = repository.clone();
+            let repository = watched.clone();
             async move {
                 let store = super::super::watch::require_store(store)?;
                 workspace_plan(&store.sqlite, &repository, selected)
@@ -1196,58 +1069,70 @@ fn follow(id: &str, args: &OpenArgs) -> Result<()> {
         super::super::watch::Transport::Pull(Box::new(|| {})),
     )?
     .context("Workspace watch did not start")?;
-    let mut arrived = BTreeSet::new();
+    let mut seen: BTreeSet<String> = args.seen.iter().cloned().collect();
+    let mut templates = Templates {
+        store: &store,
+        repo: &repo,
+        read: HashMap::new(),
+    };
+    let native = Native::Rex(rex.clone());
+    let mut container = Container {
+        id: Some(session.into()),
+        spare_tab: None,
+    };
+    let local = store.local_machine()?.id;
     let mut refresh = std::time::Instant::now();
     let mut request_id = 0_u64;
     loop {
-        workspace = store
-            .host_workspace(id)?
-            .context("Workspace occurrence was removed")?;
-        if let Some(container) = &workspace.container_id {
-            if !rex
-                .sessions()?
-                .iter()
-                .any(|session| session["session_id"] == *container)
-            {
-                return Ok(());
+        if !rex
+            .sessions()?
+            .iter()
+            .any(|item| item["session_id"] == session)
+        {
+            return Ok(());
+        }
+        if let Some(bytes) = subscription.pull() {
+            let frame: Value = serde_json::from_slice(&bytes)?;
+            if let Some(error) = frame["unavailable"].as_str() {
+                eprintln!("Work selection unavailable: {error}");
+                continue;
             }
-            if let Some(bytes) = subscription.pull() {
-                let frame: Value = serde_json::from_slice(&bytes)?;
-                if let Some(error) = frame["unavailable"].as_str() {
-                    eprintln!("Work selection unavailable: {error}");
+            let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
+            for content in plan
+                .contents
+                .iter()
+                .filter(|content| eligible(content, false))
+                .filter(|content| !content.states.contains(&SelectionState::Done))
+            {
+                if seen.contains(&content.work.id) {
                     continue;
                 }
-                let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
-                let mut groups = HashMap::new();
-                for content in plan
-                    .contents
-                    .iter()
-                    .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
-                    .filter(|content| !content.states.contains(&SelectionState::Done))
-                {
-                    if arrived.contains(&content.work.id) {
-                        continue;
-                    }
-                    match arrive(
+                let task_id = TaskId::parse(&content.work.id)?;
+                match store.task_execution_route(&task_id) {
+                    Ok(route) if route.machine_id == local => {}
+                    // Remote and unknown routes never fall back to a local tab.
+                    _ => continue,
+                }
+                // Mark before creating: an uncertain create is never retried.
+                seen.insert(content.work.id.clone());
+                let arrived = templates.for_task(&task_id).and_then(|template| {
+                    native.add_task_tab(
                         &store,
-                        &rex,
-                        &workspace,
+                        &mut container,
                         content,
-                        Path::new(&repo),
-                        &mut groups,
-                        args,
-                    ) {
-                        Ok(true) => {
-                            arrived.insert(content.work.id.clone());
-                        }
-                        Ok(false) => {}
-                        Err(error) => eprintln!("{}: {error:#}", content.title),
-                    }
+                        &repo,
+                        template.as_ref(),
+                        Presentation::default(),
+                    )
+                });
+                match arrived {
+                    Ok(_) => println!("Added {}", content.title),
+                    Err(error) => eprintln!("{}: {error:#}; not retried", content.title),
                 }
             }
         }
         // Remote starts and recovered connections need not change this Machine's
-        // Work snapshot. Re-read periodically; creation receipts fence retries.
+        // Work snapshot. Re-read periodically.
         if refresh.elapsed() >= std::time::Duration::from_secs(15) {
             request_id += 1;
             subscription.request(format!("{{\"id\":{request_id}}}").as_bytes());
@@ -1271,86 +1156,10 @@ fn follow(id: &str, args: &OpenArgs) -> Result<()> {
     }
 }
 
-/// Report arrival only after materialization; failed/unknown receipts remain retryable.
-fn arrive(
-    store: &SqliteStore,
-    rex: &Rex,
-    workspace: &HostWorkspace,
-    content: &ViewContent,
-    repo: &Path,
-    groups: &mut HashMap<WaveId, HostWorkspace>,
-    args: &OpenArgs,
-) -> Result<bool> {
-    let task_id = TaskId::parse(&content.work.id)?;
-    let route = store
-        .task_execution_route(&task_id)
-        .context("execution Machine unavailable")?;
-    if route.machine_id != store.local_machine()?.id {
-        if args.local_workspace {
-            return Ok(false);
-        }
-        let arrival = OpenArgs {
-            copy: workspace.copy_name.clone(),
-            no_focus: true,
-            arrive_task: Some(content.work.id.clone()),
-            ..args.clone()
-        };
-        let report = remote_open(
-            store,
-            route.machine_id.as_str(),
-            &workspace.repository_id,
-            &workspace.selection,
-            &arrival,
-        )
-        .with_context(|| format!("Machine {}; no local fallback", route.machine_id))?;
-        let delivered = report
-            .receipts
-            .iter()
-            .any(|receipt| receipt.status != OpenStatus::Failed && receipt.destination.is_some());
-        for receipt in report.receipts {
-            println!(
-                "{}: {}",
-                receipt.label,
-                receipt.reason.as_deref().unwrap_or("opened")
-            );
-        }
-        super::print_unknown(&report.unknown);
-        return Ok(delivered);
-    }
-    if !eligible(content, false) {
-        return Ok(false);
-    }
-    let task = store.task(&task_id)?.context("Task is unavailable")?;
-    let destination = task_workspace(
-        store,
-        rex,
-        workspace,
-        task.wave_id.as_ref(),
-        repo,
-        groups,
-        following(args),
-    )?;
-    let opened = materialize(
-        store,
-        rex,
-        &destination,
-        content,
-        repo,
-        Presentation {
-            passive: true,
-            omit_shells: workspace.copy_name.is_some(),
-            ..Presentation::default()
-        },
-    )?;
-    if opened.created {
-        println!("Added {}", content.title);
-    }
-    Ok(true)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{array, eligible, listening_endpoint};
+    use super::{array, eligible, listening_endpoint, view_again_argv};
+    use crate::lf::commands::open::OpenHost;
     use crate::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
@@ -1412,11 +1221,30 @@ mod tests {
             assert!(eligible(&content, true));
         }
     }
+
     #[test]
     fn missing_inventory_is_not_an_empty_host() {
         assert!(array(json!({}), "windows").is_err());
         assert!(array(json!({"windows":null}), "windows")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn viewing_again_is_another_fresh_launch_on_the_same_host() {
+        let argv = view_again_argv("loopflow://r/task/T-1", OpenHost::Herdr, None, "s");
+        assert_eq!(
+            argv,
+            [
+                "lf",
+                "open",
+                "loopflow://r/task/T-1",
+                "--host",
+                "herdr",
+                "--session",
+                "s",
+                "--no-focus"
+            ]
+        );
     }
 }

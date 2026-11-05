@@ -145,7 +145,7 @@ pub struct ConversationReadiness {
     pub session: String,
     pub state: ObserverState,
     pub reason: Option<String>,
-    /// Adds a new observer beside the retained pane; empty when no retry applies.
+    /// Views it again in another fresh tab; empty when that cannot help.
     pub retry_argv: Vec<String>,
 }
 
@@ -159,23 +159,8 @@ pub struct OpenReceipt {
     pub status: OpenStatus,
     pub reason: Option<String>,
     pub fallback_argv: Vec<String>,
-    /// Observers at this destination, separate from native create/reuse `status`.
+    /// Observers this command launched, separate from native create `status`.
     pub conversations: Vec<ConversationReadiness>,
-    /// Whether the Task's Rex views retain it: one Task-wide answer across every
-    /// copy and Rex server, not this destination's. Opening decides no cleanup from it.
-    pub rex_hold: Option<ViewHold>,
-}
-
-/// What a successful Rex inventory says about a Task's retained views.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewHold {
-    /// At least one occurrence is present in Rex.
-    Held,
-    /// Every occurrence is confirmed absent.
-    Released,
-    /// Some inventory could not be read or a creation is unresolved; never releases.
-    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -280,7 +265,6 @@ impl Resolved {
             reason,
             fallback_argv: self.fallback_argv(),
             conversations: Vec::new(),
-            rex_hold: None,
         }
     }
 
@@ -826,38 +810,28 @@ fn route(requested: OpenHost) -> OpenRoute {
     }
     let mut hosts = Vec::new();
     let mut reasons = Vec::new();
-    if let Some((host, _)) = viewed_placement() {
-        if host == OpenHost::Rex {
-            return OpenRoute {
-                hosts: vec![host],
-                reason: "where this conversation is viewed in Rex".into(),
-            };
-        }
-        hosts.push(host);
-        reasons.push("where this conversation is viewed");
+    // The host the caller is in is the only destination: failure there never
+    // falls through to another host. An agent's current viewer outranks its
+    // startup terminal, and a Herdr pane or tmux session inside a cmux or
+    // Desktop terminal is the innermost, current host.
+    let current = if let Some((host, _)) = viewed_placement() {
+        Some((host, "where this conversation is viewed"))
+    } else if in_rex() {
+        Some((OpenHost::Rex, "this Rex terminal"))
+    } else if in_herdr() {
+        Some((OpenHost::Herdr, "this Herdr pane"))
+    } else if in_tmux() {
+        Some((OpenHost::Tmux, "this tmux session"))
+    } else if in_cmux() {
+        Some((OpenHost::Cmux, "this cmux workspace"))
     } else {
-        // Open where the caller is. A Herdr pane or tmux session inside a cmux
-        // or Desktop terminal is the innermost, current host.
-        if in_rex() {
-            return OpenRoute {
-                hosts: vec![OpenHost::Rex],
-                reason:
-                    "this Rex terminal; unavailable Rex context never falls through to another host"
-                        .into(),
-            };
-        }
-        if in_herdr() {
-            hosts.push(OpenHost::Herdr);
-            reasons.push("this Herdr pane");
-        }
-        if in_tmux() {
-            hosts.push(OpenHost::Tmux);
-            reasons.push("this tmux session");
-        }
-        if in_cmux() {
-            hosts.push(OpenHost::Cmux);
-            reasons.push("this cmux workspace");
-        }
+        None
+    };
+    if let Some((host, reason)) = current {
+        return OpenRoute {
+            hosts: vec![host],
+            reason: format!("{reason}; failure there never falls through to another host"),
+        };
     }
     if cfg!(target_os = "macos") {
         hosts.push(OpenHost::Desktop);
@@ -1181,10 +1155,7 @@ fn open_one(
     let elsewhere = elsewhere(target);
     let mut skipped = Vec::new();
     for &host in &route.hosts {
-        if let Some(live) = elsewhere
-            .as_ref()
-            .filter(|_| !matches!(host, OpenHost::Desktop | OpenHost::Herdr))
-        {
+        if let Some(live) = elsewhere.as_ref().filter(|_| host != OpenHost::Desktop) {
             // Its own workspace in this host shows the conversation, draft intact.
             // Focusing is the revalidation, so only the batch's one focus may use it.
             if let Some(workspace) = live
@@ -1217,11 +1188,11 @@ fn open_one(
         }
         let attempt = match host {
             OpenHost::Desktop => open_desktop(target, focus, desktop),
-            OpenHost::Cmux => open_cmux(target, focus, lf),
-            OpenHost::Herdr => workspace::open_herdr(target, focus),
             OpenHost::Tmux => open_tmux(target, focus, lf),
             OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
-            OpenHost::Rex => unreachable!("Rex uses native workspace opening"),
+            OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux => {
+                unreachable!("native hosts launch fresh workspaces")
+            }
             OpenHost::Auto => unreachable!("routes contain concrete hosts"),
         };
         match attempt {
@@ -1370,33 +1341,6 @@ fn open_desktop(
     Ok(Opened::opening(None))
 }
 
-fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
-    let mut command = Command::new("cmux");
-    command
-        .env("CMUX_QUIET", "1")
-        .args([
-            "workspace",
-            "create",
-            "--name",
-            &target.destination_name(),
-            "--cwd",
-        ])
-        .arg(target.cwd())
-        .args([
-            "--command",
-            &shell,
-            "--focus",
-            if focus { "true" } else { "false" },
-        ]);
-    let output = run_host(command, "cmux")?;
-    let destination = output
-        .split_whitespace()
-        .find(|word| word.starts_with("workspace:"))
-        .map(str::to_owned);
-    Ok(Opened::opening(destination))
-}
-
 /// A new window right after the caller's, named for the Work. Its pane is the
 /// destination: pane IDs are unique for the server's life, unlike indexes.
 fn open_tmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
@@ -1521,43 +1465,26 @@ fn open_terminal(
     ))
 }
 
+/// Raise an earlier destination. Only tmux panes are focused here; Desktop
+/// raises itself and native workspace hosts never reach this route.
 fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
-    let command = match host {
-        OpenHost::Cmux => {
-            let mut command = Command::new("cmux");
-            command
-                .env("CMUX_QUIET", "1")
-                .args(["workspace", "select", destination]);
-            command
-        }
-        OpenHost::Herdr => {
-            let mut command = Command::new("herdr");
-            command.args(["workspace", "focus", destination]);
-            command
-        }
-        OpenHost::Tmux => {
-            // Selecting proves the pane still exists; a client in another
-            // session follows it when one is attached.
-            let mut command = Command::new("tmux");
-            command.args(["select-window", "-t", destination, ";"]);
-            command.args(["select-pane", "-t", destination]);
-            let selected = run_host(command, OpenHost::Tmux.label()).map(drop);
-            if selected.is_ok() {
-                let mut switch = Command::new("tmux");
-                switch.args(["switch-client", "-t", destination]);
-                let _ = run_host(switch, OpenHost::Tmux.label());
-            }
-            return selected.inspect_err(|error| {
-                tracing::debug!(reason = error.reason(), "cannot focus the destination");
-            });
-        }
-        _ => return Ok(()),
-    };
-    run_host(command, host.label())
-        .map(drop)
-        .inspect_err(|error| {
-            tracing::debug!(reason = error.reason(), "cannot focus the destination");
-        })
+    if host != OpenHost::Tmux {
+        return Ok(());
+    }
+    // Selecting proves the pane still exists; a client in another session
+    // follows it when one is attached.
+    let mut command = Command::new("tmux");
+    command.args(["select-window", "-t", destination, ";"]);
+    command.args(["select-pane", "-t", destination]);
+    let selected = run_host(command, OpenHost::Tmux.label()).map(drop);
+    if selected.is_ok() {
+        let mut switch = Command::new("tmux");
+        switch.args(["switch-client", "-t", destination]);
+        let _ = run_host(switch, OpenHost::Tmux.label());
+    }
+    selected.inspect_err(|error| {
+        tracing::debug!(reason = error.reason(), "cannot focus the destination");
+    })
 }
 
 /// Run one host request with a finite timeout and return its stdout.
@@ -1622,9 +1549,9 @@ pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
     /// Present original files in an attached Desktop Files view; never launch a host
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link", "copy"])]
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link"])]
     pub files: Vec<PathBuf>,
-    /// Presentation destination; auto follows the current Rex/Herdr/tmux/cmux viewer
+    /// Presentation destination; auto uses the current Rex/Herdr/tmux/cmux host, else Desktop, then a terminal
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
     /// Open every conversation available for you to work with
@@ -1647,27 +1574,18 @@ pub struct OpenArgs {
     /// Rex server address; otherwise use the current viewer or configured local server
     #[arg(long)]
     pub server: Option<String>,
-    /// Create or reopen a named observing copy of the selected Rex workspace
-    #[arg(long, conflicts_with = "link")]
-    pub copy: Option<String>,
-    /// Include fresh native shells when first creating a named copy
-    #[arg(long, requires = "copy")]
-    pub new_shells: bool,
-    /// Follow the selection of a recorded native workspace from its host-owned terminal
-    #[arg(long, hide = true)]
-    pub watch_workspace: Option<String>,
-    /// Materialize without changing the host's selected window
+    /// Create new Task tabs without changing the host's selection
     #[arg(long)]
     pub no_focus: bool,
-    /// Resolve only this Machine's part of a routed native workspace
+    /// Add newly started Tasks to this Rex session while the follower runs
+    #[arg(long, hide = true, requires = "server")]
+    pub follow: Option<String>,
+    /// Tasks the launching command already opened; the follower skips them
+    #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
+    pub seen: Vec<String>,
+    /// Open only this Machine's part of a routed workspace
     #[arg(long, hide = true)]
     pub local_workspace: bool,
-    /// Add one newly started Task passively within a routed workspace selection
-    #[arg(long, hide = true, requires = "local_workspace")]
-    pub arrive_task: Option<String>,
-    /// Add a new observer beside each failed Conversation in retained Rex views
-    #[arg(long, conflicts_with = "link")]
-    pub retry_observers: bool,
 }
 
 /// The Work an invocation names: every available conversation, an address,
@@ -1794,16 +1712,23 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         return Ok(());
     }
     let route = route(args.host);
-    if route.hosts.first() == Some(&OpenHost::Rex) || args.watch_workspace.is_some() {
-        return workspace::run(cli, args);
+    if args.follow.is_some() {
+        return workspace::run(cli, args, OpenHost::Rex);
+    }
+    if let Some(&host) = route
+        .hosts
+        .first()
+        .filter(|host| matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux))
+    {
+        anyhow::ensure!(
+            args.server.is_none() || host == OpenHost::Rex,
+            "--server selects a Rex server"
+        );
+        return workspace::run(cli, args, host);
     }
     anyhow::ensure!(
-        args.copy.is_none()
-            && args.server.is_none()
-            && !args.no_focus
-            && !args.local_workspace
-            && !args.retry_observers,
-        "--copy, --server, --no-focus and --retry-observers are available for Rex workspaces"
+        args.server.is_none() && !args.no_focus && !args.local_workspace,
+        "--server and --no-focus are available for Rex, Herdr and cmux workspaces"
     );
     let (targets, unknown) = targets(cli, args)?;
     // A person typing in a terminal continues the conversation right here.

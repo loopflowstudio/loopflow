@@ -753,11 +753,11 @@ fn prepared_destination_preserves_source_input_until_explicit_transfer() {
 }
 
 /// The composed handoff on a real Rex server and a real owner. A stalled owner
-/// leaves a retained failed observer; reopening reuses that destination, an
-/// explicit retry prepares beside it, and input moves only after acknowledgement.
+/// leaves an unconfirmed observer; viewing again is another fresh launch that
+/// leaves the first untouched, and input moves only after acknowledgement.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
-fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparation() {
+fn rex_unconfirmed_observer_then_fresh_view_transfers_input_after_acknowledgement() {
     let fixture = Fixture::new();
     let root = tempfile::Builder::new()
         .prefix("rex498-")
@@ -794,8 +794,6 @@ fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparati
         "rex",
         "--server",
         &rex.endpoint,
-        "--copy",
-        "review",
         "--no-focus",
         "--json",
     ];
@@ -803,46 +801,19 @@ fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparati
     let mut source = fixture.viewer(owner, true);
     source.input("source-");
 
-    // The destination is created while the owner cannot answer its observer.
+    // The tab is created while the owner cannot answer its observer.
     let paused = fixture.pause(owner);
     let created = open(&args);
-    let window = created["receipts"][0]["destination"]
-        .as_str()
-        .unwrap()
-        .to_owned();
     assert_eq!(created["receipts"][0]["status"], "opening");
     assert_ne!(
         created["receipts"][0]["conversations"][0]["state"],
         "connected"
     );
-    let container = rex.call("session.list", json!({}))["sessions"][0]["session_id"]
+    let first = rex.call("session.list", json!({}))["sessions"][0]["session_id"]
         .as_str()
         .unwrap()
         .to_owned();
-    let retained = rex.block_ids(&container);
-
-    // Repeating the named copy reuses it until the observer's attempt expires.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let conversation = loop {
-        let report = open(&args);
-        assert_eq!(report["receipts"][0]["destination"], window.as_str());
-        let conversation = report["receipts"][0]["conversations"][0].clone();
-        if !conversation["retry_argv"].as_array().unwrap().is_empty()
-            && conversation["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("did not acknowledge"))
-        {
-            break conversation;
-        }
-        assert!(Instant::now() < deadline, "{conversation}");
-        std::thread::sleep(Duration::from_millis(200));
-    };
-    assert_eq!(conversation["state"], "uncertain");
-    assert_eq!(
-        rex.block_ids(&container),
-        retained,
-        "reopen replayed a pane"
-    );
+    let retained = rex.block_ids(&first);
     drop(paused);
 
     // The source kept input through the uncertain preparation.
@@ -851,39 +822,45 @@ fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparati
     assert_eq!(provider.placement(&fixture), "rex:source");
     source.input("unfinished-");
 
-    // The explicit retry prepares beside the retained failed pane.
-    let mut retry: Vec<&str> = conversation["retry_argv"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .skip(1)
-        .map(|word| word.as_str().unwrap())
-        .collect();
-    retry.push("--json");
-    let retried = open(&retry);
-    assert_eq!(retried["receipts"][0]["destination"], window.as_str());
+    // Viewing again is another fresh launch of the same conversation.
+    let again = open(&[
+        "open",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--server",
+        &rex.endpoint,
+        "--session",
+        session,
+        "--no-focus",
+        "--json",
+    ]);
+    assert_ne!(
+        again["receipts"][0]["destination"],
+        created["receipts"][0]["destination"]
+    );
     assert_eq!(
-        retried["receipts"][0]["conversations"][0]["state"], "connected",
-        "{retried}"
+        again["receipts"][0]["conversations"][0]["state"], "connected",
+        "{again}"
     );
     assert_eq!(
         provider.placement(&fixture),
         "rex:source",
         "preparation took input"
     );
-    let blocks = rex.block_ids(&container);
-    let prepared = blocks
+    assert_eq!(rex.block_ids(&first), retained, "the first tab was touched");
+    let second = rex.call("session.list", json!({}))["sessions"]
+        .as_array()
+        .unwrap()
         .iter()
-        .find(|block| !retained.contains(block))
-        .expect("a new observer beside the retained pane");
-    assert_eq!(blocks.len(), retained.len() + 1);
-    assert!(retained.iter().any(|block| {
-        rex.screen(&container, block)
-            .contains("did not acknowledge")
-    }));
+        .map(|session| session["session_id"].as_str().unwrap().to_owned())
+        .find(|id| *id != first)
+        .expect("a second launch");
+    let prepared = rex.block_ids(&second).into_iter().next().unwrap();
 
     // Ctrl+R on the prepared pane moves input; the provider never restarted.
-    rex.write(&container, prepared, "\u{12}");
+    rex.write(&second, &prepared, "\u{12}");
     let deadline = Instant::now() + Duration::from_secs(10);
     while provider.placement(&fixture) == "rex:source" {
         assert!(Instant::now() < deadline, "input did not move");
@@ -891,7 +868,7 @@ fn rex_failed_observer_reopens_then_transfers_input_after_acknowledged_preparati
     }
     source.until_event("control");
     provider.assert_attachment_unchanged(&fixture);
-    rex.write(&container, prepared, "continued\n");
+    rex.write(&second, &prepared, "continued\n");
     assert_eq!(fixture.wait_file("second"), "unfinished-continued");
 }
 

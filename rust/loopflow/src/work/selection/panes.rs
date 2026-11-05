@@ -385,50 +385,37 @@ fn validate_tabs<'a>(
     Ok(())
 }
 
-/// A Wave's default for new Task workspaces. Targets are resolved for each Task;
-/// a template never captures another Task's Sessions, shells, or unsaved files.
+/// The `task_layout` setting: tools and arrangement for Task workspaces with no
+/// saved Desktop layout. Authored configuration, not a wire DTO, so `hidden` may
+/// be omitted. Targets are resolved for each Task; a template never captures a
+/// Session, shell process, location or unsaved file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskLayoutTemplate {
-    pub revision: i64,
     pub tree: PaneTree,
+    #[serde(default)]
     pub hidden: BTreeSet<String>,
 }
 
 impl TaskLayoutTemplate {
-    pub fn instantiate(&self, work: WorkWorkspaceKey) -> WorkPaneLayout {
-        WorkPaneLayout {
-            work,
-            revision: 0,
-            tree: self.tree.clone(),
-            focused: None,
-            zoomed: None,
-            hidden: self.hidden.clone(),
-            drafts: Vec::new(),
-        }
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        let key = WorkWorkspaceKey {
-            repository: "template".into(),
-            kind: WorkWorkspaceKind::Task,
-            id: "template".into(),
-        };
-        self.instantiate(key).validate()?;
+    /// This template as one Task's layout, rejecting captured execution or files.
+    pub fn instantiate(&self, work: WorkWorkspaceKey) -> Result<WorkPaneLayout, String> {
         for (_, pane) in self.tree.panes() {
             match pane {
                 PaneIntent::Session {
                     session_id,
                     location,
                 } if session_id.is_some() || location.is_some() => {
-                    return Err("Wave templates cannot capture a Session or its location".into())
+                    return Err(
+                        "Task layout templates cannot capture a Session or its location".into(),
+                    )
                 }
                 PaneIntent::Shell { tabs, .. }
                     if tabs
                         .iter()
                         .any(|tab| tab.location.is_some() || tab.lf_process_id.is_some()) =>
                 {
-                    return Err("Wave templates cannot capture shell execution".into())
+                    return Err("Task layout templates cannot capture shell execution".into())
                 }
                 PaneIntent::Browser { location, tabs, .. }
                     if location.is_some()
@@ -436,11 +423,23 @@ impl TaskLayoutTemplate {
                             |tab| matches!(tab, BrowserTab::Files { tabs, .. } if !tabs.is_empty()),
                         ) =>
                 {
-                    return Err("Wave templates cannot capture file locations or documents".into());
+                    return Err(
+                        "Task layout templates cannot capture file locations or documents".into(),
+                    );
                 }
                 _ => {}
             }
         }
-        Ok(())
+        let layout = WorkPaneLayout {
+            work,
+            revision: 0,
+            tree: self.tree.clone(),
+            focused: None,
+            zoomed: None,
+            hidden: self.hidden.clone(),
+            drafts: Vec::new(),
+        };
+        layout.validate()?;
+        Ok(layout)
     }
 }

@@ -570,6 +570,7 @@ def test_launchd_install_replaces_only_old_cron_and_runs_mechanical_entrypoint(
     assert cleanup._schedule("install") == 0
     payload = plistlib.loads(schedule.read_bytes())
     assert payload["StartCalendarInterval"] == {"Minute": 17}
+    assert payload["ProcessType"] == "Standard"
     assert (cleaner.home / "cron").read_text() == "0 0 * * * keep-me\n"
     args = payload["ProgramArguments"]
     assert args[:2] == ["/usr/bin/env", "-i"]
@@ -777,11 +778,13 @@ def test_activity_identifies_candidate_owner_not_repository_neighbor(cleaner, de
 
 
 @pytest.mark.parametrize("force", [False, True])
-def test_stops_real_demo_store_owner_and_descendant_before_removal(
+def test_stops_real_demo_owner_and_descendant_and_preserves_separate_history(
     cleaner, monkeypatch, force
 ) -> None:
     demo = cleaner.home / ".lf-machine/demos/test"
-    _write(demo / "store.db", 3)
+    _write(demo / "runtime", 3)
+    history = cleaner.home / ".lf-machine/demo-history/test/store.db"
+    _write(history, 3)
     marker = demo / ".disposable-coding-demo"
     marker.write_text("disposable runtime; evidence stored elsewhere")
     _age(marker, 3)
@@ -793,12 +796,14 @@ def test_stops_real_demo_store_owner_and_descendant_before_removal(
     code = (
         "import subprocess, sys, signal, time; "
         + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if force else "")
-        + "f=open(sys.argv[1], 'rb'); "
+        + "f=open(sys.argv[1], 'rb'); history=open(sys.argv[2], 'rb'); "
         "child=subprocess.Popen(['/bin/sleep', '600']); "
         "print(child.pid, flush=True); time.sleep(600)"
     )
     owner = subprocess.Popen(
-        [sys.executable, "-c", code, str(demo / "store.db")], stdout=subprocess.PIPE, text=True
+        [sys.executable, "-c", code, str(demo / "runtime"), str(history)],
+        stdout=subprocess.PIPE,
+        text=True,
     )
     neighbor = subprocess.Popen(["/bin/sleep", "600"], cwd=cleaner.home)
     try:
@@ -808,6 +813,7 @@ def test_stops_real_demo_store_owner_and_descendant_before_removal(
         assert cleaner.run() == 0
         owner.wait(timeout=3)
         assert not demo.exists()
+        assert history.read_bytes() == b"x" * 4096
         assert neighbor.poll() is None
         stopped = {item["pid"] for item in cleaner.stopped}
         assert owner.pid in stopped and child in stopped
@@ -823,6 +829,37 @@ def test_stops_real_demo_store_owner_and_descendant_before_removal(
                 os.kill(child, 9)
             except ProcessLookupError:
                 pass
+
+
+def test_released_demo_loses_its_runtime_and_keeps_durable_history(cleaner, monkeypatch) -> None:
+    runtime = cleaner.home / ".lf-machine/demos/test"
+    history = cleaner.home / ".lf-machine/demo-history/test"
+    _write(history / "home/loopflow.db", 8)
+    _write(history / "repo/AGENTS.md", 8)
+    # With LF_HOME in the durable root, the copied executable is the owner's
+    # only link to the runtime root. A demo records no outcome: seven days.
+    binary = runtime / "bin/lf"
+    binary.parent.mkdir(parents=True)
+    shutil.copyfile("/bin/sleep", binary)
+    binary.chmod(0o755)
+    marker = runtime / ".disposable-coding-demo"
+    marker.write_text("disposable runtime; evidence stored elsewhere")
+    for path in (binary, marker):
+        _age(path, 8)
+    _age_tree(runtime, 8)
+    owner = subprocess.Popen([str(binary), "600"], cwd=history / "repo")
+    try:
+        monkeypatch.delattr(cleaner, "_activity")
+        monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0.2)
+        assert cleaner.run() == 0
+        owner.wait(timeout=3)
+        assert not runtime.exists()
+        assert (history / "home/loopflow.db").exists()
+        assert (history / "repo/AGENTS.md").exists()
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=3)
 
 
 def test_stops_executable_mapping_owner_without_killing_unrelated_work(

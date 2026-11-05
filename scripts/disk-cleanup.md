@@ -13,8 +13,9 @@ and its dependencies into `~/.lf-machine/maintenance/disk-cleanup/versions/`, so
 Task checkout can disappear without breaking scheduling. Reinstall explicitly to
 update that copy. It preserves a running job, restores the prior job/configuration
 on bootstrap failure, and removes only the predecessor's marked cron entry.
-Launchd uses a clean environment and macOS's system Python, without a model or
-package resolution. The schedule and private configuration belong to this machine.
+Launchd uses a clean environment, macOS's system Python and the Standard resource
+policy. Background throttling can starve process inspection under build load.
+The schedule and private configuration belong to this machine.
 
 Ignored, untracked `target`, `.build`, `DerivedData`, `node_modules` and `.venv`
 roots anywhere under `~/src` (`LOOPFLOW_SRC` overrides it) are candidates. Nested
@@ -51,8 +52,14 @@ tree, or `"saved": true` in its root outcome record, preserves it.
 Other demos are observed unless explicitly marked under
 `~/.lf-machine/demos/<name>/` with `.disposable-coding-demo` containing
 `disposable runtime; evidence stored elsewhere`. That marker authorizes teardown
-and removal of the entire runtime, including its synthetic store and drafts,
-after the evidence retention window. Keep source and durable evidence outside it.
+and removal of the entire runtime after the evidence retention window; an unsettled
+draft held by its owner ends with that owner. A demo keeps two roots: this runtime
+root (copied app or CLI, generated output) and a durable root at
+`~/.lf-machine/demo-history/<name>` (private Machine, provider history, fixture
+repository), which is never a candidate. The demo writes the marker at release,
+never at creation: writing it restarts the retention window, so a long live review
+cannot age out. Demos write no `.cleanup-evidence.json`, so a released root has an
+unknown outcome and waits seven days.
 Ordinary Home/account history, databases, backups, experiment data, source
 worktrees, simulator devices, general app caches and Trash are never candidates.
 
@@ -104,8 +111,9 @@ estimate of reclaimable space. Roots can overlap, and APFS clones and concurrent
 growth and free-space change must not be equated or summed as exclusive usage.
 
 The shared nonblocking recovery lock releases on exit or death. Candidate
-inspection takes at most thirty seconds, commands two minutes, and each run
-thirty minutes (`--budget-seconds` overrides it). Failed cleanup steps exit nonzero;
+inspection takes at most thirty seconds; commands, including process and open-file
+inspection, take at most two minutes, capped by the remaining run budget.
+Each run has thirty minutes (`--budget-seconds` overrides it). Failed cleanup steps exit nonzero;
 partial removals get no allocation credit. Activity inspection failure stops
 deletion. This cleaner's own text/removal logs rotate at 10 MiB; durable product
 history is untouched. All inventories and receipts stay local, never in the PR.

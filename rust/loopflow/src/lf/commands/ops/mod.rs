@@ -21,10 +21,10 @@ use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
     commit_workflow, continue_sync_after_authorization, continue_sync_for_resolution,
     create_or_update_pr, current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync,
-    preview_release_notes, recover_sync, release_bump, release_check, release_notes,
-    release_publish, release_run, release_status, release_tag, submit, sync_class_name,
-    sync_strategy_name, sync_with_plan, AbandonOptions, CommitOptions, LandOptions, PrOptions,
-    Progress, SyncOptions,
+    preview_release_notes, recover_sync, release_bump, release_check, release_issues,
+    release_notes, release_promote, release_publish, release_regress, release_run, release_status,
+    release_tag, submit, sync_class_name, sync_strategy_name, sync_with_plan, AbandonOptions,
+    CommitOptions, LandOptions, PrOptions, Progress, SyncOptions,
 };
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
@@ -170,6 +170,18 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
             Ok(())
         }
         ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
+        ReleaseCommand::Issues {
+            version,
+            json,
+            target,
+        } => release_issues_cmd(version.as_deref(), *json, target.as_deref()),
+        ReleaseCommand::Regress { version, title } => {
+            println!("{}", release_regress(&find_repo_root()?, version, title)?);
+            Ok(())
+        }
+        ReleaseCommand::Promote { dry_run, target } => {
+            release_promote_cmd(*dry_run, target.as_deref(), &progress)
+        }
     }
 }
 
@@ -281,16 +293,18 @@ pub(crate) fn run_sync_in(
             return Ok(());
         }
     }
-    // A Task stack owns its sync target: the live parent branch until merge,
-    // then the default branch. An explicit override could silently drop work.
+    // An explicit default branch detaches the child using its recorded fork;
+    // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
         None
     } else {
         crate::ops::task::task_stack(repo_root)?
     };
-    if stacked.is_some() && onto.is_some() {
+    let detach =
+        stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
+    if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "stacked Task syncs choose their parent automatically; omit the target"
+            "use the default branch to detach this Task, or omit the target to sync its parent"
         ));
     }
     let stacked_onto = stacked
@@ -298,8 +312,12 @@ pub(crate) fn run_sync_in(
         .and_then(|stacked| stacked.parent_branch.as_ref())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { upstream } else { default.clone() };
-    let target = stacked_onto.as_deref().or(onto).unwrap_or(&default_target);
+    let default_target = if on_main { &upstream } else { &default };
+    let target = if detach {
+        upstream.as_str()
+    } else {
+        stacked_onto.as_deref().or(onto).unwrap_or(default_target)
+    };
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;
     }
@@ -355,13 +373,6 @@ pub(crate) fn run_sync_in(
             }
         })?
     };
-    if let Some(stacked) = stacked.as_ref() {
-        crate::ops::task::record_stack_sync(
-            stacked,
-            &verification.target_sha,
-            stacked.parent_branch.is_none(),
-        )?;
-    }
     if manual {
         return Ok(());
     }
@@ -1085,6 +1096,56 @@ fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn release_issues_cmd(version: Option<&str>, json: bool, target_name: Option<&str>) -> Result<()> {
+    let issues = release_issues(&find_repo_root()?, version, target_name)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&issues)?);
+        return Ok(());
+    }
+    if issues.is_empty() {
+        match version {
+            Some(version) => println!("No regressions reported against {version}."),
+            None => println!("No open regressions."),
+        }
+    }
+    for issue in &issues {
+        println!(
+            "{} #{} {}: {}",
+            issue.regressed_in,
+            issue.number,
+            issue.state.to_lowercase(),
+            issue.title
+        );
+        match issue.holds.as_slice() {
+            [] => println!("  holds nothing"),
+            tags => println!("  holds {}", tags.join(", ")),
+        }
+        println!("  {}", issue.url);
+    }
+    Ok(())
+}
+
+fn release_promote_cmd(
+    dry_run: bool,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let stable = release_promote(&find_repo_root()?, target_name, dry_run, progress)?;
+    let current = stable
+        .current
+        .as_ref()
+        .map_or("(none)", |release| release.tag.as_str());
+    match &stable.next {
+        Some(next) if dry_run => println!("Stable: {current} (would move to {})", next.tag),
+        Some(next) => println!("Stable: {} (was {current})", next.tag),
+        None => println!("Stable: {current} (stays)"),
+    }
+    for hold in &stable.holds {
+        println!("  {hold}");
+    }
+    Ok(())
+}
+
 fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let status = release_status(&repo_root, target_name)?;
@@ -1101,7 +1162,7 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
             .map_or("(none)", |release| release.tag.as_str());
         match &stable.next {
             Some(next) => println!(
-                "Stable: {current} (moves to {} on the next release run)",
+                "Stable: {current} (moves to {} on the next promote or release run)",
                 next.tag
             ),
             None => println!("Stable: {current}"),

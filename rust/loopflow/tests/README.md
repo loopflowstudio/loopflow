@@ -69,13 +69,26 @@ past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
+`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
+holds a SQLite writer while typing and returning to the viewer. Control stays
+responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
+without replay. `transport::input_retry_tests` bounds polling through a failed
+store and verifies recovery through the real descriptor loop.
+
+`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
+owners while resuming their Sessions. Drafts, pending requests, turns, Graph
+ancestry/steps and Runs retain the same provider, attachment and capture; no new
+provider launches. A completed Session is unknown, not work: its unanswering owner
+ends and resume continues on one new provider, while an answering one is attached.
+The matching rollover unit test preserves the named retention reasons and permits
+movement after protected work settles.
+
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
 must retain drafts, requests, history and Session/Task/capture identity through
 build replacement and viewer return; only provider replacement changes its fence.
 An unanswering protected owner survives failed attachment and completes continued
-turns after transport returns. Under SQLite contention, control and viewer return
-stay responsive; queued input arrives once, only after retention commits.
+turns after transport returns.
 `session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
 natural helper exit permits continuation, persistent helpers refuse it without
 signals or settlement, and both retain Task/history/steers. These stand-ins use
@@ -464,6 +477,11 @@ unmerged migration fails its checksum: use a fresh one. Preserve populated
 historical fixtures for merged migration coverage. A Task's migration is edited
 in place, so test the merged frontier against the finished migration and write
 no test for a schema that existed only between two edits.
+
+Installer preview regressions assert validation and preserved files independently
+of promotion eligibility, which depends on the build's Git history. Exercise them
+with `LOOPFLOW_MIGRATION_ORDER=/dev/null` as well as the normal catalog to cover
+builds that classify slug migrations as unmerged.
 
 A source copy without Git metadata must set `LOOPFLOW_BUILD_PROVENANCE=development`
 when exercising source behavior, and `LOOPFLOW_MIGRATION_ORDER` when it carries

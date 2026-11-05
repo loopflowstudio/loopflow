@@ -151,6 +151,17 @@ succeed. Interrupted, it resumes the same release from where it stopped; a
 failed build is fixed with another commit under the same version, never by
 bumping. `lf skill release-run minor` hands the same command to an agent.
 
+```bash
+lf release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
+lf release issues                                      # every open regression
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # move stable now, outside a run
+```
+
+A target with `completion: github-release` has a `stable` stream, GitHub's Latest
+marker. A GitHub issue labelled `regressed-in:v0.15.3` holds it below that release
+until the issue closes as completed.
+
 Your repository owns the build and publish steps. Declare them per target:
 
 ```yaml
@@ -197,6 +208,16 @@ lf task run LOO-13 --stack-on LOO-12
 ```
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
+
+For a stacked Task, `lf sync` follows its parent. To deliver the child's work
+independently, run `lf sync main` (or the repository's default branch). It uses
+the recorded parent tip to remove inherited changes, keeps the Task, branch and
+PR identities, and retargets the PR after integration succeeds. Resolve conflicts
+with `lf sync --manual main`, then `lf sync --continue`; `lf sync --abort` keeps
+the original placement. Parent work remains in its own branch and in Git history.
+If the recorded fork is unavailable, sync recovers it from the common ancestor
+of this checkout and the parent's remote branch. `lf sync main --plan` shows
+that fork without changing placement.
 
 ## Other machines
 

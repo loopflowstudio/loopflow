@@ -14,13 +14,57 @@ lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
 
-Each Task gets its own worktree beside your repository, its own branch and at
+A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
 most one pull request. A stacked Task forks from its parent's PR; `lf sync`
 carries the child through the parent's updates and squash merge.
 
 Every agent that works on a Task starts from the same place: the Task's notes
 and comments, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
+
+## Keep work already in progress
+
+```bash
+lf task create --worktree . --title "Finish the prototype"
+lf session list --json                         # find the Loopflow Session ID
+lf task create --session SESSION --title "Finish the prototype"
+lf session bind SESSION --task LOO-12           # select this Task’s conversation
+```
+
+Promotion preserves the branch, dirty and untracked files, and the Session's
+provider history and live attachment. The selected Session becomes the Task's
+primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
+Pass `--session` explicitly to keep a conversation. An agent uses its own
+`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
+no conversation. `--run` then uses ordinary Task conversation admission.
+Opening a conversation more recently never selects it. Explicit-source retries
+keep the same Task; conflicting Task ownership fails without moving either
+person's work.
+
+Plain `lf task create` files new work, including from an owned checkout or
+Session. `--run` starts the created Task; it does not opt into adoption.
+Explicit sources work with or without `--run`. Creation alone starts no Graph
+and approves no Auto-Ship. Binding also requires an explicit Session ID.
+
+Main and Wave checkouts remain shared. A selected Session there can become a
+Task conversation without moving its cwd; an explicit later `lf task checkout`
+gives the Task a separate home. Selecting a repository or Wave primary Session
+transfers that conversation to the Task; its former scope can open a new one.
+A remote command uses the selected Machine's existing paths and Sessions; it does not transfer local live work.
+
+Desktop offers **Create Task from this conversation** in the Session’s binding
+action. **Bind to Task** makes it the selected Task’s primary conversation.
+Already-assigned Sessions offer **Make primary Task conversation** in the palette
+and Task menu. The current terminal and composer stay in place.
+
+When an existing Task already has a worktree, `lf session bind <id> --task <task>`
+keeps that worktree and immediately sets the Session's working directory there.
+Already-running clients may keep their original directory; subsequent connections
+use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
+linked checkout. Done Tasks can still select an unfinished conversation without
+reopening work. With no Task checkout, the conversation stays in place and no
+checkout is adopted. Closed Sessions and headless Runs cannot become primary.
 
 ## Steer it while it runs
 

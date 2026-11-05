@@ -19,12 +19,12 @@ package resolution. The schedule and private configuration belong to this machin
 Ignored, untracked `target`, `.build`, `DerivedData`, `node_modules` and `.venv`
 roots anywhere under `~/src` (`LOOPFLOW_SRC` overrides it) are candidates. Nested
 worktrees use their own Git rules. Git lists registered worktrees inside ignored
-containers; other ignored data trees and `.lf` state are not recursively scanned.
-Discovery reads ignore rules without inspecting tracked file contents or running
-Git content filters.
-Global Xcode Build/Index and shared generated
-caches are included; SourcePackages and embedded Git checkouts survive. Cargo
-profiles can be reclaimed separately. Discovery excludes symlinks and stops at
+containers. Git enumeration and traversal skip generated contents, ignored data
+trees and `.lf` state, without reading tracked file contents or running content
+filters. Deletion still requires the checkout's actual ignore rules.
+Global Xcode Build/Index and shared generated caches are included; SourcePackages
+and embedded Git checkouts survive. Cargo profiles can be reclaimed separately.
+Discovery excludes symlinks and stops at
 two minutes or 100,000 entries, reporting incomplete coverage.
 
 Idle builds need four hours without writes, one hour below 64 GiB free, or
@@ -69,9 +69,11 @@ Docker maintenance requires a local Unix engine. Its engine-owned BuildKit cache
 keeps recently used (24h) and in-use records, pruning older unused records toward
 the cap. Only images older than 24h with registry digests and no container
 references are removed, without force. Local unpublished images, all containers,
-volumes and remote/custom builders stay intact. Age, activity and explicit
-reservations can keep caches above their caps; native busy locks are retained
-for the next run. Other native failures remain nonzero in the receipt.
+volumes and remote/custom builders stay intact. Images without a creation timestamp
+stay with an unknown-age reason; other eligible images can still be reclaimed.
+Age, activity and explicit reservations can keep caches above their caps; native
+busy locks are retained for the next run. Other native failures remain nonzero
+in the receipt.
 
 `install --chrome-copies` separately opts this machine into removing unused Chrome
 code-signing copies older than 24 hours from Darwin's per-user temporary tree.

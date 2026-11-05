@@ -1604,6 +1604,37 @@ mod tests {
     }
 
     #[test]
+    fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
+        let conn = open();
+        apply_before_migration(&conn, "task_session_promotion");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_session_promotion.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        conn.execute(
+            "UPDATE agent_sessions SET primary_scope=NULL,wave_id=NULL WHERE id='primary'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE agent_sessions SET task_id='task_promotion',bound_at=2,work_source='bound' WHERE id='primary'", []).unwrap();
+        let history: (String, String) = conn.query_row(
+            "SELECT s.cwd,e.wave_id FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE s.id='primary' AND e.kind='captured'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(history, ("/repo/wave".into(), "wave-promotion".into()));
+        for sql in [
+            "UPDATE agent_sessions SET task_id='task_other' WHERE id='primary'",
+            "UPDATE agent_sessions SET task_id=NULL WHERE id='primary'",
+            "UPDATE agent_sessions SET wave_id=NULL WHERE id='ordinary'",
+            "UPDATE agent_sessions SET wave_id='wave-promotion' WHERE id='primary'",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
+        }
+    }
+
+    #[test]
     fn a_candidate_opens_a_store_only_when_its_catalog_knows_the_store_floor() {
         let current: Vec<String> = reader_catalog().into_iter().map(str::to_string).collect();
         let older = current[..current.len() - 1].to_vec();

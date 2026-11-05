@@ -43,6 +43,7 @@ pub fn run(
             cmd: crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Resume { .. }
                 | crate::lf::SessionCommand::New { .. }
+                | crate::lf::SessionCommand::Bind { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
@@ -53,6 +54,7 @@ pub fn run(
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Save { .. }
+                | crate::lf::TaskCommand::Create { run: false, .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })

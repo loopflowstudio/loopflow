@@ -51,10 +51,12 @@ Freshness checks the public link, bundled helper identity and store compatibilit
 as well as the app's release version. A matching version string alone is insufficient.
 
 Running Session owners and Graphs keep their process images. Promotion never kills
-bundled `lf` processes; renamed bundles remain while they are in use. Existing
-idle rollover moves eligible owners onto the installed build. Installed files and
-already-running processes can therefore report different builds during an update.
-Promotion retains the prior published artifacts and does not restart Tasks or Graphs.
+bundled `lf` processes; renamed bundles remain while they are in use. A superseded
+owner ends itself once its Sessions hold no work or input, and `lf monitor rollover`
+moves every eligible owner at once. Installed files and already-running processes
+can therefore report different builds during an update. Promotion retains the
+prior published artifacts, which are [not a rollback path](../docs/architecture/machines.md#one-main-machine),
+and does not restart Tasks or Graphs.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
@@ -136,8 +138,10 @@ A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 `install.sh` follow it, `stable` when none is recorded. `install.sh` installs
 `stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`,
 which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
-Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
-cadence is already installed, so a Machine stays on its stream unasked.
+Every install of a build schedules `lf install` daily (launchd, or cron on Linux)
+unless a cadence is already installed, so a Machine stays on its stream unasked.
+[Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
+install adds the line back.
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
 appcast. `dev` has no appcast and runs no updater: each `lf install --dev`
@@ -181,7 +185,7 @@ Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
 | One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
 | Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Adopted: `Packages (main)` signs and notarizes the app for `dev` |
 | Refuse newer-format data and name which side to update | Rex, Firefox | Declined: older lf keeps opening a newer store, and destructive changes are staged |
-| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may |
+| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: no install compares versions, so a switch, or a scheduled run on a Machine ahead of its stream, may install older |
 | One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
 | Separate data per channel | Zed, Warp, VS Code | Declined: the store is the work model, and Tasks must not split by stream |
 | Release branches and cherry-picks for hotfixes | Zed, Tailscale | Declined for now: fix forward on main; branch only when main can't carry the fix (Docker's rule) |

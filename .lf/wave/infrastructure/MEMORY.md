@@ -291,7 +291,7 @@ rate-limit recovery; formatting, Clippy and architecture checks pass. A schedule
 release child signal did not recur; cause unknown. Hosted candidate CI, live
 request counts and installed acceptance remain unproved. `rust/loopflow/tests/README.md` retains
 Linux HTTPS reconnect as CI's obligation. Exact failures, commands and counts:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
+`6935bfbadb:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
 
 Jack authorized landing after checks. His `6d169dc1` permits publication before live
@@ -307,8 +307,8 @@ Jack Heart requested shipping after review; complete after merge.
 interactive/headless, Task/taskless starts. Existing conversations and provider
 changes are out. Shared LOOPFLOW.md teaches self-renaming.
 Fake-API Claude TUI/headless and shared Codex TUI pass; embedded Codex/exec lack
-the endpoint. Live cmux workspace/tab rename passed with a stand-in
-(`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
+the endpoint. Live cmux workspace/tab rename passed with a stand-in.
+Docker promotion/retry preserves hooks, settings
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 
 October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
@@ -771,7 +771,7 @@ remains Infrastructure-owned. Main #1523's terminal draft stays separate.
 
 Status preserves pending-publication uncertainty. Real SSH, live Linear, installation and cron activation
 remain unproved. Candidate/run IDs and repairs:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Tasks across machines.
+`6935bfbadb:wave/infrastructure/MEMORY.md`, Tasks across machines.
 
 ## Planning and launch preservation (curated 2026-10-13)
 
@@ -1000,6 +1000,15 @@ The parent's signed `ac8e088f5f` Desktop repair pairs CLI/helper and retains old
 runtimes; it predates LOO-724's repairs and proves no resumed turn. LOO-723 owns
 policy/mini rollout; affected-Session recovery stays coordinated with the parent.
 
+Upgrade docs audit (998c9b, 2026-11-05): Jack Heart chose words over code. Docs
+and `lf help monitor rollover` now say rollover ignores viewers and keeps unsent
+drafts, every install registers `com.loopflow.refresh`, and the published
+fallback is the active build with no rollback after a floor raise. Undecided
+product choices the audit exposed: a disabled refresh job fails `lf schedule`
+and `lf install --dev` while release installs only warn; Linux installs restore
+the cron line; no install compares versions, so a Machine ahead of its stream
+can move back on a scheduled run.
+
 ## Shipped history
 
 Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
@@ -1065,8 +1074,8 @@ telemetry red; fresh failures join existing work.
 
 ## Durable model lessons (curated 2026-10-02)
 
-[Earlier model and planning records](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#model-design-settled)
-preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
+Earlier model and planning records (`d281370191:wave/infrastructure/MEMORY.md`,
+Model (design settled)) preserve their exact decisions and implementation history. Current planning and release decisions supersede archived cadence, daemon-chat
 and mandatory Project assumptions.
 
 Self-hosting remains the default; credentials follow the repository Doppler
@@ -1145,21 +1154,10 @@ test removal, cache relaxation or retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 October 8, superseding review-only feedback.
-The Task stays open for cold-cache verification; Git retains measurements and
-rejected patches. Provider-probe removal, absent-Wave resolution and directory reuse
-matched evidence; capture-store reuse and ancestor-probe deferral did not and were
-removed.
-Claude reconnect's native median worsens; the later handoff gain cannot repair it.
-
+Jack Heart requested landing #1505 October 8; the Task stays open for cold-cache
+verification on dedicated macOS with exclusive cache control and native login.
 Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
-untimed seed turn. Fresh Homes are not cold OS caches.
-LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache control
-and native login, reporting the limitation and reset method. SVG readability awaits review. Neither gap is waived.
-
-Copied databases keep absolute provider-home paths: strip routes before launch and
-connect only benchmark-created Sessions. Early excluded probes reached those
-paths without a write audit; isolation remains unproved. Fixtures prove no
-installed gain or managed-account continuity. The network-isolated CI smoke
-bounds launch work and preserves identity, context and history; nested-directory
-launch retains the repository root. Hosted success remains unproved.
+untimed seed turn; fresh Homes are not cold OS caches. Copied databases keep
+absolute provider-home paths: strip routes before launch and connect only
+benchmark-created Sessions. Measurements, rejected patches and limits:
+`3b07e13404:.lf/wave/infrastructure/MEMORY.md`, this heading.

@@ -373,10 +373,12 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 Ordinary commands, provider children, hooks, Session connections and Graph steps
 use the stable installed entry. Each new execution selects the current installed
 CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
-Machine selection and Session attribution stay intact. Installation does not
-restart existing processes or wait for their exit; they may continue or fail
-naturally. Clients and hooks launched before this behavior may retain their old
-executable paths.
+Machine selection and Session attribution stay intact. Installation quits and
+reopens a running Desktop. It does not restart other processes or wait for their
+exit; they may continue or fail naturally. A Session owner on a superseded lf
+ends itself once its Sessions hold no work or input, and `lf monitor rollover`
+moves every eligible owner at once. Clients and hooks launched before this
+behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
@@ -393,9 +395,17 @@ Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
 installation promotion lock. The snapshot is validation input, never a second live
 Machine. Published switch receipts support interrupted release installation;
-they do not choose ordinary command data directories. A settled install retains
-its published fallback and the one it replaced; superseded content-addressed
-binaries and app bundles are removed unless a live process executes them.
+they do not choose ordinary command data directories. Every published switch
+makes its target the published fallback, so a settled install retains the active
+build and the fallback it replaced, normally the previous build. Other
+content-addressed binaries and app bundles are removed unless a live process
+executes them.
+
+Retained bytes are not a rollback path. `lf self install rollback` refuses
+receipt-managed installs, so going back means switching to a stream whose release
+still opens the store. After a release raises the store's reader floor, older
+binaries, retained or released, fail their own preflight and no rollback path
+exists.
 
 `lf self` owns published updates and skill exports; `lf install`
 remains the short update command. Its directory retains the stored

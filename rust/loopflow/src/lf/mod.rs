@@ -2336,7 +2336,7 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -2395,8 +2395,9 @@ pub enum InstallCommand {
         #[arg(long)]
         preview: bool,
     },
-    /// Repoint the global CLI at retained prior bytes only after that binary's
-    /// own preflight proves it recognizes the current store frontier.
+    /// Repoint a legacy global CLI at retained prior bytes only after that
+    /// binary's own preflight proves it recognizes the current store frontier.
+    /// Refuses receipt-managed installs.
     #[command(hide = true)]
     Rollback {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).

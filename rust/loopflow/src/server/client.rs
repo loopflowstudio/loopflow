@@ -144,24 +144,13 @@ impl Connection {
         let answer = socket
             .receive()
             .map_err(|error| stalled(error, "welcome the connection"))?;
-        match answer {
+        match answer.map(accepted).transpose()? {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
                 welcome,
                 pending: VecDeque::new(),
                 path: path.to_path_buf(),
             }),
-            Some(ServerMessage::Error {
-                code,
-                message,
-                data,
-                ..
-            }) => Err(ServerError {
-                code,
-                message,
-                data,
-            }
-            .into()),
             Some(other) => anyhow::bail!("Server did not welcome the connection: {other:?}"),
             None => anyhow::bail!(OLDER_PROTOCOL),
         }
@@ -232,17 +221,6 @@ impl Connection {
             ServerMessage::Response {
                 trace_id, result, ..
             } => Ok(Response { trace_id, result }),
-            ServerMessage::Error {
-                code,
-                message,
-                data,
-                ..
-            } => Err(ServerError {
-                code,
-                message,
-                data,
-            }
-            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -256,17 +234,6 @@ impl Connection {
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
-            ServerMessage::Error {
-                code,
-                message,
-                data,
-                ..
-            } => Err(ServerError {
-                code,
-                message,
-                data,
-            }
-            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -278,17 +245,6 @@ impl Connection {
                 || answers(message, id)
         })? {
             ServerMessage::Reading { frame, .. } => Ok(frame),
-            ServerMessage::Error {
-                code,
-                message,
-                data,
-                ..
-            } => Err(ServerError {
-                code,
-                message,
-                data,
-            }
-            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -301,12 +257,14 @@ impl Connection {
         })
     }
 
+    /// The first message `matches`; a refusal among them is the error.
     fn wait(&mut self, mut matches: impl FnMut(&ServerMessage) -> bool) -> Result<ServerMessage> {
         if let Some(index) = self.pending.iter().position(&mut matches) {
-            return Ok(self
-                .pending
-                .remove(index)
-                .expect("position names a pending message"));
+            return accepted(
+                self.pending
+                    .remove(index)
+                    .expect("position names a pending message"),
+            );
         }
         loop {
             let mut message = self
@@ -317,7 +275,7 @@ impl Connection {
                 message = self.fetch(ticket)?;
             }
             if matches(&message) {
-                return Ok(message);
+                return accepted(message);
             }
             self.pending.push_back(message);
         }
@@ -330,6 +288,24 @@ fn answers(message: &ServerMessage, id: &str) -> bool {
         ServerMessage::Response { id: of, .. } => of == id,
         ServerMessage::Error { id: of, .. } => of.as_deref().is_none_or(|of| of == id),
         _ => false,
+    }
+}
+
+/// The message, unless the server refused: then its [`ServerError`].
+fn accepted(message: ServerMessage) -> Result<ServerMessage> {
+    match message {
+        ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        } => Err(ServerError {
+            code,
+            message,
+            data,
+        }
+        .into()),
+        other => Ok(other),
     }
 }
 
@@ -388,21 +364,8 @@ fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
             .map_err(|error| stalled(error.into(), "admit the ticket"))?;
         line.push(byte[0]);
     }
-    match serde_json::from_slice::<ServerMessage>(&line)? {
+    match accepted(serde_json::from_slice(&line)?)? {
         ServerMessage::Admitted => {}
-        ServerMessage::Error {
-            code,
-            message,
-            data,
-            ..
-        } => {
-            return Err(ServerError {
-                code,
-                message,
-                data,
-            }
-            .into())
-        }
         other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
     }
     stream.set_read_timeout(None)?;
@@ -520,7 +483,6 @@ mod tests {
                     build: "test".into(),
                     executable_sha256: "f".repeat(64),
                     machine: None,
-                    capabilities: Vec::new(),
                     limits: Limits {
                         max_message: MAX_MESSAGE,
                         max_connections: MAX_CONNECTIONS,

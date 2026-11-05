@@ -37,26 +37,6 @@ const QUEUE: usize = 64;
 /// Checkpoints one subscription may have waiting.
 const CHECKPOINTS: usize = 64;
 
-const CAPABILITIES: &[&str] = &[
-    "reads",
-    "subscriptions",
-    "commands",
-    "configuration",
-    "roadmap",
-    "machine_id",
-    "portfolio",
-    "repository_path",
-    "session_rename",
-    "session_start",
-    "task_create",
-    "owner_bridge",
-    "session_owner",
-    "desktop_sessions",
-    "session_page",
-    "view_plan",
-    "all_view_plans",
-];
-
 type Lines = Framed<UnixStream, LinesCodec>;
 
 /// A connection as its carrier delimits it: one protocol message per item.
@@ -76,13 +56,14 @@ impl Carrier for Lines {
 /// Welcomed connections by client ID, as `lf server status` lists them.
 pub(super) type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
 
-/// A welcomed connection's row, removed when the connection ends.
-pub(super) struct Admitted {
+/// A welcomed connection's row in `lf server status`, removed when the
+/// connection ends.
+pub(super) struct Listed {
     clients: Clients,
     id: String,
 }
 
-impl Admitted {
+impl Listed {
     fn new(clients: &Clients, client: ClientIdentity) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let connected_at = time::OffsetDateTime::now_utc()
@@ -110,7 +91,7 @@ impl Admitted {
     }
 }
 
-impl Drop for Admitted {
+impl Drop for Listed {
     fn drop(&mut self) {
         lock(&self.clients).remove(&self.id);
     }
@@ -271,11 +252,11 @@ pub(super) async fn connection(
         .context("closed before its first message")??;
     match welcome(&mut lines, &line, instance, executable_sha256, clients).await? {
         Greeting::Ended => Ok(()),
-        Greeting::Session(admitted) => {
+        Greeting::Session(listed) => {
             session(
                 &mut lines,
                 instance.into(),
-                &admitted,
+                &listed,
                 remote_control,
                 Admission::Local,
                 tickets,
@@ -294,7 +275,7 @@ pub(super) async fn connection(
 /// What a connection's first message made it.
 pub(super) enum Greeting {
     /// `welcome` was sent; the session follows for this listed client.
-    Session(Admitted),
+    Session(Listed),
     /// A ticket to redeem; `admitted` or an error follows.
     Ticket(String),
     /// The connection's last message was sent.
@@ -364,8 +345,8 @@ pub(super) async fn welcome<C: Carrier>(
         .await?;
         return Ok(Greeting::Ended);
     };
-    let admitted = Admitted::new(clients, hello.client);
-    tracing::debug!(%instance, client = %admitted.id, revision, "Server connection welcomed");
+    let listed = Listed::new(clients, hello.client);
+    tracing::debug!(%instance, client = %listed.id, revision, "Server connection welcomed");
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
     let machine =
@@ -375,7 +356,7 @@ pub(super) async fn welcome<C: Carrier>(
     send(
         carrier,
         &ServerMessage::Welcome(Welcome {
-            client_id: admitted.id.clone(),
+            client_id: listed.id.clone(),
             revision,
             server_revision: REVISION,
             min_revision: MIN_REVISION,
@@ -383,7 +364,6 @@ pub(super) async fn welcome<C: Carrier>(
             build: crate::build_info::BUILD_VERSION.to_owned(),
             executable_sha256: executable_sha256.into(),
             machine,
-            capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
             limits: Limits {
                 max_message: MAX_MESSAGE,
                 max_connections: MAX_CONNECTIONS,
@@ -391,7 +371,7 @@ pub(super) async fn welcome<C: Carrier>(
         }),
     )
     .await?;
-    Ok(Greeting::Session(admitted))
+    Ok(Greeting::Session(listed))
 }
 
 /// The newest revision both sides speak.
@@ -439,7 +419,7 @@ enum Start {
 pub(super) async fn session<C: Carrier>(
     lines: &mut C,
     instance: Arc<str>,
-    admitted: &Admitted,
+    listed: &Listed,
     remote_control: Option<mpsc::Sender<Control>>,
     admission: Admission,
     tickets: Arc<Tickets>,
@@ -559,7 +539,7 @@ pub(super) async fn session<C: Carrier>(
                 return Ok(());
             }
         };
-        admitted.requested();
+        listed.requested();
         if id.is_empty() || id.len() > 128 {
             send(
                 lines,

@@ -50,7 +50,7 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":1048576,"max_connections":64}}
+← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null}}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -65,7 +65,9 @@ The first message is `hello` with the revisions the client speaks. The server
 chooses the newest revision both sides speak and answers `welcome` with it, a
 server-assigned `client_id`, the server's own range, its incarnation (`instance` changes with every start), build,
 executable SHA-256, the Machine reading (`null` while the registry is
-unavailable or uninitialized), capabilities and limits. With no revision in
+unavailable or uninitialized) and limits. The negotiated revision is the whole
+compatibility check: a server that speaks it offers every operation below, so
+no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
 its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 2 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the

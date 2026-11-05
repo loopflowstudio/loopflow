@@ -156,10 +156,6 @@ final class MachineConnection {
         let timeout: Task<Void, Never>
     }
 
-    static func socketURL(endpoint: URL, path: String) throws -> URL {
-        try MachineAddress.socketURL(endpoint: endpoint, path: path)
-    }
-
     static func open(endpoint: URL) async throws -> MachineConnection {
         let socket = try MachineSocket(endpoint: endpoint, path: ServerProtocol.machinePath, maximumMessage: ServerProtocol.maxMessage)
         do {
@@ -193,16 +189,19 @@ final class MachineConnection {
 
     func close() { fail(RegistryQueryError("Machine connection closed")) }
 
-    /// One request and its answer within `seconds`. A timeout or cancellation
-    /// sends `cancel` and releases the wait; a dispatched command still completes.
-    func request(_ operation: ServerOperation, seconds: Int = 15) async throws -> JSONValue {
+    /// How long a request may wait for its answer.
+    static let requestSeconds = 15
+
+    /// One request and its answer. A timeout or cancellation sends `cancel` and
+    /// releases the wait; a dispatched command still completes.
+    func request(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         let line = try Self.line(.request(id: id, operation: operation))
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 if let failure { continuation.resume(throwing: failure); return }
                 let timeout = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(Self.requestSeconds)) } catch { return }
                     self?.forget(id, throwing: RegistryQueryError("The Machine did not respond in time"))
                 }
                 pending[id] = PendingRequest(continuation: continuation, timeout: timeout)

@@ -11,12 +11,10 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
 
-    private static let baseline = ["all_view_plans", "session_owner", "owner_bridge"]
-
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
         let connection = try await MachineConnection.open(endpoint: endpoint)
         defer { connection.close() }
-        guard let machineID = try? identity(connection.welcome, required: []) else {
+        guard let machineID = try? identity(connection.welcome) else {
             throw RegistryQueryError("Update the Machine service to connect from this phone.")
         }
         if let replacing, replacing.machineID != machineID {
@@ -46,7 +44,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
-        guard case .string(let path) = try await read(.repositoryPath(id: task.work.repository), required: ["session_page", "repository_path"]) else {
+        guard case .string(let path) = try await read(.repositoryPath(id: task.work.repository)) else {
             throw RegistryQueryError("The Machine did not return the repository path")
         }
         let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,14 +66,14 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func startSession(sessionID: String) async throws {
         // The complete CLI operation returns its existing SessionRecord.
-        let record = try decode(SessionRecord.self, await request(.command(.sessionStart(id: sessionID)), required: ["session_start"]))
+        let record = try decode(SessionRecord.self, await request(.command(.sessionStart(id: sessionID))))
         guard record.id == sessionID else {
             throw RegistryQueryError("The Machine returned a different Session")
         }
     }
 
     func creationContext() async throws -> MobileCreationContext {
-        let portfolio = try await decode(Portfolio.self, read(.portfolio, required: ["task_create", "portfolio", "view_plan"]))
+        let portfolio = try await decode(Portfolio.self, read(.portfolio))
         if let error = portfolio.error { throw RegistryQueryError(error) }
         let machineID = savedMachine.machineID
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
@@ -84,20 +82,18 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
         try verifySubmission(submission)
         let outcome = try await request(.command(.taskCreate(directory: submission.directory,
-            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)), required: Self.creation)
+            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)))
         return try decode(TaskCreateOutcome.self, outcome)
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
         try verifySubmission(submission)
-        let plan = try await decode(WorkViewPlan.self, read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)"), required: Self.creation))
+        let plan = try await decode(WorkViewPlan.self, read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)")))
         guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
         return task
     }
-
-    private static let creation = ["task_create", "view_plan"]
 
     private func verifySubmission(_ submission: MobileTaskSubmission) throws {
         guard submission.machineID == savedMachine.machineID else {
@@ -105,19 +101,17 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         }
     }
 
-    /// The Machine's identity from its welcome, once it advertises what this app uses.
-    private static func identity(_ welcome: ServerWelcome, required: [String]) throws -> String {
+    /// The Machine's identity from its welcome. The negotiated revision is the
+    /// compatibility check; a server that speaks it offers every operation here.
+    private static func identity(_ welcome: ServerWelcome) throws -> String {
         guard case .object(let fields) = welcome.machine, case .string(let machineID) = fields["id"], !machineID.isEmpty else {
             throw RegistryQueryError("The Machine did not return its identity")
-        }
-        guard (baseline + required).allSatisfy(welcome.capabilities.contains) else {
-            throw RegistryQueryError("Update the Machine service to use Tasks and Sessions from this phone")
         }
         return machineID
     }
 
     /// The live control connection, opened once for concurrent callers.
-    private func connection(required: [String] = []) async throws -> MachineConnection {
+    private func connection() async throws -> MachineConnection {
         let connection: MachineConnection
         if let opening, let live = try? await opening.value, !live.isClosed {
             connection = live
@@ -129,20 +123,20 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
                 if opening == task { opening = nil }
                 throw error
             }
-            if opening == task { live = connection } else { connection.close(); return try await self.connection(required: required) }
+            if opening == task { live = connection } else { connection.close(); return try await self.connection() }
         }
-        guard try Self.identity(connection.welcome, required: required) == savedMachine.machineID else {
+        guard try Self.identity(connection.welcome) == savedMachine.machineID else {
             throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
         }
         return connection
     }
 
-    private func request(_ operation: ServerOperation, required: [String] = []) async throws -> JSONValue {
-        try await connection(required: required).request(operation)
+    private func request(_ operation: ServerOperation) async throws -> JSONValue {
+        try await connection().request(operation)
     }
 
-    private func read(_ query: ServedRead, required: [String] = []) async throws -> JSONValue {
-        try await request(.read(query), required: required)
+    private func read(_ query: ServedRead) async throws -> JSONValue {
+        try await request(.read(query))
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {

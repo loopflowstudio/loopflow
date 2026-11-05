@@ -154,7 +154,6 @@ pub struct Welcome {
     pub executable_sha256: String,
     /// Null while the Machine registry is unavailable or uninitialized.
     pub machine: Option<serde_json::Value>,
-    pub capabilities: Vec<String>,
     pub limits: Limits,
 }
 

@@ -10,12 +10,10 @@ import XCTest
 final class MachinePairingTests: XCTestCase {
     func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
         let bundle = Bundle(for: Self.self)
-        let requestURL = try XCTUnwrap(bundle.url(forResource: "configure_remote", withExtension: "json", subdirectory: "server"))
         let configURL = try XCTUnwrap(bundle.url(forResource: "mobile_configuration", withExtension: "json", subdirectory: "server"))
         let config = try JSONDecoder().decode(MachineMobileConfiguration.self, from: Data(contentsOf: configURL))
-        let request = ServerClientMessage.request(id: "mobile-1", operation: .configureRemote(configuration: config))
-        XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
-                       try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: requestURL)))
+        XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(config)),
+                       try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: configURL)))
         let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))
         guard case .response("mobile-1", _, let result) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
             return XCTFail("Expected listener configuration")
@@ -25,7 +23,7 @@ final class MachinePairingTests: XCTestCase {
     }
     func testAddressPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {
         let endpoint = try MachineAddress.decode(" machine.example.ts.net:8443/ ")
-        let url = try MachineConnection.socketURL(endpoint: endpoint, path: "/v1/machine")
+        let url = try MachineAddress.socketURL(endpoint: endpoint, path: "/v1/machine")
         XCTAssertEqual(url.absoluteString, "wss://machine.example.ts.net:8443/v1/machine")
         for invalid in ["http://machine.example.ts.net", "https://example.com",
                         "https://machine.example.ts.net.attacker.com", "https://user@machine.example.ts.net",

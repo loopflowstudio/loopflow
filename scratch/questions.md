@@ -24,8 +24,12 @@ connection. Assumptions made while implementing, each reversible:
   per connection. Task creation can take longer; the creation sheet already
   recovers the same request by id after a lost reply.
 - The phone identifies itself as `kind: mobile, platform: ios`; `welcome` carries
-  the Machine id and capabilities, so identity is checked per connection rather
-  than per operation.
+  the Machine id, checked per connection. The negotiated revision is the only
+  compatibility check: `welcome.capabilities` and the phone's per-operation
+  capability lists were a second, hand-mirrored allowlist that had already
+  drifted from the operation names, so compress deleted them (November 5). A
+  server missing an operation answers `invalid` by name; a new operation set
+  bumps the revision.
 - `MobileClient.suspend()` is a protocol requirement with an empty default so the
   fixture client is unchanged; only the remote client closes a connection.
 - The opt-in host-Tailscale acceptance was not rerun here: it needs the host's

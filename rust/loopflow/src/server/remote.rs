@@ -322,7 +322,7 @@ where
         .max_message_size(Some(MAX_BULK))
         .max_frame_size(Some(MAX_BULK));
     let permitted = admission.is_some();
-    let ticket_path = std::sync::Mutex::new(false);
+    let mut ticket_path = false;
     let socket = tokio::time::timeout(
         Duration::from_secs(5),
         accept_hdr_async_with_config(
@@ -336,9 +336,7 @@ where
                 }
                 match request.uri().path() {
                     "/v1/machine" => {}
-                    "/v1/ticket" => {
-                        *ticket_path.lock().expect("handshake callback runs once") = true
-                    }
+                    "/v1/ticket" => ticket_path = true,
                     _ => return Err(reject(StatusCode::NOT_FOUND)),
                 }
                 Ok(response)
@@ -348,9 +346,6 @@ where
     )
     .await??;
     let admission = admission.expect("the handshake refused an unadmitted peer");
-    let ticket_path = ticket_path
-        .into_inner()
-        .expect("handshake callback completed");
     let mut messages = Messages(socket);
     let first = tokio::time::timeout(service::FIRST_MESSAGE, messages.next())
         .await
@@ -369,11 +364,11 @@ where
         Greeting::Ticket(_) => Ok(()),
         Greeting::Session(_) if ticket_path => Ok(()),
         // Remote connections never configure mobile access.
-        Greeting::Session(admitted) => {
+        Greeting::Session(listed) => {
             service::session(
                 &mut messages,
                 instance.into(),
-                &admitted,
+                &listed,
                 None,
                 admission,
                 tickets,

@@ -32,8 +32,6 @@ struct ServerProtocolTests {
         #expect(welcome.minRevision == 2)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
-        #expect(welcome.capabilities.contains("session_owner"))
-        #expect(welcome.capabilities.contains("subscriptions"))
         #expect(welcome.limits.maxMessage == 1_048_576)
         #expect(welcome.limits.maxConnections == 64)
         #expect(welcome.machine == .object([:]))

@@ -92,6 +92,8 @@ public enum ServerClientMessage: Encodable, Sendable {
     }
 }
 
+/// Mobile access as `lf server mobile --status` reports it; Desktop reads it
+/// through that command, so no client sends `mobile.*` operations.
 public struct MachineMobileConfiguration: Codable, Sendable {
     public struct Owner: Codable, Sendable {
         public let node: String
@@ -102,7 +104,7 @@ public struct MachineMobileConfiguration: Codable, Sendable {
     public let owner: Owner
 }
 
-/// The result of `mobile.status`.
+/// What `lf server mobile --status` prints.
 public struct MachineMobileStatus: Codable, Sendable {
     public let configuration: MachineMobileConfiguration?
     public let ready: Bool
@@ -112,10 +114,6 @@ public struct MachineMobileStatus: Codable, Sendable {
 /// What a request asks for, named by its `kind`: a dotted resource and verb.
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
-    /// Same-user local socket only; the result is a `MachineMobileStatus`.
-    case mobileStatus
-    /// Same-user local socket only; the result is `{configuration}`.
-    case configureRemote(configuration: MachineMobileConfiguration?)
     case sessionOwner(session: String)
     case read(ServedRead)
     case command(ServedWrite)
@@ -125,18 +123,11 @@ public enum ServerOperation: Encodable, Sendable {
     /// `{ticket}` for a connection carrying one request of `bytes` bytes.
     case upload(bytes: Int)
 
-    private enum Keys: String, CodingKey { case kind, owner, session, request, configuration, bytes }
+    private enum Keys: String, CodingKey { case kind, owner, session, request, bytes }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
-        case .mobileStatus:
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("mobile.status", forKey: .kind)
-        case .configureRemote(let configuration):
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("mobile.configure", forKey: .kind)
-            try box.encode(configuration, forKey: .configuration)
         case .upload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)
@@ -219,11 +210,10 @@ public struct ServerWelcome: Decodable, Sendable {
     public let executableSHA256: String
     /// `.null` while the Machine registry is unavailable or uninitialized.
     public let machine: JSONValue
-    public let capabilities: [String]
     public let limits: ServerLimits
 
     private enum CodingKeys: String, CodingKey {
-        case revision, instance, build, machine, capabilities, limits
+        case revision, instance, build, machine, limits
         case clientID = "client_id", serverRevision = "server_revision", minRevision = "min_revision"
         case executableSHA256 = "executable_sha256"
     }

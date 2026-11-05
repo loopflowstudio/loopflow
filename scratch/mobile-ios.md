@@ -111,7 +111,11 @@ generation. Decisions taken in this slice:
   Operation`, `Reply::Bridged`, the `bootstrap` request and `tests/fixtures/dto/machine/`;
   with the merge, the untyped `Reply`/`ServerReply` envelope, `generation` on
   readings and the `command`, `bulk_request`, `all_view_plans` and `task_create`
-  fixtures. Nothing speaks revision 1.
+  fixtures. Nothing speaks revision 1. Compress (November 5) also deleted
+  `welcome.capabilities` and the phone's per-operation capability lists: the
+  negotiated revision is the one compatibility check, and the Swift
+  `mobile.status`/`mobile.configure` encoders, which no client sends (Desktop
+  reads mobile setup through `lf server mobile`).
 
 Checks (November 5, after the merge): `cargo test -p loopflow --lib server::`
 20 pass; `--test served_reads` 5 pass; `--test transport_tests server_` 17 pass

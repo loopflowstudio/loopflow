@@ -135,9 +135,9 @@ history refuses rather than counting as a first thread. `answering` turns privat
 on main; only this module calls it after the merge. `c59cfcc631` (#1807) adopted
 checkouts stay unmarked, matching the trust assumption.
 
-PR #1816's body still says automatic opening was never observed natively; the
-November 5 store-launch proof supersedes that paragraph, and the body does not yet
-describe launching from the store before a pane mounts. Publication refreshes both.
+Publication, November 5: PR #1816's body now carries the store-launch proof,
+launching from the store before a pane mounts, the pending main sync and the
+current acceptance; it no longer says automatic opening was never observed natively.
 
 Concept review, November 5 (fifth pass, against the store-launch change): the
 experience and its four concepts are unchanged; launching from the store is the

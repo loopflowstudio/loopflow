@@ -33,3 +33,5 @@ caps are private machine configuration: uv 8 GiB per cache, sccache 10 GiB,
 local Docker build cache 8 GiB. Preserve active cache users, Docker volumes,
 containers, unpublished images and remote engines. Reinstall the same runner
 after changes; never enable this utility through product packaging.
+
+Disposable demos have two roots and a release marker; `scripts/disk-cleanup.md` owns that contract.

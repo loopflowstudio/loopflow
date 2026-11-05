@@ -831,6 +831,37 @@ def test_stops_real_demo_owner_and_descendant_and_preserves_separate_history(
                 pass
 
 
+def test_released_demo_loses_its_runtime_and_keeps_durable_history(cleaner, monkeypatch) -> None:
+    runtime = cleaner.home / ".lf-machine/demos/test"
+    history = cleaner.home / ".lf-machine/demo-history/test"
+    _write(history / "home/loopflow.db", 8)
+    _write(history / "repo/AGENTS.md", 8)
+    # With LF_HOME in the durable root, the copied executable is the owner's
+    # only link to the runtime root. A demo records no outcome: seven days.
+    binary = runtime / "bin/lf"
+    binary.parent.mkdir(parents=True)
+    shutil.copyfile("/bin/sleep", binary)
+    binary.chmod(0o755)
+    marker = runtime / ".disposable-coding-demo"
+    marker.write_text("disposable runtime; evidence stored elsewhere")
+    for path in (binary, marker):
+        _age(path, 8)
+    _age_tree(runtime, 8)
+    owner = subprocess.Popen([str(binary), "600"], cwd=history / "repo")
+    try:
+        monkeypatch.delattr(cleaner, "_activity")
+        monkeypatch.setattr(cleanup, "OWNER_GRACE_SECONDS", 0.2)
+        assert cleaner.run() == 0
+        owner.wait(timeout=3)
+        assert not runtime.exists()
+        assert (history / "home/loopflow.db").exists()
+        assert (history / "repo/AGENTS.md").exists()
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=3)
+
+
 def test_stops_executable_mapping_owner_without_killing_unrelated_work(
     cleaner, monkeypatch
 ) -> None:

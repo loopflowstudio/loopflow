@@ -340,6 +340,15 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
+    /// Retire `session` as its provider's exit does, leaving its owner running.
+    fn complete(&self, session: &str) {
+        self.sql()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+    }
     fn ends(&self, owner: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
         while self.running(owner) {
@@ -1803,6 +1812,43 @@ fn resume_json_returns_once_when_it_starts_the_owner() {
     fixture.ends(&owner);
 }
 
+/// A retired conversation reopened by id can still end: its owner is not held forever.
+#[test]
+fn a_reopened_retired_conversation_ends_after_its_grace() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let binary = Path::new(env!("CARGO_BIN_EXE_lf"));
+    let first = fixture.owner(fixture.native(binary, &path, "initial"));
+    fixture.launches(1);
+    let mut viewer = fixture.viewer(&first, true);
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&first);
+    let sql = fixture.sql();
+    let (session, retired): (String, Option<i64>) = sql
+        .query_row(
+            "SELECT id,completed_at FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [&first],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(retired.is_some(), "the exited conversation was not retired");
+
+    // Only the reopened owner gets the short grace: a first owner nobody views yet
+    // could end before its provider starts.
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    // A terminal owner, as a person's `lf resume` gets; nobody views it.
+    let mut reopened = fixture.serve(true, &[binary.to_str().unwrap(), "resume", &session]);
+    reopened.env("PATH", &path);
+    let owner = fixture.owner(reopened);
+    fixture.launches(2);
+    fixture.ends(&owner);
+}
+
 #[test]
 fn resume_json_returns_after_relay_and_viewer_takeover() {
     let fixture = Fixture::new();
@@ -2301,7 +2347,7 @@ while True:
         ("submitted", Path::new(env!("CARGO_BIN_EXE_lf"))),
     ] {
         let mut command = fixture.native(binary, &path, "initial");
-        command.env("EDITOR_CASE", name);
+        command.env("EDITOR_CASE", name).env("RUST_LOG", "warn");
         let owner = fixture.owner(command);
         let mut viewer = fixture.viewer(&owner, true);
         until_out(&mut viewer, "EDITOR_READY");
@@ -2322,6 +2368,15 @@ while True:
     assert!(
         fixture.running(&owners[0]),
         "an unsent draft ended after its grace"
+    );
+    // The grace restarts while input holds the owner; its reason stays one line.
+    std::thread::sleep(Duration::from_secs(5));
+    let log = std::fs::read_to_string(fixture.home.path().join("logs/transport.log")).unwrap();
+    assert_eq!(
+        log.matches("retaining detached Session past its limit: native input")
+            .count(),
+        1,
+        "{log}"
     );
     std::fs::remove_file(&removable).unwrap();
     std::thread::sleep(Duration::from_secs(4));
@@ -2864,7 +2919,7 @@ while True:
 }
 
 /// A conversation whose lf executable is deleted, rebuilt or superseded ends
-/// once it waits for a person, even while viewed, and a terminal showing it
+/// once it holds no work or input, even while viewed, and a terminal showing it
 /// follows through its lf entry into the reopened conversation with its
 /// history: a deleted build through the entry that still dispatches, a rebuilt
 /// build through its own path, and one launched through the installed entry
@@ -3170,18 +3225,25 @@ impl Terminal {
     }
 }
 
+/// A Session whose owner runs another lf build than this test binary, with
+/// that build as its entry: `(owner, session)`.
+fn owner_on_another_build(fixture: &Fixture, path: &str) -> (String, String) {
+    let other = fixture.home.path().join("bin/lf-other");
+    other_build(&other);
+    let mut command = fixture.native(&other, path, "hello");
+    command.env("LF_BIN", &other);
+    let owner = fixture.owner(command);
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    (owner, session)
+}
+
 /// An idle owner on another build ends; resume continues its saved conversation.
 #[test]
 fn resume_takes_over_an_owner_from_another_build() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
-    let other = fixture.home.path().join("bin/lf-other");
-    other_build(&other);
-    let mut command = fixture.native(&other, &path, "hello");
-    command.env("LF_BIN", &other);
-    let previous = fixture.owner(command);
-    fixture.launches(1);
-    let session = fixture.session_of_owner(&previous);
+    let (previous, session) = owner_on_another_build(&fixture, &path);
     let mut viewer = fixture
         .command(&["session", "resume", &session])
         .env("PATH", &path)
@@ -3211,6 +3273,213 @@ fn resume_takes_over_an_owner_from_another_build() {
         "{stderr}"
     );
     assert!(!stderr.contains("cut off"), "{stderr}");
+}
+
+/// Socket silence cannot turn retained work into permission to replace a provider.
+fn unanswering_superseded_owner_keeps(protection: &str) {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (owner, session) = owner_on_another_build(&fixture, &path);
+    let mut viewer = fixture.viewer(&owner, true);
+    let sql = fixture.sql();
+    match protection {
+        "draft" => {
+            viewer.input("retained draft");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let input: Option<String> = sql
+                    .query_row(
+                        "SELECT native_input FROM processes WHERE id=?1",
+                        [&owner],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                if input.is_some() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "draft was not retained");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        "request" | "turn" => {
+            fixture.mark_working(&session);
+            if protection == "request" {
+                sql.execute(
+                    "UPDATE session_activity SET open_tools=0,pending_input=1,yielded=1 WHERE session_id=?1",
+                    [&session],
+                ).unwrap();
+            }
+        }
+        "graph" | "step" => {
+            let graph = loopflow::id::LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+                rusqlite::params![graph, (protection == "graph").then_some(&owner)],
+            ).unwrap();
+            sql.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+                [&graph],
+            ).unwrap();
+            if protection == "step" {
+                sql.execute(
+                    "UPDATE processes SET parent_lf_process_id=?1 WHERE id=(
+                     SELECT e.lf_process_id FROM agent_sessions s
+                     JOIN session_events e ON e.seq=s.current_capture WHERE s.id=?2)",
+                    rusqlite::params![graph, session],
+                )
+                .unwrap();
+                sql.execute(
+                    "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                     SELECT ?1,e.lf_process_id,0,'[]' FROM agent_sessions s
+                     JOIN session_events e ON e.seq=s.current_capture WHERE s.id=?2",
+                    rusqlite::params![graph, session],
+                ).unwrap();
+            }
+        }
+        "run" => {
+            sql.execute(
+                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                [&session],
+            )
+            .unwrap();
+        }
+        _ => unreachable!(),
+    }
+    let identity = || {
+        sql.query_row(
+            "SELECT s.agent_process_id,p.attachment_token,s.current_capture,s.provider_thread,o.native_input
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             JOIN processes o ON o.id=s.transport_lf_process_id WHERE s.id=?1",
+            [&session],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+                r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?)),
+        ).unwrap()
+    };
+    let before = identity();
+    drop(viewer);
+    let paused = fixture.pause(&owner);
+    let resumed = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let output = wait_for_viewer(resumed, Duration::from_secs(20));
+    let after = identity();
+    let running = fixture.running(&owner);
+    let launches = fixture.launches(1);
+    drop(paused);
+    // Finish only this fixture after observing the refused replacement.
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    assert!(!output.status.success(), "{protection}: {output:?}");
+    assert!(running, "{protection}: resume ended the protected owner");
+    assert_eq!(after, before, "{protection}: resume changed retained state");
+    assert_eq!(
+        launches.len(),
+        1,
+        "{protection}: resume launched another provider"
+    );
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_draft() {
+    unanswering_superseded_owner_keeps("draft");
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_request() {
+    unanswering_superseded_owner_keeps("request");
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_turn() {
+    unanswering_superseded_owner_keeps("turn");
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_graph() {
+    unanswering_superseded_owner_keeps("graph");
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_graph_step() {
+    unanswering_superseded_owner_keeps("step");
+}
+
+#[test]
+fn unanswering_superseded_owners_preserve_a_run() {
+    unanswering_superseded_owner_keeps("run");
+}
+
+/// A completed Session names no known work, so `lf resume` still gets you back
+/// from a superseded owner that cannot answer.
+#[test]
+fn resume_ends_an_unanswering_superseded_owner_of_a_completed_session() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (previous, session) = owner_on_another_build(&fixture, &path);
+    fixture.complete(&session);
+    let paused = fixture.pause(&previous);
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .env_remove("RUST_LOG")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // A stopped owner holds SIGTERM until it continues, so it continues once resume
+    // has seen the silence; the signal then ends it whichever arrives first.
+    let log = fixture.home.path().join("logs/lf.log");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !std::fs::read_to_string(&log)
+        .is_ok_and(|text| text.contains("Session owner does not answer"))
+    {
+        assert!(Instant::now() < deadline, "resume never saw the silence");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(paused);
+    let launches = fixture.launches(2);
+    fixture.ends(&previous);
+    let current = fixture.owner_of(&session);
+    viewer.kill().unwrap();
+    let output = viewer.wait_with_output().unwrap();
+    fixture.stop(&current);
+    assert_ne!(current, previous);
+    assert_eq!(launches.len(), 2, "resume launched a second replacement");
+    assert!(launches[1].contains(" --resume "), "{launches:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Moved"), "{stderr}");
+}
+
+/// An answering owner may hold a turn or draft nothing records: a viewer reaches
+/// it, so resume attaches and ends nothing.
+#[test]
+fn resume_attaches_an_answering_superseded_owner_of_a_completed_session() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (owner, session) = owner_on_another_build(&fixture, &path);
+    fixture.complete(&session);
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    fixture.wait_controlled(&owner);
+    let running = fixture.running(&owner);
+    let launches = fixture.launches(1);
+    viewer.kill().unwrap();
+    viewer.wait().unwrap();
+    fixture.stop(&owner);
+    fixture.ends(&owner);
+    assert!(running, "resume ended an answering owner");
+    assert_eq!(launches.len(), 1, "resume launched another provider");
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

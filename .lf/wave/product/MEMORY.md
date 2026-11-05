@@ -447,21 +447,11 @@ its caller without creating a Wave or conversation. Known failed work stays
 stopped until explicit recovery; retry retains the Flow position and conversation.
 
 Jack clarified “no, Task sessions stay”: Task conversations and authored human
-reviews retain their feedback and completion contract. Persistent versus one-off
-Task conversations remains open. Historical Ask rows become ordinary conversations
-without replacing the Wave chat or granting Flow settlement authority. Older Ask
-identity and caller-release notes below describe the retired model.
-
-The local Ask removal implements this boundary with provider simulations and
-store recovery coverage; full Rust and Desktop acceptance remains with gate.
-A successful provider turn is not reclassified from prose alone. This records
-Product’s shared Session contract, not a Task or Wave placement decision.
-
-Converted Ask history follows ordinary conversation rules; its former kind alone
-creates no attention obligation. Conversion itself never completes a Session.
-Later confirmed owning-attachment exits can retire unassigned, non-primary
-conversations; Task/Wave conversations and Flow reviews remain open. Missing
-process evidence grants neither retirement nor Flow settlement. Full Desktop acceptance remains unproved.
+reviews retain their feedback and completion contract. Historical Ask rows become
+ordinary conversations with no attention obligation, Flow settlement authority or
+completion; confirmed owning-attachment exits may retire unassigned non-primary
+conversations only. Coverage and proof limits: `83b3d64a93:.lf/wave/product/MEMORY.md`,
+this heading.
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
@@ -962,7 +952,7 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 `ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
 `scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
-## Sessions projection and native resume (reconciled 2026-11-04)
+## Sessions projection and native resume (reconciled 2026-11-05)
 
 Retired Ask/Ready/Complete and LOO-491 evidence:
 `a32c385044:.lf/wave/product/MEMORY.md`, this heading.
@@ -975,21 +965,22 @@ honors Close; saved display grants no retention. Eight conversations/two
 preparations remain provisional. Visible/protected work survives; completed
 departure releases through 717.
 
-Jack authorized corrections through re-demo, not landing/installation. Absent
-Sessions use resume explanation's Start offer; missing history uses Session actions.
-Start retains non-replacing intent through argv, execution and claim:
-fresh ownership reads cannot protect a takeover command.
-Only Take back replaces input; navigation/Retry reveal. Close fences late
-results even before Session identity exists. Prepared-command tests execute the
-returned program and wrappers, and prove holder continuity;
-nonzero exit can conceal parsing failure. Claim-time contention is covered.
+Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
+of this task”) and on November 5 ruled out any normal “unopened” state: owned
+idle/active/moving Tasks create their primary Session and start or resume the
+provider during load, before selection. Unassigned Tasks stay backlog. The first
+turn without a request reads and reports; each start spends one provider turn.
+Start keeps non-replacing intent through argv, execution and claim; only Take back
+replaces input; Close fences late results. A consumed first launch with no history
+costs one Try again. Launch runs from the model: `.hidden()` panes never mount, so
+prepared Sessions start their terminal from the store and the pane adopts it.
+`lf task run` on a graph without an interactive step approves Auto-Ship and
+recovery restarts it; fixtures end in `interactive: default`.
 
-Local retention uses the local query/Task; remote presence uses observed remote
-identity. Routing the local Machine through peer lookup failed “is not added”.
-CLI Start/retain/departure/return and contention fixtures prove no native usability.
-Stand-ins and mismatched checkouts prove no recovery. Disposable paired app/CLI
-data preserves the main registry; candidates must include later repairs. Claude/Codex/Rex, reboot and
-twenty-Task footprint remain with demo.
+Local retention uses the local query; remote presence uses observed remote
+identity (peer lookup of the local Machine failed “is not added”). The November 5
+disposable candidate proved four providers live on load with no Graph; drafts,
+cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
 
 ### Task observation and retired Watch
 

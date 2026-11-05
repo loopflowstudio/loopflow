@@ -122,13 +122,22 @@ Warm slots are not filtered by person: a teammate's owned Task on an unreachable
 Machine fails quietly and occupies one. Desktop has no local person identity to
 compare. Acceptable while Jack is the only owner; revisit before shared repositories.
 
-Upstream `ae3c91abee` (#1818) and `86fea8578f` (#1822) change `attaches`, not
-`open_without_replacing`, which reads `answering` directly: at sync confirm that a
-retained, unresponsive owner with no native history refuses rather than counting
-as a first thread. `c59cfcc631` (#1807) adds `lf task create --worktree`; those
-adopted checkouts stay unmarked, matching the trust assumption.
+Sync, November 5: the stack parent's tip is already contained and origin/main is
+not merged; the parent (#1811) integrates first. A trial merge of origin/main
+conflicts in three parent files (`transport.rs`, `transport/lifetime.rs`,
+`tests/README.md`) and two of this branch's: a comment line in `bin/lf.rs` and the
+Sessions `onChange` block, where main's `reconcileMembership` now returns a
+selection to apply before `openWarmConversations`. At the main sync,
+`open_without_replacing` still decides owner liveness with `answering` alone
+(`human_session.rs:1043`) while main's `attaches` consults `owner_retention`
+(`ae3c91abee`, `86fea8578f`); confirm a retained unresponsive owner with no native
+history refuses rather than counting as a first thread. `answering` turns private
+on main; only this module calls it after the merge. `c59cfcc631` (#1807) adopted
+checkouts stay unmarked, matching the trust assumption.
 
-PR #1816's description must drop any claim of a Start click.
+PR #1816's body still says automatic opening was never observed natively; the
+November 5 store-launch proof supersedes that paragraph, and the body does not yet
+describe launching from the store before a pane mounts. Publication refreshes both.
 
 ## Verification
 
@@ -147,4 +156,7 @@ clippy and the 714-test Desktop suite passed before publication. November 5
 `scripts/test_desktop.sh --filter 'WorkspaceRetentionTests|WarmPaneMountTests|WorkCacheTests'`
 43 passed after the tile-retention fix. Compress, November 5: Swift-only edits;
 `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests|WorkspaceRetentionTests|WorkCacheTests|WorkspacePanesTests|WorkSurfaceTests|SessionsPolishTests|DTOFixtureTests'`
-203 passed in 8 suites; Rust unchanged, no rerun.
+203 passed in 8 suites; Rust unchanged, no rerun. Realign, November 5: plan claims
+checked against the tree by inspection (intent, warm queue, store launch, first
+turn, trust marker, shared matching, named tests all present); no code change, no
+rerun. The rendered proof's candidate predates `83b3d64a93`'s shared Task matching.

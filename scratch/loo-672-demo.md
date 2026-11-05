@@ -14,7 +14,11 @@ display session; [manifest](demo-evidence/store-manifest.json)), fresh private
 data: four owned idle Tasks, no provider ever launched, the Stopped run Task
 carrying its three stopped `TASK_RUN_ATTEMPTS` records and the “start it” comment.
 `uv run python scratch/prepare-redemo.py` reproduces the setup from the debug CLI
-and app builds without touching the main environment.
+and app builds without touching the main environment. The candidate was built from
+`1fdbf09f7a` plus the store-launch diff committed as `78f4d8e6c0`; `83b3d64a93`'s
+shared Task matching came after it and is unproven natively. `demo.html` still
+describes the November 4 candidate (`7b23c50c20`, “Prefetch still needs repair”);
+the next demo rebuilds it from a HEAD candidate and this evidence.
 
 Observed with nothing selected
 ([store-load-unselected.png](demo-evidence/store-load-unselected.png)):

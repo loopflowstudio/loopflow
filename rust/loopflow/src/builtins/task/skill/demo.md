@@ -59,10 +59,10 @@ identities, teardown command and private-Machine history reopening instructions 
 the demo note. Keep both roots intact through rebuilds while owners live.
 
 When review ends, record each draft and pending request as settled or given up. A
-person's input needs that person's answer, given on the demo page; that answer is the
-release. Closing a viewer, age or socket failure releases nothing, and without an
-answer both roots stay. A headless run settles the input it made itself when it ends,
-and that ending is its release.
+person's input needs that person's answer to a question on the demo page, given in the
+conversation; that answer is the release. Closing a viewer, age or socket failure
+releases nothing, and without an answer both roots stay. A headless run settles the
+input it made itself when it ends, and that ending is its release.
 If all input is settled, end only verified demo owners, confirm exit and remove the
 runtime root. An owner whose draft was edited stays running even after that draft is
 sent, and no command stops a Session: `lf resume` it, exit its provider, and signal

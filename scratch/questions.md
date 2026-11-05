@@ -43,3 +43,13 @@ because its hooks proved bounded. See [the receipt](loo-725.md#cleanup-proof-rec
 Its logic matches main's; the cause is unknown, and four diagnostic runs did not repeat it.
 Gate or CI should show whether it recurs; a viewer leaving during takeover would be a
 product bug, not only a test race.
+
+Wave memory stayed read-only in the November 4 realign: no step of `auto`, `pursue`, `refresh`
+or `deliver` calls for its upkeep. Earlier passes on this branch did edit it, including
+condensing unrelated sections. Those edits stay and [the PR body](loo-725.md#delivery-text)
+names them, because reverting would drop the LOO-725 section and is as easy later.
+
+The November 4 fifth concept review treats abandoned-review age, durable-history expiry and
+edited drafts outside demos as open but not this Graph's stopping condition: none changes this
+diff, and each has a safe accepted default. Jack Heart's brief asks to carry `auto` through
+delivery. If he wants them settled before landing, `lf ship --stop` holds the Task.

@@ -292,12 +292,13 @@ struct WorkNavigationTests {
     func unstartedTaskOffersStart() async throws {
         let model = try model()
         await model.refresh()
-        let task = try #require(model.task(id: "issue-now")?.task)
+        let task = try #require(model.task(id: "issue-review")?.task)
         #expect(task.awaitsStart)
-        #expect(try #require(model.task(id: "issue-review")?.task).awaitsStart == false)
+        // Started Tasks open their conversation, whoever owns them; finished ones show history.
+        #expect(try #require(model.task(id: "issue-now")?.task).awaitsStart == false)
         #expect(try #require(model.task(id: "issue-later")?.task).awaitsStart == false)
         let offer = TaskStartOffer(model: model, task: task)
-        let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-now").button()
+        let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
         #expect(model.navigation.taskRunDrafts[task.id] == nil)

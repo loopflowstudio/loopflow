@@ -180,8 +180,8 @@ struct WorkCacheTests {
         #expect(model.selection == nil)
         #expect(model.workStatus == .current) // Rendering is not held by preparation.
         #expect(registry.preparationCount == 2)
-        let newest = closed ? 10 : 11
-        let expected = stride(from: newest, through: newest - 7, by: -1).map { "prefetch-\($0)" }
+        // The newest row is the started Task nobody owns; it opens like any working Task.
+        let expected = ["prefetch-16"] + stride(from: closed ? 10 : 11, through: closed ? 4 : 5, by: -1).map { "prefetch-\($0)" }
         #expect(registry.recentTasks.map(\.id) == expected)
         #expect(Set(await source.preparedTasks) == Set(expected.prefix(2)))
         await source.releasePreparations()
@@ -230,7 +230,7 @@ struct WorkCacheTests {
         let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: store, model: model,
             onFocus: { id, _ in workspace.multiplexer.setFocusedPane(id) })
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation")
         }
         _ = try view.inspect().find(text: "Opening conversation…")
 
@@ -265,8 +265,8 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
-    @Test("A claimed Task replaces its refused reveal with an automatic Start")
-    func claimedTaskLeavesRefusedReveal() async throws {
+    @Test("A started Task replaces its refused reveal with an automatic Start")
+    func startedTaskLeavesRefusedReveal() async throws {
         let source = try Source()
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
@@ -275,7 +275,7 @@ struct WorkCacheTests {
         while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
         while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
         await source.setPreparationFailure("No provider history")
-        let id = "prefetch-16" // The fixture's unassigned idle Task.
+        let id = "prefetch-15" // The fixture's unstarted Task.
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
         model.openWarmConversations()
         while workspace.conversationError == nil, ContinuousClock.now < deadline { await Task.yield() }
@@ -284,7 +284,7 @@ struct WorkCacheTests {
         #expect(!model.conversationIsOpening(workspace))
 
         await source.setPreparationFailure(nil)
-        try await source.claimTask(id)
+        try await source.startTask(id)
         await model.refresh()
         while await !source.preparedTasks.contains(id), ContinuousClock.now < deadline { await Task.yield() }
         while workspace.openingConversation, ContinuousClock.now < deadline { await Task.yield() }
@@ -294,7 +294,7 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
-    @Test("A reveal refused after its Task was claimed leaves no offer and starts")
+    @Test("A reveal refused after its Task started leaves no offer and starts")
     func supersededRefusalDoesNotLand() async throws {
         let source = try Source()
         let repository = "repo_" + UUID().uuidString
@@ -303,7 +303,7 @@ struct WorkCacheTests {
         let deadline = ContinuousClock.now + .seconds(3)
         while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
         while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
-        let id = "prefetch-16" // The fixture's unassigned idle Task.
+        let id = "prefetch-15" // The fixture's unstarted Task.
         await source.hold(["session", "resume"])
         let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
         model.openWarmConversations()
@@ -311,7 +311,7 @@ struct WorkCacheTests {
         #expect(workspace.conversationIntent == .reveal)
 
         await source.setPreparationFailure("No provider history", once: true)
-        try await source.claimTask(id)
+        try await source.startTask(id)
         await model.refresh()
         #expect(workspace.conversationIntent == .start)
         await source.release()
@@ -323,7 +323,7 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
-    @Test("A link's reveal refused after its Task was claimed leaves no offer and starts")
+    @Test("A link's reveal refused after its Task started leaves no offer and starts")
     func supersededLinkRefusalDoesNotLand() async throws {
         let source = try Source()
         let repository = "repo_" + UUID().uuidString
@@ -332,15 +332,15 @@ struct WorkCacheTests {
         let deadline = ContinuousClock.now + .seconds(3)
         while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
         while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
-        let id = "prefetch-16" // The fixture's unassigned idle Task.
+        let id = "prefetch-15" // The fixture's unstarted Task.
         await source.hold(["session", "resume"])
-        let opening = Task { await model.openTaskLink(TaskLink(issue: "PREFETCH-16", repo: Self.repo, conversation: true)) }
+        let opening = Task { await model.openTaskLink(TaskLink(issue: "PREFETCH-15", repo: Self.repo, conversation: true)) }
         await source.waitForHeldRead()
         let workspace = try #require(registry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: id)))
         #expect(workspace.conversationIntent == .reveal)
 
         await source.setPreparationFailure("No provider history", once: true)
-        try await source.claimTask(id)
+        try await source.startTask(id)
         await model.refresh()
         #expect(workspace.conversationIntent == .start)
         await source.release()
@@ -363,14 +363,14 @@ struct WorkCacheTests {
         let deadline = ContinuousClock.now + .seconds(5)
         while await source.preparedTasks.count < 8, ContinuousClock.now < deadline { await Task.yield() }
         while registry.preparationCount > 0, ContinuousClock.now < deadline { await Task.yield() }
-        #expect(await source.preparedTasks.count == 8) // Warm prefetch stops; four working Tasks remain.
+        #expect(await source.preparedTasks.count == 8) // Warm prefetch stops; five working Tasks remain.
 
         await source.holdPreparations()
-        let working = (0..<12).map { "prefetch-\($0)" }, backlog = "prefetch-16"
+        let working = (0..<12).map { "prefetch-\($0)" } + ["prefetch-16"], unstarted = "prefetch-15"
         func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
         model.applySelectionPlans([fixtureViewPlan(
             owner: .init(repository: repository, kind: .repository, id: repository),
-            members: (working + [backlog]).map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
+            members: (working + [unstarted]).map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
         model.selectWorkingTasksDashboard()
         while await source.preparedTasks.count < 10, ContinuousClock.now < deadline { await Task.yield() }
         #expect(registry.preparationCount == 2)
@@ -393,13 +393,14 @@ struct WorkCacheTests {
             #expect(tile.multiplexer.pane(forSessionId: "conversation-" + id) != nil)
             #expect(tile.conversationIntent == .start)
         }
-        // A tile with no conversation to reveal keeps its Open button.
-        let backlogTile = try #require(registry.retained(key(backlog)))
-        let backlogTask = try #require(model.task(id: backlog)?.task)
-        #expect(await !source.preparedTasks.contains(backlog))
-        #expect(backlogTile.conversationError == nil)
-        _ = try DashboardConversationOffer(model: model, task: backlogTask, workspace: backlogTile).inspect()
-            .find(viewWithAccessibilityIdentifier: "dashboard-open-conversation-\(backlogTask.id)")
+        // An unstarted Task has no conversation to open; its tile offers Start instead.
+        let unstartedTile = try #require(registry.retained(key(unstarted)))
+        let unstartedTask = try #require(model.task(id: unstarted)?.task)
+        #expect(await !source.preparedTasks.contains(unstarted))
+        #expect(unstartedTile.conversationError == nil)
+        #expect(unstartedTask.awaitsStart)
+        _ = try TaskStartOffer(model: model, task: unstartedTask).inspect()
+            .find(viewWithAccessibilityIdentifier: "task-start-\(unstartedTask.id)")
         registry.prepareForQuit()
     }
 
@@ -478,7 +479,7 @@ struct WorkCacheTests {
         let view = WorkspacePanesView(workspace: queued, isFocused: true, sessions: store, model: model,
             onFocus: { id, _ in queued.multiplexer.setFocusedPane(id) })
         _ = try view.inspect().find(text: "Opening conversation…")
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "primary-open-conversation") }
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
 
         await source.setPreparationFailure("Claude account unavailable")
         registry.canPrepare = nil
@@ -491,7 +492,7 @@ struct WorkCacheTests {
         let failedView = WorkspacePanesView(workspace: failed, isFocused: true, sessions: store, model: model,
             onFocus: { id, _ in failed.multiplexer.setFocusedPane(id) })
         _ = try failedView.inspect().find(text: "Claude account unavailable")
-        let button = try failedView.inspect().find(viewWithAccessibilityIdentifier: "primary-open-conversation").button()
+        let button = try failedView.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
         #expect(try button.labelView().text().string() == "Retry")
         registry.prepareForQuit()
     }
@@ -819,7 +820,7 @@ private actor Source {
         var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
         var inventory = wire["tasks"] as! [String: Any]
         let template = (inventory["items"] as! [[String: Any]])[0]
-        // The newest row is an unassigned working Task: backlog, which load leaves alone.
+        // The newest row is a started Task nobody owns; it opens like any working Task.
         let states = (0..<12).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
         inventory["items"] = states.enumerated().map { index, state in
             var row = template
@@ -848,15 +849,15 @@ private actor Source {
         failsOnce = once
     }
 
-    func claimTask(_ id: String) throws {
+    /// The Task's checkout was placed: it is now idle, a working Task.
+    func startTask(_ id: String) throws {
         var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
         var inventory = wire["tasks"] as! [String: Any]
         inventory["items"] = (inventory["items"] as! [[String: Any]]).map { item in
             guard (item["task"] as? [String: Any])?["id"] as? String == id else { return item }
             var item = item
             var runtime = item["runtime"] as! [String: Any]
-            runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
-                                "machine": ["id": "home-a", "label": "laptop"]] as [String: Any]
+            runtime["status"] = "idle"
             item["runtime"] = runtime
             return item
         }

@@ -46,7 +46,7 @@ struct WorkspacePanesTests {
         let store = workspace.multiplexer
         #expect(store.visibleLayout?.allPanes.map(\.id) == ["session"])
         #expect(store.shellPane?.content.selectedShell != nil)
-        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
         #expect(try button.labelView().text().string() == "Open conversation")
         #expect(view.sessions.sessions.isEmpty)
     }
@@ -56,7 +56,7 @@ struct WorkspacePanesTests {
         let (workspace, view) = taskPanes()
         workspace.conversationError = "Conversation launcher unavailable"
         _ = try view.inspect().find(text: "Conversation launcher unavailable")
-        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
         #expect(try button.labelView().text().string() == "Retry")
     }
 
@@ -68,7 +68,7 @@ struct WorkspacePanesTests {
         let pane = try #require(store.sessionPane)
         store.setCollapsed(paneId: pane.id, collapsed: true)
         #expect(store.visibleLayout == nil)
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
     }
 
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")

@@ -231,10 +231,10 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
 
-    /// Owned working Tasks start their conversation when opened; others only show
-    /// history. An unassigned Task is backlog: nothing moves it until someone claims it.
+    /// Working Tasks start their conversation when opened, owned or not: opening
+    /// claims nothing. Unstarted and finished Tasks only show history.
     public var conversationIntent: SessionOpenIntent {
-        runtime?.status.isWorking == true && !isUnassigned ? .start : .reveal
+        runtime?.status.isWorking == true ? .start : .reveal
     }
 }
 

@@ -410,7 +410,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let prepares = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
-            if args.contains("resume") { _ = await prepares.next(); return encoded }
+            // The load also prepares the repository primary; only this Task's preparations count.
+            if args.contains("resume"), args.contains("--task") { _ = await prepares.next(); return encoded }
             if args.starts(with: ["desktop", "plan"]) { return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -1016,13 +1017,15 @@ struct WorkDestinationTests {
         sessionJSON["actions"] = sessionActionFixture(state: "detached")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let sessionID = record.id
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json")
         let root = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as! [String: Any]
         let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if args.prefix(2) == ["session", "resume"] {
+            // A primary's preparation names neither this Session nor its Task.
+            if args.prefix(2) == ["session", "resume"], args.contains(sessionID) || args.contains("--task") {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }

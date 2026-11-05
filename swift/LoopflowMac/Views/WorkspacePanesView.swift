@@ -24,9 +24,8 @@ struct WorkspacePanesView: View {
             } else {
                 PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
                                description: "Your panes are retained. Show a pane to continue.") {
-                    if workspace.key.kind == .task,
-                       !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
-                        TaskConversationButton(workspace: workspace, model: model)
+                    if !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
+                        ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
                     }
                     Button("Show pane") {
                         let pane = store.focusedPane
@@ -55,20 +54,22 @@ struct WorkspacePanesView: View {
     }
 }
 
-struct TaskConversationButton: View {
+/// The one action of a Work whose conversation is not open here: Rust's explicit
+/// Start after a refused reveal, Retry after a failure, else Open. The model
+/// routes it by the Work's kind.
+struct ConversationOpenButton: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
+    let sessions: SessionsStore
 
     var body: some View {
         let failed = workspace.conversationError != nil
         Button(workspace.conversationStart?.label ?? (failed ? "Retry" : "Open conversation")) {
-            Task {
-                if workspace.conversationStart != nil { await model.startTaskConversation(in: workspace) }
-                else { await model.openTaskConversation(workspace.key.id, intent: failed ? workspace.conversationIntent : nil) }
-            }
+            Task { await model.openConversation(in: workspace, store: sessions) }
         }
+        .buttonStyle(.bordered)
         .help(workspace.conversationStart?.help ?? (failed ? "Try opening this conversation again" : "Show the recorded conversation"))
-        .accessibilityIdentifier("task-open-conversation")
+        .accessibilityIdentifier("open-conversation")
     }
 }
 
@@ -772,32 +773,33 @@ struct SessionPaneView: View {
         }
     }
 
+    /// The Session slot before any conversation is open here. Every Work opens
+    /// its own; this pane says why it has not and offers the one next action.
+    /// An unstarted Task has no checkout and so no conversation: it offers Start.
     @ViewBuilder
     var emptyWorkspace: some View {
         if model.conversationIsOpening(workspace) {
             ProgressView("Opening conversation…")
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if workspace.key.kind == .task {
-            PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
-                description: workspace.conversationError ?? workspace.conversationStart?.help ?? "Open this Task’s recorded conversation.") {
-                TaskConversationButton(workspace: workspace, model: model)
-            }
+        } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
+            TaskStartOffer(model: model, task: task)
         } else {
-            // A primary opens on its own; this pane only shows why it has not and
-            // offers the retry. Close is the one deliberate way to stay here.
-            PaneEmptyState(title: workspace.conversationError == nil ? "Conversation not open" : "Conversation failed to open",
-                           systemImage: workspace.conversationError == nil ? "terminal" : "exclamationmark.triangle",
-                           description: workspace.conversationError
-                               ?? (workspace.conversationClosed ? "Closed here. Select it again to reopen the conversation."
-                                   : "Loopflow has not reported this repository yet.")) {
-                Button(workspace.conversationError == nil ? "Open conversation" : "Retry") {
-                    Task { await model.openPrimaryConversation(in: workspace, store: sessions) }
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("primary-open-conversation")
+            let failed = workspace.conversationError != nil
+            PaneEmptyState(title: failed ? "Conversation failed to open" : "Conversation not open",
+                           systemImage: failed ? "exclamationmark.triangle" : "terminal",
+                           description: _conversationNote) {
+                ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
             }
         }
+    }
+
+    private var _conversationNote: String {
+        if let error = workspace.conversationError { return error }
+        if let start = workspace.conversationStart { return start.help }
+        if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
+        if model.showsSavedWork { return WorkCache.savedReason }
+        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
     }
 
     /// The pane a Session occupies before its terminal exists here. Each state

@@ -74,7 +74,7 @@ changing the open workspace.
 The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
 
 Each Work keeps one pane layout and document store. Repository and Wave
-entry shows their retained conversation or an explicit **Open conversation** action.
+entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, current Project and
 full Task inventory, followed by their metrics. **Project history**, **Realign Projects…** and **Workflow**
 open the existing planning inspectors. The sidebar starts at 240 points wide;
@@ -111,9 +111,9 @@ shared two-minute/fifteen-minute lifecycle.
 
 Automatic opening creates the primary Session if absent and starts its native
 conversation if it has no history. Existing history resumes on the same Session.
-No Start or Open click is needed, including after relaunch. Unstarted and
-unassigned Tasks are backlog: they are not prefetched and never start a conversation
-on their own. Opening never launches a Graph, claims or starts a Task, runs the
+No Start or Open click is needed, including after relaunch, and a started Task
+opens whether or not anyone owns it. An unstarted Task has no checkout and no
+conversation: its Session slot offers **Start**, which runs its Workflow. Opening never launches a Graph, claims or starts a Task, runs the
 repository or Wave operator, or replays consumed input: with no request, the first
 turn of any primary reads its scope and reports where it stands. A failed
 automatic Start shows its error with **Retry**. A launch that ended with no saved
@@ -227,7 +227,7 @@ Search and terminal state stay with their retained pane when switching Work.
 Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
-remains available when the Task has no conversation open.
+remains available when the Work has no conversation open.
 Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
 recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
 Command-P in the file pane to search **scratch** and files changed from the

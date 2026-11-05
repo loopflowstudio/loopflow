@@ -775,13 +775,27 @@ final class WorkModel {
         }
     }
 
-    func startTaskConversation(in workspace: SessionsWorkspace) async {
-        guard workspace.conversationStart != nil, let found = task(id: workspace.key.id) else { return }
-        let remote = workspace.location?.machineId != workspace.localMachineId
-        let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo,
-                            machine: remote ? workspace.location?.machineId : nil,
-                            repository: remote ? workspace.key.repository : nil, conversation: true)
-        await openTaskLink(link, expectedTaskID: found.task.id, intent: .start)
+    /// The placeholder's one action for any Work whose conversation is not open
+    /// here: a Task's explicit Start after a refused reveal, a failed opening's
+    /// Retry on the workspace intent, or a reveal; a primary prepares in place.
+    /// Automatic opening runs through the warm queue, never through here.
+    func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
+        switch workspace.key.kind {
+        case .task:
+            if workspace.conversationStart != nil, let found = task(id: workspace.key.id) {
+                let remote = workspace.location?.machineId != workspace.localMachineId
+                let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo,
+                                    machine: remote ? workspace.location?.machineId : nil,
+                                    repository: remote ? workspace.key.repository : nil, conversation: true)
+                await openTaskLink(link, expectedTaskID: found.task.id, intent: .start)
+            } else {
+                await openTaskConversation(workspace.key.id, intent: workspace.conversationError != nil ? workspace.conversationIntent : nil)
+            }
+        case .repository, .wave:
+            guard let workspaceRegistry else { return }
+            if workspace.key.kind == .wave, workspace.wave == nil { workspace.wave = wave(id: workspace.key.id)?.wave.name }
+            await workspace.openPrimaryConversation(store: store, registry: workspaceRegistry)
+        }
     }
 
     /// Whether the Task's retained workspace shows a Session, as its pane would.
@@ -2038,11 +2052,6 @@ final class WorkModel {
     func taskSessions(_ id: String) -> [SessionRecord] {
         let runtimeID = task(id: id)?.task.runtime?.workId ?? id
         return (sessions.value ?? []).filter { $0.names(task: runtimeID) }
-    }
-
-    func openPrimaryConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
-        guard let workspaceRegistry else { return }
-        await workspace.openPrimaryConversation(store: store, registry: workspaceRegistry)
     }
 
     /// ⌘N: the Nth Task row on screen.

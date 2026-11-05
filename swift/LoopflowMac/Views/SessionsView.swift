@@ -148,7 +148,7 @@ final class SessionsWorkspace {
 
     /// Whether a pane shows a Session the store holds. A saved layout can name a
     /// headless Run or an aged-out Session the store doesn't hold, and that pane
-    /// renders as "No Task conversation open".
+    /// renders as "Conversation not open".
     func showsConversation(held: Set<String>) -> Bool {
         multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
     }
@@ -1557,7 +1557,8 @@ struct SessionsContentView: View {
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
-            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
+            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || fileTask?.task.conversationIntent == .start
+                || workspace.presentation.content == .terminals)
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1717,7 +1718,8 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
+        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || task?.task.conversationIntent == .start
+            || entry.presentation.content == .terminals
         return VStack(spacing: 0) {
             if let error = entry.retentionError {
                 Text("Workspace cleanup pending: " + error).font(.caption).textSelection(.enabled).padding(6)
@@ -1800,11 +1802,7 @@ struct SessionsContentView: View {
                 if let error = entry.conversationError {
                     HStack {
                         Text(error).textSelection(.enabled)
-                        Button("Retry") {
-                            if key.kind == .task, let work = key.reference { openTask(work) }
-                            else if let work = key.reference { openWaveConversation(work) }
-                            else { openRepositoryConversation() }
-                        }
+                        Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
                     }.foregroundStyle(theme.palette.text)
                         .padding(8).background(theme.terminal.background.color)
                 }
@@ -1872,30 +1870,6 @@ struct SessionsContentView: View {
 
     private func openSession(_ record: SessionRecord) {
         model.openSession(record, store: store)
-    }
-
-    private func openTask(_ work: WorkReference) {
-        let trace = UUID().uuidString
-        Perf.$inputTrace.withValue(trace) {
-            Perf.agentInput("task_click", task: work.id)
-            Task { await model.openTaskConversation(work.id) }
-        }
-    }
-
-    private func openRepositoryConversation() {
-        guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        model.select(nil)
-        navigation.content = .terminals
-        let entry = workspace
-        Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
-    }
-
-    private func openWaveConversation(_ work: WorkReference) {
-        guard let wave = model.wave(id: work.id)?.wave else { return }
-        model.select(work)
-        navigation.content = .terminals
-        let entry = workspace
-        Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
     }
 
     /// An independent conversation with Task context in the Task's checkout.

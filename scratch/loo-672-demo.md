@@ -13,7 +13,11 @@ requested the same behavior for Waves and repositories, then clarified “auto
 open everything *AND* prefetch everything”. Implement the expanded scope in
 `loo-672-load-prefetch.md`; return for demo. No shipping approval. The expanded
 scope is implemented at the tree (`loo-672-ready-conversations.md`, Primaries) and
-unproven natively; the November 5 candidates predate it.
+unproven natively; the November 5 candidates predate it. Cases added the same day
+for the next demo: a started Task nobody owns opens on load like any other, with no
+Claim/Start gate; an unstarted Task's pane offers Start and no conversation gate;
+Task, Wave and repository panes show the same placeholder when a conversation is
+not open.
 
 ## Current open candidate — November 5
 

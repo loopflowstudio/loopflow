@@ -39,18 +39,15 @@ input was already consumed but no native history survived, navigation does not
 replay it; the pane's **Try again** or `lf resume` does. The current headless run verifies preparation and ownership; rendered native acceptance
 remains with the Graph's demo step.
 
-Implementation assumption, November 4: automatic startup needs a Task owner.
-Unassigned working Tasks stay backlog, matching the Wave board and "nothing moves an
-unassigned Task"; selecting one still shows its existing Claim and Start offer. Jack
-said working Tasks without naming this case. To include them, drop the `isUnassigned`
-term in `RoadmapTask.conversationIntent` and show their conversation instead.
-
-Superseded November 5 (sixth concept review): Jack Heart's "auto open everything" and
-"once you've selected something, you want to see its session" cover started unassigned
-Tasks; opening claims nothing, so the Wave board's backlog rule is untouched. The
-implement iteration drops the `isUnassigned` term. Unstarted Tasks still start
-explicitly: placing their checkout starts the Task, which opening never authorizes.
-To exclude unassigned Tasks again, restore the term.
+Implementation assumption, November 4, superseded November 5 (sixth concept review):
+automatic startup was limited to owned Tasks by analogy to "nothing moves an
+unassigned Task". Jack Heart's "auto open everything" and "once you've selected
+something, you want to see its session" cover started unassigned Tasks, and the
+reading pass claims nothing, so `conversationIntent` is now working → Start and the
+Wave board's backlog rule is untouched. Unstarted Tasks still start explicitly:
+placing their checkout starts the Task, which opening never authorizes, so their
+Session slot offers Rust's Start. To exclude unassigned Tasks again, restore the
+`!isUnassigned` term.
 
 Concept-review assumption, November 4: a Task primary's first turn with no person's
 request reads and reports, whether Desktop opened it or someone ran `lf resume --task`.

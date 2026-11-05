@@ -8,7 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
+import uuid
 import time
 from pathlib import Path
 
@@ -18,12 +18,16 @@ from app_bundle import install_app_executable
 
 def main() -> None:
     source = Path(__file__).resolve().parents[1]
-    root = Path(tempfile.mkdtemp(prefix="loo-672-redemo-", dir="/tmp")).resolve()
-    repo = root / "repo"
+    root = Path.home() / ".lf/demos" / ("loo672-" + uuid.uuid4().hex[:10])
+    durable = root / "durable"
+    runtime = root / "runtime"
+    durable.mkdir(parents=True, mode=0o700)
+    runtime.mkdir(mode=0o700)
+    repo = durable / "repo"
     repo.mkdir()
-    home = root / "machine"
+    home = durable / "machine"
     home.mkdir()
-    bundle = root / "Loopflow LOO-672 Redemo.app"
+    bundle = runtime / "Loopflow LOO-672 Redemo.app"
     contents = bundle / "Contents"
     resources = contents / "Resources"
     resources.mkdir(parents=True)
@@ -73,9 +77,12 @@ def main() -> None:
                  ["config", "user.email", "loo672-demo@example.invalid"],
                  ["add", "."], ["commit", "-m", "Disposable review repository"]):
         run(["git", *args])
-    run(["git", "init", "--bare", str(root / "origin.git")])
-    run(["git", "remote", "add", "origin", str(root / "origin.git")])
+    run(["git", "init", "--bare", str(durable / "origin.git")])
+    run(["git", "remote", "add", "origin", str(durable / "origin.git")])
     run(["git", "push", "-q", "origin", "main"])
+
+    wave = json.loads(run([str(cli), "wave", "add", "Review", "--objective",
+        "Disposable conversation review for Jack Heart. Report status only; no project work.", "--json"]))
 
     # Nothing has launched a provider: load alone starts every conversation, from an
     # absent Session (Automatic conversation) or a metadata-only one naming its provider.
@@ -104,14 +111,15 @@ def main() -> None:
     stopped.update(run_status=status, status_before_load=task_state(stopped["id"]), ps_before_load=json.loads(run([str(cli), "ps", "--json"])))
     manifest = {"source_head": run(["git", "-C", str(source), "rev-parse", "HEAD"]).strip(),
                 "source_diff_sha256": hashlib.sha256(run(["git", "-C", str(source), "diff", "HEAD", "--", "rust", "swift"]).encode()).hexdigest(),
+                "durable_root": str(durable), "runtime_root": str(runtime), "wave": wave,
                 "candidate": str(bundle), "repository": str(repo), "machine": str(home), "tasks": tasks,
                 "exercised": "Fresh data with no Session; load must start every conversation without a click",
                 "expect": "Stopped run reports its status and the start-it comment, and `lf ps` shows no new Graph"}
-    (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (durable / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     # Drop inherited invocation markers without recording any credential values.
     # `--repo` names this data: the bundle's saved defaults would otherwise reopen
     # the repository of an earlier candidate with the same bundle identifier.
-    launch = root / "launch.sh"
+    launch = durable / "launch.sh"
     launch.write_text("#!/bin/zsh\ncd " + shlex.quote(str(repo)) + "\n"
         + "exec env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') "
         + "LF_HOME=" + shlex.quote(str(home)) + " LF_BIN=" + shlex.quote(str(cli)) + " "

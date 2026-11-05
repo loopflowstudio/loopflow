@@ -1,5 +1,80 @@
 # LOO-672 — Task conversation demo
 
+## Accepted native re-demo — November 5, 2026, 12:03 PST
+
+Built source `990fab54d3` with the fresh Rust CLI/FFI and Swift app. Jack Heart
+reviewed the opened candidate and said “ok lg2m ship it”, authorizing shipping.
+
+Before any Task or Wave selection, six native providers were live: the repository,
+the Review Wave, and four Tasks (two Claude, four Codex overall). Selecting Review
+showed its already completed reading pass; returning to repo retained the same
+conversation. Provider process identities were unchanged after selection. The
+Stopped run Graph IDs matched their prelaunch set. Both repo and Wave reported
+status without starting Task work. No Start/Open action was clicked.
+
+Evidence: `demo-evidence/all-work-manifest.json`, `all-work-load-ps.json`,
+`all-work-load-sessions.json`, `all-work-load-stopped.json`,
+`all-work-after-selection-ps.json`, `all-work-repo.png`, `all-work-wave.png`.
+The repo screenshot's old No session state is retained as
+`store-load-unselected.png`. Native startup and rendered selection pass; exact
+drafts, restart, Rex takeover, cold return and twenty-Task private memory were
+not measured in this review. The Wave reading pass could not find its authored
+files in its prepared checkout; it still read the shared Wave state. This is an
+observed context limitation, not proof of full Wave context fidelity.
+
+Jack asked the cache size: actual code keeps eight recent unfinished Task
+conversations across windows plus visible exceptions; repository/Wave primaries
+are outside that cap. Two concurrent preparations, no byte budget. This means
+Task prefetch is bounded rather than literally every Task in a large repository.
+This limitation was disclosed in conversation while shipping was authorized.
+
+### Demo retention and ownership
+
+- Durable root: `/Users/jack/.lf/demos/loo672-9cd2824ab8/durable` (private Machine, fixture repo, captured history and native
+  provider-history copies).
+- Runtime root: `/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime` (complete copied bundle and app log).
+- LF_HOME: `/Users/jack/.lf/demos/loo672-9cd2824ab8/durable/machine`
+- LF_BIN: `/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf`
+- App PID: 61597; bundle `com.loopflow.mac.redemo.loo672.9cd2824ab8`.
+- Native history copies for all six threads: `/Users/jack/.lf/demos/loo672-9cd2824ab8/durable/provider-history`. Original
+  native threads remain in the configured provider homes; these are copies, not
+  relocations. The private Machine's capture history also stays in the durable root.
+- Full owner/process identities and history paths: `/Users/jack/.lf/demos/loo672-9cd2824ab8/durable/owners.json` and
+  `demo-evidence/all-work-owners.json`.
+
+| Session | Provider | Owner PID | Agent PID | Owner lf process ID |
+|---|---|---|---|---|
+| 1b004602486944d4b40986ff3ab09c74 | claude | 67405 | 67760 | 09c729a6-e7fb-4afa-bf23-e84b230b11ed |
+| db27e9a514ea49a39f3a91d27bbd100e | codex | 67991 | 72330 | 2b1c3f90-f746-422b-916a-519ecc9daeb4 |
+| 6bdbe914830f4d6eb9edd1dd83869ae2 | claude | 68093 | 68504 | af4e3437-0c45-43da-81d5-fb10a7b6fb1c |
+| 3f0fabfb74b84607852ad459e06ed009 | codex | 66671 | 70857 | d279ee06-31e2-411a-9307-8523564a4c3d |
+| 6d8569454f304c01b8a7997593929862 | codex | 66255 | 70735 | b4929b24-17ff-46b1-97ec-55489e91f7d8 |
+| d312686713fe4bdd863c8e6d7c3ca1db | codex | 67363 | 71997 | 6319f3a5-6add-4b9f-8a34-d90a83ca40c4 |
+
+Reopen a private-Machine conversation from the fixture repository with:
+
+```sh
+cd /Users/jack/.lf/demos/loo672-9cd2824ab8/durable/repo
+env LF_HOME=/Users/jack/.lf/demos/loo672-9cd2824ab8/durable/machine LF_BIN='/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf' '/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf' resume <session-id>
+```
+
+Teardown is **not released**. No reviewing-assistant draft was typed or submitted.
+The automatic reading passes settled their own initial turns. Any input Jack
+entered remains unclassified until Jack answers the demo release question. Both
+roots and all owners stay intact. Approval to ship is not release of editor input.
+
+After Jack confirms every draft/request settled, use the resume command above
+for each exact Session and exit its provider normally. An owner with an edited
+draft remains running even after submission. If an eligible owner will not exit,
+first re-read `env LF_HOME=/Users/jack/.lf/demos/loo672-9cd2824ab8/durable/machine LF_BIN='/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf' '/Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf' ps --json` and verify its full process identity and PID
+against owners.json, then `kill -TERM <verified-owner-pid>` only for that owner.
+Confirm every demo owner has exited before removing the exact runtime directory:
+`rm -rf /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime`. Never delete the durable root. If any input
+is given up or any owner survives, retain runtime and owners and document it.
+
+Current runbook: `scratch/demo.html`. Earlier results below are historical.
+
+
 Full record of the November 4 failed reviews, corrections and earlier candidates:
 `78f4d8e6c0:scratch/loo-672-demo.md`. Jack Heart's decisions are in
 `questions.md`; the design is `loo-672-ready-conversations.md`; the runbook is
@@ -25,7 +100,7 @@ either attaches in the tile with the board still shown, on a Dashboard, the
 repository page or a Wave view (in the tree since the eighth- and ninth-review
 tile direction).
 
-## Current open candidate — November 5
+## Earlier candidate — November 5
 
 Jack Heart requested launch. Rebuilt Desktop at `eae0d31694` and prepared fresh
 private data at `/private/tmp/loo-672-redemo-346bmcxn`. Launched and raised its

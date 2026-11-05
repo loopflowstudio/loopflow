@@ -127,7 +127,11 @@ presented) re-enter the warm opener in place through
 `SessionsWorkspaceRegistry.openConversation(in:store:)`: Rust's Start after a
 refused reveal, else Retry on the workspace intent, readmitting a closed one, with
 the same Machine check and the Wave name `prefetchPrimary` left on the workspace;
-the Dashboard stays. Only a selected Task's pane opens through its link, which can
+the Dashboard stays. Proposed (ninth concept review, next implement): the in-place
+route keys on a presented board, `selectedViewPlan` or `navigation.waveView`, so a
+tile on the repository page or a Wave view attaches in place too; today `inTile`
+reads `selectedViewPlan` alone, which is nil for both, and those tiles' **Retry**
+navigates into the Task. Only a selected Task's pane opens through its link, which can
 resolve the checkout its Start creates; the error overlay above panes that are
 already showing (`conversationPanes`) is the same Retry through the same opener,
 not a second route. `WorkModel.conversationIsOpening` shows “Opening conversation…”
@@ -313,6 +317,32 @@ Implementation), the two tile views and `attachTaskConversation` deleted. The
 place; a second case shows a finished tile without history offering Rust's Start
 label after its refused reveal and starting in place. Open choices unchanged: the
 five demo questions stand as recorded defaults.
+
+Concept review, November 5 (ninth pass, against the eighth-review tile direction):
+the experience and its five concepts hold. One `ConversationPlaceholder` renders in
+pane (`WorkspacePanesView`) and tile (`DashboardView`), the two tile views and
+`attachTaskConversation` are gone, a primary's Retry and a Dashboard tile's button
+enter the registry opener, a closed selected Task readmits through deliberate focus
+on its link route, and an unknown Machine never reaches the placeholder because
+`SessionsRootView` shows "Workspace unavailable" or progress instead of the content.
+The rule "a tile opens in place while a view plan is presented" stops one board
+short. `presentWaveTiles` opens the repository page's and a Wave view's Task tiles
+through the same `openTiles` and `present(open:)` as a Dashboard, so they are in
+`visibleWork` with the same zoom control, but `selectedViewPlan` is nil for
+`.work(nil)` and `.work(wave)`; `inTile` is therefore false there and the shared
+placeholder's **Retry** routes through `openTaskConversation`, which selects the
+Task and leaves the board. The repository page is the one in Jack Heart's
+screenshot. Settled by the eighth pass's rule and the accepted "the zoom control is
+the way into the Work": no new product choice. Next implement: `inTile` is a
+presented board (`selectedViewPlan != nil || navigation.waveView != nil`) and a
+visible tile, with one `WorkDestinationTests` case where a repository-page or
+Wave-view tile whose opening failed retries in place and the board stays
+selected; `.entered` keeps the pane's navigating Retry. Checked and unchanged: a
+Wave's `machine` is its Tasks' default Machine, not where its primary lives, so
+prefetching every visible Wave's primary in the local checkout is right; the
+pane overlay's Retry above showing panes labels the same failure the same way and
+runs the same opener. Open choices unchanged: the five demo questions stand as
+recorded defaults.
 
 ## Verification
 

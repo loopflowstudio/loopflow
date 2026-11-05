@@ -99,7 +99,6 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         branch: String::new(),
         base_commit: String::new(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank,
@@ -253,18 +252,6 @@ impl SqliteStore {
             map_task_checkout(row, |id| Ok(identifiers.short(id)))
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
-    }
-
-    pub fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE tasks SET agent=?2, updated_at=?3 WHERE id=?1",
-            params![task_id.as_str(), agent, now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
     }
 
     pub(crate) fn request_task_completion(
@@ -1421,9 +1408,9 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             ],
         ),
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,agent=?7,branch=?8,base_commit=?9,parent_pr_id=?10,checkout_machine_id=?11 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,branch=?7,base_commit=?8,parent_pr_id=?9,checkout_machine_id=?10 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
     Ok(())
 }
 
@@ -1613,7 +1600,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
-    t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
+    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
     t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id,t.regressed_in
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
@@ -2059,7 +2046,7 @@ fn map_task_columns(
     Ok(Task {
         id,
 
-        revision: row.get::<_, i64>(13)? as u64,
+        revision: row.get::<_, i64>(12)? as u64,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
@@ -2072,22 +2059,21 @@ fn map_task_columns(
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
-        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(22)?)
-            .map_err(|error| invalid_column(22, error))?,
+        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
+            .map_err(|error| invalid_column(21, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
-        branch: row.get(14)?,
-        base_commit: row.get(15)?,
-        parent_pr_id: row.get::<_, Option<String>>(16)?.map(TaskPrId::from_raw),
-        agent: row.get(12)?,
+        branch: row.get(13)?,
+        base_commit: row.get(14)?,
+        parent_pr_id: row.get::<_, Option<String>>(15)?.map(TaskPrId::from_raw),
         created_at: crate::store::rows::unix_to_datetime(row.get(7)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(8)?),
-        rank: row.get(17)?,
-        assignee: row.get(18)?,
-        due_date: row.get(19)?,
-        regressed_in: row.get(23)?,
-        state: row.get(20)?,
-        completed_at: row.get(21)?,
+        rank: row.get(16)?,
+        assignee: row.get(17)?,
+        due_date: row.get(18)?,
+        regressed_in: row.get(22)?,
+        state: row.get(19)?,
+        completed_at: row.get(20)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -2434,12 +2420,12 @@ impl SqliteStore {
             insert_task_row(&tx, task)?;
         } else {
             tx.execute(
-                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
+                "UPDATE tasks SET worktree=?2,workspace_slug=?3,branch=?4,base_commit=?5,parent_pr_id=?6,checkout_machine_id=?7 WHERE id=?1",
                 params![
                     task.id.as_str(),
                     task.worktree.as_ref().map(|p| p.display().to_string()),
                     task.workspace_slug,
-                    task.agent, task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
+                    task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
                     task.worktree.as_ref().map(|_| super::durable::map_local_machine(&tx).map(|machine| machine.id.to_string())).transpose()?
                 ],
             )?;

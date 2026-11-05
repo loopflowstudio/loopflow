@@ -116,7 +116,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let completionPending: String?
     public let reason: String
     public let updatedAt: String
-    public let provider: String
+    public let provider: String?
     /// Who owns the Task on which Machine; absent when it is unowned.
     public let owner: TaskOwner?
 

@@ -20,7 +20,7 @@ fn tasks(selector: &str) -> String {
 fn checkout(cwd: &str) -> String {
     // Component boundaries avoid /repo.task matching /repo.task-other. Paths
     // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
-    format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
+    format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
 fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
@@ -123,7 +123,7 @@ fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<Str
             up(id, path) AS (SELECT id, cwd FROM f {unmoved}
                 UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),
             checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw
-                WHERE checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND worktree!=''),
+                WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND worktree!=''),
             links(session_id, graph) AS (
                 SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process
                     WHERE se.lf_process_id IN (SELECT id FROM f)
@@ -874,7 +874,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "{SHIPPING_SELECT} WHERE shipped_at IS NOT NULL
-             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')"
+             AND checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)"
         ))?;
         let rows = query
             .query_map([], read_shipping)?
@@ -1001,6 +1001,7 @@ mod tests {
                     skill: crate::graph::Skill::named("pursue"),
                     id: None,
                     interactive: false,
+                    interactive_name: None,
                     returns: None,
                     sources: Vec::new(),
                 },
@@ -1041,7 +1042,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                "UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
@@ -1241,7 +1242,7 @@ mod tests {
                 (&sibling, 2, "/repo/task-other"),
                 (&idle, 3, "/repo/idle"),
             ] {
-                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE route='local'))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
+                conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE is_local=1))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
             }
             for cwd in [
                 "/repo/task",
@@ -1299,7 +1300,7 @@ mod tests {
         .unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
         conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE is_local=1))", params![task.as_str(), project.as_str()]).unwrap();
         // The Session is bound, and its Processes ran elsewhere: only event
         // history associates them with the Task.
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
@@ -1481,7 +1482,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Retained Task',?3,1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Retained Task',?3,1,(SELECT id FROM machines WHERE is_local=1))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
             for (id, path, scope) in [
                 ("a-alias", alias.join("sub"), None),
                 ("b-subdir", repo.path().join("sub"), None),
@@ -1547,7 +1548,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE is_local=1))",params![task.as_str(),project.as_str()]).unwrap();
             for (id, scope, wave_id, cwd) in [
                 ("a-task", None, None, "/repo/task/sub"),
                 ("b-repo", Some("repository"), None, "/repo/task"),
@@ -1613,7 +1614,7 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/missing/task%_',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/missing/task%_',1,(SELECT id FROM machines WHERE is_local=1))", params![task.as_str(), project.as_str()]).unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
                 ("conversation", "/missing/task%_", false, false),
@@ -1790,7 +1791,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE route='local'))", params![child.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE is_local=1))", params![child.as_str(), project.as_str()]).unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
         // A nested checkout's work is also its enclosing Task's.

@@ -28,14 +28,6 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
-/// The shared native Codex stand-in: an app-server that records each turn
-/// and a terminal client that attaches to it.
-const CODEX_NATIVE: &str = concat!(
-    "#!/bin/sh\nexec /usr/bin/python3 '",
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/support/native_codex.py' \"$@\"\n"
-);
-
 /// The three ways to name a Task for a Graph: the Task entry, `--task`, and its
 /// worktree. All block in the foreground and reach the same checks.
 const LAUNCHES: [&[&str]; 3] = [
@@ -43,226 +35,6 @@ const LAUNCHES: [&[&str]; 3] = [
     &["-b", "--task", "INF-123", "graph", "proof"],
     &["-b", "graph", "proof"],
 ];
-
-#[test]
-fn explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children() {
-    let repo = TestRepo::new();
-    support::bind_task_planning(&repo);
-    repo.create_branch("agent-proof");
-    let home = tempfile::tempdir().unwrap();
-    let _env = support::EnvGuard::with_home(
-        &[
-            ("open", "#!/bin/sh\nexit 0\n"),
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            ("codex", CODEX_NATIVE),
-            (
-                "claude",
-                r#"#!/usr/bin/python3
-import json
-import os
-import subprocess
-import sys
-
-if '--version' in sys.argv:
-    print('fixture')
-    sys.exit(0)
-with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
-message = json.loads(sys.stdin.readline())
-message['session_id'] = 'agent-fixture'
-print(json.dumps(message), flush=True)
-print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'agent-fixture'}), flush=True)
-if os.environ.get('LF_AGENT_CHILD') != 'yes':
-    with open(os.path.join(os.environ['LF_HOME'], 'child-output'), 'w') as output:
-        subprocess.run(
-            [os.environ['LF_BIN'], '-b', 'skill', 'child', '-a', 'codex'],
-            env={**os.environ, 'LF_AGENT_CHILD': 'yes'},
-            stdout=output, stderr=subprocess.STDOUT, check=True, timeout=30,
-        )
-print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'agent-fixture', 'subtype': 'success', 'is_error': False, 'result': 'done'}), flush=True)
-for line in sys.stdin:
-    pass
-"#,
-            ),
-        ],
-        Some(home.path()),
-    );
-    let registered = support::register_task_without_pr(
-        home.path(),
-        &repo.path().canonicalize().unwrap(),
-        "agent-proof",
-        &repo.head_sha(),
-    );
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    connect_fixture_claude(home.path(), &registered.store);
-    runtime
-        .block_on(
-            registered
-                .store
-                .set_task_agent(&registered.task.id, "codex"),
-        )
-        .unwrap();
-    for (path, content) in [
-        (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
-        (
-            ".lf/skills/second.md",
-            "---\nagent: codex\n---\nSecond step.",
-        ),
-        (
-            ".lf/skills/child.md",
-            "---\nagent: codex\n---\nProvider-issued child.",
-        ),
-        (
-            ".lf/graphs/pursue.yaml",
-            "- step: {name: first, agent: codex}\n- graph: inner\n",
-        ),
-        (
-            ".lf/graphs/inner.yaml",
-            "- step: {name: second, agent: codex}\n",
-        ),
-        (
-            ".lf/graphs/feature.yaml",
-            "- graph: pursue\n- interactive: {name: demo, id: review}\n",
-        ),
-    ] {
-        let path = repo.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
-    }
-    repo.stage_all();
-    repo.commit("Define agent selection fixtures");
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    support::select_wave_graph(
-        repo.path(),
-        &store,
-        registered.task.wave_id.as_ref().unwrap(),
-        "feature",
-    );
-    // Direct Task binding used to prefer the saved Task agent over -a.
-    for args in [
-        vec![
-            "-b",
-            "--yolo",
-            "--chrome",
-            "on",
-            "--isolate",
-            "--task",
-            "INF-123",
-            "skill",
-            "first",
-            "-a",
-            "claude:sonnet",
-        ],
-        vec![
-            "-b",
-            "--yolo",
-            "--chrome",
-            "on",
-            "--isolate",
-            "-a",
-            "claude:sonnet",
-            "task",
-            "run",
-            "INF-123",
-            "pursue",
-        ],
-    ] {
-        let output = command(repo.path(), home.path(), &args).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {}\nchild: {}",
-            String::from_utf8_lossy(&output.stderr),
-            fs::read_to_string(home.path().join("child-output")).unwrap_or_default()
-        );
-    }
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let sessions = db
-        .prepare("SELECT skill, provider FROM agent_sessions ORDER BY skill")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(
-        sessions,
-        ["child", "child", "child", "first", "first", "second"]
-            .map(|skill| (skill.to_owned(), "claude".to_owned()))
-    );
-    assert_eq!(support::recorded_graphs(home.path()).len(), 1);
-    let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
-    assert_eq!(launches.lines().count(), 6);
-    for launch in launches.lines() {
-        let received: serde_json::Value = serde_json::from_str(launch).unwrap();
-        let args = received["args"].as_array().unwrap();
-        assert!(args.contains(&serde_json::json!("--chrome")), "{launch}");
-        assert!(
-            !args.contains(&serde_json::json!("--no-chrome")),
-            "{launch}"
-        );
-        assert!(
-            args.contains(&serde_json::json!("--dangerously-skip-permissions")),
-            "{launch}"
-        );
-        assert!(
-            args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
-            "{launch}"
-        );
-        assert_eq!(
-            Path::new(received["claude_home"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            home.path()
-                .join("accounts/claude/fixture")
-                .canonicalize()
-                .unwrap()
-        );
-    }
-
-    // A separate invocation with no -a keeps skill and step declarations.
-    let unbound = TestRepo::new();
-    for (path, content) in [
-        (
-            ".lf/skills/default-proof.md",
-            "---\nagent: claude:haiku\n---\nUse the declared agent.",
-        ),
-        (
-            ".lf/graphs/default-proof.yaml",
-            "- step: {name: default-proof, agent: 'claude:sonnet'}\n",
-        ),
-    ] {
-        let path = unbound.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
-    }
-    unbound.stage_all();
-    unbound.commit("Define default agent fixtures");
-    for owner in ["skill", "graph"] {
-        let output = command(
-            unbound.path(),
-            home.path(),
-            &["-b", "--isolate", owner, "default-proof"],
-        )
-        .env("LF_AGENT_CHILD", "yes")
-        .output()
-        .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let models = db
-        .prepare("SELECT model FROM agent_sessions WHERE skill='default-proof' ORDER BY model")
-        .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(models, ["haiku", "sonnet"]);
-}
 
 #[test]
 fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
@@ -920,13 +692,16 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     for (path, content) in [
         (".lf/skills/probe.md", "Probe."),
         (".lf/graphs/proof.yaml", "- step: {name: probe}\n"),
-        (
-            ".lf/wave/task-pr-tests/config.yaml",
-            "linear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
-        ),
     ] {
         repo.create_file(path, content);
     }
+    repo.create_file(
+        ".lf/wave/task-pr-tests/config.yaml",
+        &format!(
+            "id: {}\nlinear:\n  initiative: initiative-task-pr-tests\nagent: claude:opus\n",
+            registered.task.wave_id.as_ref().unwrap()
+        ),
+    );
     repo.stage_all();
     repo.commit("Set up the Wave once");
     for args in [
@@ -1394,6 +1169,7 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 #[test]
 fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     let task = GraphTask::without_wave_graph(&[]);
+    task.ok(&["set", "--global", "default_agent", "claude"]);
     // New Tasks branch from the remote's main, which carries the fixture Graphs.
     assert!(Command::new("git")
         .args(["push", "origin", "main"])
@@ -2243,14 +2019,11 @@ for line in sys.stdin:
 fn shipping_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task
 }
 
@@ -2608,14 +2381,11 @@ sys.exit(3)
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(!output.status.success());
     // The ship's Task run started its failing Graph three times, then gave up.
@@ -2689,14 +2459,11 @@ for line in sys.stdin:
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
     let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            task.registered
-                .store
-                .set_task_agent(&task.registered.task.id, "claude"),
-        )
-        .unwrap();
+    crate::config::files::update(&task.home.path().join("config.yaml"), |value| {
+        value["agent"] = "claude".into();
+        Ok(())
+    })
+    .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
         "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",

@@ -107,9 +107,14 @@ team-wide repo configuration merely to mirror `command -v` on this machine.
 Resolve repo agent configuration conservatively:
 
 - Preserve a valid existing `agent` override.
-- An absent `agent` is valid: Loopflow then uses the first of Codex, Claude,
-  OpenCode and Pi installed on this Machine. Do not write `agent` to work around a
-  missing harness.
+- An absent choice or fallback selects automatically only when exactly one
+  supported harness is installed. With multiple installed harnesses and no
+  applicable preference, ask which to use as the personal default, then save
+  that explicit choice with `lf set --global default_agent <harness>`. Explain
+  that a repository or step's `agent` choice can override this fallback. Never
+  infer a preference from installation order or the agent running this setup.
+  The initial setup conversation can be launched with `lf -a <harness> init`.
+  With no present user, leave the choice unresolved and report that command.
 - Change `agent` or `supported_harnesses` only when the user explicitly wants
   a team-wide policy. Ask whether the choice is repo-wide or Machine-local before
   writing it.
@@ -130,8 +135,9 @@ exclusion patterns, permission bypasses, model pins, IDE settings, or release
 policy without evidence that this repository needs them.
 
 Personal launch preferences belong in `~/.lf/config.yaml`. They are optional
-and never block initialization. Discuss them only after the distributed path
-works; never modify them for a parent reviewer.
+when selection is unambiguous. Resolve a missing harness choice before proving
+a launch; unrelated read-only setup still works. Never modify personal
+preferences for a parent reviewer.
 
 ## 3. Connect shared truth for the intended path
 

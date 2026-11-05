@@ -95,7 +95,7 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<()> {
 pub(crate) fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
     anyhow::ensure!(config.write_scope != crate::agent::AgentWriteScope::Worktree || config.execution_boundary.is_some(), "Pi has no provider-only worktree sandbox; use a managed Task in an OS environment with the required boundary");
     let mut args = Vec::new();
-    if let Some(model) = crate::config::parse_agent(config.agent()).1 {
+    if let Some(model) = crate::config::parse_agent(config.agent()?).1 {
         args.extend(["--model".into(), model]);
     }
     if let Some(path) = context_file {

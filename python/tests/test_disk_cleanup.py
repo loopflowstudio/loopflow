@@ -570,6 +570,7 @@ def test_launchd_install_replaces_only_old_cron_and_runs_mechanical_entrypoint(
     assert cleanup._schedule("install") == 0
     payload = plistlib.loads(schedule.read_bytes())
     assert payload["StartCalendarInterval"] == {"Minute": 17}
+    assert payload["ProcessType"] == "Standard"
     assert (cleaner.home / "cron").read_text() == "0 0 * * * keep-me\n"
     args = payload["ProgramArguments"]
     assert args[:2] == ["/usr/bin/env", "-i"]
@@ -777,11 +778,13 @@ def test_activity_identifies_candidate_owner_not_repository_neighbor(cleaner, de
 
 
 @pytest.mark.parametrize("force", [False, True])
-def test_stops_real_demo_store_owner_and_descendant_before_removal(
+def test_stops_real_demo_owner_and_descendant_and_preserves_separate_history(
     cleaner, monkeypatch, force
 ) -> None:
     demo = cleaner.home / ".lf-machine/demos/test"
-    _write(demo / "store.db", 3)
+    _write(demo / "runtime", 3)
+    history = cleaner.home / ".lf-machine/demo-history/test/store.db"
+    _write(history, 3)
     marker = demo / ".disposable-coding-demo"
     marker.write_text("disposable runtime; evidence stored elsewhere")
     _age(marker, 3)
@@ -793,12 +796,14 @@ def test_stops_real_demo_store_owner_and_descendant_before_removal(
     code = (
         "import subprocess, sys, signal, time; "
         + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if force else "")
-        + "f=open(sys.argv[1], 'rb'); "
+        + "f=open(sys.argv[1], 'rb'); history=open(sys.argv[2], 'rb'); "
         "child=subprocess.Popen(['/bin/sleep', '600']); "
         "print(child.pid, flush=True); time.sleep(600)"
     )
     owner = subprocess.Popen(
-        [sys.executable, "-c", code, str(demo / "store.db")], stdout=subprocess.PIPE, text=True
+        [sys.executable, "-c", code, str(demo / "runtime"), str(history)],
+        stdout=subprocess.PIPE,
+        text=True,
     )
     neighbor = subprocess.Popen(["/bin/sleep", "600"], cwd=cleaner.home)
     try:
@@ -808,6 +813,7 @@ def test_stops_real_demo_store_owner_and_descendant_before_removal(
         assert cleaner.run() == 0
         owner.wait(timeout=3)
         assert not demo.exists()
+        assert history.read_bytes() == b"x" * 4096
         assert neighbor.poll() is None
         stopped = {item["pid"] for item in cleaner.stopped}
         assert owner.pid in stopped and child in stopped

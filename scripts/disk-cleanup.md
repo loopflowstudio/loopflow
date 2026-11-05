@@ -13,8 +13,9 @@ and its dependencies into `~/.lf-machine/maintenance/disk-cleanup/versions/`, so
 Task checkout can disappear without breaking scheduling. Reinstall explicitly to
 update that copy. It preserves a running job, restores the prior job/configuration
 on bootstrap failure, and removes only the predecessor's marked cron entry.
-Launchd uses a clean environment and macOS's system Python, without a model or
-package resolution. The schedule and private configuration belong to this machine.
+Launchd uses a clean environment, macOS's system Python and the Standard resource
+policy. Background throttling can starve process inspection under build load.
+The schedule and private configuration belong to this machine.
 
 Ignored, untracked `target`, `.build`, `DerivedData`, `node_modules` and `.venv`
 roots anywhere under `~/src` (`LOOPFLOW_SRC` overrides it) are candidates. Nested
@@ -110,8 +111,9 @@ estimate of reclaimable space. Roots can overlap, and APFS clones and concurrent
 growth and free-space change must not be equated or summed as exclusive usage.
 
 The shared nonblocking recovery lock releases on exit or death. Candidate
-inspection takes at most thirty seconds, commands two minutes, and each run
-thirty minutes (`--budget-seconds` overrides it). Failed cleanup steps exit nonzero;
+inspection takes at most thirty seconds; commands, including process and open-file
+inspection, take at most two minutes, capped by the remaining run budget.
+Each run has thirty minutes (`--budget-seconds` overrides it). Failed cleanup steps exit nonzero;
 partial removals get no allocation credit. Activity inspection failure stops
 deletion. This cleaner's own text/removal logs rotate at 10 MiB; durable product
 history is untouched. All inventories and receipts stay local, never in the PR.

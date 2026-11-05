@@ -770,12 +770,16 @@ mod compatibility_tests {
     #[test]
     fn an_older_candidate_selects_a_store_a_newer_build_migrated() {
         let directory = tempfile::tempdir().unwrap();
-        for sql in [
+        for (index, sql) in [
             "ALTER TABLE waves ADD COLUMN colour TEXT;",
             "ALTER TABLE waves DROP COLUMN promoted_at;",
-        ] {
-            let store = directory.path().join("loopflow.db");
-            let _ = std::fs::remove_file(&store);
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // A fresh path per case: Linux reuses a deleted file's inode, and two
+            // stores at one path, inode and schema cookie share a cached schema.
+            let store = directory.path().join(format!("loopflow-{index}.db"));
             let connection = rusqlite::Connection::open(&store).unwrap();
             crate::store::migrations::apply_sqlite(&connection).unwrap();
             let newer = crate::store::migrations::apply_newer_migration(&connection, sql).unwrap();

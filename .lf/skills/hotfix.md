@@ -121,9 +121,12 @@ bundle and its helper reports the same build and opens the store.
 
 ## 6. Roll over stale processes
 
-Running lf processes keep their binary until they exit. Count them by binary:
+Running lf processes keep their binary until they exit. Record what runs before
+the promote and after it; the promote itself prints the live processes before it
+changes anything and its result last:
 
 ```bash
+lf monitor rollover --dry-run    # what would move, what stays and why
 ps -axo comm= | grep -E '/\.lf/bin/lf-|Loopflow\.app/Contents/MacOS/lf' | sort | uniq -c
 ```
 

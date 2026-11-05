@@ -41,6 +41,13 @@ immutable. Fix it with a new forward migration, even when it merged an hour ago.
 | `~/.lf/loopflow.db`, ordinary open | nothing; refuses when this build knows a migration the store lacks |
 | `~/.lf/loopflow.db`, install switch | pending merged migrations, after a backup, under the promotion lock |
 
+`lf install` prints the store advance and every live lf process by binary before
+it changes anything, then proceeds; its result prints last, after skill sync, so a
+`tail` of the output shows it. Processes on the previous lf keep their binary and
+read the store the install leaves behind; a Session on one comes back through
+`lf resume` once its client is stopped and that lf has exited. The install
+records itself as a Process once the store has settled.
+
 To try schema work, run the branch's lf with a private `LF_HOME`. It starts
 empty: the branch's migrations build a fresh store there, apart from the
 Machine's data. Editing an unmerged migration that a private Home already
@@ -74,11 +81,16 @@ Machine claim. Historical PIDs are evidence only; they must never be signaled lo
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
-database. The filename carries the previously applied migration and a fingerprint
-of the complete ledger plus product schema, so a backup from another branch-local
-history cannot be mistaken for the state being repaired. Once a migration
-commits, the two newest backups with that fingerprinted name stay and older ones
-are removed; a file named any other way is never touched.
+database as `loopflow.db.backup-<previous migration>-<16 hex>`, never under
+`~/.lf/backups`. The name carries the previously applied migration and a
+fingerprint of the complete ledger plus product schema, so a backup from another
+branch-local history cannot be mistaken for the state being repaired. Once a
+migration commits, only the clone it made stays. When the install settles it goes
+too, unless a process still runs an older build (`rollover::inventory()`, the list
+`lf doctor` and `lf install` print): that process reads the live store, and the
+clone is the restore point for the generation its build was written against, so
+the clone stays while such a process can still show the migration lost something,
+until the next install's commit. A file named any other way is never touched.
 
 ## Older lf keeps opening a newer store
 
@@ -87,17 +99,41 @@ migrated has more ledger rows than this build knows; this build checks the rows
 it knows and runs against the superset. Nothing is compared past its own
 frontier, and nothing a migration does decides whether an older lf opens.
 
-So a migration must leave older lf working. Change the schema in stages:
+So a migration must leave older lf working: destructive change is staged.
+Jack Heart's rule (2026-10-27): expand, wait for older lf to exit, export, drop.
+A new migration is additive against `origin/main`'s schema, or it is a contract:
 
-1. **Expand.** Add the new table or column. New columns are nullable or defaulted.
-   Ship the code that writes both shapes and reads the new one.
-2. **Wait 30 days** after the expand merges, so old lf processes exit.
-3. **Contract.** Export what the drop loses, delete the old code and the data,
-   then drop the table or column.
+```sql
+-- expand: wave_hue_colour                 # the migration that merged the new shape
+-- exports: ~/.lf/exports/waves-hue.json   # where the preflight wrote what this drops
+ALTER TABLE waves DROP COLUMN hue;
+```
 
-Rename and reshape are expand then contract. A rebuild that keeps every column is
-additive for readers. A process older than the window meets a dropped column as
-an error from the one statement that reads it; the rest of the store still answers.
+An expand step with no SQL to add, because the new shape is files or code as
+`settings_authority`'s was, is a migration whose body is only a comment saying
+what the store stopped being the authority for. It merges, starts the clock, and
+the ledger records it.
+
+`check_migrations.py` applies the branch's migrations over `origin/main`'s and
+compares shapes. Additive: every table keeps its columns (a rebuild that changes a
+CHECK and copies every column counts), every view keeps its columns (its definition
+may change), new columns are nullable or defaulted, and no unique index an older
+writer can violate joins an existing table. An older writer's row carries every new
+column's default, so a unique index over only new columns whose `WHERE` is false for
+those defaults never sees it. Trigger and index changes and data writes are additive
+too. A type change, a column made `NOT NULL` or a required column without a default fails:
+stage it as an expand now and a contract later. A contract may drop tables, views
+and their columns that its expand step superseded, once that step has been on
+`origin/main` for the staging window (`STAGING_DAYS` in `check_migrations.py`), and
+it names where its preflight exported the data before the SQL ran. The settings
+cutover is the template: `config::migrate::preflight` writes `settings-cutover.json`
+under the migration fence, so an interrupted upgrade still has every document it
+replaced.
+The check measures; nothing at runtime refuses to install or migrate.
+
+Rename and reshape are expand then contract. A process older than the window
+meets a dropped column as an error from the one statement that reads it; the
+rest of the store still answers.
 
 New code must accept what an older writer leaves behind. While older lf still
 runs, it writes rows without the new columns, so read `NULL` there sensibly, and
@@ -118,6 +154,9 @@ f5981e removes the write 30 days after that release.
   released batch appears.
 - A slug never reuses a released migration's name.
 - Runtime SQL names its columns: no positional `INSERT ... VALUES`, no `SELECT *`.
+- An unmerged migration is additive against `origin/main`'s schema, or a contract
+  whose `-- expand:` step merged `STAGING_DAYS` ago and whose `-- exports:` names
+  where the dropped data went.
 
 ## What a database can be told
 

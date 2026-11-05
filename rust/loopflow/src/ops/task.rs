@@ -721,8 +721,8 @@ pub(crate) fn select_task_run(
             ))
         })?),
         // A run that stopped starts again from where it began, or from the
-        // step a limit held when it ended: the steps before it are done.
-        (None, Some((cursor, _))) => limit_recovery::held(&store.sqlite, &task.id)
+        // step it was waiting at on a usage limit: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
             .map_err(task_error)?
             .and_then(|(step, _)| graph.find(&step))
             .or_else(|| graph.place_of(cursor)),

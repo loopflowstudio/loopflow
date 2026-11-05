@@ -531,10 +531,6 @@ pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
     })
 }
 
-/// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
-/// After a failure the restart waits, longer each time in a row; a process
-/// that ended without failing (killed, interrupted) restarts at once.
 /// Start `lf <args>` in `worktree`, outliving this process.
 pub(super) fn start_lf_in(worktree: &std::path::Path, args: &[&str]) -> OpsResult<()> {
     let context = crate::os_process::execution_context().map_err(task_error)?;
@@ -546,6 +542,10 @@ pub(super) fn start_lf_in(worktree: &std::path::Path, args: &[&str]) -> OpsResul
     Ok(())
 }
 
+/// Start `lf --task ISSUE ship` again for each shipping Task checked out on
+/// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
+/// After a failure the restart waits, longer each time in a row; a process
+/// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;

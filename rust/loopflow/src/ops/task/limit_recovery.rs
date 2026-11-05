@@ -1,19 +1,24 @@
 //! A step waiting out a usage limit does so in its own Process. When that
 //! Process ends first (a restart, a reboot), the wait's record says which step
-//! the run stood at. The run starts again there once an account can take it,
-//! so the steps before it stay done.
+//! the run was waiting at. `lf task run` starts the run again at that step, so
+//! the steps before it stay done; the recovery sweep does so by itself once the
+//! wait is over, for a Task that `restarts_by_itself`.
 
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
+use crate::ops::task_execution::task_execution_blockers;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 
 use super::super::error::OpsResult;
 use super::{block_on_task, task_error, task_store};
 
-/// The step of the Task's latest Graph that ended waiting on a limit, and when
-/// that wait ends. It is where `lf task run` picks up.
-pub(crate) fn held(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<(String, i64)>> {
+/// The step of the Task's latest Graph whose Process ended waiting on a limit,
+/// and when that wait ends. It is where `lf task run` picks up.
+pub(crate) fn waiting_on_limit(
+    store: &SqliteStore,
+    task: &TaskId,
+) -> StoreResult<Option<(String, i64)>> {
     let Some(graph) = store.task_graphs(task)?.pop() else {
         return Ok(None);
     };
@@ -29,9 +34,18 @@ pub(crate) fn held(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<(St
         .map(|retry_at| (graph.label(step), retry_at)))
 }
 
-/// Start again every owned Task's run that a limit held and whose wait is over.
-/// A shipping Task's own restart does it, through the same `held`.
-pub(crate) fn restart_held_runs() -> OpsResult<()> {
+/// Whether the sweep starts a waiting run again without anyone asking: the
+/// Task is assigned, unfinished, and nothing else still executes for it.
+/// Status promises an automatic restart only when this holds.
+pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResult<bool> {
+    Ok(store.task_owned(task).map_err(task_error)?
+        && !store.task_state(task).map_err(task_error)?.is_terminal()
+        && task_execution_blockers(store, task)?.is_empty())
+}
+
+/// Start again every waiting run whose wait is over and that `restarts_by_itself`.
+/// A shipping Task's own restart does it, through the same `waiting_on_limit`.
+pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
         let now = crate::store::rows::now_unix();
@@ -42,22 +56,15 @@ pub(crate) fn restart_held_runs() -> OpsResult<()> {
         let shipping = store.sqlite.local_shipping_tasks().map_err(task_error)?;
         for id in waited {
             if shipping.iter().any(|(shipped, _)| *shipped == id)
-                || store
-                    .sqlite
-                    .task_state(&id)
-                    .map_err(task_error)?
-                    .is_terminal()
-                || !store.sqlite.task_owned(&id).map_err(task_error)?
+                || !restarts_by_itself(&store.sqlite, &id)?
             {
                 continue;
             }
-            let Some((_, retry_at)) = held(&store.sqlite, &id).map_err(task_error)? else {
+            let Some((_, retry_at)) = waiting_on_limit(&store.sqlite, &id).map_err(task_error)?
+            else {
                 continue;
             };
-            if retry_at > now
-                || !crate::ops::task_execution::task_execution_blockers(&store.sqlite, &id)?
-                    .is_empty()
-            {
+            if retry_at > now {
                 continue;
             }
             let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
@@ -67,7 +74,10 @@ pub(crate) fn restart_held_runs() -> OpsResult<()> {
                 continue;
             };
             super::ship::start_lf_in(worktree, &["task", "run", &task.identifier])?;
-            tracing::info!("restarted the run a limit held for {}", task.identifier);
+            tracing::info!(
+                "restarted the run waiting on a limit for {}",
+                task.identifier
+            );
         }
         Ok(())
     })

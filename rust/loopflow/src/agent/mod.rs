@@ -428,7 +428,9 @@ fn resolve_account_route_blocking(
     if route.is_none() && launch.execution_boundary.is_some() {
         return Err(crate::provider_account::ProviderAccountError::NoEligibleAccount {
             provider,
-            accounts: "a connected managed account is required by this execution boundary; ambient credentials cannot satisfy it".to_string(), retry_at: None, });
+            accounts: "a connected managed account is required by this execution boundary; ambient credentials cannot satisfy it".to_string(),
+            retry_at: None,
+        });
     }
     Ok(route)
 }

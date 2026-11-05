@@ -260,7 +260,7 @@ latest never grants primary authority. The graph is fixed when taken up. `lf tas
 starts the run as a child Graph process, again when one fails, and that Graph writes
 where it left the Task: before the interactive step it stopped at, or at `end`. A run
 that stops leaves the Task on it, and the next `lf task run` starts that run again from
-where it began. `lf task move --wave/--no-wave` changes membership without transferring
+where it began, except at a step that ended waiting on a usage limit, which it restarts at. `lf task move --wave/--no-wave` changes membership without transferring
 execution. No command approves or completes a step.
 Taskless execution uses the same Graph runner. A Graph is one lf process and the step
 Processes it starts; its id is the Graph process ID. The Graph process holds the cursor and

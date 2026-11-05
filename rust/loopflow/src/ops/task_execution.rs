@@ -26,7 +26,7 @@ pub enum TaskExecutionState {
     Starting,
     Running,
     Stalled,
-    /// A usage limit holds its step until an account frees up. It goes on by itself.
+    /// Its step is waiting out a usage limit until an account frees up.
     Waiting,
     Blocked,
     Unknown,
@@ -99,7 +99,14 @@ pub(crate) async fn execution_of_latest_graph(
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
-        apply_limit_recovery(&mut snapshot, recovery);
+        apply_limit_recovery(&mut snapshot, recovery, &task.identifier, || {
+            crate::ops::task::limit_recovery::restarts_by_itself(sqlite, &task.id).unwrap_or_else(
+                |error| {
+                    tracing::warn!("limit recovery for {}: {error}", task.identifier);
+                    false
+                },
+            )
+        });
     }
     if snapshot.state == TaskExecutionState::Running {
         if let (Some((session, _, captured)), Some(step)) = (input, step) {
@@ -119,9 +126,15 @@ pub(crate) async fn execution_of_latest_graph(
     Ok((snapshot, Some(graph.detail(entry))))
 }
 
-/// A step recovering from a limit says so. One that died waiting holds the same
-/// promise: the run starts again at it once the wait is over.
-fn apply_limit_recovery(snapshot: &mut TaskExecutionSnapshot, recovery: &AgentLimitRecovery) {
+/// A step recovering from a limit says so. One that died waiting is where the
+/// next `lf task run` starts; status promises that happens by itself only when
+/// the recovery sweep would do it (`restarts_by_itself`).
+fn apply_limit_recovery(
+    snapshot: &mut TaskExecutionSnapshot,
+    recovery: &AgentLimitRecovery,
+    issue: &str,
+    restarts_by_itself: impl FnOnce() -> bool,
+) {
     let label = snapshot.step.as_deref().unwrap_or("Step");
     let provider = &recovery.provider;
     let reason = &recovery.reason;
@@ -139,10 +152,12 @@ fn apply_limit_recovery(snapshot: &mut TaskExecutionSnapshot, recovery: &AgentLi
         }
         (TaskExecutionState::Blocked, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
-            snapshot.reason = format!(
-                "{label} ended while waiting for {provider} capacity; the run starts again at it after {}",
-                crate::lf::output::format_time(retry_at)
-            );
+            let after = crate::lf::output::format_time(retry_at);
+            snapshot.reason = if restarts_by_itself() {
+                format!("{label} ended while waiting for {provider} capacity; the run starts again at it by itself after {after}")
+            } else {
+                format!("{label} ended while waiting for {provider} capacity until {after}; `lf task run {issue}` starts the run again at it")
+            };
         }
         _ => {}
     }
@@ -295,24 +310,43 @@ mod tests {
     #[test]
     fn status_tells_waiting_retrying_and_a_plain_failure_apart() {
         let mut waiting = snapshot(TaskExecutionState::Running);
-        apply_limit_recovery(&mut waiting, &recovery(Some(1_900_000_000)));
+        apply_limit_recovery(
+            &mut waiting,
+            &recovery(Some(1_900_000_000)),
+            "LOO-1",
+            || true,
+        );
         assert_eq!(waiting.state, TaskExecutionState::Waiting);
         assert!(waiting.reason.contains("waiting for claude capacity until"));
 
         let mut retrying = snapshot(TaskExecutionState::Running);
-        apply_limit_recovery(&mut retrying, &recovery(None));
+        apply_limit_recovery(&mut retrying, &recovery(None), "LOO-1", || true);
         assert_eq!(retrying.state, TaskExecutionState::Running);
         assert!(retrying.reason.contains("another claude account"));
 
         // A step that moved accounts and then failed for its own reasons failed.
         let mut failed = snapshot(TaskExecutionState::Blocked);
-        apply_limit_recovery(&mut failed, &recovery(None));
+        apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
 
         let mut ended = snapshot(TaskExecutionState::Blocked);
-        apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)));
+        apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)), "LOO-1", || true);
         assert_eq!(ended.state, TaskExecutionState::Waiting);
-        assert!(ended.reason.contains("starts again at it"));
+        assert!(ended.reason.contains("starts again at it by itself"));
+
+        // An unassigned Task's run waits for someone to start it.
+        let mut unassigned = snapshot(TaskExecutionState::Blocked);
+        apply_limit_recovery(
+            &mut unassigned,
+            &recovery(Some(1_900_000_000)),
+            "LOO-1",
+            || false,
+        );
+        assert_eq!(unassigned.state, TaskExecutionState::Waiting);
+        assert!(!unassigned.reason.contains("by itself"));
+        assert!(unassigned
+            .reason
+            .contains("`lf task run LOO-1` starts the run again at it"));
     }
 
     #[test]

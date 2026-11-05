@@ -1390,7 +1390,7 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
 }
 
 #[test]
-fn a_run_a_limit_held_starts_again_at_that_step_without_replaying_the_done_ones() {
+fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held"]);
     assert!(!failed.success(), "{}", failed.text);
@@ -1410,7 +1410,7 @@ fn a_run_a_limit_held_starts_again_at_that_step_without_replaying_the_done_ones(
     let steps = steps_of_latest_graph();
     assert_eq!(steps.len(), 2, "{steps:?}");
     // The step's Process ended waiting on a limit; the wait is over.
-    let held: String = db
+    let waiting: String = db
         .query_row(
             "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
                 (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
@@ -1421,7 +1421,7 @@ fn a_run_a_limit_held_starts_again_at_that_step_without_replaying_the_done_ones(
         .unwrap();
     db.execute(
         "INSERT INTO agent_limit_recoveries VALUES(?1,'claude','rejected: five_hour',1,1)",
-        [&held],
+        [&waiting],
     )
     .unwrap();
     assert!(task

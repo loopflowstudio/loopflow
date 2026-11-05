@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>c0b373 concept review</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fdfdfb; --muted:#666; --rule:#ddd; --prop:#0a6b3d; --cur:#8a4b00; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e4; --bg:#151515; --muted:#9a9a9a; --rule:#333; --prop:#5fd39a; --cur:#e0a35a; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Helvetica Neue", sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
+  h1 { font-size:1.5rem; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.5rem 0 .75rem; }
+  code, pre { font:.88em/1.5 ui-monospace, Menlo, monospace; }
+  pre { overflow-x:auto; padding:.9rem 1rem; border-left:3px solid var(--rule); margin:1rem 0; }
+  .now { border-left-color:var(--cur); }
+  .next { border-left-color:var(--prop); }
+  .tag-now { color:var(--cur); } .tag-next { color:var(--prop); }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.95rem; }
+  td, th { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
+  ol li { margin:.6rem 0; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Limit recovery: one promise, said the same way everywhere</h1>
+  <p>Task c0b373 · concept-review step (headless) · November 5, 2026</p>
+  <p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>ops/task/limit_recovery.rs</code>, <code>ops/task_execution.rs</code>, <code>ops/task.rs</code>, <code>AGENTS.md</code>, <code>docs/architecture-reference.md</code>, <code>docs/subscriptions.md</code></p>
+</header>
+
+<p>No decision is needed from this page. It records three corrections the accepted design already implies and sends them to implement. The open policy questions stay with the demo/review step.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+  <tr><th>What you do or see</th><th>Concept</th><th>Owner</th></tr>
+  <tr><td>A step's account runs out; it keeps going</td><td>account cools, step moves</td><td><code>_run_with_transient_retries</code>, <code>agent_limit_recoveries.retry_at = NULL</code></td></tr>
+  <tr><td>Every account is cooling; <code>lf task status</code> says Waiting</td><td>Waiting</td><td><code>TaskExecutionState::Waiting</code>, <code>retry_at</code> set</td></tr>
+  <tr><td>The Machine restarts during a wait</td><td>run restarts at the waiting step</td><td><code>limit_recovery::held</code>, <code>restart_held_runs</code>, <code>select_task_run</code></td></tr>
+  <tr><td>An open Claude Session hits a limit</td><td>login moves once; next message continues</td><td><code>StopFailure</code> hook → <code>record_rate_limit_signal</code></td></tr>
+</table>
+
+<h2>The mismatch: the restart says one thing, the contract another</h2>
+<p class="tag-now">Now, in AGENTS.md and the architecture reference:</p>
+<pre class="now">A stopped run leaves the Task on it, and the next
+`lf task run` starts it again from where it began.</pre>
+<p class="tag-now">Now, in the code:</p>
+<pre class="now">(None, Some((cursor, _))) =&gt; limit_recovery::held(&amp;store.sqlite, &amp;task.id)
+    .and_then(|(step, _)| graph.find(&amp;step))
+    .or_else(|| graph.place_of(cursor)),</pre>
+<p class="tag-next">Proposed contract text:</p>
+<pre class="next">… starts it again from where it began, or from the step
+a usage limit held when its Process ended.</pre>
+<p>This exception only. Restarting at any failed step is LOO-435's work.</p>
+
+<h2>Two smaller corrections</h2>
+<p><strong>One name.</strong> The person sees <em>Waiting</em>; the code says <code>held</code>. <span class="tag-next">Proposed:</span> <code>waiting_step</code>, <code>restart_waiting_runs</code>.</p>
+<p><strong>Status claims only what will happen.</strong> A step that ended mid-wait reads <q>the run starts again at it after 14:00</q>. The sweep skips unowned, finished and blocked Tasks, so on an unassigned Task nothing restarts it. <span class="tag-next">Proposed:</span> the sweep and the status text share one predicate. When it fails, the status says the next <code>lf task run</code> starts at that step.</p>
+
+<h2>Still open for Jack at review</h2>
+<ol>
+  <li>Should <code>seven_day_overage_included</code> cool the whole account? a) yes, as built · b) only when the plan's own quota is also gone</li>
+  <li>Should a wait have a limit? a) none, as built · b) give up after N days and show Blocked</li>
+  <li>Model/harness fallback: a) none, as built · b) add ordered alternates to preferences (new policy)</li>
+  <li>Interactive Sessions: a) continue on your next message, as built · b) continue idle Sessions by themselves (needs a reliable no-draft signal)</li>
+</ol>
+</main>
+</body>
+</html>

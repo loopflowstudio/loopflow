@@ -87,9 +87,10 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Select a working Task to open its conversation automatically. Recent unfinished
-Tasks stay warm for immediate return: Desktop retains eight, plus any additional
-visible panes. Return lands at the bottom. Older conversations reconnect or resume
+Working Tasks open their conversations on load, before any selection. Recent
+unfinished Tasks stay warm for immediate return: Desktop retains eight, plus any
+additional visible panes; a Task shown as a Dashboard tile stays warm after the
+Dashboard leaves. Return lands at the bottom. Older conversations reconnect or resume
 the same provider history automatically.
 A small **Connecting…** indicator remains until the live relay accepts input.
 Errors remain visible with **Retry**.
@@ -103,7 +104,8 @@ release on departure through the shared two-minute/fifteen-minute lifecycle.
 Repository load prepares and opens conversations for claimed working Tasks (idle,
 active or moving), even with no saved recent visits. The selected Task comes first,
 then visible tiles, then recent working Tasks, two preparations at a time. Visible
-tiles sit outside the eight-conversation limit.
+tiles sit outside the eight-conversation limit. A prepared conversation starts its
+provider at once, before any pane shows it; selecting the Task shows the running terminal.
 Saved Close remains closed; initial rendering does not wait for preparation.
 
 Working Tasks automatically create their primary Session if absent and start its

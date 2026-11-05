@@ -1,0 +1,151 @@
+{
+  "source_head": "1fdbf09f7aa053f3f837edbdc4c0660cb0019208",
+  "source_diff_sha256": "0c62fa7d919240e468240a7b32d3f06e508cf2dff480b113f878b0433dfc1d0f",
+  "candidate": "/private/tmp/loo-672-redemo-nz7p4u4v/Loopflow LOO-672 Redemo.app",
+  "repository": "/private/tmp/loo-672-redemo-nz7p4u4v/repo",
+  "machine": "/private/tmp/loo-672-redemo-nz7p4u4v/machine",
+  "tasks": [
+    {
+      "id": "task_f47971aa1b324355aecf98bfe461deb7",
+      "title": "Automatic conversation",
+      "provider": null,
+      "session": null,
+      "workspace": {
+        "base_commit": "bf3dafbb84c025d46f0dd8432b0c552cbffd64d4",
+        "branch": "jack-heart/f47971-automatic-conversation",
+        "local_exists": true,
+        "machine_id": "home_6d743bcf834e922eea8a99cb2f167ca0",
+        "machine_label": null,
+        "slug": "f47971-automatic-conversation",
+        "worktree": "/private/tmp/loo-672-redemo-nz7p4u4v/repo.f47971-automatic-conversation"
+      }
+    },
+    {
+      "id": "task_4c939dda48634a5ea15c759b635311b8",
+      "title": "Claude continuity",
+      "provider": "claude",
+      "session": "c0aed0c099e548fca496b9b0ae025fd6",
+      "workspace": {
+        "base_commit": "bf3dafbb84c025d46f0dd8432b0c552cbffd64d4",
+        "branch": "jack-heart/4c939d-claude-continuity",
+        "local_exists": true,
+        "machine_id": "home_6d743bcf834e922eea8a99cb2f167ca0",
+        "machine_label": null,
+        "slug": "4c939d-claude-continuity",
+        "worktree": "/private/tmp/loo-672-redemo-nz7p4u4v/repo.4c939d-claude-continuity"
+      }
+    },
+    {
+      "id": "task_d3b1023451654b5bbd383dca52575e0e",
+      "title": "Codex continuity",
+      "provider": "codex",
+      "session": "7bd7bd5c50a7435989b95bc96bb74ad7",
+      "workspace": {
+        "base_commit": "bf3dafbb84c025d46f0dd8432b0c552cbffd64d4",
+        "branch": "jack-heart/d3b102-codex-continuity",
+        "local_exists": true,
+        "machine_id": "home_6d743bcf834e922eea8a99cb2f167ca0",
+        "machine_label": null,
+        "slug": "d3b102-codex-continuity",
+        "worktree": "/private/tmp/loo-672-redemo-nz7p4u4v/repo.d3b102-codex-continuity"
+      }
+    },
+    {
+      "id": "task_84b06bf8943344bcb942f925f33fb812",
+      "title": "Stopped run",
+      "provider": "claude",
+      "session": "4c6ee152c77844b49a5a0aa3a8674f33",
+      "workspace": {
+        "base_commit": "bf3dafbb84c025d46f0dd8432b0c552cbffd64d4",
+        "branch": "jack-heart/84b06b-stopped-run",
+        "local_exists": true,
+        "machine_id": "home_6d743bcf834e922eea8a99cb2f167ca0",
+        "machine_label": null,
+        "slug": "84b06b-stopped-run",
+        "worktree": "/private/tmp/loo-672-redemo-nz7p4u4v/repo.84b06b-stopped-run"
+      },
+      "run_status": "stopped",
+      "status_before_load": {
+        "task": {
+          "id": "task_84b06bf8943344bcb942f925f33fb812",
+          "identifier": "84b06b",
+          "title": "Stopped run",
+          "wave": null,
+          "project": null,
+          "state": "idle",
+          "reason": "commit --no-such-flag: command exited with status 2. Inspect its history and effects, then launch fresh work",
+          "graph": {
+            "name": "stops",
+            "step": null
+          },
+          "pr": null,
+          "next": "lf task run 84b06b"
+        },
+        "sessions": [
+          {
+            "id": "4c6ee152c77844b49a5a0aa3a8674f33",
+            "title": "84b06b Stopped run",
+            "provider": "claude",
+            "interactive": true,
+            "state": "unknown",
+            "available": false,
+            "cwd": "/private/tmp/loo-672-redemo-nz7p4u4v/repo.84b06b-stopped-run",
+            "agent_process_id": null
+          }
+        ],
+        "graph_processes": [
+          {
+            "id": "b692f418-d28e-4490-bff0-50902066c31b",
+            "name": "stops",
+            "state": "stopped",
+            "step": "commit --no-such-flag",
+            "updated_at": "2026-11-05T13:52:22Z"
+          },
+          {
+            "id": "c869f4b0-40b7-42d8-8419-3f45da998c4c",
+            "name": "stops",
+            "state": "stopped",
+            "step": "commit --no-such-flag",
+            "updated_at": "2026-11-05T13:52:22Z"
+          },
+          {
+            "id": "5840d9a8-01b6-499a-9575-6e08e6264873",
+            "name": "stops",
+            "state": "stopped",
+            "step": "commit --no-such-flag",
+            "updated_at": "2026-11-05T13:52:22Z"
+          }
+        ],
+        "comments": {
+          "comments": [
+            {
+              "id": "04fdeaa8-142e-4981-b05c-807f78f25c83",
+              "body": "Jack Heart claimed this on home_6d743bcf834e922eea8a99cb2f167ca0\n\n<!-- loopflow-ownership:{\"id\":\"own_088d4d36038b48719d03bb050d9c7d3b\",\"task_id\":\"task_84b06bf8943344bcb942f925f33fb812\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"loo672-demo@example.invalid\",\"machine_id\":\"home_6d743bcf834e922eea8a99cb2f167ca0\",\"machine_label\":null,\"at\":1793886741} -->",
+              "author": {
+                "kind": "integration"
+              },
+              "created_at": "2026-11-05T13:52:21.123Z"
+            },
+            {
+              "id": "e5db73c7-9314-4e49-843d-a481263f7fc9",
+              "body": "start it\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:e5db73c7-9314-4e49-843d-a481263f7fc9 -->",
+              "author": {
+                "kind": "person",
+                "name": "Jack Heart"
+              },
+              "created_at": "2026-11-05T13:52:23.39448Z"
+            }
+          ],
+          "pending_sync": [],
+          "conflicts": {},
+          "refresh_error": null
+        }
+      },
+      "ps_before_load": {
+        "nodes": []
+      }
+    }
+  ],
+  "exercised": "Fresh data with no Session; load must start every conversation without a click",
+  "expect": "Stopped run reports its status and the start-it comment, and `lf ps` shows no new Graph"
+}

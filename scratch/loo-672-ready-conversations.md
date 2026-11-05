@@ -7,13 +7,30 @@ shipping, merging and installation are not. The pre-infrastructure plan is
 superseded and preserved at
 `a32c385044:scratch/research/loo-672-pre-infrastructure-plan.md`.
 
-## November 5 repair direction
+## November 5 repair: prepared Sessions start from the store
 
 Jack Heart confirmed that background prefetch must open native conversations for
 started working Tasks before selection; “unopened” is not their normal state.
 The November 4 native demo prepared records but left untouched providers absent.
-Repair that rendered path and verify live providers before any selection.
-See `loo-672-load-prefetch.md` and the current `loo-672-demo.md` evidence.
+Launch depended on a pane mounting a `.prepared` item, and the warm host never
+produced one: SwiftUI `.hidden()` creates the platform view without attaching it
+to a window (proven by a mounted test), and a fresh repository's working Tasks are
+Dashboard tiles in `openWork`, which the host excluded while the tiles part was
+hidden, so nothing rendered them at all. Launch now belongs to the model:
+`SessionsStore` starts a Session's terminal through `GhosttySurfacePool.start`
+whenever an item becomes `.prepared` (preparation, Try again, provider switch,
+reset). The pooled view runs unmounted at the last mounted pane size; the pane
+that later shows it adopts the running surface, as `GhosttyTerminalMount` already
+does. The pool's `runtime` is explicit: the app passes `GhosttyManager.shared`
+through `RepositoryWorkspaces`; headless stores and tests have none and launch
+nothing. The hidden warm host is deleted. `WarmPaneMountTests` proves an
+unmounted start and a runtimeless store that only prepares.
+
+The rendered proof then showed a second gap: leaving the Dashboard released the
+tiles' terminals. A tile's workspace is created by presentation, so `prefetch`
+skipped it as already decided and it never entered the warm set. `prefetch` now
+admits a visible tile without re-validating its location, so the conversations
+load started stay warm after selection (`WorkspaceRetentionTests`).
 
 ## Accepted outcome and constraints
 
@@ -73,8 +90,8 @@ Other Work still reveals history.
 `RoadmapTask.conversationIntent` excludes unstarted, unassigned, shipping and
 terminal Tasks from initial conversation creation, and load prefetch discovers only
 Tasks it would start. A Session that reveal left unavailable opens automatically
-once its Task's intent becomes Start. Hidden warm panes mount the same terminal
-view, so `.prepared` launches the provider off-screen; only a rendered run proves it.
+once its Task's intent becomes Start. `.prepared` starts the provider from the
+store (above), before any pane shows it.
 
 Rust retains primary-scope admission and per-Session launch locks; only Take back
 replaces an input holder. Non-replacing startup refuses to replay a consumed
@@ -266,4 +283,6 @@ that assertion now checks the prepared set.
 
 Checks, November 4, through realign: `cargo test -p loopflow --lib ops::human_session::` 37 passed (compress; Rust code unchanged since); `scripts/test_desktop.sh --filter 'WorkCacheTests|WorkDestinationTests'` 89 passed after the link repair, and `WorkspacePanesTests|SessionsStoreTests|WorkspaceRetentionTests|WorkNavigationTests|DesktopPaneControlTests|DTOFixtureTests|WorkCLISubscriptionTests` passed at compress; clippy, gate, candidate and rendered native proof (idle Task, stopped run, no new Graph) deferred to the Graph.
 
-Checks before publication, November 4: see `loo-672-demo.md`, “Current candidate: automatic opening”. Clippy and the 714-test Desktop suite passed; `scripts/test_desktop.sh` crashes in `ghostty_config_finalize` at some environment sizes, independent of this change. Gate and rendered native proof remain.
+Checks before publication, November 4: see `loo-672-demo.md`, “Current candidate: automatic opening”. Clippy and the 714-test Desktop suite passed; `scripts/test_desktop.sh` crashes in `ghostty_config_finalize` at some environment sizes, independent of this change.
+
+Checks, November 5 (Swift only; Rust unchanged): `scripts/test_desktop.sh --filter 'WarmPaneMountTests|GhosttyTerminalInputTests|WorkspaceRetentionTests|WorkCacheTests|WorkspacePanesTests|SessionsStoreTests'` 102 passed before the tile-retention fix; after it `--filter 'WorkspaceRetentionTests|WarmPaneMountTests|WorkCacheTests'` 43 passed. Gate owns the suites; the rendered proof is in `loo-672-demo.md`.

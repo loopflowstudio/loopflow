@@ -1,5 +1,54 @@
 # LOO-672 — Task conversation demo, November 4, 2026
 
+## Store-launch proof — November 5, 2026, 05:41–05:55 PST
+
+**Result: load alone starts every working Task conversation, and they stay warm
+after selection. Awaiting Jack Heart's re-demo.** Candidate
+`/private/tmp/loo-672-redemo-nz7p4u4v` (own bundle id; run `launch.sh` from a
+display session; [manifest](demo-evidence/store-manifest.json)), fresh private
+data: four owned idle Tasks, no provider ever launched, the Stopped run Task
+carrying its three stopped `TASK_RUN_ATTEMPTS` records and the “start it” comment.
+
+Observed with nothing selected (window destination: repository; the middle pane
+says **No session open** for the repository itself,
+[store-load-unselected.png](demo-evidence/store-load-unselected.png) from the
+first November 5 candidate, same build apart from the retention fix):
+
+- Within seconds of launch all four providers were live: Claude for **Claude
+  continuity** and **Stopped run**, Codex for **Codex continuity** and the
+  absent-Session **Automatic conversation**, whose primary Session load created
+  ([store-load-ps.json](demo-evidence/store-load-ps.json), four `agent_process`
+  nodes; [store-load-sessions.json](demo-evidence/store-load-sessions.json), all
+  `active` with agent process IDs and terminal surfaces).
+- No Graph ran: `lf ps` held no Graph node and the Stopped run's Graph IDs equal
+  `status_before_load` ([store-load-stopped-status.json](demo-evidence/store-load-stopped-status.json)).
+- Then `lf desktop goto 2` selected **Claude continuity**: the pane adopted the
+  running terminal mid reading pass with the same agent PID
+  ([store-selected.png](demo-evidence/store-selected.png),
+  [store-selected-ps.json](demo-evidence/store-selected-ps.json)). The other
+  three kept their surfaces and `active` Sessions, and `lf desktop capture`
+  read all four terminals ([store-selected-captures.txt](demo-evidence/store-selected-captures.txt)).
+  The Stopped run's untouched conversation reported the failed step and the
+  recorded “start it” comment without acting on it; its composer shows the
+  provider's own suggested next prompt, nothing entered or sent.
+- Found and fixed on the first candidate: leaving the Dashboard released the
+  tiles' terminals (Sessions `detached`, providers still alive) because tile
+  workspaces never entered the warm set. `prefetch` now admits a visible tile;
+  `WorkspaceRetentionTests` covers it, and the candidate above includes it.
+
+Diagnosis behind the repair: launching waited for a pane to mount. `.hidden()`
+never attaches a platform view to the window, and a fresh repository's working
+Tasks were hidden Dashboard tiles that nothing rendered. The store now starts the
+terminal when a Session becomes prepared (design, November 5 section).
+
+The three extra Graph records of November 4 were a ship restart, not opening:
+`lf task run bda939 stops` approved Auto-Ship because the graph had no interactive
+step, and `ops::recovery::recover()` on the next lf read restarted the ship
+(`restart_ships`), writing three `--batch graph run` children of one parentless
+`lf --task bda939 ship` in the same second as the app launch. The fixture graph
+now ends in `interactive: default`; a debug-CLI run stopped idle with `shipped_at`
+null and only the three records one run writes.
+
 ## Native re-demo — November 4, 2026, 20:00–20:02 PST
 
 **Result: partial; load-time prefetch fails. No acceptance from Jack Heart yet.**
@@ -9,54 +58,19 @@ matching CLI, explicit repository and private LF_HOME. Changed only its disposab
 bundle identifier/display name to `com.loopflow.mac.automatic.loo672` / **Loopflow
 LOO-672 Automatic**, then ad-hoc signed it, to distinguish the older running demo.
 
-Observed through native Desktop, without pressing Start/Open:
-
-- Repository load created the absent primary Session for **Automatic conversation**.
-  But `automatic-load-ps.json` was empty and all four Session records had null
-  agent process IDs. This is preparation, not usable native input.
-- Selecting **Automatic conversation** opened the real Codex composer and initial
-  reading turn. Selecting **Claude continuity** opened real Claude without folder
-  trust or a Start click. The native UI and first turns rendered.
-- The untouched **Codex continuity** Task remained idle, with its original Session
-  `95e5e441ab32454aa160d7957c5c3bf3`, unknown Session state and no agent process,
-  even after the other conversations completed. This fails Jack's load-prefetch
-  requirement. Evidence: `automatic-unselected-status.json` and `automatic-current-ps.json`.
-- Selecting **Stopped run** opened Claude. Its final report described the failed
-  Graph and the recorded “start it” comment, and explicitly did not execute it.
-  No Graph was live in the later process read. However, three additional failed
-  Graph records appeared at 04:00:22Z, around launch, compared with the preparation
-  manifest. A prelaunch read already showed an lf Session process. Therefore this
-  is **not** clean proof that opening/load caused no Graph execution. Determine
-  the origin of those runs before claiming this acceptance check passes.
-- No draft text was entered by the reviewing assistant; no exact-draft, restart,
-  Rex takeover, cold-return or memory acceptance is claimed. No Task Graph for
-  LOO-672 was restarted; no installation, merge or shipping occurred.
-
-The app log also contains repeated SwiftUI AttributeGraph cycle warnings
-(`/tmp/loo672-automatic-app.log`); their relationship to prefetch is unresolved.
-The hidden warm-pane mounting and preparation queue are investigation entry
-points, not a proven diagnosis. Repair the real rendered prefetch path and repeat
-fresh load with provider liveness checked **before any Task selection**. Also make
-stopped-run setup free of ship retries and reconcile the extra runs above.
-
-Current review page: `scratch/demo.html`. Native evidence:
-`demo-evidence/automatic-selected.png`, `automatic-claude.png`, and
-`automatic-stopped.png`. Design remains `loo-672-ready-conversations.md`; the
-accepted no-click/load-prefetch direction is unchanged. Disposition: **available**
-for review in the open **Loopflow LOO-672 Automatic** app; implementation still
-needs the prefetch repair. Earlier sections below are historical preparation and
-review evidence, not current acceptance.
-
+Observed without pressing Start/Open: load created the absent primary Session but
+no provider ran (`automatic-load-ps.json` empty); selecting **Automatic conversation**
+and **Claude continuity** opened real Codex and Claude; untouched **Codex continuity**
+kept no agent process (`automatic-unselected-status.json`); **Stopped run** reported
+the failed Graph and “start it” without executing it. Evidence pages:
+`automatic-selected.png`, `automatic-claude.png`, `automatic-stopped.png`,
+`scratch/demo.html`. Superseded by the November 5 proof above.
 
 ## Current candidate: automatic opening — November 4
 
-Candidate for Jack Heart's re-demo of automatic opening, built from a tree identical to
-`7b23c50c20` (its `lf` reports `3ef57e857.dirty` only because it was built before that
-commit; `git diff HEAD -- rust swift` was empty at preparation).
-
-- App: `/private/tmp/loo-672-redemo-eh8h08q0/Loopflow LOO-672 Redemo.app`
-- Launch from a display session: `/private/tmp/loo-672-redemo-eh8h08q0/launch.sh`
-- [Manifest](demo-evidence/automatic-manifest.json): repository, Machine, Tasks and checkouts.
+Candidate for the November 4 re-demo, built from a tree identical to `7b23c50c20`:
+`/private/tmp/loo-672-redemo-eh8h08q0` (app, `launch.sh`,
+[manifest](demo-evidence/automatic-manifest.json)).
 
 Preparation is the only thing exercised so far. Fresh data holds four owned idle Tasks:
 **Automatic conversation** (absent Session), **Claude continuity** and **Codex continuity**

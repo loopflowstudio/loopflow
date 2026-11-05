@@ -83,3 +83,11 @@ November 5 re-demo clarification from Jack Heart: started working Tasks have no
 normal “unopened” conversation state; background prefetch initializes and opens
 the native conversation before selection. Preparing Session metadata alone does
 not meet this requirement. See `loo-672-load-prefetch.md`.
+
+Implementation assumption, November 5: a prepared Session's terminal starts from the
+store, sized to the last mounted pane or 1100×700 before any pane has mounted, so the
+provider's first frames use a plausible grid; the pane that shows it resizes it.
+The launcher is an explicit `GhosttyManager?` dependency (the app passes `.shared`;
+tests and headless registries pass none), so a prepared fixture never spawns a real
+`lf` in a test. `.hidden()` never attaches NSViewRepresentable views to a window, so
+no hidden host can launch; launching from the model replaces it.

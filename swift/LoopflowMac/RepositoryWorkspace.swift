@@ -24,7 +24,14 @@ final class RepositoryWorkspaces {
     private var reconcilingWarmth = false
     private var visibleWarmExceptions = 0
 
-    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
+    private let runtime: GhosttyManager?
+
+    /// `runtime` is the Ghostty this app starts prepared Sessions in before their
+    /// panes mount; headless uses have none and launch nothing.
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+        self.localMachineId = localMachineId
+        self.runtime = runtime
+    }
 
     func prepareForQuit() {
         for registry in repositories.values { registry.prepareForQuit() }
@@ -51,7 +58,7 @@ final class RepositoryWorkspaces {
 
     func registry(for repository: String) -> SessionsWorkspaceRegistry {
         if let retained = repositories[repository] { return retained }
-        let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId, runtime: runtime)
         repositories[repository] = registry
         registry.onWarmthChanged = { [weak self] in self?.reconcileWarmth() }
         registry.canPrepare = { [weak self] in
@@ -93,7 +100,8 @@ final class RepositoryWorkspaces {
 @MainActor
 final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
     let workspaces = RepositoryWorkspaces(
-        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId)
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
+        runtime: .shared)
     private var release: Task<Void, Never>?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

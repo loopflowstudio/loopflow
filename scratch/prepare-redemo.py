@@ -28,7 +28,9 @@ def main() -> None:
     resources = contents / "Resources"
     resources.mkdir(parents=True)
     plist = plistlib.loads((source / "swift/LoopflowMac/Info.plist").read_bytes())
-    plist.update(CFBundleIdentifier="com.loopflow.mac.redemo.loo672",
+    # A bundle identifier of its own: app defaults restore the last scene per
+    # identifier, so a shared one reopens an earlier candidate's repository.
+    plist.update(CFBundleIdentifier="com.loopflow.mac.redemo.loo672." + root.name.rsplit("-", 1)[-1],
                  CFBundleExecutable="Loopflow LOO-672 Redemo",
                  CFBundleName="Loopflow LOO-672 Redemo",
                  CFBundleDisplayName="Loopflow LOO-672 Redemo")
@@ -62,8 +64,11 @@ def main() -> None:
         "This repository is disposable demonstration data for Jack Heart’s LOO-672 review.\n"
         "Wait for a request in the conversation; no project work is assigned here.\n")
     (repo / ".lf/graphs").mkdir(parents=True)
-    # A step that fails, so one Task carries a stopped run into the review.
-    (repo / ".lf/graphs/stops.yaml").write_text("- cmd: commit --no-such-flag\n")
+    # A step that fails, so one Task carries a stopped run into the review. The
+    # interactive step after it keeps `task run` from approving Auto-Ship: an
+    # approved ship restarts on the next lf read (recovery), which would add Graph
+    # records at app launch that the no-Graph proof cannot tell from opening.
+    (repo / ".lf/graphs/stops.yaml").write_text("- cmd: commit --no-such-flag\n- interactive: default\n")
     for args in (["init", "-b", "main"], ["config", "user.name", "Jack Heart"],
                  ["config", "user.email", "loo672-demo@example.invalid"],
                  ["add", "."], ["commit", "-m", "Disposable review repository"]):
@@ -104,11 +109,13 @@ def main() -> None:
                 "expect": "Stopped run reports its status and the start-it comment, and `lf ps` shows no new Graph"}
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     # Drop inherited invocation markers without recording any credential values.
+    # `--repo` names this data: the bundle's saved defaults would otherwise reopen
+    # the repository of an earlier candidate with the same bundle identifier.
     launch = root / "launch.sh"
     launch.write_text("#!/bin/zsh\ncd " + shlex.quote(str(repo)) + "\n"
         + "exec env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') "
         + "LF_HOME=" + shlex.quote(str(home)) + " LF_BIN=" + shlex.quote(str(cli)) + " "
-        + shlex.quote(str(executable)) + "\n")
+        + shlex.quote(str(executable)) + " --repo " + shlex.quote(str(repo)) + "\n")
     launch.chmod(0o755)
     print(root)
 

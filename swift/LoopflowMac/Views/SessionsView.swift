@@ -538,7 +538,7 @@ final class SessionsWorkspaceRegistry {
 
     // Observable only for environment delivery; lazy creation must not invalidate views.
     @ObservationIgnored private var workspaces: [WorkWorkspaceKey: SessionsWorkspace] = [:]
-    let surfaces = GhosttySurfacePool()
+    let surfaces: GhosttySurfacePool
     private(set) var localMachineId: String?
     private(set) var machineError: String?
 
@@ -568,7 +568,12 @@ final class SessionsWorkspaceRegistry {
         reconcileWarmth()
     }
 
-    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
+    /// `runtime` lets prepared Sessions start their terminals before a pane shows
+    /// them; a registry without one retains and shows but never launches.
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+        self.localMachineId = localMachineId
+        surfaces = GhosttySurfacePool(runtime: runtime)
+    }
 
     func loadWarmIntent(repository: String) {
         guard warmPersistenceKey == nil else { return }
@@ -588,11 +593,14 @@ final class SessionsWorkspaceRegistry {
         guard !presentationClosed, !quitting else { return }
         let restoring = restoreCandidates.contains(key)
         restoreCandidates.removeAll { $0 == key }
+        // A visible tile's workspace was shown, not chosen: admitting it keeps the
+        // conversation warm after the Dashboard leaves; its location is already in use.
         guard !completed, !closedConversations.contains(key), !recentTasks.contains(key),
-              restoring || workspaces[key] == nil,
+              restoring || workspaces[key] == nil || visibleWork.contains(key),
               recentTasks.count < Self.warmConversationLimit else { return }
+        let fresh = workspaces[key] == nil
         let workspace = workspace(for: key, title: title, location: location)
-        workspace.requiresLocationValidation = true
+        if fresh || restoring { workspace.requiresLocationValidation = true }
         recentTasks.append(key)
         reconcileWarmth()
     }
@@ -1212,6 +1220,7 @@ final class SessionsStore {
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].adoptPreparation(surface, intent: intent)
+                startTerminal(id)
             }
         } catch {
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
@@ -1224,9 +1233,26 @@ final class SessionsStore {
         switch sessions[index].state {
         case .pending, .failed, .unavailable, .ended, .elsewhere:
             sessions[index].adoptPreparation(record, intent: intent)
+            startTerminal(record.id)
         case .opening, .prepared, .live:
             break
         }
+    }
+
+    /// A prepared Session's terminal starts at once, shown or not: warm Work runs
+    /// before any pane mounts, and the pane later mounted adopts the running view.
+    private func startTerminal(_ id: String) {
+        guard let index = _index(id), case .prepared = sessions[index].state else { return }
+        let item = sessions[index]
+        guard let workspace = item.record.workspace, workspace.unavailable == nil else { return }
+        surfaces.start(TerminalIdentity.session(id, machineId: workspace.machineId),
+            workingDirectory: presentationDirectory(for: item.record, checkout: workspace.worktree),
+            argv: item.launchArguments,
+            onSurfaceCreated: { [weak self] in
+                Perf.agentInput("surface_created", session: id)
+                self?.beginPaneLoad(id)
+            },
+            onSurfaceFailed: { [weak self] reason in self?.recordPaneFailure(id, reason: reason) })
     }
 
     func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
@@ -1267,6 +1293,7 @@ final class SessionsStore {
         sessions[current].agentOverride = agent
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
+        startTerminal(id)
         return prepared
     }
 
@@ -1281,6 +1308,7 @@ final class SessionsStore {
         sessions[current].record = restarted
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
+        startTerminal(id)
         return restarted
     }
 
@@ -1505,14 +1533,6 @@ struct SessionsContentView: View {
 
     private var mainPane: some View {
         ZStack {
-            ForEach(workspaces.recentTasks.filter { !workspaces.openWork.contains($0) }, id: \.self) { key in
-                if let entry = workspaces.retained(key), !entry.conversationClosed,
-                   let pane = entry.multiplexer.sessionPane {
-                    WorkspacePanesView(workspace: entry, isFocused: false, sessions: store, model: model,
-                        onFocus: { _, _ in }, face: pane)
-                        .hidden().allowsHitTesting(false).accessibilityHidden(true)
-                }
-            }
             if navigation.showsSelection {
                 DashboardView(model: model, workspaces: workspaces, sessions: store)
             } else if let key = workspaces.selectedWork {

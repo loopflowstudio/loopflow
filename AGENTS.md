@@ -513,6 +513,9 @@ requires `@Environment` Observation objects; ViewInspector cannot inject those
 objects. Keep existing leaf views internal for `@testable` access rather than
 adding test-only constructors or mounting a window.
 Keep mounted terminal frame checks in `.requiresDisplay` suites.
+Work that must happen whether or not a pane renders (starting a warm terminal) runs
+from the model, not from a view's mount: SwiftUI `.hidden()` never attaches an
+`NSViewRepresentable` to a window, and unrendered parts mount nothing.
 
 ## When to Mock
 

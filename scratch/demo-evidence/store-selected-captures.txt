@@ -1,0 +1,16 @@
+=== capture task_f47971aa1b324355aecf98bfe461deb7
+› Ask Codex to do anything
+  GPT-6-Astra high · /private/tmp/loo-672-redemo-nz7p4u4v/repo.f47971-automatic-conversation
+  ← for agents · ? for shortcuts
+=== capture task_4c939dda48634a5ea15c759b635311b8
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  jack@Jacks-MacBook-Pro-2 repo.4c939d-claude-continuity (jack-heart/4c939d-claude-continuity)
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents
+=== capture task_d3b1023451654b5bbd383dca52575e0e
+› Ask Codex to do anything
+  GPT-6-Astra high · /private/tmp/loo-672-redemo-nz7p4u4v/repo.d3b102-codex-continuity
+  ← for agents · ? for shortcuts
+=== capture task_84b06bf8943344bcb942f925f33fb812
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  jack@Jacks-MacBook-Pro-2 repo.84b06b-stopped-run (jack-heart/84b06b-stopped-run)
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents

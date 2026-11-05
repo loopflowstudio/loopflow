@@ -100,6 +100,23 @@ struct WorkspaceRetentionTests {
         UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())")
     }
 
+    @Test("A working Task shown as a tile stays warm after the Dashboard leaves")
+    func tiledWorkingTaskStaysWarm() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let repository = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let tiled = WorkWorkspaceKey(repository: "repo", kind: .task, id: "tiled")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        _ = registry.workspace(for: repository, title: "repo", location: nil)
+        let tile = registry.workspace(for: tiled, title: "Tiled", location: location)
+        registry.present(open: [repository, tiled])
+        #expect(tile.hostUse == "retained")
+        registry.prefetch(tiled, title: "Tiled", location: location, completed: false)
+        #expect(registry.recentTasks == [tiled])
+        #expect(!tile.requiresLocationValidation)
+        registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "visited"), title: "Visited", location: location)
+        #expect(tile.hostUse == "retained")
+    }
+
     @Test("Saved unfinished Tasks fill spare warmth without evicting working Tasks", arguments: [7, 8])
     func restoredTasksFillSpareWarmth(workingCount: Int) {
         let repository = "repo_" + UUID().uuidString

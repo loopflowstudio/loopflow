@@ -56,4 +56,3 @@ Relevant current source in LOO-498: docs/workspaces.md; scratch/rex-workspace.md
 ## Latest configured-path finding
 
 When Jack requested opening LOO-717, a branch lf open --task LOO-717 --host rex attempt failed before creating anything: Current conversation viewer is unavailable; refusing stale Rex startup placement. It returned destination=null, container=null. This means the isolated Rex regression does not prove this configured agent-caller path. Jack then instructed use Rex CLI directly until lf lands. Do not present that failed opening as a successful demo.
-

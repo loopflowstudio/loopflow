@@ -90,15 +90,6 @@ impl Store {
         .await
     }
 
-    pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let agent = agent.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_task_agent(&task_id, &agent)
-        })
-        .await
-    }
-
     pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {

@@ -91,10 +91,10 @@ pub(crate) fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     anyhow::ensure!(
-        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()).0.as_str()),
+        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
-        config.agent(),
-        config.agent(),
+        config.agent()?,
+        config.agent()?,
     );
     if let Some(provider) = provider_session {
         if session.provider.as_deref() != Some("codex") {
@@ -491,6 +491,7 @@ fn run_native_session(
                 agent_session.cloned(),
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
+                command.isolate,
             )
         })
         .transpose()
@@ -561,6 +562,7 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned(), account.clone());
         }
         let exit = crate::harness::native_exit::NativeExit {
+            isolate: command.isolate,
             session: owner.1.clone(),
             attachment: owner.2.clone(),
             provider: command.program.clone(),
@@ -958,12 +960,13 @@ fn run_codex_native(
         let prepared = ready_rx.recv();
         let result = match prepared {
             Ok((thread, remote, account)) => {
-                let client = crate::agent::native_connection_command(
+                let mut client = crate::agent::native_connection_command(
                     command.cwd.clone(),
                     thread.as_ref(),
                     remote,
                     command.attachment.clone(),
                 );
+                client.isolate = command.isolate;
                 run_native_session(
                     &client,
                     environment,
@@ -1266,6 +1269,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1477,6 +1481,7 @@ mod tests {
             }
         });
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1499,6 +1504,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             program: "/bin/sh".into(),
@@ -1605,6 +1611,7 @@ mod tests {
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
@@ -1692,6 +1699,7 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 context: None,

@@ -44,6 +44,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     let mut config = AgentConfig {
+        isolate: None,
         system_prompt: request.system_prompt.clone(),
         conversation_context: request.conversation_context.clone(),
         task_prompt: request.task_prompt.clone(),
@@ -61,7 +62,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ..AgentConfig::default()
     };
     config.apply_agent_override();
-    let (selected_harness, model) = crate::config::parse_agent(config.agent());
+    let (selected_harness, model) = crate::config::parse_agent(config.agent()?);
     if selected_harness != harness {
         config.provider_account_id = None;
         config.provider_account_authority_home = None;
@@ -72,7 +73,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     crate::agent::pin_provider_account_id_blocking(&mut config).map_err(anyhow::Error::from)?;
-    request.agent = config.agent().to_owned();
+    request.agent = config.agent()?.to_owned();
     request.account_id = config.provider_account_id.clone();
     let spec = SessionCaptureSpec {
         harness: selected_harness,

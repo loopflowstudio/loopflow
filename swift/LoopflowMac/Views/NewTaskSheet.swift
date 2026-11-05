@@ -163,8 +163,8 @@ struct NewTaskSheet: View {
     /// Whose default the reported workflow is, named for the scope it follows.
     static func defaultPhrase(_ reported: WaveGraph.Default, scope: String) -> String {
         switch reported.source {
-        case "personal", "global": "your default"
-        case "wave", "repo": "\(scope)'s default"
+        case "personal": "your default"
+        case "repository": "\(scope)'s default"
         default: "the default"
         }
     }

@@ -349,19 +349,17 @@ pub(crate) struct HistoryCapture {
 
 pub(crate) fn conversation(
     cwd: &std::path::Path,
-    agent: Option<&str>,
     skill: &str,
     title: String,
 ) -> anyhow::Result<LfSession> {
-    let skill = crate::graph::load_skill(skill, cwd)?.name;
+    let skill = crate::graph::load_skill(skill, cwd)?;
     let wave = crate::work::wave::context::resolve_ambient_wave_name();
     let agent = crate::ops::task::resolve_task_agent(
         cwd,
         wave.as_deref(),
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
-        agent,
-        None,
-    );
+        Some(&skill),
+    )?;
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,
@@ -370,7 +368,7 @@ pub(crate) fn conversation(
         caller_artifact_key: None,
         input_published: false,
         cwd: cwd.to_path_buf(),
-        skill: Some(skill),
+        skill: Some(skill.name),
         provider: Some(provider),
         model,
         node: None,

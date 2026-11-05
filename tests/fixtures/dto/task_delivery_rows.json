@@ -283,7 +283,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "done": {
     "task": {
@@ -569,7 +569,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "none": {
     "task": {
@@ -855,7 +855,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "due": {
     "task": {
@@ -928,7 +928,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "unrelated": {
     "task": {
@@ -1001,7 +1001,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "conversion": {
     "task": {
@@ -1287,7 +1287,7 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   },
   "completed_running": {
     "task": {
@@ -1573,6 +1573,6 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   }
 }

@@ -12,6 +12,8 @@ use serde_json::Value;
 
 struct Machines {
     root: tempfile::TempDir,
+    _person: support::ambient::EnvGuard,
+    _env: support::EnvGuard,
 }
 
 impl Machines {
@@ -42,7 +44,15 @@ exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
                 "#!/bin/sh\nexit 1\n",
             );
         }
-        let fixture = Self { root };
+        let env = support::EnvGuard::with_home(&[], Some(&home));
+        let person = support::ambient::EnvGuard::clear(&["LF_USER_NAME"]);
+        std::env::set_var("LF_HOME", &home);
+        std::env::set_var("LF_USER_NAME", "Jack");
+        let fixture = Self {
+            root,
+            _person: person,
+            _env: env,
+        };
         fixture.remote(
             loopflow::build_info::BUILD_VERSION,
             "home_11111111111111111111111111111111",
@@ -339,7 +349,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .output()
         .unwrap();
     assert_success(&set);
-    assert!(String::from_utf8_lossy(&set.stdout).contains("its Session runs on mini"));
+    assert!(String::from_utf8_lossy(&set.stdout).contains("lf.config.local.yaml"));
 
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
@@ -417,9 +427,11 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
         .success());
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     let retained: String = db
-        .query_row("SELECT id FROM machines WHERE route='mini'", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT id FROM machines WHERE id=?1",
+            [added["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(retained, added["id"].as_str().unwrap());
     // A replacement at the same destination can be explicitly added after removal.
@@ -574,6 +586,26 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
 }
 
 #[test]
+fn selecting_the_current_machine_executes_locally() {
+    let fixture = Machines::new();
+    let local = fixture.json(&["machine", "id", "--json"]);
+    let output = fixture.run(&[
+        "--machine",
+        local["id"].as_str().unwrap(),
+        "config",
+        "catalog",
+        "--json",
+    ]);
+    assert_success(&output);
+    let definitions: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(definitions
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|definition| definition["key"] == "machine"));
+}
+
+#[test]
 fn machine_selector_dispatches_before_local_help_and_placement() {
     let fixture = Machines::new();
     let added = fixture.json(&["machine", "add", "mini", "--json"]);
@@ -678,9 +710,15 @@ fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
     assert_success(&fixture.run(&["machine", "add", "mini"]));
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     db.execute(
-        "INSERT INTO provider_accounts (provider, account_id, login_email, credential_state, routing_state, created_at, updated_at) VALUES ('codex', 'person', 'person@example.com', 'connected', 'automatic', 0, 0)",
+        "INSERT INTO provider_accounts (provider, account_id, credential_state, created_at, updated_at) VALUES ('codex', 'person', 'connected', 0, 0)",
         [],
     ).unwrap();
+    assert_success(&fixture.run(&[
+        "set",
+        "--global",
+        "accounts.codex.person.login_email",
+        "person@example.com",
+    ]));
     let remote = fixture.root.path().join("remote");
     fs::write(remote.join("connected"), "true").unwrap();
     executable(
@@ -846,12 +884,25 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
             loopflow::build_info::BUILD_VERSION
         ),
     );
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let mini = fixture.json(&["machine", "add", "mini", "--json"]);
     let added = fixture.json(&["--machine", "mini", "machine", "add", "third", "--json"]);
-    assert_eq!(added["label"], "third");
-    let remote_machines = fixture.json(&["--machine", "mini", "machine", "list", "--json"]);
-    assert_eq!(remote_machines.as_array().unwrap().len(), 1);
-    assert_eq!(remote_machines[0]["id"], added["id"]);
+    // The new alias belongs to the executor's saved profile. Direct remote work
+    // sees it; a forwarded request continues using the origin's declarations.
+    let output = fixture
+        .command(&["machine", "list", "--json"])
+        .env("HOME", &remote)
+        .env("LF_HOME", remote.join("store"))
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let remote_machines: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let remote_machines = remote_machines.as_array().unwrap();
+    assert_eq!(remote_machines.len(), 2);
+    for (label, id) in [("mini", &mini["id"]), ("third", &added["id"])] {
+        assert!(remote_machines
+            .iter()
+            .any(|machine| machine["label"] == label && &machine["id"] == id));
+    }
     let local = fixture.json(&["machine", "list", "--json"]);
     assert_eq!(local.as_array().unwrap().len(), 1);
     assert_eq!(local[0]["label"], "mini");
@@ -872,6 +923,7 @@ fn preview_machines() -> Machines {
     );
     // Seed identity using the normal operation before taking the read baseline.
     assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "default_agent", "codex"]));
     for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
         for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {
             executable(
@@ -916,10 +968,10 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
     .unwrap();
     fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
     // A conflicting caller preference must not resolve the destination path.
-    fs::write(
-        fixture.root.path().join("local/config.yaml"),
-        "repo_root: /not-the-remote-root\n",
-    )
+    loopflow::config::files::update(&fixture.root.path().join("local/config.yaml"), |value| {
+        value["repo_root"] = "/not-the-remote-root".into();
+        Ok(())
+    })
     .unwrap();
     let local_db = fixture.root.path().join("local/loopflow.db");
     let remote_db = remote.join("store/loopflow.db");
@@ -927,7 +979,7 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
     let remote_before = checkpoint_bytes(&remote_db);
     let expected_id: String = rusqlite::Connection::open(&remote_db)
         .unwrap()
-        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+        .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
             row.get(0)
         })
         .unwrap();
@@ -1042,7 +1094,7 @@ fn remote_preview_preserves_absent_corrupt_and_changed_machine_evidence() {
     {
         let db = rusqlite::Connection::open(&remote_db).unwrap();
         db.execute(
-            "UPDATE machines SET id='home_99999999999999999999999999999999' WHERE route='local'",
+            "UPDATE machines SET id='home_99999999999999999999999999999999' WHERE is_local=1",
             [],
         )
         .unwrap();
@@ -1173,10 +1225,10 @@ fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() 
         .unwrap()
         .success());
     fs::write(remote.join("store/config.yaml"), "repo_root: ~/projects\n").unwrap();
-    fs::write(
-        fixture.root.path().join("local/config.yaml"),
-        "repo_root: /caller-only\n",
-    )
+    loopflow::config::files::update(&fixture.root.path().join("local/config.yaml"), |value| {
+        value["repo_root"] = "/caller-only".into();
+        Ok(())
+    })
     .unwrap();
     fs::write(
         repo.join(".lf/config.yaml"),
@@ -1298,27 +1350,6 @@ struct SharedPlan {
     remote_path: std::path::PathBuf,
     destination: loopflow::planning_git::PlanningDestination,
     _repos: Vec<loopflow_test_support::TestRepo>,
-    _person: Person,
-}
-
-/// In-process writes name the same person as the fixture's `lf` commands,
-/// whose Git identity is the test repository's.
-struct Person(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-
-impl Person {
-    fn jack() -> Self {
-        let guard = loopflow_test_support::env_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        std::env::set_var("LF_USER_NAME", "Jack");
-        Self(guard)
-    }
-}
-
-impl Drop for Person {
-    fn drop(&mut self) {
-        std::env::remove_var("LF_USER_NAME");
-    }
 }
 
 impl SharedPlan {
@@ -1388,7 +1419,6 @@ impl SharedPlan {
             remote_path,
             destination,
             _repos: repos,
-            _person: Person::jack(),
         }
     }
 
@@ -1679,105 +1709,49 @@ fn task_ownership_never_routes_to_another_persons_machine() {
 }
 
 #[test]
-fn set_machine_copies_wave_and_repository_defaults_to_your_other_machines() {
-    use loopflow::durable::{MachineSetting, OwningMachineSource};
+fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
+    use loopflow::durable::MachineSetting;
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
     plan.to_local();
     let mini = plan.remote.local_machine().unwrap().id;
     let laptop = plan.local.local_machine().unwrap().id;
-    let repository = ["--repository", plan.repository.as_str()];
-    let mut wave = repository.to_vec();
-    wave.extend(["--wave", "owners", "set", "machine", "mini"]);
-    let output = fixture.run(&wave);
-    assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
-    // A selected repository with no Wave sets the repository's default.
-    let mut bare = repository.to_vec();
-    bare.extend(["set", "machine", "mini"]);
-    let output = fixture.run(&bare);
-    assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("This repository:"));
-    // The Wave Session comes back to the laptop; its Tasks stay on mini.
-    let mut session = repository.to_vec();
-    session.extend([
+    let wave = plan
+        .local
+        .ensure_wave_project(plan.local_path.to_str().unwrap(), "owners")
+        .unwrap()
+        .wave_id;
+    let output = fixture.run(&[
+        "--repository",
+        plan.repository.as_str(),
         "--wave",
         "owners",
         "set",
-        "machine.session",
-        laptop.as_str(),
+        "machine.tasks",
+        mini.as_str(),
     ]);
-    let output = fixture.run(&session);
     assert_success(&output);
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners: its Session runs"));
-    for (store, path) in [
-        (&plan.local, &plan.local_path),
-        (&plan.remote, &plan.remote_path),
-    ] {
-        let wave = store
-            .ensure_wave_project(path.to_str().unwrap(), "owners")
-            .unwrap()
-            .wave_id;
-        assert_eq!(
-            store
-                .wave_owning_machine(&wave, MachineSetting::Tasks)
-                .unwrap(),
-            (mini.clone(), OwningMachineSource::Wave("owners".into()))
-        );
-        assert_eq!(
-            store
-                .wave_owning_machine(&wave, MachineSetting::Session)
-                .unwrap(),
-            (laptop.clone(), OwningMachineSource::Wave("owners".into()))
-        );
-        for setting in [MachineSetting::Tasks, MachineSetting::Session] {
-            assert_eq!(
-                store
-                    .repository_owning_machine(&plan.repository, setting)
-                    .unwrap(),
-                (mini.clone(), OwningMachineSource::Repository)
-            );
-        }
-    }
-    let listed = fixture.json(&["machine", "list", "--json"]);
-    let listing = |id: &str| {
-        listed
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|listing| listing["id"] == id)
-            .unwrap()
-            .clone()
-    };
-    let scopes = listing(mini.as_str())["defaults"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|d| {
-            format!(
-                "{} {}",
-                d["scope"]["kind"].as_str().unwrap(),
-                d["setting"].as_str().unwrap()
-            )
-        })
-        .collect::<Vec<_>>();
     assert_eq!(
-        listing(laptop.as_str())["defaults"][0]["setting"],
-        "session"
+        plan.local
+            .wave_owning_machine(&wave, MachineSetting::Tasks)
+            .unwrap()
+            .0,
+        mini
     );
     assert_eq!(
-        scopes,
-        ["wave tasks", "repository tasks", "repository session"]
+        plan.local
+            .wave_owning_machine(&wave, MachineSetting::Session)
+            .unwrap()
+            .0,
+        laptop
     );
-    // The laptop routes the unowned Task to mini; mini claims it for itself.
+    assert!(!plan.remote_path.join("lf.config.local.yaml").exists());
     assert_eq!(
         plan.local.task_execution_route(&task).unwrap().machine_id,
         mini
     );
-    assert!(plan.local.claim_task(&task).is_err());
-    plan.remote.claim_task(&task).unwrap().unwrap();
+    assert!(plan.local.task_ownership(&task).unwrap().log.is_empty());
 }
 
 #[test]

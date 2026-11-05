@@ -19,7 +19,10 @@ pub(crate) fn finish_session_attachment(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader};
     use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
 
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
@@ -56,6 +59,181 @@ mod tests {
             .release_session_attachment("resume", &attached)
             .unwrap();
         (home, store, detached)
+    }
+
+    #[test]
+    fn resume_waits_for_a_dead_owners_helpers_without_lifeline_authority() {
+        resume_after_leader_exit(true);
+    }
+
+    #[test]
+    fn resume_refuses_a_dead_owners_persistent_helpers_without_settling() {
+        resume_after_leader_exit(false);
+    }
+
+    fn resume_after_leader_exit(exits: bool) {
+        const RECOVERY_HOME: &str = "LOOPFLOW_TEST_SESSION_RECOVERY";
+        if let Some(home) = std::env::var_os(RECOVERY_HOME) {
+            let home = std::path::PathBuf::from(home);
+            let store = SqliteStore::new(&home.join("store.db")).unwrap();
+            std::fs::write(home.join("recovering"), "ready").unwrap();
+            let result = crate::session_record::resume_session_agent_process(
+                &store,
+                "resume",
+                &store.test_lf_process(),
+            )
+            .map_err(|error| error.to_string());
+            std::fs::write(home.join("result"), serde_json::to_vec(&result).unwrap()).unwrap();
+            return;
+        }
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let (home, store, detached) = resume_fixture();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: crate::durable::TaskId::new(),
+                repository_id: store
+                    .ensure_repository(home.path().to_str().unwrap())
+                    .unwrap(),
+                project_id: None,
+                title: "Retain Session work".into(),
+                description: "Existing work before owner replacement".into(),
+                due_date: None,
+            })
+            .unwrap();
+        let capture = store.session("resume").unwrap().unwrap().captured;
+        store.bind_session("resume", capture, &task.id).unwrap();
+        let attached = store
+            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
+            .unwrap();
+        // These children have no local lifeline writer, as when a different
+        // invocation recovers a Session after its launcher has disappeared.
+        let mut command = Command::new("/bin/sleep");
+        command.env_clear().arg("60").process_group(0);
+        store
+            .record_agent_process_launch("resume", &attached, &command, false)
+            .unwrap();
+        let mut leader = Child(command.spawn().unwrap());
+        let pid = leader.0.id();
+        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        store
+            .record_agent_process_identity("resume", &attached, pid, birth)
+            .unwrap();
+        store
+            .record_session_connection(
+                "resume",
+                &attached,
+                home.path().join("absent.sock").to_str().unwrap(),
+                &"saved-thread".into(),
+            )
+            .unwrap();
+        let mut helper = Child(
+            Command::new("/bin/sh")
+                .env_clear()
+                .args([
+                    "-c",
+                    "printf 'ready\\n'; read -r done; printf 'natural exit\\n'",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .process_group(pid as i32)
+                .spawn()
+                .unwrap(),
+        );
+        let mut output = BufReader::new(helper.0.stdout.take().unwrap());
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        assert_eq!(line, "ready\n");
+        leader.0.kill().unwrap();
+        leader.0.wait().unwrap();
+        let detached = store
+            .release_session_attachment("resume", &attached)
+            .unwrap();
+        store
+            .save_session_steer("resume", "Test author", "Keep this direction")
+            .unwrap();
+        let pending =
+            serde_json::to_value(store.session_steers("resume", 0, 100).unwrap()).unwrap();
+        let before = store.session("resume").unwrap().unwrap();
+        let history = store.session_history("resume", 0, 0).unwrap();
+        let agent = store.process(&attached.agent_process_id).unwrap().unwrap();
+        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
+        let test = if exits {
+            "resume_waits_for_a_dead_owners_helpers_without_lifeline_authority"
+        } else {
+            "resume_refuses_a_dead_owners_persistent_helpers_without_settling"
+        };
+        let mut recovery = Child(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!("session_record::runtime::tests::{test}"),
+                ])
+                .env(RECOVERY_HOME, home.path())
+                .stdin(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        if exits {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            while !home.path().join("recovering").exists() {
+                assert!(recovery.0.try_wait().unwrap().is_none(), "recovery exited");
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "recovery did not start"
+                );
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            // Keep a survivor alive into the recovery attempt, then let it exit.
+            std::thread::sleep(Duration::from_millis(500));
+            drop(helper.0.stdin.take());
+        }
+        assert!(recovery.0.wait().unwrap().success());
+        let result: Result<crate::process::SessionAttachment, String> =
+            serde_json::from_slice(&std::fs::read(home.path().join("result")).unwrap()).unwrap();
+        if exits {
+            let next = result.unwrap();
+            helper.0.wait().unwrap();
+            line.clear();
+            output.read_line(&mut line).unwrap();
+            assert_eq!(line, "natural exit\n", "recovery must not signal helpers");
+            assert_ne!(next.agent_process_id, attached.agent_process_id);
+            assert_ne!(next.token, detached.token);
+            assert!(store
+                .process(&attached.agent_process_id)
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_some());
+            assert!(
+                super::finish_session_attachment(&store, "resume", &attached, "interrupted")
+                    .is_err()
+            );
+            assert_eq!(store.session_attachment("resume").unwrap(), Some(next));
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.contains(&format!("pid {} (", helper.0.id())),
+                "{error}"
+            );
+            assert!(helper.0.try_wait().unwrap().is_none());
+            assert_eq!(store.session_attachment("resume").unwrap(), Some(detached));
+            assert_eq!(
+                store.process(&attached.agent_process_id).unwrap(),
+                Some(agent)
+            );
+        }
+        assert_eq!(store.session("resume").unwrap(), Some(before));
+        assert_eq!(store.task(&task.id).unwrap(), Some(task));
+        assert_eq!(
+            store.session_thread("resume").unwrap(),
+            Some("saved-thread".into())
+        );
+        assert_eq!(
+            serde_json::to_value(store.session_steers("resume", 0, 100).unwrap()).unwrap(),
+            pending
+        );
+        assert_eq!(store.session_history("resume", 0, 0).unwrap(), history);
     }
 
     #[test]

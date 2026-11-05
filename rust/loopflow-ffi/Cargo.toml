@@ -19,3 +19,4 @@ dist = false
 
 [dev-dependencies]
 tempfile = "3.27"
+loopflow-test-support = { path = "../loopflow-test-support" }

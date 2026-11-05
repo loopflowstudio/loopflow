@@ -1241,6 +1241,7 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
+            isolate: None,
             chrome: false,
             session_attachment: None,
             system_prompt: String::new(),

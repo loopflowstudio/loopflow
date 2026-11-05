@@ -138,12 +138,9 @@ pub enum TaskExecutionSource {
 
 /// Where your Machine for an unowned Task or a scope's Session came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "declaration", rename_all = "snake_case")]
 pub enum OwningMachineSource {
-    /// `lf --wave <wave> set machine <machine>`, set on the Task's Wave or a parent Wave.
-    Wave(String),
-    /// `lf set machine <machine>`, set on the Task's repository.
-    Repository,
+    Preference(Box<crate::config::settings::SettingCandidate>),
     /// No default is set: the Machine running the command.
     ThisMachine,
 }
@@ -534,6 +531,15 @@ impl GraphStepProcess {
             Some(passes) => format!("{} · {passes}", self.label),
             None => self.label.clone(),
         }
+    }
+}
+
+impl schemars::JsonSchema for MachineId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "MachineId".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
     }
 }
 

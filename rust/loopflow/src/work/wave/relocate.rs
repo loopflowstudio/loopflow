@@ -82,6 +82,20 @@ pub async fn relocate_wave(
             .sqlite
             .ensure_wave(&root.target.repo().to_string(), parent)?;
     }
+    let mut copied = Vec::new();
+    for planned in &moves {
+        if let Some(value) = crate::config::files::copy_wave(
+            Path::new(planned.wave.repo()),
+            planned.target.repo().as_path(),
+            planned.wave.id(),
+        )? {
+            copied.push((
+                planned.wave.repo().to_owned(),
+                planned.wave.id().clone(),
+                value,
+            ));
+        }
+    }
     store
         .relocate_waves(
             moves
@@ -95,6 +109,9 @@ pub async fn relocate_wave(
                 .collect(),
         )
         .await?;
+    for (source, id, value) in copied {
+        crate::config::files::finish_wave_move(Path::new(&source), &id, &value)?;
+    }
     Ok(receipt)
 }
 

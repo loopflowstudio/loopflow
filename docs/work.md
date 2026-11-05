@@ -281,10 +281,12 @@ Keychain.
 # .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
 graph: code
 agent: claude
-skill_agents:
-  implement: claude:opus
-context_budgets:
-  memory_tokens: 20000
+skills:
+  implement:
+    agent: claude:opus
+context:
+  budgets:
+    memory_tokens: 20000
 ```
 
 ```bash
@@ -296,20 +298,23 @@ lf wave status billing                                    # each setting and its
 ```
 
 `config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
-changes; launches in the Wave layer it over the repository's and your
-`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+changes; Wave values override repository values, and personal config overrides
+both. Repository settings (`planning`, `release`,
 `merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
 settings.
 
-`lf set` never edits committed config. It stores your own value on this
-Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
-(`--global`); without `--wave` it sets the repository, even in a Wave's Task
-worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
-committed value for you only, and `lf wave status` reports it as `personal`.
-Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
-(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
-repository and global. `lf unset <key>` hands the choice back.
+`lf set` edits your private `lf.config.local.yaml`, shared across this clone's
+Task worktrees. `--wave` selects a Wave within that file; `--global` edits
+`~/.lf/config.yaml`. Independent clones have independent private preferences.
+The same values can be edited by hand or through Desktop. `lf unset <key>` removes
+your declaration and reveals the next applicable value.
+
+Machine choices and ordered accounts are personal file settings too. Credentials,
+observed availability and existing work placement remain runtime state. Agent choices
+beat all `default_agent` fallbacks; within each class, personal settings beat shared
+settings. [Configuration](config.md) owns the complete source/scope/target rules and
+remote preference behavior. `lf wave status` explains each value's source.
 
 A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
 released lf still reads (LOO-640 removes that).

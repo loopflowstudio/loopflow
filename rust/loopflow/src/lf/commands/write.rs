@@ -414,10 +414,8 @@ impl Write {
         if !cli.command.as_ref().is_some_and(Commands::changes_work) {
             return self.perform(&repo, &cli).map(Some);
         }
-        crate::config::with_agent_override(cli.agent.as_deref(), || {
-            crate::journal::with_call_process(&repo, &argv, || self.perform(&repo, &cli))
-        })
-        .map(Some)
+        let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
+        crate::journal::with_call_process(&repo, &argv, || self.perform(&repo, &cli)).map(Some)
     }
 
     fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {

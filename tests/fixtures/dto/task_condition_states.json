@@ -70,7 +70,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "completed": {
     "task": {
@@ -356,7 +356,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "stale": {
     "task": {
@@ -616,7 +616,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "unavailable": {
     "task": {
@@ -712,7 +712,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "user_wait": {
     "task": {
@@ -973,7 +973,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "dirty": {
     "task": {
@@ -1069,7 +1069,7 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": "task"
+    "graph_source": null
   },
   "authored_commits": {
     "task": {
@@ -1355,6 +1355,6 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "graph_source": "task"
+    "graph_source": null
   }
 }

@@ -939,7 +939,7 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1", [task.as_str()]).unwrap();
+        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
         store
             .conn
             .lock()
@@ -1481,8 +1481,8 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO provider_accounts(provider,account_id,credential_state,
-                    routing_state,created_at,updated_at)
-                 VALUES('codex','engineering','connected','automatic',1,1)",
+                    created_at,updated_at)
+                 VALUES('codex','engineering','connected',1,1)",
                 [],
             )
             .unwrap();

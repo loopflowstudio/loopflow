@@ -39,6 +39,11 @@ Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
 receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
 its shared repository publishes authored files that lifecycle operations may already commit.
+When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
+`tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
+keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
+context-budget regressions as well as migration tests: moving storage must
+preserve their existing behavior.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
@@ -63,6 +68,31 @@ prompt/stop callbacks from the generated hook settings, preserves silent work
 past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
+
+Upgrade recovery also needs `transport_tests`: retained hooks must settle through
+ContextBlock, exclude subagents and report real delivery errors. Public resume
+must retain drafts, requests, history and Session/Task/capture identity through
+build replacement and viewer return; only provider replacement changes its fence.
+An unanswering protected owner survives failed attachment and completes continued
+turns after transport returns. Under SQLite contention, control and viewer return
+stay responsive; queued input arrives once, only after retention commits.
+`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+natural helper exit permits continuation, persistent helpers refuse it without
+signals or settlement, and both retain Task/history/steers. These stand-ins use
+candidate wire/schema; released-version, permanently broken transport and
+installed-provider recovery still need separate proof.
+Use published 0.15.1 for the released boundary: its owner speaks newline JSON
+and predates native-input tracking. Prove attachment and retention of an unsent
+draft before allowing its provider to be replaced; an absent input record does
+not establish that an older provider's editor is empty.
+Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
+a shallow checkout orders all slugs as drafts and can reject the released store
+before reaching the interaction under test.
+
+Hook command spelling or Clap declaration changes also run
+`cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
+keeps the exact callback retained by running providers while rejecting other
+command aliases; run it alongside the retained-hook upgrade test.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -117,7 +147,7 @@ public live steering. It uses a local model and disposable homes; configured-acc
 and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
-`explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children` when
+`explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own_agent` when
 integrating Claude transport changes; bound the test so missing acknowledgements
 fail locally instead of exhausting the merge queue's deadline.
 Cross-provider replay fixtures must install stand-ins for both the recorded and
@@ -367,6 +397,25 @@ skills and Graph recipes into the checkout; default sync exports globally.
 ```bash
 cargo test -p loopflow --lib skills::tests
 ```
+
+Settings and recipe changes also run the provider-boundary matrix:
+
+```bash
+cargo test -p loopflow --test integration settings_launch_tests::
+```
+
+It executes exported commands and runtime Graphs, comparing inspected settings
+with provider arguments and delivered documents. Preserve defining Graph IDs
+through composition, live repository skill overrides in global recipes, personal/shared
+file precedence, explicit CLI/environment selection and empty/false/unset values.
+Session/resume fixtures create local Tasks through the CLI and wait for each
+worker before reading its selection. Stand-ins establish launch behavior, not
+configured-provider recovery. Claude's headless permission floor is independent
+of the resolved `yolo` preference; terminal bypass checks own its negation.
+Launch and preview fixtures select a harness explicitly or save a fixture-local
+`default_agent`; they must not depend on the developer's installed providers.
+Keep composed launch matrices split into bounded behavioral cases so each stays
+within the ordinary CI test deadline without dropping assertions.
 
 After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch

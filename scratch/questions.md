@@ -134,9 +134,8 @@ Implementation assumptions, November 5 (eighth-review tile direction):
   opening, the tile and the primary's selected pane (compress removed the
   workspace's own `openPrimaryConversation`, which skipped the Machine check).
 
-Concept-review assumption, November 5 (ninth pass): "a tile opens in place while a view
-plan is presented" means any presented board, including the repository page and a Wave
-view, whose Task tiles `presentWaveTiles` opens like a Dashboard's. Today's `inTile`
-reads `selectedViewPlan` alone, which is nil there, so those tiles' Retry navigates into
-the Task; the next implement keys the route on `selectedViewPlan` or `navigation.waveView`.
-To keep Wave-view tiles navigating instead, leave `inTile` as it is and record that choice.
+Concept-review assumption, November 5 (ninth pass, landed): "a tile opens in place while
+a view plan is presented" means any presented board, including the repository page and a
+Wave view, whose Task tiles `presentWaveTiles` opens like a Dashboard's. `inTile` keys on
+`selectedViewPlan` or `navigation.waveView` plus visibility, so those tiles' Retry attaches
+in place and the board stays. Wave-view tiles navigating instead was the rejected reading.

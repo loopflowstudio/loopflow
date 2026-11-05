@@ -24,14 +24,6 @@ public enum SessionOpenIntent: String, Codable, Sendable, CaseIterable {
 
     /// Every intent flag a prepared command may carry.
     public static let flags = Set(allCases.flatMap(\.arguments))
-
-    public var action: SessionActionKind {
-        switch self {
-        case .resume: .moveHere
-        case .start: .open
-        case .reveal: .reveal
-        }
-    }
 }
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.

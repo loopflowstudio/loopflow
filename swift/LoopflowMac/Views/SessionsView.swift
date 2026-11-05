@@ -1135,7 +1135,7 @@ struct SessionItem: Identifiable, Equatable {
         } else if intent != .resume, record.heldElsewhere {
             state = .elsewhere
         } else {
-            state = record.action(intent.action)?
+            state = record.action(intent == .resume ? .moveHere : .open)?
                 .unavailableReason.map(State.failed) ?? .prepared
         }
     }

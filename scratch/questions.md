@@ -45,6 +45,13 @@ unassigned Task"; selecting one still shows its existing Claim and Start offer. 
 said working Tasks without naming this case. To include them, drop the `isUnassigned`
 term in `RoadmapTask.conversationIntent` and show their conversation instead.
 
+Superseded November 5 (sixth concept review): Jack Heart's "auto open everything" and
+"once you've selected something, you want to see its session" cover started unassigned
+Tasks; opening claims nothing, so the Wave board's backlog rule is untouched. The
+implement iteration drops the `isUnassigned` term. Unstarted Tasks still start
+explicitly: placing their checkout starts the Task, which opening never authorizes.
+To exclude unassigned Tasks again, restore the term.
+
 Concept-review assumption, November 4: a Task primary's first turn with no person's
 request reads and reports, whether Desktop opened it or someone ran `lf resume --task`.
 This drops operating without a greeting on that explicit path, because the launch cannot

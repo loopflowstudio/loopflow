@@ -70,10 +70,15 @@ remains available on the same Task and checkout.
 
 Viewing, prefetch and restore never start a Task Graph or replay interrupted or
 captured input. Creating the initial native conversation for a working Task is
-within the automatic-open requirement; executing Task work is not. Prefetch does
-not reach backlog: unstarted Tasks and unassigned started Tasks (assumption in
-`questions.md`). Missing account or Machine evidence stays an actionable failure;
-the selected Task never falls back to a different checkout or Machine.
+within the automatic-open requirement; executing Task work is not. Every started
+Task (idle, active, moving) opens, owned or not: opening claims nothing, so the
+"nothing moves an unassigned Task" rule is untouched (sixth concept review,
+below, superseding the November 4 owner assumption in `questions.md`). An
+unstarted Task has no checkout and so no conversation to open; placing one starts
+the Task, which opening never authorizes, so it keeps an explicit Task-start
+offer that does not read as a conversation gate. Missing account or Machine
+evidence stays an actionable failure; the selected Task never falls back to a
+different checkout or Machine.
 
 Fresh repository state discovers idle, active and moving Tasks, including those
 absent from saved recent history. Order: selected Task, visible tiles, saved
@@ -146,8 +151,16 @@ reconciliation and conversation lookup agree.
 ### Delete — do not maintain
 
 - History-only reveal as the automatic policy for working Task load, linked
-  selection, prefetch and Retry. Reveal stays for backlog Tasks and the CLI's
-  explicit `--reveal-existing` contract.
+  selection, prefetch and Retry. Reveal stays for unstarted and completed Tasks
+  and the CLI's explicit `--reveal-existing` contract.
+- The `!isUnassigned` term in `RoadmapTask.conversationIntent` and the three
+  `WorkCacheTests` cases that use the fixture's unassigned idle Task as the
+  refused-reveal subject; they move to the unstarted Task. (Sixth concept review.)
+- Two placeholders for one state: `No Task conversation open` /
+  `task-open-conversation` and `Conversation not open` /
+  `primary-open-conversation`, with `openTaskConversation` and
+  `openPrimaryConversation` as separate Retry paths. One placeholder, one Retry
+  routed by kind. (Sixth concept review.)
 - The selected-state **No session open / Open conversation** gate for repository
   and Wave Work, the `key.kind == .task || id != nil` admission in the warm queue,
   and `TASK_PRIMARY_MESSAGE` as a Task-only first turn: deleted November 5.
@@ -200,6 +213,42 @@ lifetime, none for existing history) rather than the original line. Compress not
 no design change: `GhosttySurfacePool.start`'s `.uninitialized, .initializing`
 return is unreachable because `GhosttyManager.initialize()` finishes synchronously
 in `.ready` or `.failed`.
+
+Concept review, November 5 (sixth pass, against the primaries change): the
+expanded experience holds and its concepts did not grow: which Work opens itself,
+what may open and in what order, when a provider starts, who may take input, what
+a first turn may do. Three things the accepted decisions already imply, for the
+next implement iteration, none a new product choice:
+
+- **Started unassigned Tasks open too.** Jack Heart's "auto open everything" and
+  "once you've selected something, you want to see its session", with the glossary's
+  working states (idle, active, moving), cover them; their only exclusion was an
+  analogy to "nothing moves an unassigned Task", and the reading pass already
+  claims and starts nothing. Drop the `!isUnassigned` term; `conversationIntent`
+  becomes `isWorking ? .start : .reveal`. The refused-reveal tests move to the
+  unstarted fixture Task (`prefetch-15`), which has no checkout and still refuses.
+  The fifth pass asked this as its first demo question; Jack's blanket direction
+  answers it. Restoring the term is the one-line reversal if the demo says otherwise.
+- **An unstarted Task shows a Task-start offer, not the rejected gate.** It has
+  no checkout, so there is no conversation to open and placing one starts the
+  Task, which opening never authorizes. Its pane says the Task is not started and
+  offers Rust's Start, with its help text; the words "No Task conversation open"
+  go. Completed Tasks keep history-only reveal and LOO-717 release.
+- **One placeholder for every Work.** Task and primary panes now express one
+  contract: opening, the conversation, a passive held conversation, a failure
+  with Retry, Closed-here, or the Task-start offer above. Two titles, two
+  accessibility identifiers and two openers (`openTaskConversation`,
+  `openPrimaryConversation`) remain from the Task-only days; merge them into one
+  placeholder whose Retry the model routes by kind. The primary branch's
+  "Loopflow has not reported this repository yet" copy is unreachable:
+  `SessionsContentView` renders no pane before the Machine is known, so the
+  merged placeholder shows the saved-Work note or the read error instead.
+
+Settled as the product rule, not a limitation: a primary never operates
+unprompted; opening reads, and operation begins with the person's first request,
+from Desktop or `lf resume`. The November 4 and 5 assumptions in `questions.md`
+record the CLI consequence. Open choices unchanged: the five demo questions of
+the fifth pass, less the first, which Jack's direction answered.
 
 ## Verification
 

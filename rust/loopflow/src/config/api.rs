@@ -223,8 +223,12 @@ fn inspect_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::Request;
+    use super::{run, Request};
     use crate::config::files::Destination;
+    use crate::lf::commands::graph::EnvVarGuard;
+    use loopflow_test_support::TestRepo;
+    use serde_json::{json, Value};
+    use std::path::Path;
 
     #[test]
     fn catalogue_wire_shape_includes_feature_category() {
@@ -255,27 +259,14 @@ mod tests {
             assert!(serde_json::from_value::<Destination>(invalid).is_err());
         }
     }
-}
-
-#[cfg(test)]
-mod configuration_tests {
-    use crate::config::api::Request;
-    use crate::config::files::Destination;
-    use loopflow_test_support::TestRepo;
-    use serde_json::{json, Value};
-    use std::path::Path;
-
-    fn request(request: Request) -> Result<Value, String> {
-        crate::config::api::run(request).map_err(|error| error.to_string())
-    }
 
     fn edit(
         destination: &Destination,
         key: &str,
         value: Option<&str>,
         unset: bool,
-    ) -> Result<Value, String> {
-        request(Request::Declaration {
+    ) -> anyhow::Result<Value> {
+        run(Request::Declaration {
             destination: destination.clone(),
             key: key.into(),
             value: value.map(str::to_owned),
@@ -290,7 +281,7 @@ mod configuration_tests {
         key: &str,
         expected: &str,
     ) {
-        let explained = request(Request::Explain {
+        let explained = run(Request::Explain {
             destination: destination.clone(),
             key: key.into(),
         })
@@ -329,8 +320,7 @@ mod configuration_tests {
     fn destinations_bind_save_explanation_and_launch_across_worktrees_and_wave_renames() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("LF_HOME");
-        std::env::set_var("LF_HOME", home.path());
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = TestRepo::new();
         repo.create_file(".lf/skills/probe.md", "Probe settings.\n");
         repo.create_file(
@@ -411,6 +401,7 @@ mod configuration_tests {
         let private_before = std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap();
         assert!(edit(&private, "user.name", Some("Wrong scope"), false)
             .unwrap_err()
+            .to_string()
             .contains("does not apply"));
         assert!(edit(&shared, "user.name", Some("Wrong owner"), false).is_err());
         assert_eq!(
@@ -518,9 +509,5 @@ mod configuration_tests {
                 .unwrap(),
             "codex:global"
         );
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
     }
 }

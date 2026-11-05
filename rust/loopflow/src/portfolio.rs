@@ -184,11 +184,7 @@ fn read_in(directory: &Path) -> Result<Portfolio> {
     )
 }
 
-pub fn change(command: &PortfolioCommand) -> Result<Portfolio> {
-    change_in(command, &std::env::current_dir()?)
-}
-
-fn change_in(command: &PortfolioCommand, directory: &Path) -> Result<Portfolio> {
+pub fn change(command: &PortfolioCommand, directory: &Path) -> Result<Portfolio> {
     let portfolio = change_at(&crate::store::lf_home_dir(), command, directory)?;
     if !matches!(command, PortfolioCommand::Remove { .. }) {
         register_authored_waves(&portfolio, command, directory)?;
@@ -289,7 +285,7 @@ pub fn write(
     io: &mut crate::lf::commands::mutation::CommandIo<'_>,
 ) -> Result<()> {
     let portfolio = match command {
-        Some(command) => change_in(command, directory)?,
+        Some(command) => change(command, directory)?,
         None => read_in(directory)?,
     };
     if json {

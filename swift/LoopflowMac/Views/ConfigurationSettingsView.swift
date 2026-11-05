@@ -74,14 +74,15 @@ struct ConfigurationSettingsView: View {
         }
     }
 
-    private var address: [String: Any] {
+    private var address: JSONValue {
         destination.address(repository: (repository as NSString).expandingTildeInPath, wave: wave)
     }
 
-    private func request(value: String?, unset: Bool) throws -> JSONValue {
-        try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject:
-            ["action": "declaration", "destination": address, "key": key,
-             "value": value as Any? ?? NSNull(), "unset": unset]))
+    private func request(value: String?, unset: Bool) -> JSONValue {
+        .object([
+            "action": .string("declaration"), "destination": address, "key": .string(key),
+            "value": value.map(JSONValue.string) ?? .null, "unset": .bool(unset),
+        ])
     }
 
     private func resetSelection() {
@@ -124,8 +125,10 @@ struct ConfigurationSettingsView: View {
         let selection = selectionID
         explanation = ""
         do {
-            let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: await ServerClient.configuration(try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject:
-                ["action": "explain", "destination": address, "key": key]))))
+            let data = try await ServerClient.configuration(.object([
+                "action": .string("explain"), "destination": address, "key": .string(key),
+            ]))
+            let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
             guard selection == selectionID else { return }
             locator = result.path
             let effectiveKey = result.key
@@ -164,11 +167,11 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
         }
     }
 
-    func address(repository: String, wave: String) -> [String: Any] {
-        var value: [String: Any] = ["kind": rawValue]
-        if self != .personalGlobal { value["repository"] = repository }
-        if isWave { value["wave"] = wave }
-        return value
+    func address(repository: String, wave: String) -> JSONValue {
+        var value: [String: JSONValue] = ["kind": .string(rawValue)]
+        if self != .personalGlobal { value["repository"] = .string(repository) }
+        if isWave { value["wave"] = .string(wave) }
+        return .object(value)
     }
 }
 

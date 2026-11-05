@@ -72,6 +72,10 @@ historical authorship from later Machine settings; older unknown names stay unkn
   Request entry and nested workers use the same unwind-safe scope restoration.
 - Desktop FFI crate/adapter/module-map/linking/packaging are deleted. Provider
   launches and remote streams retain their existing owners.
+- Portfolio's ambient-cwd mutation wrapper is removed; CLI/server and fake-world
+  callers use one explicit-directory API. Settings requests build `JSONValue`
+  directly, removing the old untyped dictionary/serialization round trip. The
+  migrated configuration tests share one module and restore environment on unwind.
 
 Pre-sync parity and routing evidence is retained at
 `b702602ee1:scratch/mobile-backend.md`; it predates the settings merge and does
@@ -320,4 +324,4 @@ current owner policy. [Original Desktop scope](research_notes/desktop-server-ori
 retains the app-automation questions. The current review is
 [concept-review.html](concept-review.html).
 
-Check (November 4 settings merge): `config::api::` (3), `journal::request::` (3), server wire round-trip (1), `served_reads configuration_` (2), focused Swift configuration/protocol/theme suites (35), Swift boundaries, `cargo fmt`, `git diff --check`, and `cargo clippy --all-targets --jobs 4 -- -D warnings` passed. Logs: `/tmp/loo593-settings-{api,request-reuse,wire,server,swift,clippy}.log`. An unchanged library-test rebuild was stopped after prolonged compilation; request/wire checks reused the binary built by the passing API check. Gate owns full merged suites/packaging; demo owns rendered and installed-replacement acceptance.
+Check (November 4 settings merge): `config::api::` (3), `journal::request::` (3), server wire round-trip (1), `served_reads configuration_` (2), focused Swift configuration/protocol/theme suites (35), Swift boundaries, `cargo fmt`, `git diff --check`, and `cargo clippy --all-targets --jobs 4 -- -D warnings` passed. Logs: `/tmp/loo593-settings-{api,request-reuse,wire,server,swift,clippy}.log`. An unchanged library-test rebuild was stopped after prolonged compilation; request/wire checks reused the binary built by the passing API check. After reduction, `config::api::` (3), `portfolio::` (3), `swift build --build-tests`, headless `ConfigurationSettingsTests` (2), Swift boundaries, formatting and Clippy passed; logs: `/tmp/loo593-compress-*.log`. Gate owns full merged suites/packaging; demo owns rendered and installed-replacement acceptance.

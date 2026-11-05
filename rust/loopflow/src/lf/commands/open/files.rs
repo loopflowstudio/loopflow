@@ -20,7 +20,14 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
     );
     let (targets, _) = match super::targets(cli, args) {
         Ok(targets) => targets,
-        Err(_) if args.host == OpenHost::Auto => {
+        Err(_)
+            if args.host == OpenHost::Auto
+                && args.url.is_none()
+                && cli.task.is_none()
+                && cli.wave.is_none()
+                && !cli.selects_repository()
+                && crate::repo::discover_repo_root(&std::env::current_dir()?)?.is_none() =>
+        {
             return report(cli, args, None, &args.files, explain)
         }
         Err(error) => return Err(error),

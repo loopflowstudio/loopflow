@@ -19,3 +19,10 @@ No Wave-memory edits are authorized. The previously proposed correction to
 infrastructure memory (Desktop-only rather than current-host automation) remains
 for its owner, preserved at
 `ea0e0781b22f092b6a0169802997ff7a3628c65c:scratch/questions.md`.
+
+Headless demo decision, November 4: apply the repository's existing optional
+hosted-diagnostic policy to this independent-main candidate. The configured Task
+command still fails at the known installed-schema boundary; this is recorded as
+failed evidence, not waived into a pass. Fresh candidate-owned fallback and
+headless Files checks support advancing to gate without importing parent schema
+changes. No new product choice or human approval is inferred; see docs-first-demo.md.

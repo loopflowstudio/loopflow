@@ -38,10 +38,10 @@ HTML render in read mode; active edits keep their selection and draft while
 another file becomes a tab. Desktop retains its existing remote Files transport.
 
 With no Desktop attached, the command reports paths and opens nothing. A missing
-file or unmatched view reports an error; correct the path or destination and
-retry presentation without rewriting the docs. The docs-first workflow reports
-paths and continues when presentation is unavailable. It never launches a
-terminal editor, browser or host as a fallback.
+file, invalid Work selection or unmatched view reports an error; correct the
+path or destination and retry presentation without rewriting the docs. The
+docs-first workflow reports paths and continues when presentation is unavailable.
+It never launches a terminal editor, browser or host as a fallback.
 
 ## Share a link
 

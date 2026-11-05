@@ -96,6 +96,21 @@ fn files_without_a_host_are_a_noop_even_outside_a_repository() {
 }
 
 #[test]
+fn files_report_unresolved_work_instead_of_an_absent_desktop() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let result = lf(
+        home.path(),
+        cwd.path(),
+        None,
+        &["open", "--task", "INF-404", "--file", "guide.md", "--json"],
+    );
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Task resolution unavailable"));
+    assert!(result.stdout.is_empty());
+}
+
+#[test]
 fn desktop_file_presentation_without_desktop_never_falls_back_to_a_terminal() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

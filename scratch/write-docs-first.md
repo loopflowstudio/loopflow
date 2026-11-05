@@ -10,8 +10,9 @@ conversation and PR #1817 remain; source PR #1810 and parent PR #1814 stay intac
 Landing is authorized, through the existing code Graph's delivery steps.
 
 Reconciled November 4, 2026: implementation and independent placement exist.
-PR #1817 is open against main at `582201f7996dc28aa2ccbc75fd6d735c4e995b80`,
-matching this checkout. Review, gate, landing and verification remain.
+PR #1817 is open against main; the reviewed checkpoint is
+`60dd0e3f4141a87f0f556e373b189a76d2e703d7`. Gate passed with the local repairs
+recorded below. Publish those repairs, land, then verify delivery.
 
 The complete stacked implementation, prior dirty gate repairs, decisions and
 contrary evidence are preserved at
@@ -104,24 +105,24 @@ Independent delivery changes the integration target, not the Task's identity.
 The owned sync records placement after integration and PR retargeting; conflicts
 and retarget failures retain recovery through the existing operation. Missing
 comparison history remains unknown evidence, never an empty diff. No additional
-placement lifecycle is needed. Next proof remains the combined candidate's
-affected gate checks and Desktop interaction coverage listed below; this review
+placement lifecycle is needed. The gate evidence below covers the combined
+candidate's affected checks and headless Desktop interactions; this review
 does not promote historical passes or headless evidence into mounted UI proof.
 
-Review and gate the published independent-main candidate, then land and verify
-the delivered behavior. Managed detachment and publication are complete;
+Publish the gate repairs, then land and verify the delivered behavior.
+Managed detachment and initial publication are complete;
 recovery history and its evidence limits are in `recovery.md`.
 Recorded focused checks cover absent-Desktop behavior, original paths, no extra Session,
 active draft/tab retention, and clean/conflicted detachment preserving parent and
-child identities. Gate owns affected graph/progression, world recipes, goldens,
+child identities. Gate covered affected graph/progression, world recipes, goldens,
 DTO/action fixtures, sync/recovery callers, docs and headless Swift checks.
 Relevant Rust modules: `git`, `ops::sync`, `lf::commands::ops`,
 `lf::commands::open`, `lf::commands::desktop`, `graph::compiled`, `task_graph`;
 integration `sync_tests`, `work_open_tests`; world recipe and prompt binaries.
 Git sync callers also reach `agent_startup_tests`, `release_tests` and
 `release_lock_tests` in the tests README. The latest main integration changed
-Task/Session ownership and transport code; the earlier passes do not establish
-that the combined candidate passes these affected suites.
+Task/Session ownership and transport code; the earlier passes alone did not
+establish that the combined candidate passes these affected suites.
 
 Demo/review owns configured attached Files rendering, an active draft surviving
 repeat presentation, saving/rereading the correction and conversation continuity.
@@ -132,3 +133,45 @@ Files/pane/DTO and Theme tests passed. That unexplained exit remains historical,
 not a passing full suite. No parent landing or installation is required here.
 
 Check: `gh pr view 1817 --json baseRefName,headRefOid,state` confirmed open/main/`582201f799`; prior focused detachment, Desktop-fallback and Task-context tests plus fmt/clippy passed before the latest main sync; no code changed during realign, so no tests rerun; combined affected suites and Swift remain with gate, mounted UI evidence with demo/review.
+
+## Gate evidence — November 4
+
+Reviewed the full diff against the supplied base `c59cfcc631`, including the
+existing uncommitted demo notes. The plan maps graph/skill changes to graph,
+Task progression, catalog, world recipes and prompt goldens; file presentation
+to open/Desktop, Work-opening, DTO and headless Swift checks; sync/recovery to
+Git, sync, Task, startup, release locks, release and PR-range/authority checks.
+Docs reach CLI spelling, README/index and website checks. No FFI wire change,
+terminal implementation, migration, or Xcode build configuration was added.
+
+Two repairs remain in the working tree for delivery. Auto file presentation
+previously swallowed an invalid Task selection and returned success as though
+Desktop were absent. It now preserves Work-resolution errors, while an
+unselected call outside a repository remains a no-op; the regression and
+usage docs cover this distinction. The existing root-child sync fixture now
+uses `EnvGuard`, since completed sync records placement and must not consult
+the installed registry. No product behavior was changed to accommodate it.
+
+Commands below ran with inherited `LF_*` removed and stdin closed. The first
+run selected the installed CLI ahead of the candidate for website generation;
+the follow-up corrected PATH to `target/debug`, then rustup's proxy directory.
+No timeout occurred. Unchanged suites retain their result; the follow-up
+covered the repaired inputs rather than repeating the full gate.
+
+- `uv run python scripts/test.py --base c59cfcc631 --reuse-passing --rust-filter 'test(git::tests::) | test(ops::sync::) | test(lf::commands::ops::sync_performance_tests::) | test(lf::commands::open::) | test(lf::commands::desktop::) | test(graph::) | test(task_graph::) | test(ops::task::tests::) | test(sync_tests::) | test(work_open_tests::) | test(agent_startup_tests::) | test(release_lock_tests::) | test(cli_discovery::) | test(documented_commands::) | test(dto_fixtures::) | test(task_graph_launch_tests::) | test(skills::catalog::) | binary(release_tests) | binary(golden_prompt) | test(world_recipes::) | binary(task_pr_range_tests) | binary(task_pr_authority_tests)'`: architecture passed; Rust 503 passed, one fixture failed at the installed-registry boundary; website failed before tests on installed CLI selection; Desktop build, 687 headless Swift tests in 89 suites and Swift boundary check passed (297 s including builds, 136 s test execution).
+- `cargo fmt --all`: passed after repairs.
+- `uv run python scripts/test.py --base HEAD --reuse-passing --website --rust-filter 'test(lf::commands::open::) | test(work_open_tests::) | test(sync_tests::existing_root_child_syncs_parent_from_its_original_fork)'`: passed in 161 s; 21 Rust tests including both repairs, architecture, formatting, candidate CLI build, `cargo clippy --all-targets --jobs 4 -- -D warnings`, and 72 website tests. Stable rustc 1.99.1 was current after `rustup update stable --no-self-update`.
+- `git diff --check`: passed.
+
+Local logs: `/tmp/loo-728-gate.log`, `/tmp/loo-728-gate-repair.log`; the substantive
+results are retained above. Resource postflight passed with 149.1 GiB free.
+Cleanup retained unrelated builds because the installed schema lacks
+`machines.is_local`; no installed schema or parent work was changed. The Swift
+linker warned about cached native objects targeting macOS 26.2 versus 26.0,
+but app build and tests passed. The earlier unexplained broad Swift exit is
+historical; this combined candidate has a completed full headless pass.
+
+CI still owns the full matrix and Xcode app/test-runner compile. Optional native
+display diagnostics were skipped, not passed. Installed-database compatibility
+and the configured attached-Desktop walkthrough retain the limits documented
+in `docs-first-demo.md`; no screenshot or mounted UI evidence is claimed.

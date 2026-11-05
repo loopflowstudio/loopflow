@@ -713,6 +713,7 @@ fn sync_after_squash_merge_leaves_only_unique_diff() {
 
 #[test]
 fn existing_root_child_syncs_parent_from_its_original_fork() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     let original_fork = repo.head_sha();
     repo.create_branch("child");

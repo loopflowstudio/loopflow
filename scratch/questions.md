@@ -25,3 +25,8 @@
   A store that stays broken for the life of a Session (an old build after a
   column change) would otherwise be asked ten times a second until the person
   quits. If a faster catch-up matters, it is one constant.
+- A turn typed and answered while the store was down replays, after recovery, as
+  a draft no hook will acknowledge; that owner stays retained until the person
+  quits (resume attaches, rollover leaves it). Kept as the safe side of LOO-709's
+  rule that uncertain input retains; the alternative is an acknowledgement replay
+  kept beside the hook's gap marker, not built here.

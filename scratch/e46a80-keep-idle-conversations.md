@@ -13,8 +13,9 @@ old processes live. 23 idle Codex clients lost their relays within a second,
 ## Why Claude survived and Codex did not
 
 Claude's data path is the TUI talking to Anthropic. lf touches it only through
-hooks (separate `lf __context-block` processes; a store failure exits 1, which
-Claude shows as a non-blocking hook notice and continues) and the PTY owner.
+hooks (separate `lf __context-block` processes; on 11-04 a store failure exited
+1, which Claude showed as a non-blocking hook notice and continued) and the PTY
+owner.
 OpenCode and Pi are the same shape: lf observes, it does not carry.
 
 Codex is different: lf's relay sits between the Codex TUI and the app-server
@@ -55,8 +56,9 @@ wait until `try_record_owner_input` commits, retrying forever. On 11-04 the
   `SessionCapture::finish` writes `terminal.json` and treats its store
   observation and attachment finish as best-effort.
 - Hooks (Jack's 2026-11-05 steers): every `__context-block` call is best-effort.
-  Claude: a store failure exits 1, which Claude Code treats as non-blocking
-  (exit 2 would block); unchanged. Pi: the bash-tool guard no longer `exit`s the
+  Claude: a store failure emits the context block without steers and exits 0
+  (`deliver_steers`); exit 2 would block, and exit 1 showed a hook notice on
+  11-04. Pi: the bash-tool guard no longer `exit`s the
   tool when lf fails, and `pi-event`, context refresh and steering failures
   notify once instead of shutting Pi down. OpenCode: the `context` hook catches
   a failed `__context-block` and sends the prompt without lf's context. The
@@ -165,6 +167,22 @@ never caught the store up once it answered. Implemented the same day:
 
 Kept: the bounded wait, the unfenced turn, the receipt gate on saved input and
 the provider's own exit.
+
+Fourth pass (2026-11-05, against the implemented catch-up): the contract reads
+as implemented at every layer, and no accepted decision implies more. One
+counterexample found and kept: a turn typed *and answered* during a gap. The
+owner delivers it unrecorded; Claude's prompt and Stop hooks cannot acknowledge
+it; when the store answers, the replay records it as a `Submitted` draft nothing
+will acknowledge, and the next prompt turns it `Uncertain`. That owner is then
+retained (`OwnerRetention::NativeInput`) until the person quits: the idle ending
+never fires, `lf monitor rollover` reports "native input holds the conversation",
+and `lf resume` attaches to it (`attaches` returns true on any retention) instead
+of moving it to the installed lf. Kept because LOO-709 already chooses this side
+(uncertain input retains the native process), because the conversation is never
+lost, only kept, and because the alternative, hooks keeping an acknowledgement
+replay beside the gap marker, is machinery for a window the length of an
+install's migration. If that retained process ever matters, the fix is an
+acknowledgement replay in the hook's marker, not a change to the owner.
 
 ## Delete — do not maintain
 

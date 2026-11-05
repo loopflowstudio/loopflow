@@ -1,7 +1,6 @@
 # 337044: delete the reader floor
 
-Jack Heart's Task brief (2026-11-05). Status: accepted, implemented, including the
-`reader_floor` write concept review changed on 2026-11-05; gate next. Source: the 2026-11-05 upgrade audit, section 2 "Deleted"
+Jack Heart's Task brief (2026-11-05). Status: accepted, implemented, gated and demoed on 2026-11-05; ship next. Source: the 2026-11-05 upgrade audit, section 2 "Deleted"
 column and section 4(b).
 
 ## Design
@@ -137,3 +136,4 @@ python/tests/test_release_publisher.py` 38 passed; clippy and fmt clean. Impleme
 Realign (2026-11-05, after the floor write): `cargo test -p loopflow --lib reader_floor` and `a_ledger_with_no_recorded_floor` 2 passed; wording edits only otherwise.
 Concept review (2026-11-05, second pass): `carry_reader_floor` and `MIGRATIONS.md` match the accepted design; no change, no open product choice.
 Gate (2026-11-05, after sync onto 384505b): `cargo test -p loopflow --lib -- store:: commands::install commands::rollover ops::release` 508 passed, 1 failed: `merge_order_follows_origin_main_and_counts_a_move_as_an_addition` (unchanged from main; git spawn ENOENT under a 42-minute loaded run, passes alone); pytest 38 passed; fmt and clippy clean; Swift build to CI (one optional delegate method removed).
+Demo (2026-11-05, headless, decided standing in for Jack Heart): `target/debug/lf` built from e351c36d5 (Rust unchanged since), private `LF_HOME=/Users/jack/.lf-demo-337044.iqqr`. Fresh store's newest row `task_session_promotion`, floor NULL (no recorded floor, as designed). Added ledger row `later_additive` past the catalog: `lf doctor` `ok store ... compatible`, `wave list`/`session list` exit 0, `lf task create` wrote b112ec and `task list` shows it. `ALTER TABLE waves DROP COLUMN promoted_at`: `task list` exit 0, `wave list` exit 1 with `no such column: promoted_at`, doctor still compatible. A table added without a ledger row still refuses at a known head (`differs from lf 0.15.1+e351c36d5`), correct. `git grep "needs an lf that knows"` outside shipped records and scratch: none. No owners started; root left in place, nothing to tear down. Decision: advance.

@@ -668,6 +668,41 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
 }
 
 #[test]
+fn remote_task_promotion_needs_no_provider_account() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let prefix = ["--machine", "mini", "--account", "codex=unavailable@"];
+    for operation in [
+        vec![
+            "task",
+            "create",
+            "--title",
+            "Prototype",
+            "--session",
+            "remote-session",
+        ],
+        vec!["session", "bind", "remote-session", "--task", "LOO-12"],
+    ] {
+        let args = [prefix.as_slice(), operation.as_slice()].concat();
+        let output = fixture.run(&args);
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for arg in operation {
+            assert!(stdout.contains(&format!("argument: {arg}\n")), "{stdout}");
+        }
+    }
+    let output = fixture.run(
+        &[
+            prefix.as_slice(),
+            &["task", "create", "--title", "Prototype", "--run"],
+        ]
+        .concat(),
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unavailable@"));
+}
+
+#[test]
 fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
     use base64::prelude::*;
 

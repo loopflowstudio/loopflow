@@ -136,7 +136,7 @@ the command returns when the turn ends.
 
 ```bash
 lf session rename <session> "Release notes"
-lf session bind <session> --task LOO-12      # file a loose conversation under its Task
+lf session bind <session> --task LOO-12      # select the Task’s primary conversation
 ```
 
 New Sessions are named from the request or the skill; Task conversations take
@@ -147,8 +147,17 @@ Task identifier first. In cmux, a Task's workspace is named
 workspace you renamed in cmux keeps your name.
 
 Launching in a Task's checkout binds the Session to that Task automatically.
-`bind` is for the rest: it assigns a Task to a Session that has none,
-permanently, including a done or landed Task, without reopening it.
+`bind` permanently associates an unfinished interactive Session and selects it
+as the Task's primary conversation. Repeating it selects that same Session again;
+other conversations stay associated. A Task with a worktree keeps it, and binding
+immediately sets the Session's working directory there. Already-running clients
+may keep their original directory; subsequent connections use the selected one.
+Files stay in their old checkout.
+An open Task without a worktree adopts the Session's unowned linked checkout;
+main and Wave checkouts stay shared. Done Tasks can still select an unfinished
+conversation. If the Task has no checkout, the conversation stays in place and
+no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
+closed. Closed Sessions and headless Runs cannot become primary.
 `--dry-run` shows the exact target first.
 
 ## Which login it runs on

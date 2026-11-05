@@ -974,6 +974,12 @@ public struct RegistryQuery: Sendable {
             .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
     }
 
+    /// Create a Task around the selected conversation without launching work.
+    public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await run(
+            ["task", "create", "--session", id, "--title", title, "--json"], cwd))
+    }
+
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
         try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
     }

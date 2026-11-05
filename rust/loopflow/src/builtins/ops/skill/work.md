@@ -24,6 +24,30 @@ not select work for this conversation. Do not create a Task merely because a
 worktree, PR or Graph exists. Create Tasks when requested or when the selected
 planning procedure calls for them; taskless work remains taskless otherwise.
 
+`lf task create --title "<outcome>"` files new work regardless of the current
+checkout or invoking Session. `--run` starts the created Task; it never selects
+existing work implicitly. When asked to keep the current conversation, pass
+`--session <id>` using `LF_AGENT_CALLER.session_id` or look up the Loopflow ID
+with `lf session list --json`. Shells also select a Session explicitly.
+`--worktree <path>` adopts only that linked checkout. Explicit sources work
+with or without `--run`; retries recover the selected work's Task.
+
+`lf session bind <id> --task <task>` permanently binds and selects its primary
+conversation. Use an unfinished interactive Session; closed Sessions and headless
+Runs cannot become primary.
+If the Task already owns another worktree, binding immediately sets the Session's
+directory there. Already-running clients may keep their original directory;
+subsequent connections use the selected one. Files stay where they are. If an open Task has no checkout,
+binding adopts the Session’s unowned linked checkout. Bind to a done Task without
+reopening it. With no Task checkout, retain the Session’s directory; do not
+allocate a checkout merely to bind the conversation.
+Promotion keeps files, branch, provider history and live input attachment;
+it starts no Graph and approves no Auto-Ship. Creation keeps main/Wave checkouts
+shared and binds the selected Session in place. A selected repository/Wave primary
+conversation transfers to the Task, freeing its former scope to open another
+conversation. Remote sources must already exist on the selected Machine;
+promotion never copies live work.
+
 Use `lf` for changes to managed worktrees, Task delivery and Work state so their
 recorded ownership stays consistent. Ordinary inspection, edits and tests run
 here. Preserve existing contributions before checkpointing with `lf commit`.

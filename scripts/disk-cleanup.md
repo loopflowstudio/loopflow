@@ -51,8 +51,14 @@ tree, or `"saved": true` in its root outcome record, preserves it.
 Other demos are observed unless explicitly marked under
 `~/.lf-machine/demos/<name>/` with `.disposable-coding-demo` containing
 `disposable runtime; evidence stored elsewhere`. That marker authorizes teardown
-and removal of the entire runtime, including its synthetic store and drafts,
-after the evidence retention window. Keep source and durable evidence outside it.
+and removal of the entire runtime after the evidence retention window; an unsettled
+draft held by its owner ends with that owner. A demo keeps two roots: this runtime
+root (copied app or CLI, generated output) and a durable root at
+`~/.lf-machine/demo-history/<name>` (private Machine, provider history, fixture
+repository), which is never a candidate. The demo writes the marker at release,
+never at creation: writing it restarts the retention window, so a long live review
+cannot age out. Demos write no `.cleanup-evidence.json`, so a released root has an
+unknown outcome and waits seven days.
 Ordinary Home/account history, databases, backups, experiment data, source
 worktrees, simulator devices, general app caches and Trash are never candidates.
 

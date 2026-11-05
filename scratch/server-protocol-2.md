@@ -70,7 +70,15 @@ completes, as today.
 
 `attach` stays a dedicated connection: hello, one attach request, `bridged`,
 then the unchanged binary owner protocol. Mixing terminal bytes into the
-control connection would make every reading wait behind terminal output.
+control connection would make every reading wait behind terminal output, and
+it would tie the person's byte path to the control path's health. Jack's
+November 5 direction after the upgrade incident applies here: lf is a session
+manager and context adder on top of a harness, never a middleman that can break
+the person's connection to their agent. The bridge therefore stays a plain byte
+copy with no store read in its path, the control connection is the only place
+the server consults Work, and a control failure, a `busy` reply or a bounded
+queue overflow never closes a bridged terminal. Server replacement still drops
+bridges; the owner and its Session survive, and Desktop reconnects.
 
 ```text
 client ── hello{revision 2, min 2, client} ──▶ server

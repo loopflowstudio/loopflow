@@ -52,7 +52,7 @@ as well as the app's release version. A matching version string alone is insuffi
 
 Running Session owners and Graphs keep their process images. Promotion never kills
 bundled `lf` processes; renamed bundles remain while they are in use. A superseded
-owner ends itself once its Sessions hold no work or input, and `lf monitor rollover`
+owner ends itself once its Sessions hold no work or input, and `lf process rollover`
 moves every eligible owner at once. Installed files and already-running processes
 can therefore report different builds during an update. Promotion retains the
 prior published artifacts, which are [not a rollback path](../docs/architecture/machines.md#one-main-machine),

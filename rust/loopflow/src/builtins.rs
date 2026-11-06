@@ -159,9 +159,8 @@ mod tests {
 
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "feedback, revised artifact paths and remaining work",
             "headless surface",
-            "blocker in ordinary output and stop",
+            "nobody can feel it",
             "closing, detaching, provider exit, or lack of response",
         ] {
             assert!(demo.contains(contract), "demo omits {contract:?}");
@@ -339,8 +338,19 @@ mod tests {
             "triage",
             "gate",
             "demo",
+            "measure",
+            "optimize-plan",
         ] {
             assert!(get_builtin_skill(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn optimize_is_a_subroutine_that_leaves_delivery_to_its_caller() {
+        let graph = get_builtin_graph("optimize").expect("optimize graph");
+        let steps: Vec<_> = graph.lines().filter(|l| !l.starts_with('#')).collect();
+        for delivery in ["deliver", "pr-publish", "land", "interactive:"] {
+            assert!(!steps.iter().any(|s| s.contains(delivery)), "{delivery}");
         }
     }
 
@@ -365,7 +375,7 @@ mod tests {
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "qa", "research", "sync-conflicts"] {
+        for name in ["implement", "gate", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");

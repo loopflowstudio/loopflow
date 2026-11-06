@@ -48,6 +48,10 @@ pub fn show(
     if options.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
+        let output: Vec<Value> = output
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()?;
         print!("{}", render(&output, repo, options, &Colors::new()));
     }
     Ok(())

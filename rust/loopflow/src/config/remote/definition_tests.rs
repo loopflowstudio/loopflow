@@ -25,6 +25,19 @@ fn write(home: &Path, file: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+fn inspected(
+    repo: &Path,
+    skill: Option<&str>,
+    graph: Option<&str>,
+    step: Option<&str>,
+) -> Vec<serde_json::Value> {
+    crate::engine::config::inspect(repo, None, skill, graph, step)
+        .unwrap()
+        .iter()
+        .map(|inspection| serde_json::to_value(inspection).unwrap())
+        .collect()
+}
+
 fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
     let config = crate::config::load_config(Some(repo))
         .unwrap()
@@ -53,15 +66,12 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
 
 fn probe(repo: &Path) -> settings::ResolvedSettings {
     let resolved = resolve(repo, crate::graph::load_skill("probe", repo).unwrap());
-    let inspected = crate::engine::config::inspect(repo, None, Some("probe"), None, None).unwrap();
+    let report = inspected(repo, Some("probe"), None, None);
     assert_eq!(
-        inspected[0]["settings"]["agent"]["value"],
+        report[0]["settings"]["agent"]["value"],
         resolved.config.agent().unwrap()
     );
-    assert_eq!(
-        inspected[0]["settings"]["yolo"]["value"],
-        resolved.config.yolo
-    );
+    assert_eq!(report[0]["settings"]["yolo"]["value"], resolved.config.yolo);
     resolved
 }
 
@@ -241,11 +251,10 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             remote::PROFILE_ENV,
             &serde_json::to_string(&profile).unwrap(),
         );
-        let inspected =
-            crate::engine::config::inspect(repo.path(), None, None, Some("outer"), None).unwrap();
-        assert_eq!(inspected.len(), 4);
+        let report = inspected(repo.path(), None, Some("outer"), None);
+        assert_eq!(report.len(), 4);
         for index in [0, 2] {
-            let pair = &inspected[index..index + 2];
+            let pair = &report[index..index + 2];
             assert_eq!(pair[0]["settings"]["agent"]["value"], "codex:named");
             assert_eq!(pair[1]["settings"]["agent"]["value"], "codex:anonymous");
         }
@@ -271,9 +280,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             ".lf/graphs/inner.yaml",
             "- step: {name: probe, id: work, agent: claude:repository}\n",
         );
-        let repository =
-            crate::engine::config::inspect(repo.path(), None, None, Some("inner"), Some("work"))
-                .unwrap();
+        let repository = inspected(repo.path(), None, Some("inner"), Some("work"));
         assert_eq!(
             repository[0]["settings"]["agent"]["value"],
             "claude:repository"

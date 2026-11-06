@@ -140,7 +140,7 @@ pub enum Read {
     /// `lf --cwd <directory> [--wave <wave>] config settings [--skill|--graph
     /// [--step]] --json`: effective settings and their sources.
     #[serde(rename = "config.settings")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::server::schema::Untyped>>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::engine::config::Inspection>>()))]
     Settings {
         directory: PathBuf,
         wave: Option<String>,
@@ -249,7 +249,7 @@ pub enum Read {
     /// `lf --cwd <directory> repository planning`: where the repository's
     /// planning is exchanged. Its watch exchanges it while it runs.
     #[serde(rename = "repository.planning")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::server::schema::Untyped>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::planning::PlanningStatus>()))]
     PlanningStatus { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
@@ -326,7 +326,7 @@ pub enum Read {
     /// `lf --cwd <directory> pr reviews [<pr>] --json`: requested reviews
     /// and review submissions, each with the commit it reviewed.
     #[serde(rename = "pr.reviews")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::server::schema::Untyped>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Reviews>()))]
     PrReviews {
         directory: PathBuf,
         pr: Option<String>,
@@ -738,7 +738,7 @@ impl Read {
                 task,
                 all,
             } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
-            Self::PlanningStatus { directory } => super::planning::status_json(directory),
+            Self::PlanningStatus { directory } => value(&super::planning::read_status(directory)?),
             Self::WorkLink { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
             Self::RepositoryPath { id } => {

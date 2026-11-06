@@ -1,70 +1,56 @@
 //! The text form of `lf pr reviews`. Reads and requests go through
 //! `engine::pr`; inline threads stay on GitHub.
 
-use serde_json::Value;
+use crate::engine::pr::Reviews;
 
-/// Render the provider's review report the way `lf pr reviews` prints it:
-/// the review commit is kept so an old approval never reads as one of the
-/// current head.
-pub(super) fn render(reviews: &Value) -> String {
-    let text = |value: &Value| match value {
-        Value::String(text) => text.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
-    };
+/// Render the review report the way `lf pr reviews` prints it: the review
+/// commit is kept so an old approval never reads as one of the current head.
+pub(super) fn render(reviews: &Reviews) -> String {
     let mut out = format!(
         "PR #{}  {}\nHead: {}\n",
-        text(&reviews["number"]),
-        text(&reviews["url"]),
-        text(&reviews["headRefOid"])
+        reviews.number,
+        reviews.url,
+        reviews.head.as_deref().unwrap_or_default()
     );
-    if reviews["isDraft"].as_bool().unwrap_or(false) {
+    if reviews.draft {
         out.push_str("Draft\n");
     }
-    let decision = text(&reviews["reviewDecision"]);
+    let decision = reviews.decision.as_deref().unwrap_or_default();
     out.push_str(&format!(
         "Review decision: {}\n",
         if decision.is_empty() {
             "not reported"
         } else {
-            &decision
+            decision
         }
     ));
     out.push_str("Requested reviewers:");
-    let requested = reviews["reviewRequests"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    if requested.is_empty() {
+    if reviews.requested.is_empty() {
         out.push_str(" none");
     }
-    for request in &requested {
-        let name = if request["login"].is_null() {
-            &request["name"]
-        } else {
-            &request["login"]
-        };
+    for request in &reviews.requested {
         out.push(' ');
-        out.push_str(&text(name));
+        out.push_str(
+            request
+                .login
+                .as_deref()
+                .or(request.name.as_deref())
+                .unwrap_or_default(),
+        );
     }
     out.push_str("\nReview submissions (inline discussion on GitHub):\n");
-    let submissions = reviews["reviews"].as_array().cloned().unwrap_or_default();
-    if submissions.is_empty() {
+    if reviews.reviews.is_empty() {
         out.push_str("  none\n");
     }
-    for review in &submissions {
-        out.push_str(&format!(
-            "  {}: {}",
-            text(&review["author"]["login"]),
-            text(&review["state"])
-        ));
-        if !review["commit"].is_null() {
-            out.push_str(&format!(" at {}", text(&review["commit"]["oid"])));
+    for review in &reviews.reviews {
+        let author = review.author.as_ref().map_or("", |author| &author.login);
+        out.push_str(&format!("  {author}: {}", review.state));
+        if let Some(commit) = &review.commit {
+            out.push_str(&format!(" at {}", commit.oid));
         }
         out.push('\n');
-        let body = text(&review["body"]);
-        if !body.is_empty() {
-            out.push_str(&body);
+        if !review.body.is_empty() {
+            out.push_str(&review.body);
             out.push('\n');
         }
     }
@@ -77,13 +63,15 @@ mod tests {
 
     #[test]
     fn renders_the_review_report_with_its_commits() {
-        let reviews = serde_json::json!({
+        let reviews = serde_json::from_value(serde_json::json!({
             "number": 42, "url": "https://example.com/pull/42", "headRefOid": "new-head",
-            "isDraft": false, "reviewDecision": null,
-            "reviewRequests": [{"login": "alice"}, {"name": "platform"}],
-            "reviews": [{"author": {"login": "maya"}, "state": "APPROVED", "body": "",
-                         "commit": {"oid": "older-head"}}]
-        });
+            "isDraft": false, "reviewDecision": "",
+            "reviewRequests": [{"__typename": "User", "login": "alice"},
+                               {"__typename": "Team", "name": "platform", "slug": "platform"}],
+            "reviews": [{"id": "r1", "author": {"login": "maya"}, "state": "APPROVED", "body": "",
+                         "submittedAt": "2026-11-05T00:00:00Z", "commit": {"oid": "older-head"}}]
+        }))
+        .unwrap();
         assert_eq!(
             render(&reviews),
             "PR #42  https://example.com/pull/42\nHead: new-head\nReview decision: not reported\n\

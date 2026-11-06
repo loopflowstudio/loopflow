@@ -33,13 +33,22 @@ pub fn unset(destination: &Destination, key: &str) -> Result<Declaration> {
     declaration(destination, key, None, true)
 }
 
+/// The effective settings of one selection: general, or a skill and its
+/// Graph occurrence, each with every source's candidate.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct Inspection {
+    pub skill: Option<String>,
+    pub occurrence: Option<crate::config::settings::OccurrenceSettings>,
+    pub settings: std::collections::BTreeMap<String, crate::config::settings::EffectiveSetting>,
+}
+
 /// What `config.explain` returns: every source's candidate for `key` and the
 /// effective value, as a launch at the destination's scope resolves it.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct Explanation {
     pub path: PathBuf,
     pub key: String,
-    pub inspections: Vec<serde_json::Value>,
+    pub inspections: Vec<Inspection>,
 }
 
 /// `config.explain`: how `key` resolves at the scope `destination` names.
@@ -101,7 +110,7 @@ pub fn settings(
     skill: Option<&str>,
     graph: Option<&str>,
     step: Option<&str>,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<Inspection>> {
     let repo = crate::repo::working_directory_in(directory)?;
     inspect(&repo, wave, skill, graph, step)
 }
@@ -188,7 +197,7 @@ pub fn inspect(
     skill: Option<&str>,
     graph: Option<&str>,
     step: Option<&str>,
-) -> anyhow::Result<Vec<serde_json::Value>> {
+) -> anyhow::Result<Vec<Inspection>> {
     anyhow::ensure!(
         skill.is_none() || graph.is_none(),
         "choose --skill or --graph"
@@ -204,7 +213,7 @@ fn inspect_selection(
     skill: Option<&str>,
     graph: Option<&str>,
     step: Option<&str>,
-) -> anyhow::Result<Vec<serde_json::Value>> {
+) -> anyhow::Result<Vec<Inspection>> {
     let mut selections = Vec::new();
     if let Some(graph) = graph {
         fn collect(
@@ -252,7 +261,11 @@ fn inspect_selection(
         selections.iter().map(Some).collect()
     } {
         let resolved = crate::config::settings::resolve(config, selection)?;
-        output.push(serde_json::json!({"skill": selection.map(|s| &s.name), "occurrence": selection.and_then(|s| s.occurrence.as_ref()), "settings": resolved.settings}));
+        output.push(Inspection {
+            skill: selection.map(|skill| skill.name.clone()),
+            occurrence: selection.and_then(|skill| skill.occurrence.as_deref().cloned()),
+            settings: resolved.settings,
+        });
     }
     Ok(output)
 }

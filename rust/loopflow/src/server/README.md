@@ -52,9 +52,9 @@ rather than the connection. The root accepts any message either side sends;
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
 on the wire, and `x-result` beside it names what `response.result` carries. A
-result with no Rust type refers to `$defs/Untyped`: `repository.planning`,
-`pr.reviews` and the rows of `config.settings`. The serialize contract keeps a
-nullable field required, as both sides send it.
+watch frame's `body` refers to `$defs/Untyped`, because its shape is the
+`x-result` of the read that opened it. The serialize contract keeps a nullable
+field required, as both sides send it.
 
 Rust validates every fixture against its definition, every `response` fixture
 against its operation's `x-result` and, in `served_reads`, every live read.

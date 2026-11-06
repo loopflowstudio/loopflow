@@ -116,10 +116,19 @@ pub(crate) fn watch_status(
         super::watch::Watched::every(STATUS_CLOCK),
         move |store, ()| {
             let repo_key = repo_key.clone();
-            async move { Ok(status(store.as_deref(), &repo_key).await?.to_json()) }
+            async move { Ok(status(store.as_deref(), &repo_key).await?.report()) }
         },
         transport,
     )
+}
+
+/// What `repository.planning` answers: the transport, and for Git the
+/// destinations with their import and publication evidence.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct PlanningStatus {
+    /// `git`, or the tracker's lowercased name.
+    transport: String,
+    destinations: Vec<crate::store::PeerPlanningStatus>,
 }
 
 /// Where a repository's planning is exchanged.
@@ -131,15 +140,16 @@ enum Status {
 
 impl Status {
     /// What `lf planning status --json` prints.
-    fn to_json(&self) -> serde_json::Value {
+    fn report(self) -> PlanningStatus {
         match self {
-            Self::Remote(provider) => serde_json::json!({
-                "transport": provider.to_ascii_lowercase(),
-                "destinations": [],
-            }),
-            Self::Git(destinations) => {
-                serde_json::json!({"transport": "git", "destinations": destinations})
-            }
+            Self::Remote(provider) => PlanningStatus {
+                transport: provider.to_ascii_lowercase(),
+                destinations: Vec::new(),
+            },
+            Self::Git(destinations) => PlanningStatus {
+                transport: "git".to_owned(),
+                destinations,
+            },
         }
     }
 }
@@ -150,13 +160,13 @@ fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
 }
 
 /// What `lf --cwd <directory> config planning status --json` prints.
-pub(crate) fn status_json(directory: &Path) -> Result<serde_json::Value> {
+pub(crate) fn read_status(directory: &Path) -> Result<PlanningStatus> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         Ok(status(Some(&store), &repo.to_string_lossy())
             .await?
-            .to_json())
+            .report())
     })
 }
 
@@ -177,7 +187,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     crate::ops::planning_sync::configured_destination(store, repo).await?;
     let status = status(Some(store), repo).await?;
     if json {
-        println!("{}", serde_json::to_string(&status.to_json())?);
+        println!("{}", serde_json::to_string(&status.report())?);
         return Ok(());
     }
     let destinations = match status {

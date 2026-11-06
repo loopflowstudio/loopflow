@@ -19,7 +19,9 @@ pub enum SettingScope {
     Wave,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SettingTarget {
     General,
@@ -28,13 +30,14 @@ pub enum SettingTarget {
 }
 
 /// A Graph occurrence retains its defining graph through composition and capture.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OccurrenceSettings {
     pub graph: String,
     pub id: Option<String>,
     pub source: ConfigSource,
     pub path: Option<PathBuf>,
     pub address: Option<String>,
+    #[schemars(with = "serde_json::Value")]
     pub values: Value,
 }
 
@@ -71,7 +74,7 @@ impl OccurrenceSettings {
 }
 
 /// All candidates are ordered from lowest to highest authority.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SettingCandidate {
     /// Authored key; agent and default_agent retain their choice strength.
     pub key: String,
@@ -80,11 +83,13 @@ pub struct SettingCandidate {
     pub source: ConfigSource,
     pub scope: SettingScope,
     pub target: SettingTarget,
+    #[schemars(with = "serde_json::Value")]
     pub value: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EffectiveSetting {
+    #[schemars(with = "serde_json::Value")]
     pub value: Value,
     pub candidates: Vec<SettingCandidate>,
 }

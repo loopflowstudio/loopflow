@@ -2290,6 +2290,22 @@
       ],
       "type": "object"
     },
+    "EffectiveSetting": {
+      "properties": {
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/SettingCandidate"
+          },
+          "type": "array"
+        },
+        "value": true
+      },
+      "required": [
+        "value",
+        "candidates"
+      ],
+      "type": "object"
+    },
     "Entry": {
       "additionalProperties": false,
       "properties": {
@@ -2575,7 +2591,9 @@
       "description": "What `config.explain` returns: every source's candidate for `key` and the\neffective value, as a launch at the destination's scope resolves it.",
       "properties": {
         "inspections": {
-          "items": true,
+          "items": {
+            "$ref": "#/$defs/Inspection"
+          },
           "type": "array"
         },
         "key": {
@@ -3389,6 +3407,39 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "Inspection": {
+      "description": "The effective settings of one selection: general, or a skill and its\nGraph occurrence, each with every source's candidate.",
+      "properties": {
+        "occurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OccurrenceSettings"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EffectiveSetting"
+          },
+          "type": "object"
+        },
+        "skill": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "skill",
+        "occurrence",
+        "settings"
       ],
       "type": "object"
     },
@@ -5000,6 +5051,45 @@
         }
       ]
     },
+    "OccurrenceSettings": {
+      "description": "A Graph occurrence retains its defining graph through composition and capture.",
+      "properties": {
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "graph": {
+          "type": "string"
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ConfigSource"
+        },
+        "values": true
+      },
+      "required": [
+        "graph",
+        "id",
+        "source",
+        "path",
+        "address",
+        "values"
+      ],
+      "type": "object"
+    },
     "OpenHost": {
       "enum": [
         "auto",
@@ -5227,6 +5317,100 @@
         }
       ]
     },
+    "PeerPlanningStatus": {
+      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
+      "properties": {
+        "acquisition_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/PeerProjectionConflict"
+          },
+          "type": "array"
+        },
+        "fetched_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imported_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_local": {
+          "type": "boolean"
+        },
+        "publication_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference": {
+          "type": "string"
+        },
+        "selected_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "reference",
+        "active",
+        "selected_records",
+        "imported_revision",
+        "fetched_revision",
+        "acquisition_error",
+        "publication_revision",
+        "publication_state",
+        "publication_error",
+        "pending_local",
+        "conflicts"
+      ],
+      "type": "object"
+    },
+    "PeerProjectionConflict": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "reason"
+      ],
+      "type": "object"
+    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -5245,6 +5429,26 @@
         "unavailable"
       ],
       "type": "string"
+    },
+    "PlanningStatus": {
+      "description": "What `repository.planning` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
+      "properties": {
+        "destinations": {
+          "items": {
+            "$ref": "#/$defs/PeerPlanningStatus"
+          },
+          "type": "array"
+        },
+        "transport": {
+          "description": "`git`, or the tracker's lowercased name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transport",
+        "destinations"
+      ],
+      "type": "object"
     },
     "PlanningSyncChange": {
       "properties": {
@@ -6724,7 +6928,7 @@
           "type": "object",
           "x-result": {
             "items": {
-              "$ref": "#/$defs/Untyped"
+              "$ref": "#/$defs/Inspection"
             },
             "type": "array"
           }
@@ -7194,7 +7398,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Untyped"
+            "$ref": "#/$defs/PlanningStatus"
           }
         },
         {
@@ -7535,7 +7739,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Untyped"
+            "$ref": "#/$defs/Reviews"
           }
         },
         {
@@ -7831,6 +8035,87 @@
       ],
       "type": "object"
     },
+    "Review": {
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewAuthor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewCommit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "state",
+        "body",
+        "commit"
+      ],
+      "type": "object"
+    },
+    "ReviewAuthor": {
+      "properties": {
+        "login": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login"
+      ],
+      "type": "object"
+    },
+    "ReviewCommit": {
+      "properties": {
+        "oid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oid"
+      ],
+      "type": "object"
+    },
+    "ReviewRequest": {
+      "description": "One requested reviewer: a person's `login` or a team's `name`.",
+      "properties": {
+        "login": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "login",
+        "name"
+      ],
+      "type": "object"
+    },
     "ReviewRequested": {
       "additionalProperties": false,
       "description": "What `pr.request_review` asked for.",
@@ -7852,6 +8137,57 @@
       "required": [
         "pr",
         "reviewers"
+      ],
+      "type": "object"
+    },
+    "Reviews": {
+      "description": "What `pr.reviews` answers, decoded from `gh pr view` and named as this API\nnames things. A review keeps the commit it reviewed, so an old approval\nnever reads as one of the current head.",
+      "properties": {
+        "decision": {
+          "description": "The provider's decision, such as `APPROVED`; empty or null when it reports none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "head": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "number": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requested": {
+          "items": {
+            "$ref": "#/$defs/ReviewRequest"
+          },
+          "type": "array"
+        },
+        "reviews": {
+          "items": {
+            "$ref": "#/$defs/Review"
+          },
+          "type": "array"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "head",
+        "draft",
+        "decision",
+        "requested",
+        "reviews"
       ],
       "type": "object"
     },
@@ -9408,6 +9744,41 @@
       ],
       "type": "object"
     },
+    "SettingCandidate": {
+      "description": "All candidates are ordered from lowest to highest authority.",
+      "properties": {
+        "key": {
+          "description": "Authored key; agent and default_agent retain their choice strength.",
+          "type": "string"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/SettingScope"
+        },
+        "source": {
+          "$ref": "#/$defs/ConfigSource"
+        },
+        "target": {
+          "$ref": "#/$defs/SettingTarget"
+        },
+        "value": true
+      },
+      "required": [
+        "key",
+        "locator",
+        "reason",
+        "source",
+        "scope",
+        "target",
+        "value"
+      ],
+      "type": "object"
+    },
     "SettingScope": {
       "enum": [
         "global",
@@ -9415,6 +9786,61 @@
         "wave"
       ],
       "type": "string"
+    },
+    "SettingTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "general",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "skill",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "graph": {
+              "type": "string"
+            },
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "graph_occurrence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "graph",
+            "id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "SetupValue": {
       "description": "One effective setting; `value` is absent when nothing chooses one.",

@@ -406,11 +406,53 @@ pub fn checks(directory: &Path, required: bool) -> Result<Checks> {
     })
 }
 
+/// What `pr.reviews` answers, decoded from `gh pr view` and named as this API
+/// names things. A review keeps the commit it reviewed, so an old approval
+/// never reads as one of the current head.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Reviews {
+    pub number: u64,
+    pub url: String,
+    #[serde(rename(deserialize = "headRefOid"))]
+    pub head: Option<String>,
+    #[serde(rename(deserialize = "isDraft"))]
+    pub draft: bool,
+    /// The provider's decision, such as `APPROVED`; empty or null when it reports none.
+    #[serde(rename(deserialize = "reviewDecision"))]
+    pub decision: Option<String>,
+    #[serde(rename(deserialize = "reviewRequests"))]
+    pub requested: Vec<ReviewRequest>,
+    pub reviews: Vec<Review>,
+}
+
+/// One requested reviewer: a person's `login` or a team's `name`.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReviewRequest {
+    pub login: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Review {
+    pub author: Option<ReviewAuthor>,
+    pub state: String,
+    pub body: String,
+    pub commit: Option<ReviewCommit>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReviewAuthor {
+    pub login: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReviewCommit {
+    pub oid: String,
+}
+
 /// `pr.reviews`: the requested reviews and review submissions of `pr` (the
-/// current branch's PR with none), as the provider reports them: `number`,
-/// `url`, `headRefOid`, `isDraft`, `reviewDecision`, `reviewRequests` and
-/// `reviews`, each review with the commit it reviewed.
-pub fn reviews(directory: &Path, pr: Option<&str>) -> Result<serde_json::Value> {
+/// current branch's PR with none).
+pub fn reviews(directory: &Path, pr: Option<&str>) -> Result<Reviews> {
     let repo = repo_root(directory)?;
     let mut args = vec!["pr", "view"];
     args.extend(pr);

@@ -256,7 +256,8 @@ arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
 only the session pane. The session pane shows one conversation and switches when
 another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
 Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
-⇧⌘T puts the last closed tab back where it was, its shell still running.
+⇧⌘T restores the last closed tab's identity and history. Close ends its shell
+and jobs; New Shell starts fresh execution.
 
 **View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;

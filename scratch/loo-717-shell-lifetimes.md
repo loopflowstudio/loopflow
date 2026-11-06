@@ -7,8 +7,11 @@ migration are not. The existing feature graph returns to demo review after this
 revision. The replacement is implemented at `f86a9a3e6`, integrated with main at
 `d5cab9ba60`. The earlier repair at `a1067c99cc` is historical. Jack subsequently
 accepted the scheduled cleanup and generic shell-launch revisions below; those
-are implemented in the working tree, with focused verification complete and
-the same review/publication boundary.
+are implemented at `d14b32ada0`, with focused verification complete and the same
+review/publication boundary. Concept review found that viewer return must revoke
+queued shell closure before the next sweep; the repair below is implemented in
+the working tree. Focused verification passed; broader gate and native
+demonstration follow. No new product decision is needed.
 
 ## Accepted follow-up — scheduled cleanup and shell launch
 
@@ -73,7 +76,12 @@ Removed: `retirement::start`, its executor loop and executor-only locks;
 and `SessionCommand::Remote`; Rust's `workspace-bash-env` / `workspace-zshenv`;
 Swift's `LoopflowZshBootstrap` and `buildWorkspaceShellCommand`.
 The finite sweep returns only success/failure; its former finished-worker boolean
-is gone. Tests inspect checkout and queue state. No deletion target remains.
+is gone. The concept-review repair also removes the phase-only
+`SqliteStore::owner_retiring` judgment; owners and the sweep now share the current
+Task viewer judgment. The boolean-only `record_owner_viewers` writer and its
+separate recorder/retry state are removed too: one dated observation updates
+`viewed`, the hold and cancellation together. Tests inspect checkout and queue
+state. No deletion target remains.
 
 Verification obligations for the surviving paths:
 
@@ -236,35 +244,91 @@ provider identity, input fencing and requested-work/draft protections remain.
 The Task still has one unreleased migration. Product memory now reflects the
 November 5–6 decisions; no child Product memories exist in this checkout.
 
-The upstream sync at `c8d7a7f4a8` changes builtins/Graph guidance, not the shared
-viewer or retirement implementation. The current refresh Graph includes this
-memory reconciliation. LOO-498 and LOO-672 remain separately owned; their native
+The current base `c8d7a7f4a8` changes builtins/Graph guidance, not the shared
+viewer or retirement implementation. Product memory includes the November 6
+scheduled-sweep and generic-launch decisions. LOO-498 and LOO-672 remain separately owned; their native
 behavior is not established by this branch's transport tests.
 
-## Concept review — November 6
+## Concept review — November 6, scheduled follow-up
 
-No design change or open product choice. The implemented local/SSH viewer path
-fits the accepted interaction: open on the recorded Machine, detach without
-ending execution, reconnect to that owner, and use New Shell deliberately after
-execution ends. A shell receipt represents execution; a Session viewer represents
-checkout retention; the retirement record represents completed Task cleanup.
-Each has a separate job. No host registry or second remote terminal is needed.
+**Design refinement: returning viewing revokes queued cleanup independently of
+the sweep cadence.** No open product choice. This follows Jack Heart's accepted
+“return cancels cleanup” contract; it changes neither retention nor timing policy.
+The OS scheduler decides when to attempt cleanup. A persisted `closing` phase
+cannot authorize a later effect after a Task Session viewer has returned.
 
-The decisive counterexample is a lost controlling viewer with a second passive
-viewer still connected. Input ownership may change, but checkout retention must
-remain. The owner judges each connection before recording aggregate viewing;
-the bridge cannot keep a lost endpoint alive with its own heartbeat. On last-viewer
-loss, dated absence supplies one cleanup window. Return before deletion cancels
-retirement and its queued shell closes, while explicit Close remains explicit.
-Return after deletion shows history without reconstructing a checkout or replaying
-commands. Ordinary Rex shells remain outside LF's closure policy in every case.
+Normal path: complete the Task, leave its last Session viewer, and let one sweep
+queue Desktop shell closure after the absence deadline. Owners settle their jobs;
+a later pass removes eligible Git resources. The retirement row carries progress
+and retry state across interrupted passes. Desktop supplies startup resources only
+when creating a shell; local/SSH attachment reuses execution without replay.
 
-The existing transport and Desktop usage docs describe these actions consistently;
-no skill instruction needs a new concept. This review did not resolve cleanup-error
-retry; Jack's subsequent scheduled-sweep decision above now includes that repair.
-Next proof remains the affected gate and native demo already listed below,
-especially orderly Quit delivery and repeated reconnect/Close with survivor
-inspection. This was source review; no runtime or native checks were rerun.
+Counterexample at `d14b32ada0`: a sweep writes `closing` and
+`close_requested=2`, then exits while an owner has not yet consumed that request.
+A Task Session viewer returns and its owner records `Viewed`. Both
+`record_owner_viewers` and `record_owner_viewer_hold` update only the Process.
+Before another sweep, the separate shell owner's `Ending::confirm` sees the old
+close request and `owner_retiring` sees `closing`, so it can terminate the shell
+and its jobs. Neither checks the Task's renewed viewing. The next sweep retains
+the checkout but cannot restore the lost shell state. A retry backoff does not
+prevent owners from consuming that pending request.
+
+Relevant sources: `store/sqlite/task_retirement.rs`, `store/sqlite/sessions.rs`,
+`transport/lifetime.rs`, and `ops/task/retirement.rs`. The earlier return tests called
+reconciliation/`advance` before checking cancellation; they did not exercise the
+owner consuming a close between passes. This is a source-derived counterexample,
+not a newly run process demonstration.
+
+Repair contract (implemented in the working tree):
+
+- Record renewed Session viewing and revoke that Task's pending retirement and
+  retirement-generated shell closes together. Use current Session-to-Task
+  membership, including passive viewers; an ordinary shell viewer adds no hold.
+  Preserve explicit Close and already-settled effects. A brief return/leave must
+  still restart absence and clear retry state without waiting for a sweep.
+- Before an owner consumes automatic closure, judge the current Task viewing and
+  current retirement intent, rather than treating `closing` as unconditional
+  permission. Reuse the existing records and shared judgment; add no host registry,
+  per-Task worker, second cleanup policy or blocking lock in the conversation path.
+  Unreadable cleanup state retains execution; store failures still cannot stop
+  conversation bytes. Keep the sweep's final completion/placement and Git checks.
+- Keep the accepted recovery limits: cancellation cannot resurrect a shell whose
+  closure already completed; history survives and New Shell is deliberate. Losing
+  one controlling viewer while another passive viewer remains never starts cleanup.
+  Rex shells stay outside LF's closure policy.
+
+Applied usage correction in the workspace section of `swift/README.md`:
+“⇧⌘T restores the last closed tab's identity and history. Close ends its shell
+and jobs; New Shell starts fresh execution.” The former sentence promised
+“its shell still running,” contradicting both the accepted contract and the later
+README section. No skill needs a new concept.
+
+Focused regression: queue automatic closure, record a Task Session viewer's return, then
+let the shell owner judge it **without another sweep**. Assert the shell and jobs
+survive. Cover a passive viewer on another Session, return/leave between passes,
+explicit Close remaining effective, and an ordinary shell viewer granting no hold.
+The store regressions also cover rollback if cancellation fails and a brief
+return/leave coalesced into one dated absence observation. Final owner checks
+cover stale intent, recent absence, explicit Close, ordinary shell viewing and
+unreadable cleanup state. The real transport regression pauses the shell owner,
+queues cleanup, returns a passive viewer on a different Session, then resumes the
+owner without any sweep; shell state and a background job must survive. A second
+pass leaves again before the owner resumes. Gate and native demo remain below.
+
+The recorder uses one transaction for the Process's `viewed` flag, dated hold
+and cleanup cancellation. This replaces separate writes and retry tracks
+for the same observation, including on owner exit. Unchanged Process values do
+not advance store revisions; a failed transaction retries the whole observation.
+
+Focused checks (inherited `LF_*` cleared, disposable stores; November 6):
+
+- `cargo test -p loopflow --lib returning_viewers_revoke_closes_and_retry_without_a_sweep` — passed.
+- `cargo test -p loopflow --lib -- viewer_return_and_close_cancellation_commit_together automatic_shell_close_rechecks_task_viewing_before_consuming_stale_intent workspace_retirement_waits_for_final_work_drafts_and_pending_requests retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion` — three passed; rollback assertion initially failed on nullable `viewed`, corrected to `IS 1` and verified below.
+- `cargo test -p loopflow --lib viewer_return_and_close_cancellation_commit_together` — passed after fixture-assertion correction; both recorder paths roll back viewing and close cancellation together.
+- `cargo test -p loopflow --test transport_tests returning_task_viewer_cancels_shell_close_without_another_sweep` — passed, real shell/job survival and explicit Close, no intervening sweep.
+- `cargo fmt --all -- --check`; `git diff --check` — passed. Existing macOS compact-unwind linker warning remains; broader gate owns Clippy and affected suites.
+- `cargo test -p loopflow --lib -- task_retirement::tests transport::lifetime::tests ops::task::retirement::tests pending_requests_hold_the_owner_until_the_current_attachment_settles_them` — 21 passed after consolidating viewer recording; same macOS linker warning.
+- `cargo test -p loopflow --test transport_tests -- returning_task_viewer_cancels_shell_close_without_another_sweep session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence` — 2 passed after recorder consolidation; no intervening sweep, shell/job survival and explicit Close verified.
 
 ## Scheduled cleanup and generic launch — November 6 implementation
 
@@ -299,23 +363,15 @@ upgrade have focused checks. Local and loopback-SSH shell tests carry the real
 Desktop scripts and retain generic no-integration coverage. Gate and native demo
 remain separate from these focused checks.
 
-Focused follow-up verification (November 6; fixture commands cleared inherited
-`LF_*`, no live installation or store migration):
-
-- `scripts/check_migrations.py` — passed; one final draft migration.
-- `cargo nextest run -p loopflow --lib -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(cleanup_schedule_) | test(launchd_schedule_preserves_frequency) | test(task_workspace_upgrade_)'` — 17 passed. An initial fixture branch collision was corrected before this pass.
-- `cargo build -p loopflow --bin lf --jobs 4` — passed.
-- `cargo test -p loopflow --test transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs` — passed, both generic and Desktop bootstrap variants; selected LF, terminal identity, literal argv, retained state and settled jobs.
-- `cargo test -p loopflow --test transport_tests ssh_shells::ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets -- --ignored --test-threads=1` — passed, twenty real loopback-SSH cycles (111.28 s) carrying Desktop resource bytes, reconnecting and settling processes/PTYs/sockets.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'GhosttyShellBlockTests|WorkDestinationTests'` — app/FFI built; 66 headless tests passed. Existing Swift warnings and the Rust test linker's compact-unwind warning remain unchanged.
-- `lf task retire` in a disposable Machine home outside a repository — passed with an empty queue in 0.15 s.
-- `scripts/check_architecture.py`, `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` — passed. Clippy's fixture mutex-scope finding was fixed. Gate owns the broader affected suites and demo owns native Desktop/Rex and physical remote-Machine checks.
-
-Compression verification (November 6; inherited `LF_*` cleared for tests):
-
-- `cargo nextest run -p loopflow --lib --build-jobs 4 --test-threads 4 -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(lf::commands::install::published::tests::) | test(transport::lifetime::tests::)'` — 35 passed; existing macOS compact-unwind linker warning.
-- `cargo nextest run -p loopflow --lib --build-jobs 4 --test-threads 4 -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(cleanup_schedule_)'` — 15 passed after the final query/import edits.
-- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed, including FFI. Broader gate and native demo retain their owners below.
+Focused verification recorded at `d14b32ada0:scratch/loo-717-shell-lifetimes.md`
+passed: 17 initial cleanup/schedule/migration checks; local generic and Desktop
+shell variants; twenty real loopback-SSH lifecycle cycles; 66 headless Desktop
+checks; empty-queue exit; architecture, formatting and Clippy. Compression then
+passed 35 affected library checks and 15 after final query/import edits, plus
+Clippy. These checks cleared inherited `LF_*` and used isolated stores. The
+initial fixture branch collision and fixture mutex-scope finding were repaired;
+the macOS compact-unwind and existing Swift warnings remain. No native-host or
+physical remote-Machine demonstration follows from these results.
 
 ## Related work
 
@@ -331,32 +387,42 @@ Git references to the superseded handoff and external-host design.
 
 ## Checks and remaining proof
 
-Prior repair evidence remains at `a1067c99cc:scratch/loo-717-shell-lifetimes.md`.
-The shared viewer revision has focused checks below; the prior retirement,
-Clippy, Rust FFI and Swift results do not establish this revision's full gate.
-Gate owns the affected `transport::`, `transport_tests`, `machine_commands::`,
-CLI binary, Session routing and Task workspace/retirement suites, plus architecture,
-website and Swift checks selected by `scripts/test.py --list`. macOS loopback SSH
-checks run directly with `--ignored`, outside the nested network sandbox.
+November 6 reconciliation found no bounded implementation mismatch; the later
+concept review above found that queued shell closure could outlive returning Session
+viewing until the next sweep. The working-tree repair covers that interleaving.
+The obsolete worker and Ghostty-coupled core launch symbols are absent. Earlier
+scheduled-sweep checks did not cover this interleaving; the concept-review
+regressions above do.
 
-Inherited November 6 checks (before upstream sync): `cargo test -p loopflow --test transport_tests viewer_stream_` passed (4); `cargo test -p loopflow --lib transport::viewer_tests::` passed (7); `cargo test -p loopflow --lib ops::task::retirement::tests::` passed (5, after consolidation); separately filtered real SSH prepared-viewer and shell-failure tests passed (2, `-- --ignored`); `cargo test -p loopflow --test integration machine_commands::remote_file_` passed (2) and the separately filtered `remote_session_open_returns_an_owner_pinned_terminal_command` passed (1). These cover expiry under continuous output, passive-view retention, backpressure, delayed attachment, same-PID reattachment, preview handoff, terminal sizing/restoration, final Session JSON, retained ended-shell history, SSH failure and retirement settlement. Gate owns the broader checks above.
+The earlier publication record at
+`d14b32ada0:scratch/loo-717-shell-lifetimes.md`, **Publication checks**, applies to
+`c7f1afa1d8`, before the scheduled-sweep/generic-launch follow-up. All 74 selected
+checks passed across an interrupted nextest run and its twelve-case continuation
+with the built CLI pinned; three real loopback-SSH tests passed. The first run
+alone did not pass: four fixtures queued CLI builds and eight had not started.
+Architecture, formatting and Clippy passed. The broader
+`scripts/test.py --reuse-passing` gate stopped twice at its 15-second uv-cache inventory preflight,
+before product suites. Those broader suites remain unverified, not failed product
+assertions. The full commands, counts, warnings and prior transport checks remain
+at that reference; they do not validate the follow-up by inheritance.
 
-Native demo is still owed: local and real remote Desktop shell reconnect/Close,
-orderly Quit delivery, Rex end-to-end Session viewing, lost connection and return,
-and no unintended process/PTY/socket survivors. The private demo roots and input
-contract are in `loo-717-demo.md`; no private demo provider/app was launched.
-Headless framed-transport tests do not establish a physical remote-Machine or
-native-host demonstration. Publication, merge and Task completion remain separate.
+Remaining work:
 
-Reconciliation check: `git diff --check` — passed; no runtime code changed or tests rerun. Broader gate and native demo remain assigned above.
+- Gate: affected suites selected by `uv run python scripts/test.py --list`,
+  including transport, Task workspace/retirement, CLI/Session routing,
+  architecture, website and Swift. The prior gate preflight limitation remains
+  visible; focused checks are not a full gate. Real macOS loopback SSH uses the
+  ignored tests outside the nested network sandbox.
+- Review publication: update PR #1811 for the scheduled-sweep/generic-launch
+  revision after the required checks. The prior `scratch/pr-review.html`
+  walkthrough describes `a1067c99cc` and predates both November 6 replacements.
+- Demo: local and real remote Desktop reconnect/Close, orderly Quit delivery,
+  Rex end-to-end Session viewing, lost connection/return and survivor inventory
+  for processes, PTYs and sockets. Exercise fifteen-minute eligibility plus the
+  scheduled cadence, keeping accelerated fixtures distinct from wall-clock proof.
+  Rebuild the old private demo app before using it; roots and input contract are
+  in `loo-717-demo.md`. No private demo app/provider has launched.
 
-Publication checks, November 6 (`c7f1afa1d8`, after clean `lf sync`):
-
-- `uv run python scripts/check_architecture.py` and `git diff --check` — passed.
-- `scripts/test.py --reuse-passing` with the affected Rust filter — stopped twice at resource preflight, before product suites: uv-cache inventory exceeded its 15-second deadline. Direct `du -sk /Users/jack/.cache/uv` completed in 14.65 seconds; 144 GiB remained free. The retry still timed out. Broader gate, website and Swift checks remain deferred to gate/CI, not passed.
-- Focused `cargo nextest run -p loopflow --build-jobs 4 --test-threads 4` — 62 tests passed before four fixtures queued CLI builds because this direct invocation omitted `LOOPFLOW_TEST_LF`. Interrupted those four (no product assertion failed); eight had not started. The run as a whole did not pass.
-- `cargo build -p loopflow --bin lf --jobs 4`, then nextest with `LOOPFLOW_TEST_LF=$PWD/target/debug/lf` for the twelve remaining cases — passed (12). Combined with the first run, all 74 selected checks passed: transport library, retirement/store, Session holds, local shell cycles, shared-stream expiry/backpressure, preview restoration and remote launch/file routing. macOS linking reported the large `__eh_frame` compact-unwind warning.
-- `LOOPFLOW_TEST_LF=$PWD/target/debug/lf cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored --test-threads=1` — passed (3, 197.21 seconds), including prepared launch with no extra remote PTY, healthy idle heartbeat, resize/Leave, failure paths, and twenty remote lifecycle cycles with process/PTY/socket settlement. All fixture commands cleared inherited `LF_*`; no installed app, live-store migration or physical remote Machine was used.
-- `cargo fmt --all -- --check` and `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed; Clippy also checked `loopflow-ffi`.
-
-The 74-case nextest selection was `test(transport::) | test(viewer_stream_) | test(session_viewers_retain_) | test(desktop_shell_) | test(ops::task::retirement::) | test(store::sqlite::task_retirement::) | test(machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command) | test(machine_commands::remote_file_)`. The twelve-case continuation used `test(snapshot_preview_resume_) | test(viewer_stream_) | test(session_viewers_retain_) | test(desktop_shell_) | test(machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command) | test(machine_commands::remote_file_)` against identical source.
+No product choice is open. Native and physical remote-Machine acceptance remain
+unproved. Publication, merge and Task completion are separate; this work has no
+shipping, installation or live-store migration authorization.

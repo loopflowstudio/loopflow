@@ -22,9 +22,12 @@ No new shell integration implementation or host registry. Preserve remote startu
 command blocks, LF availability and identity; reconnect never replays bootstrap.
 
 The authoritative contract contains the deletion list and verification cases.
-Continue the existing feature graph from implement through sync and publication
-to demo review, using Codex. Earlier transport validation does not validate these
-new changes. No ship, installation or live-store migration approval is implied.
+The follow-up is implemented at `d14b32ada0`; focused cleanup, installation,
+local/loopback-SSH shell and headless Desktop checks passed. Subsequent concept
+review found a cancellation gap described below, now repaired in the working tree.
+Focused verification passed; broader gate and publication precede demo review.
+No ship, installation or live-store migration
+approval is implied.
 
 Implementation choices, November 6: retry delay starts at sixty seconds, doubles
 per cleanup failure and caps at one hour. A returning viewer clears retry state;
@@ -91,6 +94,25 @@ host state, configuration option or provider-launch path was introduced.
 
 ## Review and evidence still needed
 
+Concept review, November 6: design refinement, no open product choice. Returning
+Task Session viewing must revoke queued retirement closes before the next sweep.
+At `d14b32ada0` the viewer wrote only Process evidence, while a separate shell owner
+can still consume `close_requested=2` against the stale `closing` phase. Record
+return and cancellation together and recheck current Task retention when an owner
+consumes automatic closure. Keep explicit Close, Session-only holds, ordinary
+conversation pass-through and the finite scheduled sweep. The working design
+contains the source counterexample and the required no-intervening-sweep test.
+The working-tree repair records return and cancellation atomically, including a
+brief return/leave coalesced between recorder polls. One dated observation now
+records both the viewer flag and checkout hold, replacing separate writes/retries.
+Owners reuse the sweep's
+viewer judgment before automatic closure; explicit Close remains effective.
+The old Desktop README promise that Undo keeps a closed shell running is corrected.
+Focused regressions passed, including real shell/job survival without an
+intervening sweep. The nullable fixture assertion found during rollback testing
+was corrected and passed. Commands/results are in the design; gate and native
+demo remain separate.
+
 Native Desktop and Rex demonstration remains at feature/demo. Framing tests are
 real local PTY/process tests, not a physical remote-Machine demonstration. A
 separately opened external SSH session still relies on its host's disconnect
@@ -105,9 +127,10 @@ The superseded external-host occurrence design remains at
 
 ## November 6 reconciliation
 
-Product memory now reflects Session-only retention, explicit Desktop Quit leave,
-bounded disconnected absence and the single viewer protocol across SSH. Earlier
+Product memory now also reflects the scheduled sweep and Desktop-supplied shell
+integration, alongside Session-only retention and the single viewer protocol.
+No Product child memories exist in this checkout. Earlier
 credential failures and the proposed memory correction remain at
 `d5cab9ba60:scratch/questions.md`; they add no remaining implementation work.
-The current plan separates implemented transport, inherited focused checks,
-scheduled cleanup verification and the native demonstration still owed.
+The current plan separates the follow-up's focused passes from the older
+publication checks, broader gate and native demonstration still owed.

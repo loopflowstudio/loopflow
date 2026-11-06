@@ -253,8 +253,8 @@ use the same operations on the Task's recorded Machine.
 
 Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
 viewers count, passive ones too; input control is separate. Closing the last
-viewer lets a completed Task follow its normal cleanup grace once requested work
-finishes. An ordinary shell in that directory does not retain the worktree.
+viewer starts a completed Task's cleanup grace; requested work delays cleanup
+without restarting that clock. An ordinary shell does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
 Task and conversation history remain after cleanup.
 
@@ -285,10 +285,12 @@ pass also reconciles viewed Tasks and uses that same absence window after owner 
 
 A completed, released Task keeps its checkout and Desktop shells for fifteen
 minutes total; eligible unviewed agents still end at two minutes. A returning
-viewer cancels that deadline and its queued shell closes; leaving again starts
-a new one. Requested active work, drafts, pending requests and running Graphs
-still prevent ending execution; finishing that work does not restart an
-already-due deadline. Completion and PR landing schedule one retirement pinned
+viewer cancels that deadline and its queued automatic shell closes in the same
+write that records viewing, without waiting for a sweep; leaving again starts
+a new one. Owners recheck current Task viewing before consuming automatic closure.
+Explicit Close remains effective. Requested active work, drafts, pending requests
+and running Graphs still prevent ending execution; finishing that work does not
+restart an already-due deadline. Completion and PR landing schedule one retirement pinned
 to the completion, checkout and branch; reopen or changed placement revokes it.
 Installation provisions a separate launchd/cron job running `lf task retire` once
 a minute. Each pass reads the local retirement queue, reconciles viewers, attempts

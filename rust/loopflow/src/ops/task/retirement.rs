@@ -5,10 +5,11 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
+use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
-    sqlite::{SqliteStore, TaskRetirement, ViewerHold},
+    sqlite::{SqliteStore, TaskRetirement, ViewerHold, VIEWED},
     SharedStore,
 };
 use crate::work::task::Task;
@@ -37,7 +38,6 @@ fn lock_file(name: &str) -> OpsResult<File> {
         .open(directory.join(format!("{name}.lock")))?)
 }
 
-const VIEWED: &str = "Retained by an open Task Session viewer";
 /// Owners refresh live viewing evidence every ten seconds. A dead or stalled
 /// owner cannot keep a completed checkout forever with its last cached boolean.
 pub(crate) const VIEWER_OBSERVATION_GRACE: i64 = 30;
@@ -73,6 +73,33 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
     store
         .reconcile_task_retirement(task, now, hold, absent_since)
         .map_err(task_error)
+}
+
+/// Owners consume automatic closes between sweeps. The queued phase alone
+/// cannot authorize ending execution after Session viewing has returned.
+pub(crate) fn owner_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
+    let now = now();
+    for task in store.owner_retiring_tasks(owner).map_err(task_error)? {
+        let (hold, absent_since) = viewer_hold(store, &task, now)?;
+        if hold.is_some() {
+            continue;
+        }
+        // Read intent after viewing: a concurrent return revokes this phase,
+        // including a return that has already left again.
+        if store
+            .task_retirement(&task)
+            .map_err(task_error)?
+            .is_some_and(|intent| {
+                intent.phase == "closing"
+                    && intent.due_at.is_some_and(|due| due <= now)
+                    && absent_since
+                        .is_none_or(|at| at + crate::store::sqlite::WORKSPACE_GRACE <= now)
+            })
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {

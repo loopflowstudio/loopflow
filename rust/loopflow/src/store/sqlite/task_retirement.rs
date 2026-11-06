@@ -7,6 +7,7 @@ use crate::id::LfProcessId;
 use crate::store::{StoreError, StoreResult};
 
 pub(crate) const WORKSPACE_GRACE: i64 = 15 * 60;
+pub(crate) const VIEWED: &str = "Retained by an open Task Session viewer";
 
 /// What a serving owner knows about its own viewers, recorded on its Process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,21 +49,34 @@ pub struct TaskRetirement {
 }
 
 impl SqliteStore {
+    /// Record one observation for both Session activity and checkout retention.
+    /// Renewed viewing revokes automatic closure in this same transaction.
     pub(crate) fn record_owner_viewer_hold(
         &self,
         owner: &LfProcessId,
         hold: Option<ViewerHold>,
     ) -> StoreResult<()> {
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE processes SET viewer_hold=?2,viewer_hold_at=?3 WHERE id=?1",
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE processes SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4
+             WHERE id=?1 AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4)",
             params![
                 owner.as_str(),
                 hold.map(ViewerHold::as_str),
                 hold.map(|h| match h {
                     ViewerHold::Viewed(at) | ViewerHold::Absent(at) => at,
-                })
+                }),
+                matches!(hold, Some(ViewerHold::Viewed(_))),
             ],
         )?;
+        match hold {
+            Some(ViewerHold::Viewed(_)) => hold_viewer_retirements(&tx, owner, None)?,
+            // A return and departure can both reach the recorder between polls.
+            Some(ViewerHold::Absent(at)) => hold_viewer_retirements(&tx, owner, Some(at))?,
+            None => {}
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -196,12 +210,42 @@ impl SqliteStore {
             params![intent.task_id.as_str(),intent.completion,intent.checkout,intent.branch,phase,reason])? == 1)
     }
 
-    pub(crate) fn owner_retiring(&self, owner: &LfProcessId) -> StoreResult<bool> {
+    pub(crate) fn owner_retiring_tasks(&self, owner: &LfProcessId) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(&format!("SELECT
-            EXISTS(SELECT 1 FROM task_retirements h JOIN agent_sessions s ON s.id IN ({}) WHERE s.transport_lf_process_id=?1 AND h.phase='closing')
-            OR EXISTS(SELECT 1 FROM task_retirements h JOIN task_shells s ON s.task_id=h.task_id WHERE s.owner=?1 AND h.phase='closing')", super::task_work::session_ids("h.task_id")), [owner], |r| r.get(0))?)
+        let mut query = conn.prepare(&format!("SELECT h.task_id FROM task_retirements h
+            WHERE h.phase='closing' AND (
+                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.transport_lf_process_id=?1)
+                OR EXISTS(SELECT 1 FROM task_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
+        let tasks = query
+            .query_map([owner], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(tasks)
     }
+}
+
+/// Use current Session membership, never shell receipts or input ownership.
+/// The caller records viewing and revokes cleanup in the same transaction.
+fn hold_viewer_retirements(
+    conn: &Connection,
+    owner: &LfProcessId,
+    absent_since: Option<i64>,
+) -> StoreResult<()> {
+    let mut query = conn.prepare(&format!(
+        "SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
+         AND (?2 IS NULL OR h.due_at < ?2+?3)
+         AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.transport_lf_process_id=?1
+             AND s.id IN ({}))",
+        super::task_work::session_ids("h.task_id")
+    ))?;
+    let tasks = query
+        .query_map(params![owner, absent_since, WORKSPACE_GRACE], |r| {
+            Ok(TaskId::from_raw(r.get::<_, String>(0)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for task in tasks {
+        hold_retirement(conn, &task, absent_since.is_none().then_some(VIEWED))?;
+    }
+    Ok(())
 }
 
 // A returning viewer cancels only retirement's queued shell closes, never
@@ -214,7 +258,8 @@ fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> St
     conn.execute(
         "UPDATE task_retirements SET due_at=NULL,phase='waiting',reason=?2,retry_at=NULL,failures=0
          WHERE task_id=?1 AND phase!='retired'
-           AND (due_at IS NOT NULL OR phase!='waiting' OR reason IS NOT ?2)",
+           AND (due_at IS NOT NULL OR phase!='waiting' OR reason IS NOT ?2
+                OR retry_at IS NOT NULL OR failures!=0)",
         params![task.as_str(), reason],
     )?;
     Ok(())
@@ -248,6 +293,117 @@ mod tests {
             .into_iter()
             .map(|h| (h.hold, h.ended))
             .collect()
+    }
+
+    #[test]
+    fn returning_viewers_revoke_closes_and_retry_without_a_sweep() {
+        for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
+            let (_home, store, task) = fixture();
+            let viewer = session_owner(&store, &task, "passive");
+            for shell in ["automatic", "explicit"] {
+                store.create_task_shell(shell, &task, "/repo.task").unwrap();
+            }
+            let intent = store
+                .reconcile_task_retirement(&task, 100, None, None)
+                .unwrap()
+                .unwrap();
+            store.retirement_progress(&intent, "closing", None).unwrap();
+            store.close_task_shells(&task).unwrap();
+            store.close_task_shell("explicit").unwrap();
+            store
+                .fail_retirement(&task, 1100, "owner not settled")
+                .unwrap();
+            // The recorder may see only the departure after a brief return.
+            store.record_owner_viewer_hold(&viewer, Some(hold)).unwrap();
+            let viewed: bool = store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT viewed FROM processes WHERE id=?1", [&viewer], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(viewed, matches!(hold, ViewerHold::Viewed(_)));
+            let returned = store.task_retirement(&task).unwrap().unwrap();
+            assert_eq!(returned.phase, "waiting");
+            assert_eq!(
+                (returned.due_at, returned.retry_at, returned.failures),
+                (None, None, 0)
+            );
+            assert!(
+                !store
+                    .task_shell("automatic")
+                    .unwrap()
+                    .unwrap()
+                    .close_requested
+            );
+            assert!(
+                store
+                    .task_shell("explicit")
+                    .unwrap()
+                    .unwrap()
+                    .close_requested
+            );
+            store
+                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
+                .unwrap();
+            assert_eq!(
+                store.task_retirement(&task).unwrap().unwrap().phase,
+                "waiting"
+            );
+            // Only now does a later pass date the new deadline from departure.
+            let next = store
+                .reconcile_task_retirement(&task, 1500, None, Some(1201))
+                .unwrap()
+                .unwrap();
+            assert_eq!(next.due_at, Some(1201 + WORKSPACE_GRACE));
+        }
+    }
+
+    #[test]
+    fn viewer_return_and_close_cancellation_commit_together() {
+        let (_home, store, task) = fixture();
+        let viewer = session_owner(&store, &task, "session");
+        store
+            .create_task_shell("shell", &task, "/repo.task")
+            .unwrap();
+        let intent = store
+            .reconcile_task_retirement(&task, 100, None, None)
+            .unwrap()
+            .unwrap();
+        store.retirement_progress(&intent, "closing", None).unwrap();
+        store.close_task_shells(&task).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_cancel BEFORE UPDATE ON task_retirements
+             BEGIN SELECT RAISE(FAIL, 'temporary cancellation failure'); END;",
+            )
+            .unwrap();
+        let record = || store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)));
+        assert!(record().is_err());
+        assert!(store.task_shell("shell").unwrap().unwrap().close_requested);
+        let recorded: bool = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT viewed IS 1 OR viewer_hold IS NOT NULL FROM processes WHERE id=?1",
+                [&viewer],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!recorded);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_cancel")
+            .unwrap();
+        record().unwrap();
+        assert!(!store.task_shell("shell").unwrap().unwrap().close_requested);
     }
 
     #[test]

@@ -4179,6 +4179,142 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
 
 struct ShellOwnerGuard<'a>(&'a Fixture, String);
 
+#[test]
+fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
+    let fixture = Fixture::new();
+    let task = "task_5e55105e000040008000000000000006";
+    fixture.shell_task(task);
+    let base = [
+        "task",
+        "shell",
+        task,
+        "--checkout",
+        fixture.repo.path().to_str().unwrap(),
+        "--id",
+        "desktop-shell",
+    ];
+    let mut launch = fixture
+        .command(&base)
+        .args([
+            "--create",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready > \"$HOME/ready\"",
+        ])
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    fixture.wait_file("ready");
+    let shell = fixture.shell_owner("desktop-shell");
+    let _shell_guard = ShellOwnerGuard(&fixture, shell.clone());
+    let mut terminal = fixture.viewer(&shell, true);
+    launch.wait().unwrap();
+    terminal.input("export RETAINED=still-here; sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
+    let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
+
+    // This independent Session can be viewed passively, without controlling
+    // either execution. Its viewers, rather than shell viewers, retain the Task.
+    let session_owner = fixture.start(&["/bin/sleep", "60"]);
+    let _session_guard = ShellOwnerGuard(&fixture, session_owner.clone());
+    let session = fixture.session(&session_owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET task_id=?1,interactive=1 WHERE id=?2",
+            rusqlite::params![task, session],
+        )
+        .unwrap();
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET planning_completed=1,planning_completed_at='completion' WHERE id=?1",
+            [task],
+        )
+        .unwrap();
+    fixture
+        .sql()
+        .execute(
+            "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
+        SELECT id,planning_completed_at,worktree,branch,0,'waiting' FROM tasks WHERE id=?1",
+            [task],
+        )
+        .unwrap();
+
+    for brief_return in [false, true] {
+        // Hold the consumer while the sweep's queued close and the Session's
+        // return are recorded, then let the actual owner judge the request.
+        let pid = fixture
+            .sql()
+            .query_row("SELECT pid FROM processes WHERE id=?1", [&shell], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // SAFETY: pid belongs to this fixture's shell owner and the guard resumes it.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        let paused = PausedOwner(pid);
+        fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;
+            UPDATE task_shells SET close_requested=2;").unwrap();
+        let mut passive = fixture.viewer(&session_owner, false);
+        wait_hold(&fixture, &session_owner, Some("viewed"));
+        let state: (String, Option<i64>, Option<i64>, i64, i64) = fixture
+            .sql()
+            .query_row(
+                "SELECT h.phase,h.due_at,h.retry_at,h.failures,s.close_requested
+             FROM task_retirements h JOIN task_shells s ON s.task_id=h.task_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("waiting".into(), None, None, 0, 0));
+        if brief_return {
+            passive.request(json!({"kind":"leave"}));
+            wait_hold(&fixture, &session_owner, Some("absent"));
+        }
+        drop(paused);
+        // Allow the owner policy to consume any queued candidate. No sweep or
+        // retirement reconciliation occurs between return and these assertions.
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(fixture.running(&shell));
+        terminal.input("printf 'value:%s\\n' \"$RETAINED\"\r");
+        until_out(&mut terminal, "value:still-here");
+        let job_state = Command::new("ps")
+            .args(["-p", &job.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        assert!(job_state.status.success());
+        assert!(!String::from_utf8_lossy(&job_state.stdout)
+            .trim()
+            .starts_with('Z'));
+        if !brief_return {
+            passive.request(json!({"kind":"leave"}));
+            wait_hold(&fixture, &session_owner, Some("absent"));
+        }
+    }
+    // An explicit Close still ends this shell with a passive Task viewer present.
+    let _passive = fixture.viewer(&session_owner, false);
+    wait_hold(&fixture, &session_owner, Some("viewed"));
+    assert!(fixture
+        .command(&base)
+        .arg("--close")
+        .output()
+        .unwrap()
+        .status
+        .success());
+    fixture.ends(&shell);
+    let settled: bool = fixture
+        .sql()
+        .query_row(
+            "SELECT jobs_settled FROM task_shells WHERE owner=?1",
+            [&shell],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(settled);
+}
+
 impl Fixture {
     fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
         let output = self.command(&["machine", "id"]).output().unwrap();

@@ -62,7 +62,7 @@ mod task_details;
 mod task_retirement;
 mod task_shells;
 pub use task_retirement::TaskRetirement;
-pub(crate) use task_retirement::ViewerHold;
+pub(crate) use task_retirement::{ViewerHold, VIEWED, WORKSPACE_GRACE};
 pub use task_shells::TaskShell;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;

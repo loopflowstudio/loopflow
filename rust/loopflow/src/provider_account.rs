@@ -1315,6 +1315,11 @@ pub(crate) fn match_account<'a>(
 }
 
 pub(crate) fn current_repo_id() -> Result<Option<CanonicalRepo>, ProviderAccountError> {
+    // A test's process directory is the developer's checkout, whose private
+    // route belongs to that Machine and not to any fixture.
+    if cfg!(test) {
+        return Ok(None);
+    }
     let current = std::env::current_dir()
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
     Ok(CanonicalRepo::discover(&current).ok())

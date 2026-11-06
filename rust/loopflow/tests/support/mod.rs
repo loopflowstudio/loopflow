@@ -257,7 +257,11 @@ impl EnvGuard {
         }
         let previous_path = env::var("PATH").ok();
         let new_path = match (&previous_path, include_existing_path) {
-            (Some(prev), true) => format!("{}:{}", bin.path().display(), prev),
+            (Some(prev), true) => format!(
+                "{}:{}",
+                bin.path().display(),
+                loopflow_test_support::path_without_installed_harnesses(prev)
+            ),
             _ => bin.path().display().to_string(),
         };
         env::set_var("PATH", new_path);

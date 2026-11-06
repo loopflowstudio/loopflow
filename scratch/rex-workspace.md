@@ -46,3 +46,7 @@ Jack Heart rejected the November 6 demo showing only Task & workflow. The immedi
 Jack then confirmed “okworked” after the single ordinary Claude conversation was
 opened. Use that experience as the target; the branch's fresh-start failure remains
 unresolved. This feedback approves neither shipping nor demo cleanup.
+
+Jack Heart requested the PR against LOO-717. LOO-498 now selects LOO-717 / PR #1811 as its stack parent. Keep shell lifetime and retirement in that parent; review native opening and cwd additions in #1814 above it. The failed branch fresh-start demo remains unresolved.
+
+Stack validation against LOO-717 a1067c99: isolated Rex resume/cwd tests 2 passed; last-viewer/disconnect retention test 1 passed; formatting and all-targets clippy passed. No live demo was relaunched during stacking.

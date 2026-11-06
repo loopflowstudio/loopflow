@@ -201,5 +201,10 @@ it instead of the failed history. Jack's input/resize acceptance remains pending
 - Reopen history through `lf resume session_8ebcd369c5e9479fbfe989fea0f7b65d`.
   No draft settlement or teardown requested; keep all owners and roots intact.
 
-Next review: try ordinary input in the single conversation tab. Separately repair
-and verify branch fresh-conversation startup before claiming PR acceptance.
+Jack Heart subsequently replied “okworked”. This confirms that the ordinary Task
+conversation worked for him. It does not establish individual split/cwd or resize
+checks, repair of branch fresh-conversation startup, or approval to ship. The demo
+input has not been released for cleanup; leave the conversation and roots intact.
+
+Remaining work: repair and verify branch fresh-conversation startup against this
+accepted ordinary-conversation experience before claiming PR acceptance.

@@ -2,28 +2,26 @@
 requires: a reviewable change
 produces: published or updated PR
 ---
-Publish the current change when the caller's publication boundary is satisfied.
+Publish the current change as a ready PR once it meets the caller's bar for publishing.
 
-Inspect the diff against its actual base, including uncommitted work, the
-accepted outcome and verification. A completed implementation or reconciliation
-step does not establish that required behavior works. Resolve clear gaps;
-return a concrete blocker when the publication criteria do not hold.
+Read the diff against its actual base, including uncommitted work, next to the
+accepted outcome and what was checked. A finished implementation step doesn't
+mean the behavior works. Fix clear gaps; if the change isn't ready, return the
+concrete blocker.
 
-Run `lf sync` first and resolve any conflicts in place; a published PR merges
-cleanly with its base. Conflicts are routine work, never a question for the
-person. Then run `lf pr publish`. The command owns pushing and PR creation/update, consumes
-valid prepared copy, and otherwise generates copy through its pr-message
-template. It marks the PR ready and returns the URL without opening a browser.
-Use explicit title/body overrides only when the caller supplied or revised them.
-Inspect the returned PR for scope, supported claims and material proof limits;
-correct its copy through the same operation when necessary.
+Run `lf sync` first and resolve conflicts in place; a published PR merges
+cleanly with its base. Conflicts are routine work, never a question. Then run
+`lf pr publish`. It pushes, creates or updates the PR, uses prepared copy or
+writes it through pr-message, marks the PR ready, and prints the URL without
+opening a browser. Pass a title or body only when the caller supplied or
+revised one. Read the PR for scope and claims the work doesn't back, and fix
+its copy with the same command.
 
-Keep publication separate from merge. This skill neither arms auto-merge nor
-completes the Task. Open the review page with `lf pr open` only when requested.
-Preserve unrelated active contributions rather than staging them as this change.
+Publishing is not merging: don't arm auto-merge or complete the Task. Run `lf
+pr open` only when asked. Leave unrelated work out of this change.
 
-For a persistent document workspace, inspect the entire committed range and use
-`lf commit -m "<accepted change>" <selected-path>...` before publication. Persistent
-publication pushes committed documents, preserves other staged and unstaged work,
-and keeps `scratch/` local. Do not delete scratch or create an export worktree.
-Continued publication carries new work past merged history automatically.
+In a persistent document workspace, read the whole committed range and run
+`lf commit -m "<accepted change>" <selected-path>...` before publishing. That
+pushes the committed documents, leaves other staged and unstaged work alone,
+and keeps `scratch/` local. Don't delete scratch or create an export worktree.
+Later publishes carry new work past merged history on their own.

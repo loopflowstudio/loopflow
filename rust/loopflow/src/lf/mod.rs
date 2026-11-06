@@ -229,9 +229,9 @@ impl Cli {
     pub fn merges(&self) -> bool {
         matches!(
             &self.command,
-            Some(Commands::Ops(OpsCommand::Pr {
+            Some(Commands::Pr {
                 cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
-            }))
+            })
         )
     }
 
@@ -256,21 +256,18 @@ impl Cli {
                     ..
                 }
             ),
-            Some(Commands::Ops(cmd)) => match cmd {
-                OpsCommand::Commit { message, .. } => message.is_none(),
-                OpsCommand::Sync(args) => !args.plan && !args.abort && !args.manual,
-                OpsCommand::Pr { cmd } => matches!(
-                    cmd,
-                    Some(
-                        PrCommand::Open { .. }
-                            | PrCommand::Publish { .. }
-                            | PrCommand::Submit { .. }
-                            | PrCommand::Arm { .. }
-                            | PrCommand::Land { .. }
-                    )
-                ),
-                _ => false,
-            },
+            Some(Commands::Commit { message, .. }) => message.is_none(),
+            Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
+            Some(Commands::Pr { cmd }) => matches!(
+                cmd,
+                Some(
+                    PrCommand::Open { .. }
+                        | PrCommand::Publish { .. }
+                        | PrCommand::Submit { .. }
+                        | PrCommand::Arm { .. }
+                        | PrCommand::Land { .. }
+                )
+            ),
             Some(Commands::Repository {
                 cmd: Some(RepositoryCommand::Release { cmd }),
                 ..
@@ -340,13 +337,13 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Ops(OpsCommand::Account {
+        if let Some(Commands::Account {
             cmd,
             provider,
             cached,
             details,
             json,
-        })) = &self.command
+        }) = &self.command
         {
             if let Some(misuse) =
                 AccountCommand::misuse(cmd.as_ref(), *provider, *cached || *details || *json)
@@ -535,8 +532,60 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: PlanningCommand,
     },
-    #[command(flatten)]
-    Ops(OpsCommand),
+    /// Pull request lifecycle
+    Pr {
+        #[command(subcommand)]
+        cmd: Option<PrCommand>,
+    },
+    /// Commit changes
+    Commit {
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        /// Push the branch after committing
+        #[arg(short = 'p', long = "push")]
+        push: bool,
+        #[arg(long = "no-add")]
+        no_add: bool,
+        /// Commit only these paths, preserving other staged and unstaged edits
+        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
+        paths: Vec<String>,
+        /// Print what the commit left
+        #[arg(long)]
+        json: bool,
+    },
+    /// Merge upstream into the current branch (default: main or stack parent)
+    Sync(SyncArgs),
+    /// Worktree operations
+    Wt {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Serve Desktop and other clients on this host
+    Server {
+        #[command(subcommand)]
+        cmd: ServerCommand,
+    },
+    /// Name, connect, pool and rent Machines
+    Machine {
+        #[command(subcommand)]
+        cmd: MachineCommand,
+    },
+    /// Refresh account access and capacity, or manage logins and routing
+    Account {
+        #[command(subcommand)]
+        cmd: Option<AccountCommand>,
+        /// Limit observations to one provider
+        provider: Option<crate::provider_auth::Provider>,
+        /// Inspect cached evidence without contacting providers
+        #[arg(long)]
+        cached: bool,
+        /// Include credential sources, browser choices, and timestamps
+        #[arg(long)]
+        details: bool,
+        /// Emit the account overview as one JSON document
+        #[arg(long)]
+        json: bool,
+    },
     /// This repository: its identity and checkout, where it exchanges planning,
     /// its releases, CI, people and size
     #[command(args_conflicts_with_subcommands = true)]
@@ -621,66 +670,6 @@ pub enum Commands {
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
-}
-
-/// Root nouns for delivery and the environment work runs in: PRs, commits,
-/// syncs, worktrees, the server, Machines and accounts. Flattened into the root.
-#[derive(Subcommand, Debug)]
-pub enum OpsCommand {
-    /// Pull request lifecycle
-    Pr {
-        #[command(subcommand)]
-        cmd: Option<PrCommand>,
-    },
-    /// Commit changes
-    Commit {
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        /// Push the branch after committing
-        #[arg(short = 'p', long = "push")]
-        push: bool,
-        #[arg(long = "no-add")]
-        no_add: bool,
-        /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
-        paths: Vec<String>,
-        /// Print what the commit left
-        #[arg(long)]
-        json: bool,
-    },
-    /// Merge upstream into the current branch (default: main or stack parent)
-    Sync(SyncArgs),
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Serve Desktop and other clients on this host
-    Server {
-        #[command(subcommand)]
-        cmd: ServerCommand,
-    },
-    /// Name, connect, pool and rent Machines
-    Machine {
-        #[command(subcommand)]
-        cmd: MachineCommand,
-    },
-    /// Refresh account access and capacity, or manage logins and routing
-    Account {
-        #[command(subcommand)]
-        cmd: Option<AccountCommand>,
-        /// Limit observations to one provider
-        provider: Option<crate::provider_auth::Provider>,
-        /// Inspect cached evidence without contacting providers
-        #[arg(long)]
-        cached: bool,
-        /// Include credential sources, browser choices, and timestamps
-        #[arg(long)]
-        details: bool,
-        /// Emit the account overview as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 /// `repository.*`: one repository's planning exchange, releases, CI, people,
@@ -1147,7 +1136,12 @@ impl Commands {
             Self::Desktop { cmd } => cmd.changes_work(),
             Self::Process { cmd } => cmd.changes_work(),
             Self::Planning { cmd } => cmd.changes_work(),
-            Self::Ops(cmd) => cmd.changes_work(),
+            Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
+            Self::Wt { cmd } => cmd.changes_work(),
+            Self::Machine { cmd } => cmd.changes_work(),
+            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
+            Self::Server { .. } => false,
+            Self::Commit { .. } | Self::Sync(_) => true,
             Self::Repository { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
@@ -1328,19 +1322,6 @@ impl RepositoryCommand {
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
-        }
-    }
-}
-
-impl OpsCommand {
-    pub fn changes_work(&self) -> bool {
-        match self {
-            Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
-            Self::Wt { cmd } => cmd.changes_work(),
-            Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Server { .. } => false,
-            Self::Commit { .. } | Self::Sync(_) => true,
         }
     }
 }
@@ -3500,9 +3481,9 @@ mod tests {
         assert!(!command.changes_work());
         assert!(matches!(
             command,
-            Commands::Ops(OpsCommand::Server {
+            Commands::Server {
                 cmd: ServerCommand::Status
-            })
+            }
         ));
         assert!(Cli::try_parse_from(["lf", "machine", "service", "run"]).is_err());
         assert!(Cli::try_parse_from(["lf", "server", "ensure"]).is_err());
@@ -3733,13 +3714,11 @@ mod tests {
     fn account_use_takes_its_provider_before_the_verb() {
         let cli =
             Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
-        assert!(
-            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account {
+        assert!(matches!(cli.command, Some(Commands::Account {
             cmd: Some(AccountCommand::Use { email }),
             provider: Some(crate::provider_auth::Provider::Codex),
             ..
-        })) if email == "jack@loopflow.studio")
-        );
+        }) if email == "jack@loopflow.studio"));
     }
 
     #[test]
@@ -3755,11 +3734,9 @@ mod tests {
             "Personal",
         ])
         .unwrap();
-        assert!(
-            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account {
+        assert!(matches!(cli.command, Some(Commands::Account {
             cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
-        })) if chrome_profile == ["Work", "Personal"])
-        );
+        }) if chrome_profile == ["Work", "Personal"]));
         assert!(
             Cli::try_parse_from(["lf", "account", "set", "linear", "--clear-cooldown"]).is_err()
         );
@@ -3781,14 +3758,14 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops(OpsCommand::Account {
+            Some(Commands::Account {
                 cmd: Some(AccountCommand::Connect {
                     provider,
                     email: Some(email),
                     chrome_profile: Some(chrome_profile),
                     ..
                 }), ..
-            })) if provider == "claude"
+            }) if provider == "claude"
                 && email == "operator@"
                 && chrome_profile == "Profile 9"
         ));
@@ -3806,9 +3783,9 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Ops(OpsCommand::Account { cmd: Some(AccountCommand::Connect {
+            matches!(cli.command, Some(Commands::Account { cmd: Some(AccountCommand::Connect {
             provider, email: None, chrome_profile: Some(profile), ..
-        }), .. })) if provider == "linear" && profile == "Work")
+        }), .. }) if provider == "linear" && profile == "Work")
         );
     }
 
@@ -3859,7 +3836,7 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ops(OpsCommand::Account {
+            Some(Commands::Account {
                 cmd: Some(AccountCommand::Set {
                     provider,
                     email: Some(email),
@@ -3871,7 +3848,7 @@ mod tests {
                     clear_paid_through: false,
                     ..
                 }), ..
-            })) if provider == "codex"
+            }) if provider == "codex"
                 && email == "loopflow-eng@"
                 && login_email == "engineering@example.com"
                 && routing == "automatic"
@@ -3988,12 +3965,12 @@ mod tests {
             .expect("parse waited landing");
         assert!(matches!(
             land.command,
-            Some(Commands::Ops(OpsCommand::Pr {
+            Some(Commands::Pr {
                 cmd: Some(PrCommand::Land {
                     wait_and_fix: true,
                     ..
                 })
-            }))
+            })
         ));
         assert!(Cli::try_parse_from(["lf", "pr", "land", "--wait"]).is_err());
         for command in ["land", "arm", "submit"] {
@@ -4247,13 +4224,13 @@ mod tests {
             .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Ops(OpsCommand::Sync(SyncArgs {
+            Some(Commands::Sync(SyncArgs {
                 manual: true,
                 continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            }))) if onto == "origin/main"
+            })) if onto == "origin/main"
         ));
 
         assert!(Cli::try_parse_from(["lf", "sync", "--continue", "--abort"]).is_err());

@@ -13,7 +13,7 @@ use loopflow::definition::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::commands::mutation::{selected_task_repository, task_edit_update};
 use loopflow::lf::{
-    Cli, Commands, GraphCommand, InstallCommand, OpsCommand, SkillCommand, TaskCommand, WaveCommand,
+    Cli, Commands, GraphCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
 use loopflow::ops::project::update_plan;
@@ -795,60 +795,6 @@ fn dispatch_repository(
         RepositoryCommand::People { json } => loopflow::lf::commands::people::run(*json),
         RepositoryCommand::Tokens { json, days } => {
             loopflow::lf::commands::tokens::run(*json, *days)
-        }
-    }
-}
-
-fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<()> {
-    match cmd {
-        OpsCommand::Account {
-            cmd,
-            provider,
-            cached,
-            details,
-            json,
-        } => {
-            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
-        }
-        OpsCommand::Server { cmd } => loopflow::lf::commands::server::run(cmd),
-        OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
-        OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
-        }),
-        OpsCommand::Wt { cmd } => {
-            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
-        }
-        OpsCommand::Commit {
-            message,
-            push,
-            no_add,
-            paths,
-            json,
-        } => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_commit(
-                message.as_deref(),
-                *push,
-                *no_add,
-                paths,
-                cli.agent.as_deref(),
-                *json,
-            )
-        }),
-        OpsCommand::Sync(sync) => {
-            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
-            with_runtime(&repo, args, || {
-                loopflow::lf::commands::ops::run_sync(
-                    &loopflow::engine::checkout::SyncInput {
-                        onto: sync.onto.as_deref(),
-                        preview: sync.plan,
-                        manual: sync.manual,
-                        continue_sync: sync.continue_sync,
-                        abort: sync.abort,
-                        adopt: sync.adopt,
-                    },
-                    sync.json,
-                )
-            })
         }
     }
 }
@@ -1906,20 +1852,20 @@ fn run() -> anyhow::Result<()> {
 
     // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
-    if let Some(Commands::Ops(OpsCommand::Machine {
+    if let Some(Commands::Machine {
         cmd:
             loopflow::lf::MachineCommand::Doctor {
                 json,
                 planning: false,
             },
-    })) = &cli.command
+    }) = &cli.command
     {
         journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
     // Availability and bootstrap are observational; no Work admission or repair.
-    if let Some(Commands::Ops(OpsCommand::Server { cmd })) = &cli.command {
+    if let Some(Commands::Server { cmd }) = &cli.command {
         return loopflow::lf::commands::server::run(cmd);
     }
 
@@ -2353,10 +2299,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         }) | Some(Commands::Ship { .. })
-            | Some(Commands::Ops(OpsCommand::Sync(_)))
-            | Some(Commands::Ops(OpsCommand::Pr {
+            | Some(Commands::Sync(_))
+            | Some(Commands::Pr {
                 cmd: Some(loopflow::lf::PrCommand::Land { .. })
-            }))
+            })
             | Some(Commands::Repository {
                 cmd: Some(loopflow::lf::RepositoryCommand::Release {
                     cmd: loopflow::lf::ReleaseCommand::Run { .. }
@@ -2866,9 +2812,9 @@ fn execute_command(
         Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
-        Some(Commands::Ops(OpsCommand::Machine {
+        Some(Commands::Machine {
             cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
-        })) => {
+        }) => {
             if *planning {
                 let repo = loopflow::repo::working_directory()?;
                 loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
@@ -2876,7 +2822,55 @@ fn execute_command(
                 loopflow::lf::commands::doctor::run(*json)
             }
         }
-        Some(Commands::Ops(cmd)) => dispatch_ops(cmd, cli, args),
+        Some(Commands::Account {
+            cmd,
+            provider,
+            cached,
+            details,
+            json,
+        }) => {
+            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
+        }
+        Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
+        Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
+        Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
+        }),
+        Some(Commands::Wt { cmd }) => {
+            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
+        }
+        Some(Commands::Commit {
+            message,
+            push,
+            no_add,
+            paths,
+            json,
+        }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_commit(
+                message.as_deref(),
+                *push,
+                *no_add,
+                paths,
+                cli.agent.as_deref(),
+                *json,
+            )
+        }),
+        Some(Commands::Sync(sync)) => {
+            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+            with_runtime(&repo, args, || {
+                loopflow::lf::commands::ops::run_sync(
+                    &loopflow::engine::checkout::SyncInput {
+                        onto: sync.onto.as_deref(),
+                        preview: sync.plan,
+                        manual: sync.manual,
+                        continue_sync: sync.continue_sync,
+                        abort: sync.abort,
+                        adopt: sync.adopt,
+                    },
+                    sync.json,
+                )
+            })
+        }
         Some(Commands::Repository { cmd: Some(cmd), .. }) => dispatch_repository(cmd, args),
         // Bare `lf repository`: the identity read `lf config repository` keeps for its edits.
         Some(Commands::Repository { cmd: None, json }) => in_directory_runtime(args, |_| {
@@ -3090,7 +3084,7 @@ mod tests {
     use super::{format_task_pr_line, reorder_args, CwdGuard, EnvGuard};
 
     use clap::Parser;
-    use loopflow::lf::{Cli, Commands, OpsCommand, PrCommand, TaskCommand};
+    use loopflow::lf::{Cli, Commands, PrCommand, TaskCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     /// `--as` never degrades to raw attribution: an absent registry is named
@@ -3532,9 +3526,9 @@ mod tests {
         assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Ops(OpsCommand::Pr {
+            Some(Commands::Pr {
                 cmd: Some(PrCommand::Submit { strict: true, .. })
-            }))
+            })
         ));
 
         let args: Vec<String> = ["lf", "wt", "--force", "delete", "old-tree"]

@@ -255,21 +255,27 @@ finishes. An ordinary shell in that directory does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
 Task and conversation history remain after cleanup.
 
-The serving owner records its own viewers on its Process (`viewer_hold`): an
-attached viewer that has not sent `leave` holds, including a dropped connection
-inside its 60 s reconnect grace. A local connection that outlives that grace has
-exited. A viewer attached under SSH (`"ssh": true`, set from `SSH_CONNECTION`)
-that drops without `leave` may still be running on its own Machine: it stays
-unknown, through the owner's own exit, until any fresh attach to that owner.
-Leave remote viewers with Ctrl+] so they release promptly; Desktop detaches
-its panes that way when you switch Work or close the window. Quitting Desktop
-or closing a native tab hangs up instead, so a remote viewer left that way stays
-unknown until the Session is viewed again. An owner that died without recording
-its viewers also reads as unknown; a resumed Session's new owner replaces that
-record. Unknown holds the checkout but never
-keeps an idle agent alive, and an agent's exit is not a viewer's exit.
-Viewed Desktop shells hold like Session viewers. Loopflow stores no host,
-window or occurrence identity.
+The serving owner dates its own viewer evidence on its Process (`viewer_hold`,
+`viewer_hold_at`). Only Task Session viewers retain a checkout; Desktop shells
+already accompany those Sessions and add no hold. Losing the last connection
+starts the absence clock immediately, independently of the sixty-second stream
+replay grace. A resumed viewer cancels cleanup. Ending an unviewed owner preserves
+that absence time, so its two-minute idle ending adds no new workspace grace.
+
+LF's remote viewer path frames its PTY input/output over SSH. The viewing Machine
+sends heartbeats every ten seconds, independent of typing and provider output;
+the remote relay ends after thirty seconds without them, including silent network
+failure with no EOF. The detached Session or shell execution stays on its owner.
+Window dimensions travel on the same connection. There is no host registry or
+second provider conversation. An ordinary external SSH connection uses its host's
+connection-loss detection; LF's bounded heartbeat applies to its own remote path.
+
+Desktop departure, window close and orderly Quit send Ctrl+] to release their
+relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
+back to connection-loss cleanup. Only actual Session viewing retains the checkout.
+An owner's dated observation expires too if it crashes, so a stale Process row
+cannot retain a completed workspace indefinitely. The retirement executor keeps
+observing while viewed and uses that same absence window after owner loss.
 
 A completed, released Task keeps its checkout and Desktop shells for fifteen
 minutes total; eligible unviewed agents still end at two minutes. A returning

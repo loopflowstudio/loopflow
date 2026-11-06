@@ -71,7 +71,6 @@ pub(super) fn before_read(
                     cols: 80,
                     name: None,
                     moved: None,
-                    ssh: None,
                 },
             };
             viewer.write_all(&super::wire::frame(

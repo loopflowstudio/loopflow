@@ -48,29 +48,40 @@ pub(super) fn lock(task: &TaskId, executor: bool) -> OpsResult<File> {
 }
 
 const VIEWED: &str = "Retained by an open Task Session viewer";
-const UNKNOWN: &str = "Session viewer liveness unknown; cleanup pending";
+/// Owners refresh live viewing evidence every ten seconds. A dead or stalled
+/// owner cannot keep a completed checkout forever with its last cached boolean.
+pub(crate) const VIEWER_OBSERVATION_GRACE: i64 = 30;
 
-/// Why an LF viewer still retains this checkout. Only owners' own viewer
-/// records count; an ordinary shell in the checkout never does. An owner that
-/// died without recording its viewers leaves their fate unknown.
-fn viewer_hold(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<&'static str>> {
-    let mut unknown = false;
+fn viewer_hold(
+    store: &SqliteStore,
+    task: &TaskId,
+    now: i64,
+) -> OpsResult<(Option<&'static str>, Option<i64>)> {
+    let mut absent_since = None;
     for owner in store.task_viewer_holds(task).map_err(task_error)? {
-        let live = !owner.ended
-            && crate::journal::process_evidence(store, &owner.owner)
-                != ProcessIdentityEvidence::Dead;
-        if live && owner.hold == ViewerHold::Viewed {
-            return Ok(Some(VIEWED));
-        }
-        unknown = true;
+        let at = match owner.hold {
+            ViewerHold::Viewed(at) => {
+                if !owner.ended
+                    && now < at + VIEWER_OBSERVATION_GRACE
+                    && crate::journal::process_evidence(store, &owner.owner)
+                        != ProcessIdentityEvidence::Dead
+                {
+                    return Ok((Some(VIEWED), None));
+                }
+                at + VIEWER_OBSERVATION_GRACE
+            }
+            ViewerHold::Absent(at) => at,
+        };
+        absent_since = Some(absent_since.map_or(at, |old: i64| old.max(at)));
     }
-    Ok(unknown.then_some(UNKNOWN))
+    Ok((None, absent_since))
 }
 
 fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirement>> {
-    let hold = viewer_hold(store, task)?;
+    let now = now();
+    let (hold, absent_since) = viewer_hold(store, task, now)?;
     store
-        .reconcile_task_retirement(task, now(), hold)
+        .reconcile_task_retirement(task, now, hold, absent_since)
         .map_err(task_error)
 }
 
@@ -87,10 +98,10 @@ pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> 
     start(&task.id)
 }
 
-/// The executor runs only toward a deadline. While a viewer holds the
-/// checkout it exits; that owner wakes it again when its viewers release.
+/// Keep observing a completed Task while viewed too: a crashed owner cannot
+/// wake cleanup, so the executor must notice expired viewing evidence itself.
 fn needs_executor(intent: Option<&TaskRetirement>) -> bool {
-    intent.is_some_and(|intent| intent.phase != "retired" && intent.due_at.is_some())
+    intent.is_some_and(|intent| intent.phase != "retired")
 }
 
 /// An owner whose viewers released restarts cleanup for its waiting Tasks.
@@ -288,7 +299,9 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         return Ok(false);
     }
     // A viewer that attached during closing keeps the checkout.
-    if reconcile(&store.sqlite, &task.id)?.is_none_or(|current| current.due_at.is_none()) {
+    if reconcile(&store.sqlite, &task.id)?
+        .is_none_or(|current| current.due_at.is_none_or(|due| due > now()))
+    {
         return Ok(false);
     }
     crate::ops::wt::apply_delete(deletion, &NullProgress)?;

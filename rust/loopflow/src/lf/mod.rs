@@ -1194,7 +1194,10 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
+            Self::ObserveStatus { .. }
+            | Self::History { .. }
+            | Self::List { .. }
+            | Self::Remote { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1639,6 +1642,14 @@ pub struct SessionListArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Carry a viewer through SSH with end-to-end liveness.
+    #[command(hide = true)]
+    Remote {
+        #[arg(long)]
+        serve: bool,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
     /// Run the process a Session lives in while terminals come and go
     Serve {
         /// Relay the execution to an attached terminal

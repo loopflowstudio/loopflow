@@ -38,8 +38,7 @@ pub(super) struct Activity {
     pub viewed: bool,
     pub viewers: u64,
     pub output: u64,
-    /// Whether this owner's viewers retain its Task checkout. Separate from
-    /// `viewed`: a lost SSH viewer is unknown and never keeps the agent alive.
+    /// Dated viewing evidence; a disconnected viewer enters the absence window.
     pub hold: Option<ViewerHold>,
 }
 
@@ -93,8 +92,7 @@ impl Ending {
                 !store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none();
             let may_close = settled
                 && !input_queued
-                && (close == 1
-                    || (close == 2 && !activity.viewed && store.owner_retiring(owner)?));
+                && (close == 1 || (close == 2 && store.owner_retiring(owner)?));
             return Ok(may_close.then_some(Event::Control {
                 held: false,
                 notice: Some("Shell closed".into()),
@@ -173,7 +171,7 @@ pub(super) fn record_hold(
     hold: Option<ViewerHold>,
 ) -> Result<()> {
     store.record_owner_viewer_hold(owner, hold)?;
-    if hold.is_none() {
+    if !matches!(hold, Some(ViewerHold::Viewed(_))) {
         crate::ops::task::retirement::wake_released(store, owner)?;
     }
     Ok(())
@@ -372,7 +370,7 @@ mod tests {
         conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
         conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
         let intent = store
-            .reconcile_task_retirement(&task, 0, None)
+            .reconcile_task_retirement(&task, 0, None, None)
             .unwrap()
             .unwrap();
         assert_eq!(intent.due_at, Some(900));
@@ -381,7 +379,9 @@ mod tests {
         let candidate = Ending {
             activity: Activity::default(),
         };
-        store.reconcile_task_retirement(&task, 3600, None).unwrap();
+        store
+            .reconcile_task_retirement(&task, 3600, None, None)
+            .unwrap();
         store.retirement_progress(&intent, "closing", None).unwrap();
         for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
             conn.execute(
@@ -438,19 +438,21 @@ mod tests {
             .create_task_shell("shell", &task, "/repo.task")
             .unwrap();
         store.bind_task_shell("shell", &owner).unwrap();
-        store.close_task_shell("shell").unwrap();
-        conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
-        conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_some());
+        for close in [1, 2] {
+            conn.execute("UPDATE task_shells SET close_requested=?1", [close])
+                .unwrap();
+            // A shell view adds no retention, for explicit or retirement Close.
+            let viewed = Activity {
+                viewed: true,
+                ..Activity::default()
+            };
+            conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
+                .unwrap();
+            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_none());
+            conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
+                .unwrap();
+            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_some());
+        }
     }
 
     #[test]

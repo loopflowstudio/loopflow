@@ -338,6 +338,18 @@ final class GhosttySurfacePool {
         }
     }
 
+    /// Begin ordinary leave for every attached relay before the app exits.
+    func detachForQuit() {
+        for view in views.values { _ = view.detachRelay() }
+    }
+
+    var hasRunningRelays: Bool {
+        views.values.contains { view in
+            guard let surface = view.surface else { return false }
+            return !ghostty_surface_process_exited(surface)
+        }
+    }
+
     func clearFocus() {
         for view in views.values { view.updateFocus(isFocused: false, isEnabled: false) }
     }
@@ -1605,6 +1617,8 @@ final class GhosttySurfacePool {
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
     func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func detachForQuit() {}
+    var hasRunningRelays: Bool { false }
     func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }

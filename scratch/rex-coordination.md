@@ -1,5 +1,16 @@
 # LOO-717 / LOO-498 — current boundary
 
+## Follow-up correction — November 5
+
+Jack Heart accepted explicit Desktop Quit release and bounded disconnect cleanup:
+the same fifteen-minute absence window begins at detected loss. Reconnect or
+another connected Task Session viewer retains; requested work, drafts and pending
+requests remain protected. Desktop shells add no hold. This supersedes indefinite
+unknown-liveness wording below. LF-owned remote routing carries client heartbeats;
+independently opened external SSH relies on its host's loss detection. No external
+host registry or LF closure of Rex shells is added. Current repair and proof limits
+are in loo-717-shell-lifetimes.md.
+
 ## Latest clarification in LOO-717 — November 5
 
 Jack Heart clarified: retain the worktree for an open LF viewer of its Task

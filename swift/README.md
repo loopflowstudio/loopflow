@@ -1122,13 +1122,15 @@ its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a
 local prompt.
 
-Keep a Task Session viewer open to retain its worktree; the selected Task's
-panes are viewers. Switching Work, closing the window or quitting ends Desktop's
-viewers but leaves shells and agents running. Once a completed Task has no open
-viewer, its checkout and Desktop shells stay fifteen minutes, after requested
-work finishes; eligible idle agents end under the two-minute policy. Cleanup
-of a local Task finishes without relaunching Desktop; a remote Task's viewers
-that quitting hung up stay unknown until the Session is viewed again. Return
-before then to retain it again.
+Keep a Task Session viewer open to retain its worktree. Desktop shells accompany
+Task Sessions and add no separate hold. Switching Work, closing the window or
+quitting explicitly releases Desktop's viewers while execution stays on its
+owner. With no connected viewer, a completed Task's checkout and Desktop shells
+become eligible for cleanup after fifteen minutes. Requested work, drafts and
+pending requests delay cleanup without restarting that clock; eligible idle
+agents follow the two-minute policy. LF's remote connection detects silent loss
+with viewer heartbeats. Reconnecting before cleanup cancels it; a longer outage
+can leave a completed Task without its checkout. Failed Quit delivery follows
+that same bounded absence policy.
 Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

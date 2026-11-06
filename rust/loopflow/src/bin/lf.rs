@@ -1886,7 +1886,7 @@ fn run() -> anyhow::Result<()> {
         )
         || matches!(
             &cli.command,
-            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
+            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. } | loopflow::lf::SessionCommand::Remote { .. })
         );
     if reads_work
         && !cli.context

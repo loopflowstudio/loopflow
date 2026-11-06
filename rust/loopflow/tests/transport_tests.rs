@@ -638,7 +638,7 @@ fn wait_hold(fixture: &Fixture, owner: &str, expected: Option<&str>) {
 }
 
 #[test]
-fn session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown() {
+fn session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[
         "/bin/sh",
@@ -654,11 +654,10 @@ fn session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unkn
     drop(controller);
     std::thread::sleep(Duration::from_secs(3));
     assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
-    // A dropped connection keeps holding through its reconnect grace, and its
-    // resume continues the same hold; the clean leave of that stream releases.
+    // A dropped connection starts absence immediately; replay grace is independent.
+    // Resuming the same stream restores viewing without replaying input.
     passive.socket.shutdown(std::net::Shutdown::Both).unwrap();
-    std::thread::sleep(Duration::from_secs(3));
-    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    wait_hold(&fixture, &owner, Some("absent"));
     let mut resumed = fixture.connect(&owner);
     resumed.request(json!({"kind":"resume","reconnect":passive.reconnect,
         "received":passive.received,"control":false,"own":null,"rows":24,"cols":80}));
@@ -666,7 +665,7 @@ fn session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unkn
     drop(passive);
     resumed.request(json!({"kind":"leave"}));
     drop(resumed);
-    wait_hold(&fixture, &owner, None);
+    wait_hold(&fixture, &owner, Some("absent"));
     // An SSH viewer whose connection is lost may still be running elsewhere.
     let remote = fixture.attach(
         &owner,
@@ -679,8 +678,8 @@ fn session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unkn
     finisher.input("done\n");
     finisher.finish();
     assert_eq!(fixture.wait_file("answer"), "done");
-    // Ending tells open viewers why; the lost one survives the owner as unknown.
-    wait_hold(&fixture, &owner, Some("unknown"));
+    // Ending does not create an indefinite hold for the lost viewer.
+    wait_hold(&fixture, &owner, Some("absent"));
 }
 
 #[test]
@@ -4459,3 +4458,82 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
 
 #[path = "transport/ssh_shells.rs"]
 mod ssh_shells;
+
+#[test]
+fn remote_viewer_frames_preserve_input_output_and_exit_without_leaking_heartbeats() {
+    let fixture = Fixture::new();
+    let mut child = fixture
+        .command(&[
+            "session",
+            "remote",
+            "--",
+            env!("CARGO_BIN_EXE_lf"),
+            "session",
+            "remote",
+            "--serve",
+            "--",
+            "/bin/sh",
+            "-c",
+            "stty -echo; read -r line; stty size; printf 'received:<%s>\\n' \"$line\"; exit 7",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"typed-value\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("received:<typed-value>"), "{text}");
+    assert!(text.contains("24 80"), "initial terminal size: {text}");
+    assert!(!text.contains("rows") && !text.contains("cols"), "{text}");
+}
+
+#[test]
+fn remote_viewer_silent_connection_expires_while_input_is_still_open() {
+    let fixture = Fixture::new();
+    let pid_file = fixture.home.path().join("remote-viewer.pid");
+    let script = format!(
+        "echo $$ > '{}'; exec 0<&- 1>&- 2>&-; exec sleep 600",
+        pid_file.display()
+    );
+    let mut child = fixture
+        .command(&[
+            "session", "remote", "--serve", "--", "/bin/sh", "-c", &script,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let heartbeat = br#"{"rows":24,"cols":80}"#;
+    input.write_all(&[0x11]).unwrap();
+    input
+        .write_all(&(heartbeat.len() as u32).to_be_bytes())
+        .unwrap();
+    input.write_all(heartbeat).unwrap();
+    // Keep the stream open: no EOF or TCP close can explain this release.
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("heartbeat expired"));
+    let pid: i32 = std::fs::read_to_string(pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    // SAFETY: signal zero only observes the disposable child named by its receipt.
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "remote viewer survived expiry"
+    );
+    drop(input);
+}

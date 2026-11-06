@@ -20,10 +20,10 @@ CREATE TRIGGER store_revision_task_shells_delete AFTER DELETE ON task_shells BEG
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;
 
--- The serving owner's own viewers retain its Task checkout. `viewed`: an
--- attached viewer has not left; `unknown`: an SSH viewer dropped without leaving.
--- Host identities are never stored.
-ALTER TABLE processes ADD COLUMN viewer_hold TEXT CHECK(viewer_hold IN ('viewed','unknown'));
+-- Session-view evidence lives on its existing serving Process. Timestamps bound
+-- retention if that owner crashes. Shell viewers never retain Task checkouts.
+ALTER TABLE processes ADD COLUMN viewer_hold TEXT CHECK(viewer_hold IN ('viewed','absent'));
+ALTER TABLE processes ADD COLUMN viewer_hold_at INTEGER;
 CREATE TABLE task_retirements (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id),
     completion TEXT NOT NULL,

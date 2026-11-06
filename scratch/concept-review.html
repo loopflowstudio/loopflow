@@ -1,48 +1,39 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LOO-717 · A Session viewer retains the checkout</title><style>
-:root{color-scheme:light dark;--bg:#faf8f3;--ink:#262d2a;--muted:#626c64;--line:#d8ded4;--surface:#eff2e9;--accent:#225e48}
-@media(prefers-color-scheme:dark){:root{--bg:#191e1b;--ink:#e5e9df;--muted:#b0baae;--line:#414d42;--surface:#242d26;--accent:#a5d4b8}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,-apple-system,sans-serif}main{max-width:850px;padding:42px 28px 72px;margin:auto}header{font-size:13px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:20px}header p{margin:0 0 9px}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}h1{font-size:clamp(30px,5vw,46px);font-weight:650;line-height:1.15;letter-spacing:-.035em;margin:32px 0 20px}h2{font-size:23px;line-height:1.3;margin:34px 0 12px}h3{font-size:16px;margin:0 0 6px}p{margin:12px 0}.lead{font-size:20px}.decision,blockquote{border-left:3px solid var(--accent);padding:10px 20px;background:var(--surface);margin:22px 0}.note{font-size:14px;color:var(--muted)}fieldset{border:0;padding:0;margin:22px 0 12px}legend{font-weight:600;margin-bottom:8px}.choices{display:flex;flex-wrap:wrap;gap:8px}.choices label{border:1px solid var(--line);border-radius:5px;padding:8px 12px;cursor:pointer;font-size:15px}.choices label:has(input:checked){background:var(--surface);border-color:var(--accent)}input{accent-color:var(--accent)}.result{padding:15px 0;border-bottom:1px solid var(--line)}.result p{margin:0}table{width:100%;border-collapse:collapse;font-size:14px;margin:20px 0}th,td{text-align:left;vertical-align:top;padding:12px 10px 12px 0;border-bottom:1px solid var(--line)}code{font:12px/1.5 ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}li{margin:12px 0}@media(max-width:580px){main{padding:22px 18px 48px}table,tbody,tr,td{display:block}thead{display:none}td{border:0;padding:3px 0}td:first-child{font-weight:650}tr{padding:12px 0;border-bottom:1px solid var(--line)}.lead{font-size:18px}}
-</style></head><body><main>
-<header><p>LOO-717 · Concept review → accepted revision · November 5, 2026</p><p>Code reviewed: b81df60579. Revised behavior below is accepted and awaiting implementation.</p><details><summary>Sources</summary><p><a href="loo-717-shell-lifetimes.md">Working design</a> · <a href="rex-coordination.md">Complete 498 handoff and latest clarification</a> · <a href="questions.md">Decisions</a> · <a href="../rust/loopflow/src/transport.rs">Viewer attachment</a> · <a href="../rust/loopflow/src/transport/lifetime.rs">Session lifetime</a> · <a href="../rust/loopflow/src/store/sqlite/task_retirement.rs">Current retention records</a> · <a href="../rust/loopflow/src/ops/task/retirement.rs">Cleanup</a></p></details></header>
-<h1>A Session viewer retains the checkout.</h1>
-<p class="lead">An ordinary shell in the same directory does not.</p>
-<div class="decision"><p><strong>Accepted clarification:</strong> follow the LF process viewing the Task Session. When its last viewer exits, release that hold. A Rex tab remaining after the viewer exits is not a separate hold.</p></div>
-<p>This removes the need to track Rex workspaces in LF or identify old native blocks. LF never closes Rex shells. Active requested work and other open viewers still protect the Task.</p>
-<h2>What each Task contributes</h2>
-<table><thead><tr><th>Task</th><th>What you experience</th><th>Its boundary</th></tr></thead><tbody>
-<tr><td>672 · Ready conversations</td><td>Desktop opens and prefetches conversations so they are ready when you arrive.</td><td>Desktop decides which conversations to keep warm; shared lifetime handles their viewers.</td></tr>
-<tr><td>498 · Native workspaces</td><td>Launch a Task layout into Rex, then arrange and return to it in Rex.</td><td>Rex owns its tabs, splits, shells and restoration. LF owns no external-host registry.</td></tr>
-<tr><td>717 · Lifetime and cleanup</td><td>Desktop shells survive detach and reconnect. Completed Task resources clean up when eligible.</td><td>Retain while a Task Session viewer is open; settle protected work before deletion.</td></tr>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-717 · What retains a Task?</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf8f3;--ink:#282822;--muted:#66665e;--line:#d4d2c8;--accent:#73502c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 system-ui,sans-serif}main{max-width:780px;margin:auto;padding:44px 26px 72px}header,p,section{margin-bottom:24px}h1{font-size:clamp(29px,5vw,42px);line-height:1.13;letter-spacing:-.035em;margin:18px 0}h2{font-size:22px;margin:30px 0 10px}p{margin-top:8px}small,.meta{color:var(--muted);font-size:13px}code{font-size:.86em;overflow-wrap:anywhere}a{color:var(--accent)}table{border-collapse:collapse;width:100%;font-size:15px}th,td{padding:11px 9px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{font-weight:600}blockquote{border-left:3px solid var(--accent);margin:20px 0;padding-left:19px}.finding{border-top:2px solid var(--accent);padding-top:14px}li{margin:10px 0}details{margin:22px 0}summary{cursor:pointer} @media(prefers-color-scheme:dark){:root{--bg:#20221f;--ink:#eeeae0;--muted:#b8b8ac;--line:#4b4d44;--accent:#dec09a}}@media(max-width:520px){main{padding:25px 17px}th,td{padding:9px 5px;font-size:13px}}
+</style>
+<main>
+<header><div class="meta">LOO-717 · Concept review at feature/demo · November 5, 2026</div>
+<h1>A Session viewer retains the Task.</h1>
+<p>The accepted corrections are implemented and validated. Desktop Quit releases its viewers; lost connections use the same fifteen-minute absence window. A shell adds no independent hold.</p>
+<small>Working design: <a href="loo-717-shell-lifetimes.md">shell lifetimes</a>. Review publication: <a href="https://github.com/loopflowstudio/loopflow/pull/1811">PR #1811</a>. Automated proof is separate from the native demo.</small></header>
+<section><h2>What keeps the checkout?</h2>
+<table><thead><tr><th>Remaining view</th><th>Result</th></tr></thead><tbody>
+<tr><td>Any open Task Session viewer</td><td>Retains, including hidden, unfocused and passive viewers</td></tr>
+<tr><td>Desktop shell beside its Session</td><td>The Session supplies the hold; the shell adds none</td></tr>
+<tr><td>Ordinary Rex shell, or native tab after LF exits</td><td>No hold; Rex still owns that shell</td></tr>
 </tbody></table>
-<h2>Complete a Task in Rex</h2>
-<p>Its LF Session viewer is open. An unrelated shell is also sitting in the worktree.</p>
-<fieldset><legend>Try the next action</legend><div class="choices">
-<label><input type="radio" name="scenario" value="hidden" checked> Hide the viewer</label>
-<label><input type="radio" name="scenario" value="last"> Exit the last viewer</label>
-<label><input type="radio" name="scenario" value="second"> Another viewer remains</label>
-<label><input type="radio" name="scenario" value="network"> Lose remote contact</label>
-</div></fieldset>
-<div class="result" aria-live="polite"><h3 id="outcome"></h3><p id="detail"></p></div>
-<p class="note">Policy illustration, not runtime proof. Eligible idle agents use the two-minute rule; eligible completed-Task cleanup uses the fifteen-minute grace. Requested work, drafts and pending requests still protect execution.</p>
-<h2>The mismatch in the published change</h2>
-<div class="result"><h3>Current implementation</h3><p>Stores generic host occurrences, leases and native settlement. It observes a supplied host process identity. That does not express the intended boundary of an LF Task Session viewer, and external-host persistence conflicts with the accepted ownership decision.</p></div>
-<div class="result"><h3>Accepted next implementation</h3><p>Reuse LF Session/viewer attachment and Process identity. Confirmed last-viewer exit releases the hold. Remove the external-host records and the Rex native-settlement contract. Keep Desktop shell ownership and the one Task cleanup executor.</p></div>
-<p>The existing transport already observes live viewers. The implementation still needs to connect that evidence to Task checkout retention, including multiple viewers, stale exits and remote uncertainty. Agent process exit is not viewer exit.</p>
-<h2>Actions → concepts → APIs</h2>
-<table><thead><tr><th>Action</th><th>Concept</th><th>API / implementation direction</th></tr></thead><tbody>
-<tr><td>View a Task Session</td><td>LF viewer associated with an existing Session</td><td>Existing Session attachment and process evidence; input ownership remains separate.</td></tr>
-<tr><td>Hide the Rex tab</td><td>Same viewer remains open</td><td>No focus or host-away report.</td></tr>
-<tr><td>Open a shell in its directory</td><td>Unrelated shell</td><td>No checkout-retention write.</td></tr>
-<tr><td>Exit the last LF viewer</td><td>Release that viewer's hold</td><td>Confirm exit; recheck other viewers and work; use existing Task retirement.</td></tr>
-<tr><td>Clean up</td><td>Completed Task's LF-owned resources</td><td>Settle Desktop shells and requested work; remove eligible Git resources. No Rex Close API.</td></tr>
-</tbody></table>
-<h2>Usage copy for the revised design</h2>
-<blockquote>Keep a Task Session viewer open to retain its worktree. Hidden or unfocused viewers count. Closing the last viewer lets a completed Task follow its normal cleanup grace once requested work finishes. An ordinary shell in that directory does not retain the worktree. Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.</blockquote>
-<p class="note">History survives. Eligible uncommitted checkout files can be discarded under the accepted policy; existing committed-ref safeguards remain. No automatic checkout recreation.</p>
-<h2>Review questions, resolved</h2>
-<ol><li><strong>What retains the worktree?</strong> An open LF viewer of an associated Task Session, including a passive viewer. A shell's cwd or editable title does not.</li><li><strong>Must a leftover Rex tab keep the hold?</strong> No. The latest clarification selects the LF viewer process lifetime.</li><li><strong>Does LF need a Rex occurrence registry?</strong> No. External-host persistence and automated Rex shell closure remain excluded.</li></ol>
-<p>Jack Heart requested a new pursue run to implement this revision. No further product choice is open.</p>
-</main><script>
-const scenarios={hidden:['Retain the checkout.','The LF viewer is still open. Native focus and visibility do not change its relationship to the Task Session.'],last:['Release this hold; apply ordinary cleanup conditions.','The random shell remains Rex-owned. It neither retains the worktree nor receives a Close request from LF. A leftover tab or saved screen does not recreate the viewer hold.'],second:['Retain the checkout.','The other LF Session viewer still holds it. One exit cannot release every viewer or transfer input ownership.'],network:['Keep uncertain liveness unresolved.','A failed connection alone cannot prove the LF viewer process exited. Recover existing viewer evidence; do not invent a replacement host registry.']};function render(){const s=scenarios[document.querySelector('input[name="scenario"]:checked').value];document.getElementById('outcome').textContent=s[0];document.getElementById('detail').textContent=s[1];}for(const input of document.querySelectorAll('input[name="scenario"]'))input.addEventListener('change',render);render();
-</script></body></html>
+<p>Eligible idle agents end at two minutes. A completed Task's checkout and Desktop shells become eligible at fifteen minutes total. Requested work, drafts, pending requests and running Graphs delay cleanup without restarting that clock. History survives.</p></section>
+<section><h2>Actions → concepts → APIs</h2>
+<table><thead><tr><th>You do</th><th>LF knows</th><th>Operation</th></tr></thead><tbody>
+<tr><td>View a conversation</td><td>A connected Task Session viewer</td><td>Transport Attach/Resume and dated Process evidence</td></tr>
+<tr><td>Close the last viewer or quit Desktop</td><td>No qualifying view remains</td><td>Leave; reconcile retirement</td></tr>
+<tr><td>Lose a remote connection</td><td>Connection absence, independent of provider activity</td><td>Client heartbeat timeout; ordinary absence deadline</td></tr>
+<tr><td>Reconnect before cleanup</td><td>Viewing resumes</td><td>Cancel deadline and queued shell closes</td></tr>
+</tbody></table></section>
+<section><h2>Failure and recovery</h2>
+<p>LF-owned remote routing sends heartbeats every ten seconds. Thirty seconds without them ends the remote relay even without TCP EOF. The detached execution owner stays independent. Dated owner observations also expire after an owner crash.</p>
+<p>From detected loss, the same fifteen-minute absence window applies. Another connected viewer retains throughout. Reconnecting cancels cleanup—even a brief return between cleanup checks. No extra fifteen minutes follows expiry.</p>
+<p>Orderly Desktop Quit sends leave and waits up to two seconds for relay exit. Failed delivery follows disconnect cleanup. An independently opened external SSH session uses its host's loss detection; LF's heartbeat bound applies to LF-owned routing.</p>
+<p>Expiry does not prove the remote client died. After a long outage a completed Task's checkout may be gone. Unfinished Tasks are not deleted, and conversation history remains. Existing merged-delivery, committed-ref and persistent-checkout safeguards remain; PR-less checkouts retain their existing safeguard.</p></section>
+<section><h2>What is proved</h2>
+<p>Fourteen retirement regressions, framed transport, Session-viewer release, prepared-launch/authentication routing, and real isolated OpenSSH tests pass. The SSH test runs twenty create/reconnect/close cycles and checks process, PTY and socket settlement. Formatting, Clippy, Rust FFI and the Desktop build pass.</p>
+<p>Native Desktop/Rex demonstration is still owed: actual Quit delivery, shell reconnect/Close, physical remote-Machine disconnect/reconnect, and cleanup where people use it. No demo app/provider was launched; the private demo roots remain preserved. Swift linking reports SDK/Ghostty warnings but succeeds.</p></section>
+<details><summary>Relationship to 672 and 498</summary><p><strong>672</strong> owns Desktop conversation opening. <strong>498</strong> creates layouts in Rex and other hosts. <strong>717</strong> owns Desktop shell execution and completed-Task cleanup. Both hosts use Session viewers; LF keeps no external layout registry and never closes Rex shells.</p></details>
+<footer class="meta">Jack Heart accepted these corrections and requested implementation. The Claude pursue launch failed before editing on a Keychain credential-write error; this existing Codex conversation completed the repair without changing credentials. The Task remains at feature/demo. Publication does not authorize shipping, installation or live-store migration.</footer>
+</main>
+</html>

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
-use super::{advance, now, UNKNOWN, VIEWED};
+use super::{advance, now, VIEWED};
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::store::sqlite::ViewerHold;
@@ -44,9 +44,9 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
                 .spawn()
                 .unwrap(),
         );
-        let first = fixture.session_owner("first", Some(ViewerHold::Viewed));
-        let second = fixture.session_owner("second", Some(ViewerHold::Viewed));
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        let first = fixture.session_owner("first", Some(ViewerHold::Viewed(now())));
+        let second = fixture.session_owner("second", Some(ViewerHold::Viewed(now())));
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
         let intent = fixture.intent();
         assert_eq!(
             (intent.due_at, intent.reason.as_deref()),
@@ -58,7 +58,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
             .sqlite
             .record_owner_viewer_hold(&first, None)
             .unwrap();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
         assert_eq!(fixture.intent().due_at, None);
         fixture.assert_retained();
         fixture
@@ -74,9 +74,9 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
         fixture
             .store
             .sqlite
-            .record_owner_viewer_hold(&first, Some(ViewerHold::Viewed))
+            .record_owner_viewer_hold(&first, Some(ViewerHold::Viewed(now())))
             .unwrap();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
         assert_eq!(fixture.intent().due_at, None);
         fixture
             .store
@@ -104,51 +104,28 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
 }
 
 #[test]
-fn retirement_unknown_viewers_and_crashed_owners_keep_the_checkout() {
+fn retirement_lost_viewers_and_crashed_owners_expire_without_reopening() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let fixture = Workspace::new().await;
-        // An owner that ended after losing an SSH viewer cannot vouch for it.
-        let lost = fixture.session_owner("lost", Some(ViewerHold::Unknown));
-        fixture
-            .sql()
-            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&lost])
-            .unwrap();
-        fixture.due();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
-        let intent = fixture.intent();
-        assert_eq!(
-            (intent.due_at, intent.reason.as_deref()),
-            (None, Some(UNKNOWN))
-        );
-        fixture.assert_retained();
-        // A resumed Session's new owner speaks for it; the stale record stops holding.
-        let replacement = fixture.store.sqlite.test_lf_process();
-        fixture
-            .sql()
-            .execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id='lost'",
-                [&replacement],
-            )
-            .unwrap();
-        // An owner killed while viewed never recorded its viewers' fate.
-        let mut exited = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        let process = crate::journal::OsProcess::read(exited.id())
-            .unwrap()
-            .unwrap();
-        exited.kill().unwrap();
-        exited.wait().unwrap();
-        let crashed = fixture.session_owner("crashed", Some(ViewerHold::Viewed));
-        fixture
-            .sql()
-            .execute(
-                "UPDATE processes SET pid=?2,started_at=?3,os_started_at=?3 WHERE id=?1",
-                params![crashed, process.pid, process.started_at],
-            )
-            .unwrap();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
-        assert_eq!(fixture.intent().reason.as_deref(), Some(UNKNOWN));
-        fixture.assert_retained();
+        for hold in [
+            ViewerHold::Absent(now() - 901),
+            ViewerHold::Viewed(now() - 931),
+        ] {
+            let fixture = Workspace::new().await;
+            // Completion initially observed the viewer, then the owner died.
+            fixture
+                .store
+                .sqlite
+                .reconcile_task_retirement(&fixture.task.id, now() - 1000, Some("viewed"), None)
+                .unwrap();
+            let owner = fixture.session_owner("lost", Some(hold));
+            fixture
+                .sql()
+                .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&owner])
+                .unwrap();
+            assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+            assert!(!fixture.checkout.exists());
+        }
     });
 }
 
@@ -297,7 +274,7 @@ impl Workspace {
     fn due(&self) {
         self.store
             .sqlite
-            .reconcile_task_retirement(&self.task.id, now() - 901, None)
+            .reconcile_task_retirement(&self.task.id, now() - 901, None, None)
             .unwrap();
     }
 
@@ -345,9 +322,12 @@ fn retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion() {
                     )
                     .unwrap();
             } else {
-                fixture.session_owner("returned", Some(ViewerHold::Viewed));
+                fixture.session_owner("returned", Some(ViewerHold::Viewed(now())));
             }
-            assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+            assert_eq!(
+                advance(&fixture.store, &fixture.task).await.unwrap(),
+                reopen
+            );
             fixture.assert_retained();
             let intent = fixture
                 .store

@@ -279,6 +279,6 @@ mod tests {
             "../../../../tests/fixtures/dto/server/account_redeemed.json"
         ));
         assert!(redeemed.after.is_none());
-        assert!(serde_json::from_str::<Account>(r#"{"provider":"claude"}"#).is_err());
+        assert!(serde_json::from_str::<Account>(r#"{"login":"maya@example.com"}"#).is_err());
     }
 }

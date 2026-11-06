@@ -1,119 +1,68 @@
-# Launch your Task layout in a terminal host
-
-> Accepted design, revised November 5, 2026. Fresh launch, config templates and the
-> Rex, Herdr and cmux renderers are implemented; gaps are marked where they apply.
+# Open Task workspaces
 
 ```bash
-lf open --host rex --task LOO-498     # launch this Task's layout in Rex
-lf open --host rex --wave product    # launch Product's started, unfinished Tasks
-lf open                             # select Work and host from the current context
+lf open                             # open this Task or repository in your current host
+lf open --task ENG-123 --host rex    # open a Task in Rex
+lf open --wave product              # open Product's started, unfinished Tasks
 ```
 
-For a Task, each `lf open` launches a **fresh tab with its workspace of splits**.
-Use the current or explicitly selected Rex session as its container. Fresh Task
-opening need not create another session. Return to an existing tab through Rex;
-rename, rearrange, close and restore it using Rex's own controls. Running the
-command again creates another Task tab from LF's current source layout; it does
-not search for, repair or change the earlier tab.
+In Rex, Herdr or cmux, each open creates a fresh Task tab with its configured
+splits. Conversation panes run `lf resume` in the Task's worktree. Return to existing tabs through your
+terminal app; use its controls to rearrange, rename, close and restore them.
 
-Container choice comes from where you are, never from a stored mapping. Inside a
-Rex session or Herdr workspace, a Task tab joins it. In cmux, a Task workspace
-joins the group your workspace is in now, or your window when it has no group.
-Outside one, or when
-opening a repository or Wave, `lf open` creates a new container named for the
-Wave or repository.
+From a Task checkout, `lf open` selects that Task. From a repository checkout, it
+selects the repository's started, unfinished Tasks. Use `--task` or `--wave` to
+choose another scope. Backlog Tasks appear only when explicitly selected.
 
-A Conversation pane runs `lf resume <session>` in the Task checkout, or
-`lf resume --task <task>` if it has no conversation yet. This is the same command
-you run by hand: it moves the existing conversation here or starts one when
-needed. Opening does not start a Task's Graph or submit a turn. A Shell pane
-starts a fresh shell in the checkout.
+## Choose a host
 
-From a repository checkout, select its started, unfinished Tasks in one container.
-From a Task checkout, select that Task. Use `--wave` or `--task` explicitly to
-select another scope. Backlog Tasks appear only when
-explicitly selected.
+```bash
+lf open --host herdr
+lf open --host cmux
+lf open --host rex --no-focus        # keep the current tab selected
+```
 
-Inside Rex, resolve the current host/server and caller context, including when an
-agent invokes `lf open` through a tool shell. `--host` overrides automatic host
-selection, `--server` selects a Rex Unix endpoint, and `--no-focus` preserves
-selection. A remote Task stays on its recorded Machine; failure must not create
-local replacement shells. Fresh launch does not mean another host or Machine.
+Without `--host`, LF uses the terminal you run it from. Commands issued by an agent
+use the host of that conversation's current terminal. Outside a recognized host,
+LF opens Desktop on macOS, then falls back to a plain terminal if needed.
 
-## Use the host you are in
-
-`lf open` detects the current host for direct callers and agent tools. `--host` overrides that choice. Resolve
-an agent's current attached viewer rather than its stale launch environment. In
-nested terminals, use the actual inner host. A host that is merely installed or
-running is not evidence that the caller belongs to it.
-
-Map LF's concepts to the host's own structure:
-
-| LF concept | Rex | Herdr | cmux macOS |
+| What you open | Rex | Herdr | cmux |
 | --- | --- | --- | --- |
-| Repo or Wave container | Session | Workspace | Workspace group |
-| Task | Tab | Tab | Workspace/sidebar item |
-| Task workspace | Splits inside the tab | Panes inside the tab | Split panes inside the workspace |
+| Repository or Wave | Session | Workspace | Workspace group |
+| Task | Tab | Tab | Workspace |
+| Task layout | Splits | Panes | Split panes |
 
-Herdr's workspace/tab/pane API maps directly to the hierarchy.
-[Herdr concepts](https://herdr.dev/tui/docs/concepts/)
+A Task opened inside Rex or Herdr joins the current session or workspace. In cmux,
+it joins the current workspace's group, or the window when there is no group.
+Opening a repository or Wave creates a new container named for it.
 
-cmux's Task-level object is a workspace; its per-pane surface tabs are a level
-below the Task. Groups provide the outer container.
-[cmux concepts](https://cmux.com/docs/concepts),
-[workspace groups](https://cmux.com/docs/workspace-groups)
+Rex, Herdr and cmux support layouts. tmux and plain terminals open the conversation
+alone. Herdr and cmux support local Tasks only. Rex can open remote Tasks on their
+recorded Machine. Use `--server <endpoint>` to select a Rex Unix socket.
 
-An explicit native window/container can also supply the outer grouping. The
-adapter creates native resources and reports capability differences. It does
-not persist their identities or copy their state into LF. Failure to reach the
-selected host never sends work to another host: inside Rex, Herdr, tmux or cmux,
-that host is the only route. Without current-host context, Desktop then a plain
-terminal, or an explicit `--host`. Herdr and cmux open on this Machine only; a
-remote Task fails rather than opening locally. cmux opens through its bundled CLI
-when `cmux` is not on PATH; its renderer has fixture coverage, not native proof.
+If the selected host is unavailable, LF reports the error instead of opening
+somewhere else. `--no-focus` preserves the selected tab; Conversation panes still
+run normal resume, which moves conversation input to the new terminal.
 
-## Templates, current layouts, and native workspaces
+## Choose a layout
 
-| What you change | Where it belongs | Effect |
-| --- | --- | --- |
-| Default tools and arrangement for new Task workspaces | LF configuration | Used on later launches when the Task has no saved layout |
-| This Task's current arrangement in Desktop | LF database | Sticky Desktop layout; readable as input for a terminal launch |
-| Splits, tabs, shell state and restoration in Rex | Rex | Changes that native workspace only |
+`lf open` uses the first available layout:
 
-For each Task, choose the launch input in this order:
+1. The Task's saved Desktop arrangement.
+2. Its `task_layout` configuration, including Wave preferences.
+3. The builtin Conversation, Task/workflow and Shell layout.
 
-1. Its current saved Loopflow Desktop layout.
-2. Its resolved configuration template, including Wave preferences.
-3. The builtin layout.
+Only visible panes and their selected tabs open. LF recreates the arrangement as
+closely as the host supports and reports tools it cannot display.
 
-Read the selected input and ask the host to reproduce it **as faithfully as
-possible**. Only visible, selected tools materialize. Reading a Desktop layout for
-Rex does not modify it. Rex edits never write back into LF. A selected tool that
-cannot be represented is reported, not silently executed as something else.
+Arrange a Task in Desktop to save its layout for later launches. Changes made in
+Rex, Herdr or cmux stay in that app; they do not change Desktop's saved layout or
+your templates. Opening again creates another tab from the current LF layout.
+Unsent file drafts and background tabs remain in Desktop.
 
-LF stores no external-host workspace registry, native destination IDs, named-copy
-records, creation journal or mirror of native edits. This applies to files and
-sidecars as well as SQLite. Live commands can hold their native target while
-running; they do not persist a host workspace for later reopening.
+## Set a Wave's default
 
-Templates describe tools and arrangement, not concrete Sessions, process IDs,
-execution locations, file drafts or terminal contents. Resolve those from the
-selected Task when launching. Existing file drafts and background tabs stay in
-Desktop's saved state; they are not copied into native shell commands.
-
-## Configure a Wave's default
-
-Set `task_layout` in the existing configuration scopes:
-
-- `.lf/wave/<name>/config.yaml` for a shared Wave template.
-- `lf.config.local.yaml` for private repository and Wave overrides.
-- `.lf/config.yaml` and `~/.lf/config.yaml` for broader defaults.
-
-Task worktrees share the repository's private configuration, using the existing
-Wave identity and precedence rules. See [Configuration](config.md#where-settings-live).
-There is no separate host-layout file or database preference layer.
-`lf set task_layout` and configuration reads reject a template that a launch
-could not use, such as one that captures a Session.
+This template opens Changes beside a shell and hides Conversation:
 
 ```yaml
 # .lf/wave/product/config.yaml
@@ -142,140 +91,96 @@ task_layout:
         content: {kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}
 ```
 
-The tree uses Desktop's pane shape: one conversation, one shell and one browser
-pane, each hideable. A template that names a Session, location or open file is
-rejected when a launch reads it.
+Include a conversation, shell and browser pane; add unused pane IDs to `hidden`.
+Leave Session IDs and locations unset so they resolve from the Task when opened.
+Templates cannot contain open file drafts or specific conversations.
 
-Changing a template affects future launches that use it. It neither rearranges
-Desktop's saved Task layout nor modifies existing Rex workspaces. A saved Task
-layout continues to take precedence. The winning configuration scope supplies
-the whole layout; split trees are never merged across scopes.
+Use these configuration files:
 
-## One Task tab, shared tools
+- `.lf/wave/<name>/config.yaml` for a shared Wave default.
+- `lf.config.local.yaml` for private repository and Wave overrides.
+- `.lf/config.yaml` or `~/.lf/config.yaml` for broader defaults.
 
-In Rex, a repository or Wave maps to a native session, depending on what you open.
-A Task maps to a tab. Its **workspace** is the set of tool splits inside that tab.
-The host session is a container; LF does not store a separate workspace entity
-for it. Existing Wave conversation inclusion remains part of Wave opening.
+See [configuration scopes](config.md#where-settings-live). Task worktrees share
+the repository's private configuration. The winning scope replaces the whole
+layout. A saved Desktop Task arrangement takes precedence over a template.
+Changing a template affects future launches; existing tabs stay as you arranged them.
 
-| Tool | Desktop | Terminal host |
-| --- | --- | --- |
-| Conversation | Terminal showing the LF conversation | `lf resume` in the Task checkout |
-| Shell | Terminal in the Task checkout | Fresh shell in the Task checkout |
-| Files | Native file view | Configured file browser or editor |
-| Changes | Native changes view | Git pager or diff tool |
-| Task & workflow | Native Task view | LF terminal Task view |
+## Choose your tools
 
-```bash
-lf task view LOO-498
-```
+| Pane | What opens in a terminal host |
+| --- | --- |
+| Conversation | `lf resume <session>` in the Task worktree |
+| Shell | A fresh shell in the Task worktree |
+| Files | Your file browser or editor |
+| Changes | Git's pager or your diff tool |
+| Task/workflow | The Task brief, workflow and recorded runs |
 
-In the Task view, `n` and `p` select a step and `l` reads its log. Viewing starts
-no work. The builtin layout contains Conversation, Task & workflow, and Shell.
-
-For terminal file editing, use `LF_FILE_BROWSER` for a directory browser;
-otherwise `VISUAL`, then `EDITOR`, then `vi`. Resolve preferences on the Task's
-execution Machine. GUI editors can open their own windows.
+Conversation panes use ordinary resume. If the Task has no conversation, they run
+`lf resume --task <task>` to start one. Opening does not start the Task's Graph or
+send a message. A new shell starts in the worktree without copying another
+shell's jobs or variables.
 
 ```bash
-lf task tool LOO-498 files --checkout /recorded/checkout
-lf task tool LOO-498 changes --checkout /recorded/checkout --base parent --difftool
+export LF_FILE_BROWSER=yazi          # directory browser
+export EDITOR=vim                    # file editor
+lf task view ENG-123                 # inspect the Task and workflow
 ```
 
-Changes uses Git's pager and comparison settings. Normal working-tree patches
-include untracked files; explicit difftool covers tracked files. Branch and PR
-comparisons retain their resolved base/head rather than mixing in uncommitted
-changes. `--head <sha>` selects the committed comparison explicitly.
+Files uses `LF_FILE_BROWSER` for directories, then `VISUAL`, `EDITOR`, or `vi` for
+editing. Set these on the Machine where the Task runs. GUI editors may open their
+own windows.
 
-## New Tasks arrive without taking focus
-
-In Rex, a repository or Wave launch includes a Workspace tab that adds newly
-started Tasks without taking focus, starting another provider or adding backlog
-Tasks. A single-Task launch does not follow sibling Tasks. Herdr and cmux launches
-do not follow yet.
-
-Automatic arrivals use the configured splits, with Task/workflow information in
-the Conversation slot. They do not run `resume` in the background or move input
-from another terminal. Run `lf open --task <task>` to open its conversation.
-
-The follower keeps its session and seen Tasks in memory, from its own command
-line, while it runs. Closing a Task tab stays respected during that live follower. The host owns
-its native tabs and process restoration. LF does not keep a registry to repair or
-reconstruct that workspace after the follower exits.
-
-Another `lf open --wave product` launches a new session with fresh Task tabs for
-the current started, unfinished set. Starting a Task does not open a closed host
-app. One Workspace tab follows every Machine the launch reaches. Other Machines'
-Tasks arrive in a session on their own Machine. If the launch opened nothing on
-that Machine, its first arrival creates the session, and later arrivals join it.
-If that creation's reply is lost, nothing more is created there until you open
-again.
-
-## Split where you are working
-
-Use the host's normal Split shortcut or menu. From a Conversation, Files,
-Changes or Task view, the new shell should start at that Task's checkout on its
-execution Machine. Tasks A and B in one Wave have their own directories.
-
-The same applies when you manually start or resume LF in an existing terminal.
-While attached, LF runs in the selected Task directory and reports it to the host.
-Leaving with Ctrl+] withdraws the report so the parent shell's actual directory
-can govern later splits. Shell panes do not report a fixed startup directory;
-a later `cd` must take effect.
+Changes uses Git's pager and diff settings. Working-tree patches include
+untracked files; `--difftool` covers tracked files. To launch a tool directly:
 
 ```bash
-pwd -P                               # verify inside the new native split
-rex block call -b <block> pwd         # source terminal's directory report
-rex block call -b <block> process     # source foreground process
+lf task tool ENG-123 files --checkout /path/to/task
+lf task tool ENG-123 changes --checkout /path/to/task --base parent --difftool
 ```
 
-Directory reporting has isolated native evidence. Rex's actual app Split,
-Herdr/Desktop splits and the configured remote path still need demonstration.
-A displayed Task path is not evidence of the new shell's working directory.
+Use `--head <commit>` for a committed comparison. In Task/workflow, `n` and `p`
+select a step and `l` reads its log. Viewing starts no work.
 
-## Continue normally
+## Follow newly started Tasks
+
+A repository or Wave opened in Rex includes a Workspace tab. Keep it running to
+add newly started Tasks without taking focus or adding backlog Tasks. A Task tab
+you close stays closed while that Workspace tab runs.
+
+New arrivals use the configured splits with Task/workflow information in the
+Conversation slot. They leave input in your existing terminals. Run
+`lf open --task <task>` when you want to resume that conversation.
+
+Following includes remote Tasks on their recorded Machines. Starting a Task does
+not reopen a closed host app. Single-Task opens do not follow sibling Tasks;
+Herdr and cmux do not support following.
+
+## Split in the directory you are using
+
+Use your terminal app's normal Split shortcut. From a Conversation or Task tool,
+the new shell starts in the Task worktree. From a shell, it follows that shell's
+current directory, including changes made with `cd`.
 
 ```bash
-lf resume <session-id>
+pwd -P                              # check the new shell's directory
 ```
 
-Workspace opening runs this command in a native terminal. There is no separate
-read-only conversation mode, input shortcut, or workspace attachment protocol.
-Normal resume owns provider continuity and input transfer. The open receipt says
-which native tabs were created; it does not claim that the provider is ready.
-Errors from resume remain in that terminal.
+This also applies when you run `lf resume` manually in another terminal. After
+leaving the conversation with Ctrl+], the parent shell's directory governs new
+splits again.
 
-## Failure and recovery
+## If opening fails
 
-If native creation succeeds but its reply is lost, report that a workspace may
-have appeared. Do not automatically retry the creation. Inspect and return to
-that workspace in Rex. A subsequent explicit `lf open` requests another fresh
-workspace, so it may create an additional view of the same Work.
+Check the error in the terminal. A successful open receipt means the native tab
+was created; resume may still be connecting or may report its own error there.
 
-An unreachable server is an error, not permission to launch on another server or
-Machine. Partial failures preserve successful destinations and unrelated panes;
-they do not trigger destructive rollback.
+If LF reports that a tab may have opened without a reply, look for it in your
+terminal app before running the command again. Each invocation creates fresh
+tabs. Successfully opened tabs remain available when another part of the launch
+fails.
 
-After a host restart, Rex restores what it supports. It may restore layout with
-new shells; familiar pane IDs do not prove that programs survived. LF does not
-replay commands into retained native panes. A fresh launch reads the Task's
-current LF layout or config again.
-
-## Cleanup ownership
-
-LF automatically closes only Desktop-owned shells. Rex owns its native terminals.
-Task cleanup and Session lifetime integration belong to LOO-717; opening does not
-write a host registry or lease. Closing a view is not a request to delete a Task.
-
-## Delivery boundaries
-
-Rex, Herdr and cmux render fresh layouts, selected through shared host detection.
-Desktop retains its current saved-layout behavior. Isolated native tests cover Rex
-(fresh launches, Task directories, in-Rex caller, arrivals, closed arrivals) and
-Herdr (fresh launches); cmux has fixture coverage only. tmux and plain-terminal
-routes still open the conversation alone.
-
-Configured interactive acceptance remains outstanding. Previous demos used a
-custom passive viewer and showed corrupted rendering; those results do not
-validate the normal-resume launch. Use a separate demonstration Task, leaving
-active work untouched.
+Use your terminal app to restore its tabs after a restart. Restoring a layout may
+start fresh shells; it does not necessarily preserve running programs. Closing a
+view does not delete the Task. LF closes only its Desktop-owned shells; external
+terminal apps own theirs.

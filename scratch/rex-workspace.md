@@ -34,3 +34,9 @@ Use isolated fixtures for validation; future hands-on demos need separate work.
 The prior design, failed demos and superseded constraints are retained in
 `21bbb00329:scratch/rex-workspace.md` and `21bbb00329:scratch/workspace-demo.md`.
 No shipping or installation requested. PR #1814 remains the delivery.
+
+
+Jack Heart also requested that `docs/` read as user documentation. The workspace
+guide now starts with commands and describes behavior, configuration and recovery.
+Design acceptance dates, testing provenance, delivery status and internal Task
+ownership remain in scratch/PR evidence instead of the guide.

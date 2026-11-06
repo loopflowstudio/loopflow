@@ -60,8 +60,6 @@ struct ServerProtocolTests {
         #expect(welcome.minRevision == 2)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
-        #expect(welcome.capabilities.contains("session_owner"))
-        #expect(welcome.capabilities.contains("subscriptions"))
         #expect(welcome.limits.maxMessage == 33554432)
         #expect(welcome.limits.maxConnections == 64)
         guard case .object(let machine) = welcome.machine else { Issue.record("Missing Machine"); return }

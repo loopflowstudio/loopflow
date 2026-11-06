@@ -198,11 +198,10 @@ public struct ServerWelcome: Decodable, Sendable {
     public let executableSHA256: String
     /// `.null` while the Machine registry is unavailable or uninitialized.
     public let machine: JSONValue
-    public let capabilities: [String]
     public let limits: ServerLimits
 
     private enum CodingKeys: String, CodingKey {
-        case revision, instance, build, machine, capabilities, limits
+        case revision, instance, build, machine, limits
         case clientID = "client_id", serverRevision = "server_revision", minRevision = "min_revision"
         case executableSHA256 = "executable_sha256"
     }

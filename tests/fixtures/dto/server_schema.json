@@ -8736,12 +8736,6 @@
             "build": {
               "type": "string"
             },
-            "capabilities": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
             "client_id": {
               "description": "The server's name for this connection, as `lf server status` lists it.",
               "type": "string"
@@ -8798,7 +8792,6 @@
             "build",
             "executable_sha256",
             "machine",
-            "capabilities",
             "limits"
           ],
           "type": "object"
@@ -13578,12 +13571,6 @@
         "build": {
           "type": "string"
         },
-        "capabilities": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "client_id": {
           "description": "The server's name for this connection, as `lf server status` lists it.",
           "type": "string"
@@ -13635,7 +13622,6 @@
         "build",
         "executable_sha256",
         "machine",
-        "capabilities",
         "limits"
       ],
       "type": "object"

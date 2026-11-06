@@ -32,22 +32,6 @@ const QUEUE: usize = 64;
 /// Checkpoints one subscription may have waiting.
 const CHECKPOINTS: usize = 64;
 
-const CAPABILITIES: &[&str] = &[
-    "reads",
-    "subscriptions",
-    "commands",
-    "configuration",
-    "roadmap",
-    "machine_id",
-    "portfolio",
-    "repository_path",
-    "session_rename",
-    "owner_bridge",
-    "session_owner",
-    "desktop_sessions",
-    "view_plan",
-];
-
 type Lines = Framed<UnixStream, LinesCodec>;
 
 /// Welcomed connections by client ID, as `lf server status` lists them.
@@ -264,7 +248,6 @@ async fn connection(
             build: crate::build_info::BUILD_VERSION.to_owned(),
             executable_sha256: executable_sha256.into(),
             machine,
-            capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
             limits: Limits {
                 max_message: MAX_MESSAGE,
                 max_connections: MAX_CONNECTIONS,

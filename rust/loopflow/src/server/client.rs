@@ -423,7 +423,6 @@ mod tests {
                     build: "test".into(),
                     executable_sha256: "f".repeat(64),
                     machine: None,
-                    capabilities: Vec::new(),
                     limits: Limits {
                         max_message: MAX_MESSAGE,
                         max_connections: MAX_CONNECTIONS,

@@ -137,7 +137,6 @@ pub struct Welcome {
     /// Null while the Machine registry is unavailable or uninitialized.
     #[schemars(with = "Option<crate::durable::Machine>")]
     pub machine: Option<serde_json::Value>,
-    pub capabilities: Vec<String>,
     pub limits: Limits,
 }
 

@@ -274,8 +274,8 @@ writes and removes one Keychain item scoped to its temporary config directory.
 The fixture copies the candidate, uses private Machines and stops only its identified
 provider process children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
-belong in `session_lifecycle_tests`; Chapter convergence belongs in
-`ops::chapter::tests`, including interrupted rotation and second-Machine sync.
+belong in `session_lifecycle_tests`; Project adoption belongs in
+`ops::linear::adoption_tests`.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,

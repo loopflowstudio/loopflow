@@ -1,91 +1,78 @@
 ---
 requires: accepted direction and dated chapter review when available
-produces: retained exact-ID chapter plan, rotation result, separate Task-candidate notes
+produces: each participating Wave's next plan applied, separate Task-candidate notes
 ---
-Open a new chapter from accepted direction. Waves retain their objective, memory
-and instruments. Each Wave's shared local binding selects its current Project;
-chapters coordinate optional rotation. Ordinary Projects need neither chapter
-names nor a workflow. Linear retains Project content, status and history.
+Start the repository's next chapter from accepted direction. Waves retain their
+objective, memory and instruments. Each Wave's one In Progress Linear Project is
+its current plan; the chapter is the name those plans share. A chapter starts by
+authoring each Wave's plan and admitting its Tasks; there is no rotation command,
+so no Project is completed or created here and no Task moves.
 
 ## Review and plan
 
-Read available dated reviews, Wave goals and memory, `lf wave status <wave>
---no-sync --json`, and `lf wave show --json`. Use stable Project IDs. Missing
-history remains unknown; current readings cannot reconstruct earlier outcomes.
-Run review-chapter when needed. Obtain explicit acceptance of direction before
-scoped planning. Existing acceptance remains valid; headless work without it
-reports the missing decision and stops.
+Read available dated reviews, Wave goals and memory, `lf wave planning <wave>
+--json` (the cached plan and Tasks) and `lf wave show --json` (plans with
+history). Use stable Project IDs. Missing history remains unknown; current
+readings cannot reconstruct earlier outcomes. Run review-chapter when needed.
+Obtain explicit acceptance of direction before scoped planning. Existing
+acceptance remains valid; headless work without it reports the missing decision
+and stops.
 
 Request bounded wave-start-chapter contributions for the participating Waves,
-including nested Waves. Supply accepted direction and prior evidence. Contributions
-return proposals, never mutate planning. Reconcile them into one retained
-`scratch/chapter-plan.json` with this shape:
+including nested Waves. Supply accepted direction and prior evidence.
+Contributions return proposals, never mutate planning. Reconcile them into one
+retained `scratch/chapter-plan.json`: the chapter name and, per Wave, its Wave
+UUID, the Project UUID its plan lands in, the plan's name, KRs and targets:
 
 ```json
-{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}]}
+{"name":"October","waves":[{"wave_id":"<Wave UUID>","project_id":"<Project UUID>","project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}]}
 ```
 
-Allocate each new successor UUID v4 once and retain it. For an explicitly selected
-existing destination, use its exact UUID with `create:false`. Names never select
-Projects. Every destination needs authored nonempty KRs before creation; Graph
-may be empty. Preserve existing names and unrelated content. Targets belong to
-Projects; instruments and observations stay on Waves.
+A Wave's plan lands in its current Project. Names never select Projects. Every
+plan needs authored nonempty KRs; Graph may be empty. Preserve existing names
+and unrelated content. Targets belong to Projects; instruments and observations
+stay on Waves. Never carry forward checked verdicts.
 
 Keep optional Task candidates separately in `scratch/chapter-candidates.md`, grouped
 by exact destination Project UUID. Give each candidate a stable local key, title,
 brief, acceptance, and admitted issue ID when known. These are proposal notes,
 not another Task store. A complete future Task inventory is not required.
 
-Preview the exact input:
+Show each Wave's KRs, targets, Project ID, open work and unresolved evidence.
+Obtain acceptance of the reconciled plan before applying; material changes need
+renewed judgment. Preserve names and dates of decisions.
+
+## Apply each Wave's plan
 
 ```bash
-lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --dry-run --json
+lf wave edit-plan <wave> --name "October — reliability"
+lf wave update-plan --wave <wave> --plan scratch/<wave>-plan.json   # {"metric_targets":[],"krs":[]}
+lf wave sync <wave> --json
 ```
 
-Show KRs, targets, predecessor/successor IDs, carried work, retained backlog and
-unresolved evidence. Obtain acceptance of the reconciled plan before applying;
-material changes need renewed judgment. Preserve names and dates of decisions.
-
-## Create the chapter Projects
-
-```bash
-lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --json
-```
-
-The operation preflights every participating Wave and reserves exact destinations
-before provider writes. It owns Task classification and recovery. Started work
-keeps Task, checkout, PR, Session and Graph identity. Unreviewed backlog stays in
-its predecessor until explicit disposition. Unknown evidence never authorizes
-retirement. Rotation neither launches workers nor completes Tasks or KRs.
-
-Retain command output and exit status. Retry with the same retained IDs and
-create/existing intent after partial failure, including already settled Waves.
-Never recover by name matching, create replacement UUIDs, or emulate rotation
-with individual provider mutations. Conflicting external moves remain explicit.
-A failed Wave does not block ordinary ensure of an unrelated Wave.
-
-For an explicitly scoped rotation, the same input works through:
-
-```bash
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --json
-```
+`update-plan` replaces the current Project's complete content, so supply every
+KR and target. `wave sync` refreshes the plan from Linear and shows what landed;
+retain its output and exit status. Retry a Wave with the same retained plan
+after partial failure; a failed Wave does not block another. Started work keeps
+Task, checkout, PR, Session and Graph identity; unreviewed backlog stays where
+it is until explicit disposition. Unknown evidence never authorizes
+retirement. Planning neither launches workers nor completes Tasks or KRs.
 
 ## Admit new Tasks separately
 
-Only after Project creation succeeds, reconcile candidate notes against the exact
-resulting Project IDs. Confirm each Wave still selects the intended destination.
-Use `lf task create --wave <wave> --title <title> --notes <description>` for accepted
-candidates. Record returned issue IDs alongside candidate keys. Before retrying
-an uncertain creation, inspect provider issues and recover its existing identity;
-do not blindly create again. Leave ambiguous matches unresolved.
+Only after every plan has landed, reconcile candidate notes against the exact
+Project IDs. Use `lf task create --wave <wave> --title <title> --notes
+<description>` for accepted candidates. Record returned issue IDs alongside
+candidate keys. Before retrying an uncertain creation, inspect provider issues
+and recover its existing identity; do not blindly create again. Leave ambiguous
+matches unresolved.
 
 Task admission may run across all participants or incrementally. Its failure
-leaves the created Projects and KRs usable; retain unadmitted candidates for retry.
-Do not roll back rotation or treat pending admission as successful completion.
+leaves the plans usable; retain unadmitted candidates for retry. Do not treat
+pending admission as successful completion.
 
 Curate durable decisions at their owners before scratch cleanup. Repository edits
-use the selected publication workflow; operational rotation is not Git publication.
+use the selected publication workflow; planning is not Git publication.
 
 ## Task briefs
 

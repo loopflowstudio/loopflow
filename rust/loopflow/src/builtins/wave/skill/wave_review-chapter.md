@@ -10,7 +10,7 @@ cancel Tasks, edit Projects or change Work state.
 Read supplied dated reviews, this Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
-lf wave status <wave> --no-sync --json
+lf wave planning <wave> --json
 lf wave show <wave> --json
 ```
 
@@ -27,6 +27,8 @@ retain plans, but their current membership cannot reconstruct Tasks moved away
 at an earlier boundary. A moved Task is neither completed nor abandoned. Work
 shipped later cannot prove an earlier KR. Bound the interval only from available
 evidence; absent dates or starting membership leave an incomplete baseline.
+A new plan replaces the current Project's content in place, so the retained
+review and dated observations are the only record of the plan it replaced.
 
 Give every exact KR one verdict: **holds**, **does not hold**, or **unknown**.
 Holds requires the complete observation window and denominator. A dated
@@ -46,11 +48,10 @@ claims, evidence dates, verdicts, Task/PR links and gaps. Recompute totals from
 KR rows. State `Coverage: complete` or `Coverage: incomplete` with missing scope
 and sources.
 
-Report historical Task transfers and cancellations only when evidenced. If the
-parent supplies a dated repository rotation preview, report this Wave's proposed
-dispositions separately; they are not historical facts or applied changes.
-Never implement a second classifier. Keep next-chapter recommendations separate
-from observations, including work lacking evidence of priority.
+Report historical Task transfers and cancellations only when evidenced. Open
+work stays in its Project until someone moves it; report it as open, never as
+a proposed disposition. Keep next-chapter recommendations separate from
+observations, including work lacking evidence of priority.
 
 Return the complete report and evidence dates. The repository reviewer combines
 Wave reports and may keep temporary notes in scratch. Preserve earlier reports

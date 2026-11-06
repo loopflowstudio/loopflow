@@ -11,7 +11,6 @@ use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 mod canonical_ids;
 pub(crate) mod changes;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
@@ -27,7 +26,7 @@ mod planning_peers;
 pub mod planning_sync;
 mod pr_landings;
 mod processes;
-pub(crate) mod project_transitions;
+mod project_adoption;
 mod recording_gap;
 mod repositories;
 pub mod rows;
@@ -265,23 +264,18 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
-/// Planning and checkout locks retained by every queued writer using this acquisition.
+/// The Wave's planning lock, retained by every queued writer using this
+/// acquisition and released when the last one drops it.
 #[derive(Debug, Clone)]
 pub struct PlanningLocks {
-    locks: Vec<Arc<std::fs::File>>,
+    _wave: Arc<std::fs::File>,
 }
 
 impl PlanningLocks {
     pub(crate) fn new(wave: std::fs::File) -> Self {
         Self {
-            locks: vec![Arc::new(wave)],
+            _wave: Arc::new(wave),
         }
-    }
-
-    pub(crate) fn with_checkouts(&self, checkouts: &[Arc<std::fs::File>]) -> Self {
-        let mut locks = self.locks.clone();
-        locks.extend_from_slice(checkouts);
-        Self { locks }
     }
 }
 
@@ -1227,7 +1221,6 @@ mod tests {
     use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -2006,63 +1999,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_projection_retains_rotation_checkout_exclusion_through_commit() {
-        let (directory, store, wave) = planning_store().await;
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let mut task = make_task(&store, &wave, &project);
-        task.worktree = Some(directory.path().join("checkout"));
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        let snapshot = task_planning_snapshot(&wave, &project, &task);
-        let checkouts = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        let wave_lock = std::fs::File::create(directory.path().join("wave.lock")).unwrap();
-        fs2::FileExt::try_lock_exclusive(&wave_lock).unwrap();
-        let acquisition = Arc::new(super::PlanningLocks::new(wave_lock).with_checkouts(&checkouts));
-        drop(checkouts);
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let (release, blocked) = std::sync::mpsc::channel();
-        let gate = (entered.clone(), Arc::new(std::sync::Mutex::new(blocked)));
-        let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
-        let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
-            writer_store
-                .seed_inventory(snapshot, Some(acquisition))
-                .await
-        }));
-        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
-            .await
-            .unwrap();
-        writer.abort();
-        assert!(writer.await.unwrap_err().is_cancelled());
-        let excluded = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .is_err();
-        release.send(()).unwrap();
-        let admitted = store
-            .lock_checkout_roots(vec![task.worktree.as_ref().unwrap().clone()])
-            .await
-            .unwrap();
-        assert!(
-            excluded,
-            "caller cancellation released checkout exclusion before commit"
-        );
-        assert_eq!(
-            store
-                .get_task(&task.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .pm_snapshot_synced_at,
-            Some(1)
-        );
-        drop(admitted);
-    }
-
-    #[tokio::test]
     async fn cancelled_placement_retains_planning_exclusion_through_commit() {
         for mapped in [false, true] {
             let (directory, store, wave) = planning_store().await;
@@ -2676,7 +2612,7 @@ mod tests {
             &[("commit -m work", Some("succeeded"))],
             None,
         );
-        assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        assert!(store.task_begun(&task.id).await.unwrap());
         let graphs = store.sqlite.task_graphs(&task.id).unwrap();
         assert_eq!(graphs.len(), 1);
 

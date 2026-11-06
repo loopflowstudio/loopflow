@@ -1,46 +1,40 @@
 ---
 requires: a named Wave and accepted direction
-produces: exact-ID successor proposal, KRs, separate Task candidates and evidence gaps
+produces: this Wave's next plan proposal, KRs, separate Task candidates and evidence gaps
 ---
 Shape this Wave's next chapter from accepted direction and dated evidence.
-Read its goal, memory, available review and `lf wave status <wave> --no-sync --json`.
+Read its goal, memory, available review and `lf wave planning <wave> --json`.
 Use exact Project IDs; names and current status never reconstruct history.
 Return material challenges to the requesting conversation. Headless work lacking
 accepted direction reports the missing decision and stops. Existing acceptance
 remains valid.
 
-Name the beneficiary and experienced improvement. Author nonempty KRs before
-chapter creation, with targets and evidence windows where useful. Never carry
-forward checked verdicts. Graph is optional; an empty string is valid. Ordinary
-Project ensure has no chapter or KR requirement.
+Name the beneficiary and experienced improvement. Author nonempty KRs, with
+targets and evidence windows where useful. Never carry forward checked
+verdicts. Graph is optional; an empty string is valid.
 
 Return one entry for the retained chapter plan:
 
 ```json
-{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
+{"wave_id":"<Wave UUID>","project_id":"<Project UUID>","project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
 ```
 
-Allocate a new UUID v4 once, or preserve an explicitly selected existing Project
-UUID with `create:false`. Keep proposed Task candidates separately, keyed locally
-and grouped by destination UUID; include title, brief and acceptance. Candidates
-are optional and are admitted only after chapter Projects exist.
+The plan lands in the Wave's current Project (`lf wave planning <wave> --json`
+names it). Keep proposed Task candidates separately, keyed locally and grouped
+by destination UUID; include title, brief and acceptance. Candidates are
+optional and are admitted only after the plan has landed.
 
-With a complete retained plan, preview this Wave independently:
-
-```bash
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
-```
-
-Return agree/challenge, exact input, dated preview and evidence gaps. Started
-work carries identity and execution intact; unreviewed backlog remains in its
-original Project. Unknown work stays unresolved. The operation owns classification;
-do not substitute prose cancellation rules. Preserve predecessor KRs and history.
+Return agree/challenge, exact input, dated evidence and evidence gaps. Started
+work carries identity and execution intact; unreviewed backlog remains where it
+is. Unknown work stays unresolved. Preserve the current plan's KRs and history
+in the report; the caller replaces the content.
 
 This contribution proposes only. The caller reconciles acceptance and applies
-through repository or Wave new-chapter with the retained plan. Never write the
-future plan into the current Project, rotate on a read, or create empty-KR
-successors awaiting later planning. Separate Task admission retains candidate
-notes and recovered issue IDs so failure can resume without duplicating work.
+it with `lf wave edit-plan`, `lf wave update-plan --plan` and `lf wave sync`.
+Never write the future plan into the current Project from a read, or author
+empty-KR plans awaiting later planning. Separate Task admission retains
+candidate notes and recovered issue IDs so failure can resume without
+duplicating work.
 
 ## Task briefs
 

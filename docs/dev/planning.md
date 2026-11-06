@@ -6,15 +6,14 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run
+lf wave update-plan --wave product --plan scratch/product-plan.json
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress
 Project owns Tasks, KRs and targets. A Chapter is the shared
-name of those current Projects across the repository. The rotation below describes
-the explicit shared Project binding. Rotation retains exact destinations and selected
-issue IDs for recovery, while unreviewed backlog stays in its original Project.
+name of those current Projects across the repository; each Wave's plan is
+authored in place and `lf wave planning bind` selects another existing Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
@@ -326,60 +325,21 @@ untouched. An imported completed Project stays selected history and cannot be re
 Activation records its exact Process on the Wave; that Process remains the sole owner of
 its terminal outcome and error. Swift retains command transport feedback only.
 
-## Rotate the plan, preserve the work
+## Replace the plan, preserve the work
 
 ```bash
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run --json
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --json
-lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
+lf wave edit-plan product --name "2026-10 — customer work"
+lf wave update-plan --wave product --plan scratch/product-plan.json
+lf wave planning bind product <Project UUID>     # select another existing Project
 ```
 
-Rotation previews and results return canonical Tasks with local IDs and explicit
-Linear bindings. Classification reads their saved disposition and independent local
-start evidence; it does not reconstruct provider records or resolve the Task twice.
-
-Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
-`successor_id`, `create`, `project_name`, `metric_targets` and `krs`:
-
-```json
-{
-  "name": "2026-10",
-  "waves": [{
-    "wave_id": "<registered-wave-id>",
-    "successor_id": "<new-or-existing-project-uuid>",
-    "create": true,
-    "project_name": "Autumn customer work",
-    "metric_targets": [],
-    "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
-  }]
-}
-```
-
-Allocate a new UUID once when authoring a creation plan. Set `create` to false
-for an existing exact destination; absence never turns that instruction into
-creation. Every destination requires authored KRs before any provider write.
-Existing Projects keep their names, summaries and unrelated content; supplied
-KRs and targets replace only those planning fields. Rotation preserves the Wave
-default graph.
-
-The repository operation validates all selected Waves, destinations, legacy
-conversions and Task evidence before reserving every pair and applying the first
-Wave. The Wave command consumes only its entry through the same operation.
-The shared binding identifies the predecessor. Names never select either endpoint.
-Unfinished Tasks with any ownership entry move with identity, checkout, PR and
-captured execution intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
-
-Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
-selected issue IDs; those records never select the current Project. Before the
-binding switch, retry permits corrected planning fields and reclassifies new work. After it, only retained
-selected issues are reconciled; new historical starts stay put and external moves
-remain conflicts. Predecessor completion follows the binding switch. Settled
-Waves can be retried alongside unfinished ones without new Projects, and an old
-plan cannot overwrite an intervening binding. No Chapter table is required.
-
-Task candidate admission follows Project creation separately. Retain those
-candidates alongside the input and use the existing Task creation operation;
-failure there does not undo the selected Projects or their KRs.
+`update-plan` replaces the current Project's KRs and metric targets with the
+supplied JSON (`{"metric_targets":[],"krs":[]}`); names, summaries and
+unrelated content stay. `bind` moves the Wave's shared selection to an
+existing non-terminal Project. Neither moves a Task: started Tasks keep their
+identity, checkout, PR and captured execution where they are, and `lf task
+move` is the one way a Task changes Wave. There is no rotation operation and
+no Chapter table; the chapter is the name the current plans share.
 
 ## Inspect planning before starting execution
 

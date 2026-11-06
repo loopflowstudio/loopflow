@@ -29,8 +29,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> 
     Ok(project)
 }
 
-/// Explicitly seed a Wave's shared selection with an existing Project UUID.
-/// Switching an established binding belongs to Project rotation.
+/// Select an existing non-terminal Project as the Wave's shared current plan.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(

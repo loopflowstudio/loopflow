@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::ops::chapter::TaskStartEvidence;
 
 use super::{run_planning_write, run_sqlite, PlanningLocks, Store, StoreResult};
 
@@ -37,11 +36,8 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_owned(&task)).await
     }
 
-    pub async fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
+    pub async fn task_begun(&self, task: &TaskId) -> StoreResult<bool> {
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.chapter_task_evidence(&task)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.task_begun(&task)).await
     }
 }

@@ -451,6 +451,8 @@ mod oauth_tests;
 #[cfg(test)]
 mod task_comments_tests;
 
+mod adoption;
+
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
@@ -1731,8 +1733,7 @@ async fn refresh_async(
                 team_id: team_id.clone(),
             };
             let store = planning_store().await?;
-            super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true)
-                .await?;
+            adoption::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true).await?;
             refresh_inventory(repo, wave, &ctx, &initiative).await?;
         }
     }
@@ -1887,17 +1888,6 @@ fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsRes
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) async fn checked_projects(
-    repo: &Path,
-    ctx: &LinearRepository,
-    initiative: &str,
-    wave: &str,
-) -> OpsResult<Vec<LinearProject>> {
-    let store = planning_store().await?;
-    checked_projects_with_store(repo, ctx, initiative, wave, &store).await
-}
-
 pub(super) async fn checked_projects_with_store(
     repo: &Path,
     ctx: &LinearRepository,
@@ -1941,7 +1931,7 @@ pub(super) async fn checked_projects_with_store(
     }
 
     for adopted in
-        super::chapter::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
+        adoption::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
     {
         if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
             *project = adopted;

@@ -2,7 +2,6 @@ use rusqlite::params;
 
 use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::ops::chapter::TaskStartEvidence;
 use crate::store::StoreResult;
 
 use super::SqliteStore;
@@ -33,7 +32,9 @@ impl SqliteStore {
         task_started_or_published_in(&snapshot, task)
     }
 
-    pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
+    /// Whether work on the Task began: an owner, a started event, a Session or
+    /// Graph step in its checkout, a Graph past `start`, or approval to ship.
+    pub fn task_begun(&self, task: &TaskId) -> StoreResult<bool> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let begun: bool = conn.query_row(
@@ -51,22 +52,15 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
-        // Begun follows the Task's Graph: past `start`, or approved to ship.
-        let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
-            &format!(
-                "SELECT state='abandoned',state='done',t.shipped_at IS NOT NULL OR EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND NOT (tg.step='start' AND tg.lf_process_id IS NULL)) FROM (SELECT {} AS state, t.id, t.shipped_at FROM tasks t WHERE t.id=?1) t",
-                super::durable::task_state_sql("t")
-            ),
+        if begun {
+            return Ok(true);
+        }
+        conn.query_row(
+            "SELECT t.shipped_at IS NOT NULL OR EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND NOT (tg.step='start' AND tg.lf_process_id IS NULL)) FROM tasks t WHERE t.id=?1",
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        Ok(TaskStartEvidence {
-            begun: begun || active,
-            authored: None,
-            published: false,
-            abandoned,
-            completed,
-        })
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
     }
 }
 

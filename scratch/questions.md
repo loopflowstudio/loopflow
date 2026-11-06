@@ -413,3 +413,24 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   stays readable by the released build. Account selection stays
   `account.<provider>` at every scope (`wave.<id>.account` under a Wave);
   `repository.account` was not introduced.
+
+### Step 3b — chapter leftovers (decision 11)
+
+- **`ops::chapter` is deleted**: `lf wave new-chapter` had already left the
+  CLI; the rotation engine (`new_chapter`, `rotate`, the Task classifier,
+  `rotate_projects`, project transitions and receipts, the rotation checkout
+  lock) went with it. Legacy Project adoption, which `wave sync` still runs,
+  moved to `ops::linear::adoption`; the start-evidence reader is now
+  `Store::task_begun`. The `project_transitions` tables stay in the schema as
+  history; nothing writes them.
+- **What the skills lost.** `start-chapter`, `wave-start-chapter`,
+  `review-chapter`, `wave-review-chapter`, `split-wave` and `init` now plan
+  with what exists: `lf wave planning <wave> --json` (cached read), `lf wave
+  edit-plan`, `lf wave update-plan --plan`, `lf wave planning bind`, `lf wave
+  sync` and `lf task create`. Gone with rotation: creating a successor
+  Project with a retained UUID, completing the predecessor, the dated
+  disposition preview, moving started Tasks as a batch with a retry receipt,
+  and the `--no-sync` read (`wave status` observes Linear; `wave planning` is
+  the cached read). A new plan replaces the current Project's content in
+  place, so a chapter's history is the retained review, not a completed
+  Project. Authoring a Planned Project still needs a Linear writer.

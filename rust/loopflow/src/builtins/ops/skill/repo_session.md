@@ -50,7 +50,7 @@ binding; a new one gets its first Project. Ordinary Projects need no chapter or 
 An outage is not absence. Report the cause and retry the same operation. Keep
 status and operator refresh passes observational; do not add on each poll.
 Started Tasks in prior Projects retain their execution and unfinished work.
-Chapter changes use start-chapter's KR planning, exact-ID creation and separate
+Chapter changes use start-chapter's KR planning, in-place plan updates and separate
 Task admission. Never rotate merely to make ordinary work possible.
 
 ## Develop direction

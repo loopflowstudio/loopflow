@@ -220,14 +220,11 @@ Inspect available Linear status/content: one In Progress Project is the current
 plan, Planned Projects hold future plans, and Completed Projects retain history.
 A Task takes up the graph it names, else its Wave's default, the repository's `graph:`, or `code`.
 
-If no current Project exists, report that planning gap. Establishing a chapter
-requires accepted repository-wide direction and plan dispositions: preview with
-`lf wave new-chapter --all <name> --dry-run --json`, then apply with
-`lf wave new-chapter --all <name> --json` to apply those dispositions. Every Wave
-participates; do not rotate the repository merely to initialize one Wave. A Wave
-with no Projects receives an empty plan unless an authored Planned successor
-supplies its content. Default graphs remain on the Wave or repository. Existing successors and predecessors
-retain identity; rotation completes predecessors rather than deleting them.
+If no current Project exists, report that planning gap: `lf wave sync <wave>`
+adopts an existing Linear Project, and `lf wave planning bind <wave> <Project
+UUID>` selects one explicitly. Starting a chapter needs accepted
+repository-wide direction; start-chapter authors each Wave's plan in place.
+Default graphs remain on the Wave or repository.
 
 Author future content in the Planned Linear Project through an available
 provider interface. For an existing current Project,

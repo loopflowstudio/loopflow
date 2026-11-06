@@ -70,20 +70,13 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning
-   - Chapter rotation is a separate operation from splitting a Wave. If a repository boundary is
-     also accepted, preview `lf wave new-chapter --all <name> --dry-run --json` for all
-     Waves, including the parent and children. There is no per-Wave or plan-file
-     option. Apply with `lf wave new-chapter --all <name> --json` only after the
-     direction and Task-disposition review gates.
-   - Rotation moves started unfinished Tasks within their owning Wave, retaining
-     worktrees, PRs and captured execution. Proven untouched backlog is canceled,
-     retaining issues and history; terminal Tasks stay historical. Missing
-     evidence stays unresolved. Rotation does not transfer Tasks to child Waves.
-   - Predecessor Projects become Completed; an authored Planned successor keeps
-     its content, otherwise only the predecessor's Graph is copied. New Waves
-     without Projects receive an empty `feature` plan. Retry interruption with
-     the same name. Keep the parent available while its active work finishes;
-     do not delete its Projects or imply rotation retired the Wave itself.
+   - Starting a chapter is separate from splitting a Wave: each Wave's plan is
+     authored in place with `lf wave update-plan`, after the direction review
+     gate; see start-chapter. Nothing moves Tasks between Waves on its own.
+   - Move a Task to a child only with `lf task move <issue> --wave <wave>/<child>`,
+     and only unstarted work: a started Task keeps its worktree, PR, Sessions
+     and Graph where they are. Keep the parent available while its active work
+     finishes; do not delete its Projects.
 
 6. Verify
    - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative

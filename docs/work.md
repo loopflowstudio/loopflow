@@ -331,10 +331,9 @@ lf wave update-plan --wave billing --plan plan.json
 
 The goal names who benefits; KRs prove it, observably, across a window. A
 Wave's current Project holds its Tasks, KRs and metric targets. Projects
-created together share a chapter name, such as `2026-10`; completed Projects
-keep their history. `lf wave new-chapter` rotates to the next one, moving
-started Tasks with their worktree and PR and leaving unreviewed backlog where
-it was.
+planned together share a chapter name, such as `2026-10`; completed Projects
+keep their history. `lf wave update-plan` replaces the current plan in place,
+and started Tasks keep their worktree and PR wherever they are.
 
 ### Nested Waves
 

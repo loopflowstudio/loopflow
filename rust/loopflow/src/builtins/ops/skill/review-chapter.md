@@ -17,7 +17,7 @@ accounted for. Missing starting membership is an incomplete baseline.
 Read current cached planning and Task conditions:
 
 ```bash
-lf wave status <wave> --no-sync --json
+lf wave planning <wave> --json
 lf wave show --json
 ```
 
@@ -51,10 +51,9 @@ Lead with experienced changes for users, operators, maintainers and agents,
 organized by Wave. Preserve exact claims, evidence dates, counterexamples,
 Task/PR references, changed claims and coverage gaps underneath. Report actual
 Task transfers and cancellations only where dated evidence establishes them.
-If an exact-ID plan is supplied, `lf wave new-chapter --all <name> --plan <plan.json> --dry-run --json`
-can supply prospective dispositions for the entire repository. Label that dated
-preview separately from historical facts; it does not apply
-rotation. Never invent a second Task classifier in prose.
+Nothing previews dispositions for the next chapter: open work stays where it
+is until someone moves it (`lf task move`), so report open Tasks as open.
+Never invent a Task classifier in prose.
 
 Separate next-chapter proposals: valuable goals, changed assumptions, goals not
 evidenced as priorities, and misplaced or unowned active work. Judge Wave

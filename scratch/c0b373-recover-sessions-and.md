@@ -127,6 +127,28 @@ Built (Nov 6, implement): `route_rank`/`urgency`/`order_accounts_by_urgency`; th
 Compress (Nov 6): `switch_away` checks the active login once and `replacement_login` only picks the route's next login; lib `provider_account:: lf::commands::account::` (84) and clippy pass.
 Compress after urgency docs (Nov 6): the three concept-review fixes were already in 603ff3c11d; `RouteRank` made module-private, doc lines reflowed. lib `provider_account::` (51), fmt and clippy pass.
 
+## Demo answer (Jack Heart, November 6, 2026)
+Ranking fix accepted: "ok i guess. or just poll if necessary?" A window past its reset, and a login with no observed weekly window, score as a full week (100% over 168 hours) instead of ranking last. Not built.
+
+## `lf account` CLI review (November 6, 2026; page `scratch/concept-review.html`)
+Jack Heart asked for the full account API review, aiming for an excellent CLI, with the website mock as the floor (one row per login, a bar, percent left), LOO-593's API shape (`account.*`, `lf account`, `ops` dissolves, `lf auth` retired) and comps: teamclaude, ccdaddy, claude-swap, claude-rotate, maxpool, codex-acct, Paseo, HumanLayer. The Reddit post could not be fetched.
+Proposed, not accepted: one row per login with problems as fix-it lines; verbs before logins (`lf account use work@`, provider only on ambiguity); `route` becomes `next`, a dry run with reasons; `set --routing explicit-only` becomes `pause`/`unpause`; `use` holds until full or `use auto`; `?` for unknown, never 0; reading age; reads render from cache and refresh stale rows only; exit codes.
+Evidence checked Nov 6: Sonnet/Haiku 5.5 thinking blocks stay with the account that produced them (preserved-thinking docs); prompt-cache loss on a switch still unverified. Claude 2.1.319 has `.oauth_refresh.lock` and `CLAUDE_SECURESTORAGE_CONFIG_DIR`; `rust/loopflow/src` takes no such lock, so a Claude refresh can land during a swap. The credential-only variable's behavior is unprobed.
+Anthropic's legal and compliance page: developers "may not collect, store, or intermediate Claude.ai credentials or session tokens", and Pro/Max/Ultra limits "assume ordinary, individual usage". lf stores logins and sends access tokens to rentals. Unresolved; for Jack.
+
+Answers (Jack Heart, November 6, 2026), verbatim: "1a for nwo", "2 a -- i think the reason for this is to have a single shared history and claude/codex resume worK", "3)a", "4)a", "5) not sure".
+- Switch at every launch stays (1a), for now; no throttle or margin.
+- No per-worker credentials (2a): one shared history so `claude --resume`/`codex resume` work from any terminal. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is not used.
+- `lf account use <login>` holds until that login fills up or `lf account use auto` (3a). Supersedes the "use lasts until the next launch" item in the headless concept review below.
+- All of it lands in #1828 (4a).
+- The mock on the page is the build target, unconfirmed (5: "not sure"); show it at demo.
+
+Next implement pass builds, in order:
+1. Correctness: hold Claude's `.oauth_refresh.lock` (read its protocol in the 2.1.319 binary first) across `activate`'s save-back and install; full-week score (100% over 168h) for a window past its reset and a login with no weekly reading; one usage poll at `lf account connect`.
+2. `use` hold: a stored per-provider hold that launches honor until the held login has no room or `use auto` clears it.
+3. CLI as on the page: `lf account` one row per login (bar = weekly window, percent left, reset, `● active`, reading age when stale, `?` for unknown), cache-first with stale rows refreshed; fix-it lines with the exact command; `lf account <login>` detail (replaces `--details`); `next` (replaces `route`) with reasons; `pause`/`unpause` (replaces `set --routing explicit-only`, still switching away when active); verbs first with `claude=a@` only on ambiguity, the same spelling in `--account` and `connect`; exit codes 0 fine, 2 blocked, 3 login needed on `next` and `use`. Old spellings deleted, not aliased. Docs follow.
+Not in this pass: `lf account --machines`, the fleet forecast line.
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

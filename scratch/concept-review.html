@@ -3,88 +3,114 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>c0b373 concept review</title>
+<title>lf account review</title>
 <style>
-:root{--bg:#fbfaf7;--fg:#1f1d1a;--muted:#6b665e;--rule:#e3dfd6;--code:#f1eee7;--new:#1d6b45;--newbg:#e7f3ec;--old:#8a3b2a;--oldbg:#f7e9e4;--accent:#7a4e00}
-@media (prefers-color-scheme:dark){:root{--bg:#181715;--fg:#ece8e1;--muted:#a19b90;--rule:#34312c;--code:#24221f;--new:#7fd1a4;--newbg:#17271f;--old:#e9a08d;--oldbg:#2c1b16;--accent:#e2b35a}}
+:root{--bg:#fbfaf7;--fg:#1f1d1a;--muted:#6b665e;--rule:#e3dfd6;--code:#f1eee7;--accent:#8a2a4a}
+@media (prefers-color-scheme:dark){:root{--bg:#181715;--fg:#ece8e1;--muted:#a19b90;--rule:#34312c;--code:#24221f;--accent:#d9809e}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:46rem;margin:0 auto;padding:2.5rem 16px 5rem}
+main{max-width:48rem;margin:0 auto;padding:2.5rem 16px 5rem}
 header p{margin:.15rem 0;color:var(--muted);font-size:.88rem}
 h1{font-size:1.55rem;line-height:1.25;margin:0 0 .6rem}
 h2{font-size:1.15rem;margin:2.6rem 0 .6rem}
-h3{font-size:1rem;margin:1.6rem 0 .4rem}
-code,pre{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
-code{background:var(--code);padding:.05rem .3rem;border-radius:3px}
-pre{background:var(--code);padding:.8rem 1rem;border-radius:6px;overflow-x:auto;margin:.6rem 0}
-pre code{background:none;padding:0}
-.lead{font-size:1.08rem;border-left:3px solid var(--accent);padding-left:1rem;margin:1.6rem 0}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-@media (max-width:640px){.cols{grid-template-columns:1fr}}
-.col{border:1px solid var(--rule);border-radius:6px;padding:.4rem 1rem .8rem}
-.col h3{margin-top:.6rem}
-.is{color:var(--old)} .prop{color:var(--new)}
-.tag-is{background:var(--oldbg);color:var(--old);padding:0 .35rem;border-radius:3px;font-size:.85rem}
-.tag-prop{background:var(--newbg);color:var(--new);padding:0 .35rem;border-radius:3px;font-size:.85rem}
+code{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:.05rem .3rem;border-radius:3px}
+.lead{font-size:1.06rem;border-left:3px solid var(--accent);padding-left:1rem;margin:1.6rem 0}
+.term{background:#1c191a;color:#e9e4e0;border-radius:10px;padding:1.1rem 1.3rem;overflow-x:auto;font:13.5px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;margin:.8rem 0}
+.term .p,.term .d{color:#8c8580}.term .l{color:#e58aa8}.term .b{color:#d0708f}.term .e{color:#4a4442}.term .w{color:#e3b45f}.term .g{color:#8fd0a8}
 table{border-collapse:collapse;width:100%;font-size:.93rem;margin:.6rem 0}
 th,td{text-align:left;vertical-align:top;padding:.45rem .5rem;border-bottom:1px solid var(--rule)}
 th{color:var(--muted);font-weight:600}
-.tl{list-style:none;padding:0;margin:.6rem 0}
-.tl li{padding:.35rem 0 .35rem 1rem;border-left:2px solid var(--rule)}
-.tl b{font-variant-numeric:tabular-nums}
-ol.q>li{margin:.9rem 0}
+.scroll{overflow-x:auto}
+ol.q>li{margin:1rem 0}
 ol.q ol{list-style:lower-alpha;margin:.3rem 0}
 .muted{color:var(--muted)}
+a{color:var(--accent)}
 </style>
 </head>
 <body>
 <main>
 <header>
-<h1>Every launch switches the login, so <code>lf account use</code> lasts one launch</h1>
-<p>Task c0b373 · PR #1828 · concept review after implement · November 6, 2026</p>
-<p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>provider_account.rs</code> (<code>route_rank</code>, <code>urgency</code>, <code>select_route</code>, <code>replacement_login</code>), <code>lf/commands/account.rs</code> (<code>use_account</code>, <code>switch_away</code>), <code>docs/subscriptions.md</code>, <code>docs/sessions.md</code>, <code>docs/ops.md</code></p>
+<h1>lf account: one screen, no account thinking</h1>
+<p>Task c0b373 · PR #1828 · concept review at demo · November 6, 2026 · everything below is proposed unless marked built</p>
+<p>Built from <code>lf account --help</code>, <code>provider_account.rs</code>, LOO-593 <code>scratch/api-engine.md</code> decision 10, your website mock, and the tools listed under “What we take”</p>
 </header>
 
-<p class="lead"><strong>Built:</strong> Jack Heart's November 6 decisions are in the diff. Each launch takes the top-ranked login, whichever is active; <code>lf session move --account</code> and <code>lf account drain</code> are gone; <code>--routing explicit-only</code> on the active login switches away. <strong>Next for implement:</strong> say in the docs that a manual switch lasts until the next launch, and fix one stale ranking sentence.</p>
+<p class="lead"><strong>Decision needed first:</strong> switching at every launch moves every open Claude conversation between accounts. Anthropic documents that Sonnet and Haiku 5.5 thinking blocks stay with the account that produced them, so moved conversations can lose earlier reasoning on those models. Do you want a limit on how often the Machine switches (question 1), or should Task workers get their own credentials so your open Sessions stop moving (question 2)?</p>
 
-<h2>One afternoon, as built now</h2>
-<p class="muted">Two Claude Max accounts. <code>jack@</code> is active at 60% of its weekly window, which resets in 5 days: 40% left over 120 hours scores 333. <code>work@</code> is at 30%, resetting in 3 hours: 70% over 3 hours scores 23 333.</p>
-<ul class="tl">
-<li><b>14:00</b> A Graph step launches. <code>route_rank</code> puts <code>work@</code> first; the Machine's Claude login switches and every open Claude follows at its next message.</li>
-<li><b>14:05</b> You run <code>lf account claude use jack@</code>, wanting to stay on it.</li>
-<li><b>14:06</b> The next launch ranks <code>work@</code> ahead again and switches back. <strong>Nothing told you <code>use</code> would not stick.</strong></li>
-<li><b>17:00</b> <code>work@</code> resets having been used first. That was the point of the decision, and it works.</li>
-</ul>
+<h2>What you'd see</h2>
+<p class="muted">Numbers are this Machine's cached readings. The bar is the weekly window.</p>
+<div class="term"><span class="p">$</span> <span class="l">lf</span> account
 
-<h2>Actions → concepts → APIs</h2>
-<table>
-<tr><th>You</th><th>API</th><th>Lasts</th></tr>
-<tr><td>Order accounts</td><td><code>lf set account.claude jack@,work@</code> (global, repository, Wave)</td><td>Until changed; breaks ties after plan and urgency</td></tr>
-<tr><td>See what's active and why</td><td><code>lf account</code>, <code>lf account route</code></td><td></td></tr>
-<tr><td>Switch now</td><td><code>lf account claude use work@</code></td><td><span class="tag-prop">to document</span> until the next launch ranks another login ahead</td></tr>
-<tr><td>Stay on one login</td><td><code>lf --account jack@ …</code> per launch, or <code>lf account set claude work@ --routing explicit-only</code></td><td>Per launch / until changed</td></tr>
-<tr><td>Stop using one</td><td><code>lf account set claude jack@ --routing explicit-only</code></td><td>Switches away now if active</td></tr>
-<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td><td>Per Session</td></tr>
-</table>
-<p class="muted">Concepts: account, the Machine's one login per provider, the rank every launch applies (plan, then weekly quota left per hour until reset, then declared order), routing mode, Session move by agent.</p>
+  <span class="d">claude</span>  jackstah@       <span class="b">━━━━━</span><span class="e">━━━━━━━━━━━</span>  31% left  <span class="d">Wed 12:00</span>   <span class="g">● active</span>
+                          <span class="w">fable out until Wed 12:00</span>
+  <span class="d">claude</span>  jack@           <span class="b">━━━━━</span><span class="e">━━━━━━━━━━━</span>  33% left  <span class="d">Wed 12:00   14h ago</span>
+  <span class="d">codex</span>   jack@           <span class="b">━━━━━━━━━━</span><span class="e">━━━━━━</span>  60% left  <span class="d">Wed 16:04</span>
+  <span class="d">codex</span>   jackstah@       <span class="b">━━━━━━━━━━━━━━━━</span> 100% left  <span class="d">Fri 15:01</span>
+  <span class="d">codex</span>   loopflow-eng@   <span class="b">━━━━━</span><span class="e">━━━━━━━━━━━</span>  32% left  <span class="d">Wed 19:27</span>
+  <span class="d">codex</span>   manabot-eng@    <span class="b">━━━</span><span class="e">━━━━━━━━━━━━━</span>  18% left  <span class="d">Wed 23:14</span>   <span class="g">● active</span>
 
-<h2>Docs as they should read</h2>
-<p><span class="tag-is">docs/ops.md:314 today</span> “Routes try accounts in order; one at 95% of a usage window drops behind the rest.”</p>
-<p><span class="tag-prop">proposed</span> Every launch takes the account with the most weekly quota left per hour before its reset; route order breaks ties. <code>lf account codex use work@</code> switches now, until a later launch ranks another account ahead. To stay on one, name it with <code>--account</code> or set the others <code>explicit-only</code>.</p>
+  <span class="w">!</span> claude jack@ needs a login       <span class="l">lf</span> account connect claude=jack@
+  <span class="w">!</span> codex order here uses 1 of 4     <span class="l">lf</span> unset account.codex
 
-<h2>Not verified</h2>
-<p>A running Codex keeps its login in memory. If it refreshes and writes <code>~/.codex/auth.json</code> after the home switched to another account, the home flips back silently, and the other account's newer refresh token is lost if it rotated in between. Switching at every launch makes the window more frequent. Checking needs no paid quota: fake tokens and a throwaway <code>CODEX_HOME</code>.</p>
+<span class="p">$</span> <span class="l">lf</span> account next
+  <span class="d">claude</span>  jackstah@      the only login ready for this launch
+  <span class="d">codex</span>   manabot-eng@   this repository's order names only it
+          <span class="d">without that order: jack@, 60% left</span>
+
+<span class="p">$</span> <span class="l">lf</span> account use jack@
+  <span class="w">jack@ is both claude and codex:</span> <span class="l">lf</span> account use claude=jack@
+
+<span class="p">$</span> <span class="l">lf</span> account use codex=jack@
+  codex stays on jack@ until it fills up, or <span class="l">lf</span> account use auto
+  3 open Sessions follow at their next resume
+
+<span class="p">$</span> <span class="l">lf</span> account pause claude=jackstah@
+  out of rotation; switched to jack@, 2 open Sessions followed</div>
+
+<h2>The command surface</h2>
+<div class="scroll"><table>
+<tr><th>You want</th><th>Today (built)</th><th>Proposed</th></tr>
+<tr><td>See everything</td><td><code>lf account</code>: about 40 lines, network first</td><td><code>lf account</code>: one row per login, instant from cache, refreshes only stale rows</td></tr>
+<tr><td>Dig in</td><td><code>--details</code></td><td><code>lf account jack@</code> for every window, age and source; <code>--json</code></td></tr>
+<tr><td>Know what's next and why</td><td><code>lf account route</code></td><td><code>lf account next</code>, a dry run with the reason</td></tr>
+<tr><td>Add or remove a login</td><td><code>lf account connect claude a@</code></td><td>Same job, spelled <code>claude=a@</code></td></tr>
+<tr><td>Switch and hold</td><td><code>lf account claude use a@</code>; lasts one launch</td><td><code>lf account use a@</code>; holds until full or <code>use auto</code></td></tr>
+<tr><td>Take one out</td><td><code>lf account set claude a@ --routing explicit-only</code></td><td><code>lf account pause a@</code>, <code>unpause a@</code></td></tr>
+<tr><td>Order</td><td><code>lf set account.claude a@,b@</code></td><td>Unchanged</td></tr>
+<tr><td>One launch</td><td><code>lf --account claude=a@ …</code></td><td>Unchanged; the same <code>claude=a@</code> spelling everywhere</td></tr>
+<tr><td>Other Machines</td><td><code>lf --machine mini account</code>, one at a time</td><td>Same, plus <code>lf account --machines</code> for one table</td></tr>
+<tr><td>Scripts</td><td>No documented exit codes</td><td><code>next</code> and <code>use</code> exit 0 when fine, 2 when blocked, 3 when a login is needed</td></tr>
+</table></div>
+<p>Provider position is inconsistent today: <code>lf account claude use a@</code> but <code>lf account set claude a@</code>. Verbs first fixes it. <code>ops</code> disappearing from the help path is LOO-593's change, so it isn't part of this.</p>
+
+<h2>What we take</h2>
+<div class="scroll"><table>
+<tr><th>Idea</th><th>From</th><th>In lf</th></tr>
+<tr><td>Hold Claude's refresh lock during a swap</td><td>claude-swap</td><td>Fix regardless. Claude 2.1.319 has <code>.oauth_refresh.lock</code>; lf takes no such lock, so a refresh landing mid-swap could overwrite the new login with the old one</td></tr>
+<tr><td>Minimum time between switches, and a margin</td><td>claude-swap, ccdaddy</td><td>Question 1</td></tr>
+<tr><td>Credential-only scoping</td><td>ccdaddy</td><td>Question 2</td></tr>
+<tr><td>Only spent quota moves the account</td><td>teamclaude</td><td>A per-minute 429 means slow down and keep the cache; I haven't checked how lf treats it</td></tr>
+<tr><td>Freshen before installing; set aside a dead login</td><td>claude-swap</td><td><code>invalid_grant</code> takes it out of rotation with a fix-it line</td></tr>
+<tr><td><code>?</code> for unknown, reading age, no fake zeros</td><td>ccdaddy</td><td>In the table above</td></tr>
+<tr><td>Fleet forecast</td><td>ccdaddy</td><td>A line under the table: “claude out Tue 14:00 at this rate, first back Wed 12:00”</td></tr>
+<tr><td>Who am I</td><td>ccdaddy, gh</td><td>The <code>● active</code> marker; no separate command</td></tr>
+</table></div>
+<p><strong>Left out:</strong> local proxies (they break lf's rule of staying out of the byte path), setup-token pools (you rejected long-lived tokens), PATH shims, strategy menus, and anything that spends money unasked. The Reddit post wouldn't load, so its project is unidentified. These tools were read, not run.</p>
+
+<h2>Anthropic's terms</h2>
+<p>Anthropic's <a href="https://code.claude.com/docs/en/legal-and-compliance">legal and compliance page</a> says developers “may not collect, store, or intermediate Claude.ai credentials or session tokens”, and that Pro, Max and Ultra limits “assume ordinary, individual usage”. lf stores logins and sends access tokens to rentals. This isn't a legal conclusion, and nothing here settles it, but it bears more on shipping this to other people than on your own accounts.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Should <code>lf account use</code> stay a one-launch switch?
-  <ol><li>Yes: document it (what implement does next)</li><li>No: make it hold until the active login fills up</li></ol></li>
-<li>Overage (questions 3): stop treating a rejected <code>seven_day_overage_included</code> as a limit while overage is allowed or in use?
-  <ol><li>Build it in #1828</li><li>Leave it for later</li></ol></li>
-<li>Codex refresh test above:
-  <ol><li>Run it before landing</li><li>Skip it</li></ol></li>
-<li>An unobserved fresh login ranks after a 99%-used observed one (questions 11):
-  <ol><li>Keep</li><li>Rank unobserved logins first, so their first launch observes them</li></ol></li>
+<li>How often should the Machine switch?
+  <ol><li>Every launch, as built</li><li>At most every 5 minutes, and only when the top account clearly beats the active one</li></ol></li>
+<li>Should Task workers keep their own credentials so open Sessions stop moving?
+  <ol><li>No, everything shares the login</li><li>Probe <code>CLAUDE_SECURESTORAGE_CONFIG_DIR</code> first with fake tokens, then decide</li></ol></li>
+<li><code>lf account use</code>:
+  <ol><li>Holds until the account fills up or <code>use auto</code></li><li>Lasts one launch, as built</li></ol></li>
+<li>This CLI work:
+  <ol><li>All in #1828, no stacking</li><li>#1828 takes the correctness fixes; the CLI gets its own Task</li></ol></li>
+<li><code>lf account</code> as shown: what would you change? <code>pause</code>, <code>next</code> and the fix-it lines are the parts most worth a reaction.</li>
 </ol>
 </main>
 </body>

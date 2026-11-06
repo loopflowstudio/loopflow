@@ -82,7 +82,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::describe;
+    use super::{describe, TimeTuple};
     use crate::lf::commands::{read::Read, write::Write};
 
     const REGENERATE: &str =
@@ -248,6 +248,13 @@ mod tests {
         }
         let names: BTreeSet<_> = operations.keys().map(String::as_str).collect();
         assert!(names.is_superset(&BTreeSet::from(["task.create", "session.owner"])));
+    }
+
+    #[test]
+    fn bare_time_serializes_as_its_described_tuple() {
+        let wire = serde_json::to_value(time::OffsetDateTime::UNIX_EPOCH).unwrap();
+        let tuple: TimeTuple = serde_json::from_value(wire).unwrap();
+        assert_eq!(tuple, (1970, 1, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

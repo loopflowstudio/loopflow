@@ -3,10 +3,38 @@ import Testing
 @testable import Loopflow
 
 struct ServerProtocolTests {
+    private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+
     private func fixture(_ name: String) throws -> Data {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        return try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
+        try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
+    }
+
+    /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
+    private func schema() throws -> [String: Any] {
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server_schema.json"))
+        return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    /// The arms of a tagged definition, by the value of their `tag`: the fields each carries.
+    private func arms(_ definition: String, tag: String, of schema: [String: Any]) throws -> [String: Set<String>] {
+        let definitions = try #require(schema["$defs"] as? [String: Any])
+        let arms = try #require((definitions[definition] as? [String: Any])?["oneOf"] as? [[String: Any]])
+        return try Dictionary(uniqueKeysWithValues: arms.map { arm in
+            let properties = try #require(arm["properties"] as? [String: [String: Any]])
+            return (try #require(properties[tag]?["const"] as? String), Set(properties.keys).subtracting([tag]))
+        })
+    }
+
+    private func source(_ path: String) throws -> String {
+        try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+    }
+
+    private func matches(_ pattern: String, in text: String) throws -> [[String?]] {
+        let whole = NSRange(text.startIndex..., in: text)
+        return try NSRegularExpression(pattern: pattern).matches(in: text, range: whole).map { match in
+            (0..<match.numberOfRanges).map { Range(match.range(at: $0), in: text).map { String(text[$0]) } }
+        }
     }
 
     private func encoded(_ message: ServerClientMessage) throws -> JSONValue {
@@ -259,6 +287,52 @@ struct ServerProtocolTests {
         #expect(missing == "view-1")
         #expect(absent == "not_found")
         #expect(named["expression"] == .string("task:INF-404"))
+    }
+
+    @Test func theMirrorSpeaksTheDescribedRevision() throws {
+        let schema = try schema()
+        #expect(schema["x-revision"] as? Int == ServerProtocol.revision)
+        #expect(schema["x-min-revision"] as? Int == ServerProtocol.minRevision)
+    }
+
+    /// Every operation Desktop can encode, read from its source so that no
+    /// case escapes: the kind exists and carries exactly the described fields.
+    @Test func everyEncodedOperationIsTheDescribedOperation() throws {
+        let schema = try schema()
+        let described = try ["ServerOperation", "Read", "Write"].reduce(into: [String: Set<String>]()) { all, definition in
+            all.merge(try arms(definition, tag: "kind", of: schema)) { first, _ in first }
+        }
+        let registry = try source("swift/Loopflow/Services/RegistryQuery.swift")
+        let call = #"TaggedFields\(\s*(?:\w+ \? )?"([a-z_.]+)"(?: : "([a-z_.]+)")?(?:,\s*\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*\)"#
+        let calls = try matches(call, in: registry)
+        #expect(calls.count == registry.components(separatedBy: "TaggedFields(").count - 1, "A TaggedFields call has a shape this test cannot read")
+        for groups in calls {
+            let fields = try Set(matches(#""(\w+)":"#, in: groups[3] ?? "").compactMap { $0[1] })
+            for kind in groups[1...2].compactMap({ $0 }) {
+                #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
+            }
+        }
+        for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: source("swift/Loopflow/Services/ServerProtocol.swift")) {
+            let kind = try #require(groups[1])
+            #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
+        }
+    }
+
+    /// A fixture the mirror neither encodes nor decodes is one it can drift from.
+    @Test func everyFixtureIsMirrored() throws {
+        let client = try arms("ClientMessage", tag: "type", of: schema())
+        let tests = try source("swift/LoopflowTests/ServerProtocolTests.swift")
+        let directory = root.appendingPathComponent("tests/fixtures/dto/server")
+        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            let name = url.deletingPathExtension().lastPathComponent
+            let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+            let type = try #require(object["type"] as? String)
+            if client[type] == Set(object.keys).subtracting(["type"]) {
+                #expect(tests.contains("\"\(name)\""), "No test here encodes the client fixture \(name)")
+            } else {
+                #expect(throws: Never.self, "\(name)") { try message(name) }
+            }
+        }
     }
 
     @Test func missingRequiredFieldsDoNotBecomeDefaults() {

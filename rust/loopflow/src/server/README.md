@@ -1,7 +1,8 @@
 # Connect to the local Loopflow server
 
 ```sh
-lf server status   # readiness, socket, protocol revision, incarnation and connected clients as JSON
+lf server status          # readiness, socket, protocol revision, incarnation and connected clients as JSON
+lf server describe --json # the JSON Schema of the protocol this build speaks
 ```
 
 Installation prepares client access automatically. Desktop's first connection
@@ -42,6 +43,31 @@ endpoint. Remote admission is outside this revision.
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
+
+`lf server describe --json` prints the protocol as one JSON Schema, generated
+from those types by `schema.rs`; bare `lf server describe` summarizes it. It
+reads no store and needs no running server, so a client asks the `lf` on its host
+rather than the connection. The root accepts any message either side sends;
+`$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
+`Write`, `ServerOperation` and every type they reach, and `x-revision` and
+`x-min-revision` are this build's range. Each operation's kind is a `const` as
+on the wire, and `x-result` beside it names what `response.result` carries. A
+result with no Rust type refers to `$defs/Untyped`: `repository.planning`,
+`pr.reviews` and the rows of `config.settings`. The serialize contract keeps a
+nullable field required, as both sides send it.
+
+Rust validates every fixture against its definition, every `response` fixture
+against its operation's `x-result` and, in `served_reads`, every live read.
+`tests/fixtures/dto/server_schema.json` is the same document checked in. A Rust
+test fails when it is stale and names the regeneration command:
+
+```sh
+cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json
+```
+
+`ServerProtocolTests` reads that file: every operation Desktop encodes must have
+a described kind with exactly its fields, every client fixture must be encoded
+by a test and every server fixture must decode.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}

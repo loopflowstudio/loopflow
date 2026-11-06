@@ -183,7 +183,9 @@ product choices. Removal must preserve Work and credentials.
 
 ## Commands and installed-state migration
 
-`lf server run` is the supervisor's foreground entry. `lf server status` reports
+`lf server run` is the supervisor's foreground entry. `lf server describe --json`
+prints the protocol's JSON Schema, generated from the wire types, with no server
+running. `lf server status` reports
 readiness without registering a helper. The hidden `install server` operation
 lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.

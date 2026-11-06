@@ -519,3 +519,28 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
 - **Account routes read the launch's directory.** Resolved: `resolve_provider_account_exact` takes the launch directory, so a served launch routes by its repository, not the server's. The `cfg!(test)` return is gone.
 - **`lf task show` on an unsaved selector now errors** (`task.get` answers `not_found`). It printed a null Task with planning evidence; that evidence is now only in text `lf task status`, and `lf task status --json` errors as it did.
 - **Served account operations.** `account::served` marks a served write: narration goes to `logs/lf.log`, and terminal prompts refuse. `account.connect` still holds its request for the whole browser wait; it is not detached like `pr.land`.
+
+Discovery (`lf server describe --json`). Decisions made headless; each is reversible.
+
+- **`desktop.*` kinds in the schema.** `Operation`'s comment says they are not
+  part of what other clients are offered, yet the schema prints all 102 kinds
+  because it describes what the server accepts. Open: filter them for the phone
+  and shed, or mark them, or leave them.
+- **Bare time on the wire.** `Task`-adjacent records (`CiObservation.observed_at`,
+  `PrPublication.requested_at`, `TaskPr.created_at` and others in
+  `work/task/mod.rs`) have no `time::serde::rfc3339`, so they serialize as a
+  nine-integer tuple beside RFC 3339 strings elsewhere. The schema says so
+  (`server::schema::TimeTuple`) rather than claiming a date string. Open: move
+  them to RFC 3339, which changes the wire and the stored JSON that uses them.
+- **Serialize contract for requests.** One document, one contract: nullable
+  request fields are `required`, as Desktop and the fixtures send them, though
+  serde also accepts them absent. A generated client is stricter than the server.
+- **`x-result` is declared, not derived.** The attribute sits beside each variant
+  and calls `generator.subschema_for`, the parameter name of schemars' derive:
+  a rename there is a compile error. `Write::run` and `Read::read` still return
+  `serde_json::Value`, so the declared type is held to the code by fixtures (26
+  responses) and `served_reads` (the reads), not the compiler. Writes without a
+  fixture are declared only.
+- **Snapshot churn.** `server_schema.json` is 375 KB and includes doc comments,
+  so editing a comment on a wire type asks for a regeneration. Stripping
+  descriptions would make it quieter and make it differ from `describe`.

@@ -110,3 +110,15 @@ In this superseded implementation, writes were slower because the server ran the
 Reproduce with inherited LF_* removed: `LOOPFLOW_BOUNDARY_PERF=/tmp/server.json swift test --package-path swift --filter ServerPerformanceTests`. The fixture uses the source-built target/debug/lf and a disposable Machine; no installed service registration. `baseline-harness.swift` preserves the pre-deletion harness; its implementation runs against the FFI at parent 8d6c7ee75. Raw samples and baseline artifact sizes are alongside this note.
 
 The first attempt used Portfolio add, which scanned the host source directories and was discarded; Session rename replaced it in both compared runs. An inherited capture variable then rejected the initial private-Machine write; the successful baseline ran with LF_* cleared. An overlapping-test server run was discarded in favor of the isolated run.
+
+## Many clients at once — November 6, 2026
+
+Debug build of `f579b07f3e`, throwaway server on an empty `LF_HOME`, host load about 20. Each client sends hello, subscribes to `process.list`, waits for its subscription and first reading, then all send `config.catalog` together.
+
+| Clients | Connect and watch, all | `config.catalog` p50 | max | Server RSS |
+| --- | --- | --- | --- | --- |
+| 1 | 59 ms | 6.1 ms | 6.1 ms | 263 MB |
+| 16 | 16 ms | 13.6 ms | 15.3 ms | 276 MB |
+| 63 | 71 ms | 23.0 ms | 31.0 ms | 302 MB |
+
+Idle RSS before any client: 122 MB. With 64 welcomed connections open, a 65th gets `busy {max_connections: 64}` at once and closes. Agents call `lf` directly rather than through this server, so the limit bounds UI clients (Desktop windows, phones), not agent count. No protocol change follows from this run.

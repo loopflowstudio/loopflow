@@ -63,7 +63,7 @@ impl std::fmt::Debug for SteerAdapter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Steer {
     pub id: crate::id::SteerId,
     pub sequence: i64,

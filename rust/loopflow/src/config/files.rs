@@ -30,7 +30,9 @@ pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
 }
 
 /// A user edit selects an owner, never a file plus an independently asserted scope.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Destination {

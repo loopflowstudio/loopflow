@@ -16,13 +16,13 @@ pub enum PortfolioMode {
     Manual,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PortfolioRepo {
     pub path: String,
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Portfolio {
     pub configured: bool,
     pub mode: PortfolioMode,
@@ -40,7 +40,16 @@ pub struct Selection {
 
 /// A change to which repositories the app shows; also the served
 /// `desktop.portfolio.set` write's `change`, tagged by `action`.
-#[derive(Debug, Clone, PartialEq, Eq, clap::Subcommand, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    clap::Subcommand,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PortfolioCommand {
     /// Discover immediate main checkouts in a folder (defaults to the saved folder)

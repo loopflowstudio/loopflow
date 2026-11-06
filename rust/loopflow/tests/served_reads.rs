@@ -44,6 +44,23 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
 }
 
 #[test]
+fn describe_prints_the_protocol_with_no_server_and_no_store() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let described: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["server", "describe", "--json"],
+        None,
+    ))
+    .unwrap();
+    assert_eq!(described, loopflow::server::schema::describe());
+    let summary = read(repo.path(), home.path(), &["server", "describe"], None);
+    assert!(summary.starts_with("Server protocol revision"), "{summary}");
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+#[test]
 fn configuration_edits_use_the_server_without_work_processes() {
     use loopflow::config::files::Destination;
     use loopflow::lf::commands::read::Read;
@@ -1412,11 +1429,33 @@ impl Drop for Server {
 }
 
 fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
-    loopflow::server::client::Connection::open()
+    let kind = serde_json::to_value(&query).unwrap()["kind"].clone();
+    let result = loopflow::server::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Read(query))
         .unwrap()
-        .result
+        .result;
+    assert_declared_result(kind.as_str().unwrap(), &result);
+    result
+}
+
+/// `result` has the shape `lf server describe` declares for `kind`.
+fn assert_declared_result(kind: &str, result: &Value) {
+    let schema = loopflow::server::schema::describe();
+    let read = schema["$defs"]["Read"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|arm| arm["properties"]["kind"]["const"] == kind)
+        .unwrap_or_else(|| panic!("{kind} is not in the schema"));
+    let mut declared = read["x-result"].clone();
+    declared["$defs"] = schema["$defs"].clone();
+    let validator = jsonschema::draft202012::new(&declared).unwrap();
+    let failed: Vec<_> = validator
+        .iter_errors(result)
+        .map(|error| format!("{}: {error}", error.instance_path()))
+        .collect();
+    assert!(failed.is_empty(), "{kind} answered {result}: {failed:#?}");
 }
 
 fn server_write(change: loopflow::lf::commands::write::Write) -> Value {

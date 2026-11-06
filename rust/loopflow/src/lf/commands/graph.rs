@@ -106,7 +106,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
 }
 
 /// What `lf graph customize` wrote.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct Customized {
     /// The repository file that defines the Graph.
     pub path: std::path::PathBuf,

@@ -15,7 +15,7 @@ use crate::ops::pr_landing::DeliveryCheck;
 use crate::ops::{LandOptions, PrInfo, Progress};
 
 /// What `pr.publish` or `pr.open` left on the provider.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Published {
     pub url: String,
@@ -26,7 +26,7 @@ pub struct Published {
 }
 
 /// What `pr.submit` prepared.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Prepared {
     /// The PR prepared; null when `local` kept everything on this Machine.
@@ -34,7 +34,7 @@ pub struct Prepared {
 }
 
 /// What `pr.arm` or `lf pr land` reached.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Landed {
     /// The PR armed or merged; null when it had already merged or `local`.
@@ -44,14 +44,14 @@ pub struct Landed {
 }
 
 /// What `pr.abandon` closed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Abandoned {
     pub branch: String,
 }
 
 /// How the branch's checks stand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChecksState {
     Passing,
@@ -60,7 +60,7 @@ pub enum ChecksState {
 }
 
 /// `pr.checks`: the provider's check report for the branch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Checks {
     pub branch: String,
@@ -81,7 +81,7 @@ impl Checks {
 }
 
 /// What `pr.request_review` asked for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewRequested {
     /// The PR named, or null for the current branch's.

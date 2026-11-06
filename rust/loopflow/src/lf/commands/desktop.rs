@@ -524,7 +524,7 @@ enum DesktopViewResult<'a> {
 /// `layout` reads and writes a Work's pane intent or a Dashboard's slot layout.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopLayoutRecord<'a> {
+pub(crate) enum DesktopLayoutRecord<'a> {
     Work(&'a Option<crate::work::selection::WorkPaneLayout>),
     /// Its `slots`; null is the default layout.
     Dashboard(&'a crate::work::selection::Dashboard),
@@ -1694,7 +1694,7 @@ impl TileEdit {
 /// A tile verb's output: Desktop-free edits print the record they wrote.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopTileRecord {
+pub(crate) enum DesktopTileRecord {
     Dashboard(Box<crate::work::selection::Dashboard>),
     /// The repository's Task order.
     Tasks(Vec<String>),

@@ -38,7 +38,9 @@ pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJou
 pub use recording_gap::{GapSpan, RecordingGap};
 
 /// Availability of retained planning facts, independent of execution permission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PlanningState {
@@ -50,7 +52,9 @@ pub enum PlanningState {
 }
 
 /// Acquisition evidence is independent of saved Work and outbound delivery.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskAcquisition {
     pub state: PlanningState,
     pub observed_at: Option<i64>,
@@ -1118,7 +1122,9 @@ pub struct ProviderAccountSelection {
 
 /// One observed subscription rate-limit window: how much of the plan's
 /// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitWindow {
     pub window: String,
     pub used_percent: u8,
@@ -1127,7 +1133,9 @@ pub struct AccountLimitWindow {
 }
 
 /// A stored window observation for one managed account.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AccountLimitRow {
     pub provider: String,
     pub account_id: ProviderAccountId,

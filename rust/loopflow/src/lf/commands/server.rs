@@ -11,5 +11,16 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+        ServerCommand::Describe { json: true } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&crate::server::schema::describe())?
+            );
+            Ok(())
+        }
+        ServerCommand::Describe { json: false } => {
+            println!("{}", crate::server::schema::summary());
+            Ok(())
+        }
     }
 }

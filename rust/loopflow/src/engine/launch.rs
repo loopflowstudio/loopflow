@@ -22,7 +22,7 @@ static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// What a detached operation set going: the `lf` Process that carries it.
 /// `process.get` reads how it is going; `log` is its output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Launched {
     /// The operation the Process carries: `checkout.sync`, `pr.land`,

@@ -12,7 +12,7 @@ use super::{
     PlanningConfig, ReleaseConfig, SessionConfig, SummaryConfig, UserConfig,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Applicability {
     Launch,
@@ -22,7 +22,7 @@ pub enum Applicability {
     PersonalScoped,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Combination {
     Replace,
@@ -30,7 +30,7 @@ pub enum Combination {
     Merge,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Portability {
     Portable,
@@ -38,7 +38,7 @@ pub enum Portability {
     ReferencedAssets,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Lifecycle {
     NextRead,
@@ -48,7 +48,7 @@ pub enum Lifecycle {
 }
 
 /// Display order and feature ownership, independent of settings precedence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, schemars::JsonSchema)]
 pub enum Category {
     #[serde(rename = "Agents and context")]
     Agents,
@@ -90,21 +90,45 @@ pub struct Definition {
     pub description: &'static str,
 }
 
+/// What one [`Definition`] prints: its serialization and its schema.
+#[derive(Serialize, schemars::JsonSchema)]
+struct DefinitionRow {
+    key: String,
+    shorthands: Vec<String>,
+    category: Category,
+    schema: schemars::Schema,
+    default: &'static str,
+    applicability: Applicability,
+    combination: Combination,
+    portability: Portability,
+    lifecycle: Lifecycle,
+    description: &'static str,
+}
+
 impl Serialize for Definition {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut row = serializer.serialize_struct("Definition", 10)?;
-        row.serialize_field("key", &self.canonical_key())?;
-        row.serialize_field("shorthands", &self.shorthands())?;
-        row.serialize_field("category", &self.category)?;
-        row.serialize_field("schema", &(self.schema)())?;
-        row.serialize_field("default", self.default)?;
-        row.serialize_field("applicability", &self.applicability)?;
-        row.serialize_field("combination", &self.combination)?;
-        row.serialize_field("portability", &self.portability)?;
-        row.serialize_field("lifecycle", &self.lifecycle)?;
-        row.serialize_field("description", self.description)?;
-        row.end()
+        DefinitionRow {
+            key: self.canonical_key(),
+            shorthands: self.shorthands(),
+            category: self.category,
+            schema: (self.schema)(),
+            default: self.default,
+            applicability: self.applicability,
+            combination: self.combination,
+            portability: self.portability,
+            lifecycle: self.lifecycle,
+            description: self.description,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl schemars::JsonSchema for Definition {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Definition".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        DefinitionRow::json_schema(generator)
     }
 }
 

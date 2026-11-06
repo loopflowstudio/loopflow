@@ -165,7 +165,9 @@ pub(crate) fn select_agent(agent: Option<&str>) -> Result<&str, LoadError> {
 }
 
 /// Authority is independent of the declaration's scope and target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigSource {
     Builtin,

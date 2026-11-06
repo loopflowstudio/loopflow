@@ -62,7 +62,7 @@ const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 
 /// One line of a watch.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct WatchFrame<'a, T> {
     /// The newest request this reading began after.
     pub answers: Option<u64>,

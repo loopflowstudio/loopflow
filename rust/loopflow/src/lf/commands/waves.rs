@@ -39,7 +39,7 @@ use crate::work::wave::Wave;
 /// One wave's registry snapshot — the `lf wave list` row and the `wave` field of
 /// `lf wave status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
@@ -64,7 +64,7 @@ pub struct WaveSnapshot {
 
 /// `lf wave status <wave>` and `lf wave planning <wave>`: current planning,
 /// Task conditions and Session history. Wire type; no defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveDetailSnapshot {
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
@@ -84,7 +84,7 @@ pub struct WaveDetailSnapshot {
 /// A reading, or the reason there is none. "We looked and found nothing" and
 /// "we could not look" are different facts, and an audit surface that renders
 /// them the same is lying — so the wire says which.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Evidence<T> {
     /// The source answered. `truncated` says a cap hid older items, so a full
@@ -112,7 +112,7 @@ impl<T> Evidence<T> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskSummary {
     pub repository_id: String,
     pub repo: String,
@@ -132,7 +132,7 @@ pub struct TaskSummary {
     pub assignee: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NextMoveOwner {
     User,
@@ -142,13 +142,13 @@ pub enum NextMoveOwner {
     External,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NextMove {
     pub owner: NextMoveOwner,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
     /// Completion and abandonment are independent of Graph position.
@@ -166,7 +166,7 @@ pub struct TaskRuntimeSnapshot {
 /// A Task's derived operating condition. Sessions own review actions; this state
 /// only lets Work surfaces explain whether the Task is clear, waiting on
 /// another actor, blocked, or unreadable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskConditionState {
     Waiting,
@@ -181,7 +181,7 @@ pub use crate::ops::task_actions::{
 };
 use crate::ops::task_run::TaskRunControl;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalProgressEvidenceState {
     Observed,
@@ -192,7 +192,7 @@ pub enum LocalProgressEvidenceState {
 
 /// The one definition of unsettled local Task progress. Every constituent is
 /// explicit so a popover can explain the fold without running Git again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LocalProgressEvidence {
     pub state: LocalProgressEvidenceState,
     pub unsettled: Option<bool>,
@@ -203,7 +203,7 @@ pub struct LocalProgressEvidence {
 }
 
 /// A Task's shared condition and the evidence that proves it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskConditionSnapshot {
     pub state: TaskConditionState,
     pub reason: String,
@@ -221,13 +221,13 @@ pub struct TaskConditionSnapshot {
 /// Stable references for one Task, shared verbatim by `lf wave status` and
 /// `lf wave show`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskReferenceSnapshot {
     pub issue_url: Option<String>,
     pub workspace: Option<TaskWorktreeSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskWorktreeSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
     pub machine_label: Option<String>,
@@ -239,7 +239,7 @@ pub struct TaskWorktreeSnapshot {
     pub local_exists: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrSnapshot {
     pub id: String,
     pub sequence: u32,
@@ -253,7 +253,7 @@ pub struct PrSnapshot {
     pub abandoned_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrPublicationSnapshot {
     pub requested_at: String,
     pub presentation: Option<PrPresentationSnapshot>,
@@ -261,14 +261,14 @@ pub struct PrPublicationSnapshot {
     pub merge: Option<PrMergeRequestSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrPresentationSnapshot {
     pub title: String,
     pub body: String,
     pub head_sha: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PrMergeRequestSnapshot {
     pub mode: PrMergeMode,
     pub requested_at: String,
@@ -286,7 +286,7 @@ impl From<&PrMergeRequest> for PrMergeRequestSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GithubPrSnapshot {
     pub number: u32,
     pub url: String,
@@ -329,7 +329,7 @@ impl PrSnapshot {
 
 /// Non-terminal durable Task Work whose historical Project is no longer in the
 /// current PM snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UnavailableTaskEvidence {
     pub work_id: String,
     pub task_id: String,
@@ -343,7 +343,7 @@ pub struct UnavailableTaskEvidence {
 /// Where a row sits in the plan, derived once so every surface buckets it
 /// identically.
 ///
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RoadmapSection {
     /// This Work's own planner must move next.
@@ -358,7 +358,7 @@ pub enum RoadmapSection {
 
 /// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RoadmapSnapshot {
     /// Every Task once; each names its Wave.
     pub tasks: Evidence<RoadmapTask>,
@@ -367,7 +367,7 @@ pub struct RoadmapSnapshot {
     pub waves: Vec<WaveRoadmap>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveRoadmap {
     /// The graph the Wave's Tasks take up by default.
     pub graph: Option<String>,
@@ -396,7 +396,7 @@ impl RoadmapSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
     pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub current: bool,
@@ -485,7 +485,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
 
 /// One saved Task, its local execution evidence, section and active PR.
 /// Runtime availability is independent of whether the Task has started.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RoadmapTask {
     pub task: TaskSummary,
     pub reference: TaskReferenceSnapshot,
@@ -994,7 +994,7 @@ where
 
 /// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
 /// which keeps the pane current after the Task leaves the plan.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: crate::ops::task::TaskStatus,
@@ -1136,7 +1136,7 @@ async fn repository_scope(
 }
 
 /// `lf task list --closed --json`: one page of closed Tasks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ClosedTaskPageSnapshot {
     pub tasks: Vec<RoadmapTask>,
     /// Pass as `--after` for the next page; absent on the last page.

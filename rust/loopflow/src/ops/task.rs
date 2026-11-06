@@ -71,7 +71,9 @@ use crate::work::wave::Wave;
 use time::format_description::well_known::Rfc3339;
 
 /// What `lf task wait --until` waits for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskWaitUntil {
     /// Its PR is open, or it finished first.
@@ -141,7 +143,9 @@ pub struct TaskCreateInput {
     pub report: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskControlResult {
     pub issue_id: String,
     pub task_id: String,
@@ -149,7 +153,7 @@ pub struct TaskControlResult {
     pub observation: Observation,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
     pub issue_id: Option<String>,
@@ -175,8 +179,10 @@ pub struct TaskSnapshot {
     pub provider: Option<String>,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: time::OffsetDateTime,
     /// Freshness of the PR state against GitHub as of this read. `Degraded`
@@ -193,13 +199,17 @@ pub struct TaskSnapshot {
 }
 
 /// When someone approved or stopped Auto-Ship, and who.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ShipMark {
     pub at: i64,
     pub by: crate::process::Starter,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskChangedFile {
     pub path: String,
     pub old_path: Option<String>,
@@ -209,7 +219,9 @@ pub struct TaskChangedFile {
     pub untracked: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskChangesSnapshot {
     pub recovery_directory: Option<String>,
     pub issue_identifier: String,
@@ -221,7 +233,9 @@ pub struct TaskChangesSnapshot {
     pub scratch_truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
@@ -232,7 +246,9 @@ pub struct TaskDiffSnapshot {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFileState {
     Text,
@@ -242,7 +258,9 @@ pub enum TaskFileState {
     Missing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskFileSnapshot {
     pub recoveries: Vec<TaskFileRecovery>,
     pub issue_identifier: String,
@@ -1762,7 +1780,7 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskStatus {
     pub sync: Option<crate::store::planning_sync::PlanningSyncStatus>,
     pub task: Option<Task>,
@@ -2266,7 +2284,7 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct TaskEdit {
     pub id: String,
     pub sync: crate::store::planning_sync::PlanningSyncStatus,

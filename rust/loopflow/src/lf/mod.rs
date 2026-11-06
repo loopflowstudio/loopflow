@@ -1391,6 +1391,12 @@ pub enum ServerCommand {
     Run,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Summarize the protocol this build speaks; needs no server.
+    Describe {
+        /// Print its JSON Schema, generated from the wire types
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl MachineCommand {
@@ -3485,6 +3491,11 @@ mod tests {
                 cmd: ServerCommand::Status
             }
         ));
+        let describe = Cli::try_parse_from(["lf", "server", "describe", "--json"])
+            .unwrap()
+            .command
+            .unwrap();
+        assert!(!describe.changes_work());
         assert!(Cli::try_parse_from(["lf", "machine", "service", "run"]).is_err());
         assert!(Cli::try_parse_from(["lf", "server", "ensure"]).is_err());
         let tree = crate::lf::navigation::command_tree();

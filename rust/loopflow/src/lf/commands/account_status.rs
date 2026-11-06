@@ -8,7 +8,7 @@ use crate::provider_account::{account_login, acquire_managed_login_lock, open_ac
 use crate::provider_auth::{Provider, ProviderAuthService};
 use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedStore};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Verification {
     Accepted,
@@ -17,7 +17,7 @@ pub enum Verification {
     NotChecked,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     Managed,
@@ -25,14 +25,14 @@ pub enum Scope {
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AccountReport {
     pub accounts: Vec<AccountRow>,
     pub browser: Option<BrowserDetails>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AccountRow {
     pub provider: Provider,
@@ -56,7 +56,7 @@ pub struct AccountRow {
     pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BrowserDetails {
     pub profiles: Vec<AccessProfile>,

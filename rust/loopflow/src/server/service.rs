@@ -17,7 +17,8 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
-    ServerOperation, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ServerOperation, SessionOwner, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
+    REVISION,
 };
 use crate::engine::{Error, ErrorCode};
 use crate::lf::commands::{read::Read, watch::Subscription};
@@ -481,7 +482,7 @@ async fn operate(
             .await
             .map_err(unavailable)?
             .map_err(unavailable)?;
-            Ok(serde_json::json!({ "owner": owner }))
+            serde_json::to_value(SessionOwner { owner }).map_err(unavailable)
         }
         Operation::Read(query) => {
             tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))

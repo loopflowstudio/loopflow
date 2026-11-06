@@ -4,7 +4,9 @@
 //! carries one JSON object per line.
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, write::Write};
+use crate::lf::commands::{read::Read, watch::WatchFrame, write::Write};
+use crate::server::schema::Untyped;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
@@ -15,7 +17,7 @@ pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 pub const MAX_CONNECTIONS: usize = 64;
 
 /// One message from the client.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
     /// The connection's first message; the server answers `welcome`.
@@ -34,7 +36,7 @@ pub enum ClientMessage {
     Cancel { id: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     pub revision: u32,
@@ -43,7 +45,7 @@ pub struct Hello {
 }
 
 /// Who connected, for diagnostics; it grants nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
     pub kind: String,
@@ -55,7 +57,7 @@ pub struct ClientIdentity {
 /// What a request asks for, named by its `kind`: a dotted resource and verb
 /// (`task.complete`, `planning.list`). `desktop.*` kinds are Desktop's own
 /// arrangement state, not part of what other clients are offered.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Operation {
     Server(ServerOperation),
@@ -64,33 +66,44 @@ pub enum Operation {
 }
 
 /// Operations the server owns rather than a shared read or write.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
     /// The owner Process of a Session's terminal, if one is recorded.
     #[serde(rename = "session.owner")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionOwner>()))]
     SessionOwner { session: crate::id::LfSessionId },
     /// Switch this connection to the existing owner protocol after `bridged`.
     #[serde(rename = "process.attach")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
     Attach { owner: LfProcessId },
 }
 
+/// What `session.owner` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionOwner {
+    pub owner: Option<LfProcessId>,
+}
+
 /// One message from the server.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
-    /// What the request returned: a read's or write's value, `{owner}` for
-    /// `session.owner`, null once a subscription or attachment is confirmed.
-    /// `trace_id` correlates the server's diagnostics for it.
+    /// What the request returned: the value its operation's `x-result` names,
+    /// null once a subscription or attachment is confirmed. `trace_id`
+    /// correlates the server's diagnostics for it.
     Response {
         id: String,
         trace_id: crate::id::TraceId,
         result: serde_json::Value,
     },
+    /// One watch line; its `body` has the shape of the read's `x-result`.
     Reading {
         id: String,
+        #[schemars(with = "WatchFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
     /// The subscription's last reading was its answer (`task.wait` reached
@@ -108,7 +121,7 @@ pub enum ServerMessage {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
     /// The server's name for this connection, as `lf server status` lists it.
@@ -122,12 +135,13 @@ pub struct Welcome {
     pub build: String,
     pub executable_sha256: String,
     /// Null while the Machine registry is unavailable or uninitialized.
+    #[schemars(with = "Option<crate::durable::Machine>")]
     pub machine: Option<serde_json::Value>,
     pub capabilities: Vec<String>,
     pub limits: Limits,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Status {
     pub revision: u32,
@@ -139,7 +153,7 @@ pub struct Status {
 }
 
 /// One welcomed connection, from `welcome` until it closes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectedClient {
     pub id: String,
@@ -150,7 +164,7 @@ pub struct ConnectedClient {
     pub requests: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
     pub max_message: usize,

@@ -17,13 +17,13 @@ use std::path::Path;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::ConcreteStep;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CompiledGraph {
     pub name: String,
     pub steps: Vec<GraphNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphNode {
     pub key: u32,
     /// Authored occurrence id, when the definition names one.
@@ -42,7 +42,7 @@ pub struct GraphNode {
     pub paths: Vec<CompiledGraphPath>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphNodeKind {
     Skill,
@@ -50,7 +50,7 @@ pub enum GraphNodeKind {
     Xor,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CompiledGraphPath {
     pub name: String,
     pub description: String,
@@ -59,7 +59,7 @@ pub struct CompiledGraphPath {
 
 /// Execution evidence for one backward edge in the pinned invocation. The edge
 /// itself is the deciding node's `returns_to`; this carries only its counts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphReturn {
     /// Key of the deciding occurrence that owns the edge.
     pub decider: u32,
@@ -67,14 +67,14 @@ pub struct GraphReturn {
 }
 
 /// Disclosure structure from the same resolution that supplies the execution graph.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphComposition {
     /// Digest of resolved content and composition; unrelated to invocation identity.
     pub revision: String,
     pub items: Vec<GraphCompositionItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GraphCompositionItem {
     Node {
@@ -121,7 +121,7 @@ fn composition_items(
 }
 
 /// One autonomous Graph definition, as it would be captured if started now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphCatalogEntry {
     pub name: String,
     /// The repository file that defines it; `None` for a builtin.

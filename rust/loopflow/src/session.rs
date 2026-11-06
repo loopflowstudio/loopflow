@@ -130,7 +130,7 @@ pub struct SessionBind {
 pub(crate) const AVAILABILITY_QUIET_SECONDS: i64 = 120;
 
 /// Bounded provider text observed on the current native turn. Display evidence only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionPreview {
     pub provider_thread: AgentSessionId,
     pub provider_turn: String,
@@ -204,7 +204,7 @@ pub struct SessionWork {
 }
 
 /// How this attempt received its work attribution; absent for unrecorded history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkSource {
     Declared,
@@ -294,7 +294,7 @@ pub(crate) struct SessionSummary {
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphProcessSummary {
     /// The Graph process.
     pub id: String,
@@ -306,7 +306,7 @@ pub struct GraphProcessSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphProcessSummaryState {
     /// The Graph process has no recorded exit.

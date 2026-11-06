@@ -35,7 +35,7 @@ pub fn unset(destination: &Destination, key: &str) -> Result<Declaration> {
 
 /// What `config.explain` returns: every source's candidate for `key` and the
 /// effective value, as a launch at the destination's scope resolves it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct Explanation {
     pub path: PathBuf,
     pub key: String,
@@ -106,10 +106,12 @@ pub fn settings(
     inspect(&repo, wave, skill, graph, step)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct Declaration {
     pub path: PathBuf,
     pub key: String,
+    /// The YAML declaration, as JSON.
+    #[schemars(with = "serde_json::Value")]
     pub value: Value,
     pub lifecycle: crate::config::catalog::Lifecycle,
 }

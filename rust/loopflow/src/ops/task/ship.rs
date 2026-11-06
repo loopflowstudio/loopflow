@@ -47,7 +47,7 @@ pub enum ShipStep {
 
 /// What a shipping Task is doing, derived from its ship process, its state
 /// and its landing. Nothing here waits on a person.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ShippingSnapshot {
     /// When the Task was handed off.
     pub shipped_at: i64,
@@ -56,7 +56,7 @@ pub struct ShippingSnapshot {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ShippingState {

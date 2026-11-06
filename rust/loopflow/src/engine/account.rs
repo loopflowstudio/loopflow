@@ -17,7 +17,7 @@ use crate::store::{AccountLimitWindow, ProviderAccountId};
 use crate::subscription::RateLimitResetCredits;
 
 /// The login a write selected, as the caller named it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
     pub provider: Provider,
@@ -52,7 +52,7 @@ impl Settings {
 }
 
 /// An account's windows and banked resets at one instant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UsageSnapshot {
     pub windows: Vec<AccountLimitWindow>,
@@ -60,7 +60,7 @@ pub struct UsageSnapshot {
 }
 
 /// What `account.redeem_reset` spent, and the usage before and after.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Redemption {
     pub provider: Provider,

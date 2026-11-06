@@ -280,7 +280,9 @@ impl SqliteStore {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectReadinessState {
     Unconfigured,
@@ -290,7 +292,7 @@ pub enum ProjectReadinessState {
     Terminal,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProjectReadiness {
     pub state: ProjectReadinessState,
     pub project_id: Option<String>,
@@ -299,7 +301,7 @@ pub struct ProjectReadiness {
     pub activation: Option<ProjectActivation>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProjectActivation {
     pub lf_process_id: String,
     pub completed_at: Option<i64>,

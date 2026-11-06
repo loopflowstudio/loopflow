@@ -22,7 +22,7 @@ use crate::ops::task_ownership::OwnershipChange;
 use crate::work::task::comment::TaskComments;
 
 /// What `task.run` started.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TaskRun {
     /// The run's Graph process registered; it goes on without its launcher.
@@ -62,7 +62,7 @@ impl TaskRun {
 }
 
 /// What `task.ship` set going.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TaskShip {
     /// Auto-Ship is approved and `process` ships the Task to `end`.
@@ -100,7 +100,7 @@ impl TaskShip {
 }
 
 /// What `task.hold` withdrew.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hold {
     pub issue: String,
@@ -120,7 +120,7 @@ impl Hold {
 }
 
 /// One reading of `task.wait`: the Task now, and whether it reached the state waited for.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Waited {
     pub reached: bool,

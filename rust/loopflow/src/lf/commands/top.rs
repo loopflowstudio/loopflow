@@ -23,7 +23,7 @@ const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityNodeKind {
@@ -31,7 +31,7 @@ pub enum ActivityNodeKind {
     AgentProcess,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityState {
@@ -52,7 +52,7 @@ impl ActivityState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivityNode {
     pub id: String,
     pub parent_id: Option<String>,
@@ -62,12 +62,13 @@ pub struct ActivityNode {
     pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
     pub state: ActivityState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivitySnapshot {
     pub nodes: Vec<ActivityNode>,
 }

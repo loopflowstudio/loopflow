@@ -218,7 +218,7 @@ pub(crate) async fn select_connection(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
     /// Passive metadata has no trustworthy live/closed observation.
@@ -281,13 +281,13 @@ pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<Ses
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionPage<T = SessionRecord> {
     pub entries: Vec<T>,
     pub next: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
@@ -324,7 +324,7 @@ pub struct SessionRecord {
     pub terminal_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAvailability {
     Available,
@@ -350,7 +350,7 @@ fn session_availability(session: &crate::session::SessionSummary) -> Option<Sess
 /// Whether a Session's conversation is an occurrence of a Graph. Membership
 /// comes only from its recorded Graph invocation, never from matching Task, checkout,
 /// provider, or skill.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionGraphMembership {
     Step {
@@ -370,7 +370,7 @@ pub enum SessionGraphMembership {
 }
 
 /// Where a Graph occurrence sits relative to its Graph's current position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionGraphOccurrence {
     /// The row retains membership but no selected occurrence.
@@ -1415,7 +1415,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
 }
 
 /// Resolved identity for confirmation, not a reservation or permission to bind.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionBindingPreview {
     pub session_id: crate::id::LfSessionId,
     pub task_id: String,

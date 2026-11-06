@@ -21,7 +21,7 @@ pub(super) fn show_route(repo: Option<&str>, default: bool, json: bool) -> Resul
 }
 
 /// How one provider's account is selected for a repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RouteReport {
     pub provider: Provider,
@@ -37,7 +37,7 @@ pub struct RouteReport {
     pub diagnostic: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RouteAccount {
     pub account_id: ProviderAccountId,

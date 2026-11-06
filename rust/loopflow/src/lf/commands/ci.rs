@@ -11,7 +11,7 @@ use crate::lf::output::truncate;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::open_existing_store;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CiReportDto {
     pub generated_at: String,
@@ -22,7 +22,7 @@ pub struct CiReportDto {
     pub incidents: Vec<CiIncidentDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CiSummaryDto {
     pub incidents: usize,
@@ -41,7 +41,7 @@ pub struct CiSummaryDto {
     pub p95_merge_seconds: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CiIncidentDto {
     pub identity: String,

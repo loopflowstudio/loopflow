@@ -10,7 +10,7 @@ use crate::lf::navigation::{
     command_tree, definition_invocation, definition_source, format_target, resolve_path,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
     pub name: String,

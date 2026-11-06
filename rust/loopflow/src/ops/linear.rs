@@ -41,7 +41,7 @@ pub struct LinearInitOptions {
     pub team_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinearInitResult {
     pub wave: String,
@@ -89,7 +89,7 @@ pub struct LinearReteamOptions {
 
 /// One issue that moves into the repository Team. `new_identifier` is filled only
 /// after an applied move (Linear assigns the number then).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinearReteamMove {
     pub wave: String,
@@ -103,7 +103,7 @@ pub struct LinearReteamMove {
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinearReteamProjectMove {
     pub wave: String,
@@ -112,7 +112,7 @@ pub struct LinearReteamProjectMove {
     pub from_teams: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinearReteamResult {
     pub repository: String,

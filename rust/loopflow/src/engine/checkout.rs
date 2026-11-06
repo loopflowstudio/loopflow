@@ -15,7 +15,7 @@ use crate::id::LfProcessId;
 use crate::ops::{Progress, SyncPlan};
 
 /// What `checkout.commit` left.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Committed {
     pub branch: Option<String>,
@@ -26,7 +26,7 @@ pub struct Committed {
 }
 
 /// What `checkout.create` made, or would make with `preview`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Checkout {
     pub path: PathBuf,
@@ -40,7 +40,7 @@ pub struct Checkout {
 }
 
 /// What `checkout.sync` did.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Sync {
     /// `preview`: the strategy a sync would take; nothing moved.

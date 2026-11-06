@@ -73,7 +73,7 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 }
 
 /// A read an app serves inside its own process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 /// On the wire each read is a resource-named `kind` (`task.get`); `desktop.*`
 /// reads are Desktop's own arrangement state.
 #[serde(tag = "kind", deny_unknown_fields)]
@@ -81,15 +81,18 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 pub enum Read {
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
     MonitorPs,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
     DesktopPlans { directory: PathBuf },
     /// `lf --cwd <directory> session list`, with `--interactive all`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a watch.
     #[serde(rename = "session.list")]
+    #[schemars(extend("x-result" = (crate::server::schema::either::<Vec<crate::ops::human_session::SessionRecord>, crate::ops::human_session::SessionPage>(generator))))]
     SessionList {
         directory: PathBuf,
         headless: bool,
@@ -98,13 +101,16 @@ pub enum Read {
     },
     /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
     DesktopTask { directory: PathBuf, issue: String },
     /// `lf task changes <issue> --base <base>`: a Task's changed files.
     #[serde(rename = "task.changes")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskChangesSnapshot>()))]
     TaskChanges { issue: String, base: String },
     /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
     /// draft on stdin: one Task's patch.
     #[serde(rename = "task.diff")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskDiffSnapshot>()))]
     TaskDiff {
         issue: String,
         path: Option<String>,
@@ -113,22 +119,28 @@ pub enum Read {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     #[serde(rename = "task.file")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskFileSnapshot>()))]
     TaskFile { issue: String, path: String },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
     Waves,
     /// `lf machine id`: this Machine's identity.
     #[serde(rename = "machine.self")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::Machine>()))]
     MachineId,
     /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
     Portfolio,
     /// `lf config catalog --json`: every typed setting and its policies.
     #[serde(rename = "config.catalog")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::config::catalog::Definition>>()))]
     ConfigCatalog,
     /// `lf --cwd <directory> [--wave <wave>] config settings [--skill|--graph
     /// [--step]] --json`: effective settings and their sources.
     #[serde(rename = "config.settings")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::server::schema::Untyped>>()))]
     Settings {
         directory: PathBuf,
         wave: Option<String>,
@@ -138,6 +150,7 @@ pub enum Read {
     },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
     ConfigGet {
         destination: crate::config::files::Destination,
         key: String,
@@ -145,22 +158,27 @@ pub enum Read {
     /// `lf config explain <key> <destination flags> --json`: every source's
     /// candidate and the value a launch there resolves.
     #[serde(rename = "config.explain")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Explanation>()))]
     ConfigExplain {
         destination: crate::config::files::Destination,
         key: String,
     },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     #[serde(rename = "desktop.layout")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopLayoutRecord>()))]
     PaneLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> repository people`: who owns the repository's Tasks.
     #[serde(rename = "repository.people")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::people::RepoPerson>>()))]
     People { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
     #[serde(rename = "graph.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::graph::compiled::GraphCatalogEntry>>()))]
     Graphs { directory: PathBuf },
     /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::ViewPlan>()))]
     ViewPlan {
         directory: PathBuf,
         expression: Option<String>,
@@ -168,6 +186,7 @@ pub enum Read {
     /// `lf --cwd <directory> task runs <task> [--after <after>]`: one page of
     /// the Graphs that ran for a Task.
     #[serde(rename = "task.runs")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessPage>()))]
     GraphProcesses {
         directory: PathBuf,
         task: String,
@@ -175,10 +194,12 @@ pub enum Read {
     },
     /// `lf process show <id>`: one Graph that ran, with its steps.
     #[serde(rename = "process.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessDetail>()))]
     GraphProcess { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
     #[serde(rename = "session.usage")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::session_record::SessionHistory>>()))]
     Usage {
         days: u32,
         wave: Option<String>,
@@ -188,15 +209,18 @@ pub enum Read {
     /// `lf task context <task>`: what each of that Task's Session inputs was
     /// made of.
     #[serde(rename = "task.context")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::context_usage::ContextReport>()))]
     TaskContext { task: String },
     /// `lf --cwd <directory> wave planning <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
     #[serde(rename = "wave.planning")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
     WaveDetail { directory: PathBuf, wave: String },
     /// `lf --cwd <directory> task list --closed --wave <wave> [--after
     /// <after>]`: one page of a Wave's closed Tasks. Only `closed` lists
     /// exist; open Tasks are `planning.list`'s.
     #[serde(rename = "task.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::ClosedTaskPageSnapshot>()))]
     ClosedTasks {
         directory: PathBuf,
         wave: String,
@@ -205,14 +229,17 @@ pub enum Read {
     },
     /// `lf machine list`: your registered Machines.
     #[serde(rename = "machine.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::machine::MachineListing>>()))]
     Machines,
     /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
     History(HistoryWindow),
     /// `lf --cwd <directory> planning list [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its watch reads the store.
     #[serde(rename = "planning.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::RoadmapSnapshot>()))]
     Roadmap {
         directory: PathBuf,
         wave: Option<String>,
@@ -222,36 +249,44 @@ pub enum Read {
     /// `lf --cwd <directory> repository planning`: where the repository's
     /// planning is exchanged. Its watch exchanges it while it runs.
     #[serde(rename = "repository.planning")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::server::schema::Untyped>()))]
     PlanningStatus { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::open::WorkLink>>()))]
     WorkLink { directory: PathBuf, url: String },
     /// `lf --repository <id> repository path`: a repository plan's
     /// checkout on this Machine.
     #[serde(rename = "repository.path")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
     RepositoryPath { id: RepositoryId },
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
     #[serde(rename = "wave.graph")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::project::WaveGraph>()))]
     WaveGraph {
         directory: PathBuf,
         wave: Option<String>,
     },
     /// `lf --cwd <directory> repository tokens [--days <days>]`: the codebase's size.
     #[serde(rename = "repository.tokens")]
+    #[schemars(extend("x-result" = (crate::server::schema::either::<crate::lf::commands::tokens::CodeNode, Vec<crate::lf::commands::tokens::CodeSnapshot>>(generator))))]
     Tokens {
         directory: PathBuf,
         days: Option<u32>,
     },
     /// `lf session retention`: how much Session history providers keep.
     #[serde(rename = "session.retention")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::transcript::summary::RetentionSummary>()))]
     Retention,
     /// `lf machine doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::doctor::DoctorReport>()))]
     Doctor,
     /// `lf repository ci --since <since> [--wave <wave>] [--repo <repo>]`:
     /// how failed CI was detected, repaired and landed on this Machine.
     #[serde(rename = "repository.ci")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::ci::CiReportDto>()))]
     Ci {
         since: String,
         wave: Option<String>,
@@ -260,6 +295,7 @@ pub enum Read {
     /// `lf account [<provider>] [--cached] [--details] --json`: every login's
     /// state on this Machine.
     #[serde(rename = "account.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::account::account_status::AccountReport>()))]
     AccountList {
         provider: Option<crate::provider_auth::Provider>,
         cached: bool,
@@ -268,6 +304,7 @@ pub enum Read {
     /// `lf --cwd <directory> account route [--repo <repo>] [--default]
     /// --json`: how the repository selects an account for each provider.
     #[serde(rename = "account.route")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::RouteReport>>()))]
     AccountRoute {
         directory: PathBuf,
         repo: Option<String>,
@@ -276,6 +313,7 @@ pub enum Read {
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::list::Entry>>()))]
     SkillList {
         directory: PathBuf,
         path: Vec<String>,
@@ -283,10 +321,12 @@ pub enum Read {
     /// `lf --cwd <directory> pr checks [--required] --json`: the branch's
     /// check report as the provider prints it, with its state.
     #[serde(rename = "pr.checks")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Checks>()))]
     PrChecks { directory: PathBuf, required: bool },
     /// `lf --cwd <directory> pr reviews [<pr>] --json`: requested reviews
     /// and review submissions, each with the commit it reviewed.
     #[serde(rename = "pr.reviews")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::server::schema::Untyped>()))]
     PrReviews {
         directory: PathBuf,
         pr: Option<String>,
@@ -295,6 +335,7 @@ pub enum Read {
     /// and whether it reached `until`. Subscribed, it reads on each change and
     /// ends after the reading that reached it.
     #[serde(rename = "task.wait")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::task::Waited>()))]
     TaskWait {
         issue: String,
         until: crate::ops::task::TaskWaitUntil,

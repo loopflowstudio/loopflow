@@ -144,7 +144,7 @@ pub(crate) fn deserialize_task_identifier<'de, D: serde::Deserializer<'de>>(
 
 macro_rules! prefixed_uuid_id {
     ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, schemars::JsonSchema)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -204,7 +204,7 @@ pub(crate) use prefixed_uuid_id;
 
 macro_rules! uuid_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, schemars::JsonSchema)]
         pub struct $name(String);
 
         impl $name {
@@ -297,7 +297,9 @@ uuid_id!(SteerBatchId);
 uuid_id!(AttachmentToken);
 
 /// Loopflow-owned conversation identity. Native provider conversations use AgentSessionId.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct LfSessionId(String);
 
@@ -366,7 +368,16 @@ impl rusqlite::types::FromSql for LfSessionId {
 
 /// A provider-owned conversation id. Opaque vendor bytes, never an lf identity.
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(transparent)]
 pub struct AgentSessionId(String);

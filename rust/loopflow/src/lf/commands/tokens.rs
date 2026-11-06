@@ -32,7 +32,7 @@ const NUM_WIDTH: usize = 12;
 const MAX_DEPTH: usize = 3;
 
 /// One directory or file in the codebase tree. Wire type: every field required.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeNode {
     /// Repo-relative path. Empty at the root.
     pub path: String,
@@ -65,7 +65,7 @@ pub fn run(json: bool, days: Option<u32>) -> Result<()> {
 }
 
 /// How big the codebase was, per top-level directory, on each day it changed.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeSnapshot {
     /// `YYYY-MM-DD`, the day of the sampled commit.
     pub date: String,
@@ -77,7 +77,7 @@ pub struct CodeSnapshot {
 
 /// One file extension's weight in a snapshot. `ext` is lowercase and carries no
 /// dot; a file with no extension is `(none)`, and the long tail is `other`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeSlice {
     pub ext: String,
     pub lines: usize,

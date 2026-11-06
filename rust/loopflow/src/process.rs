@@ -6,7 +6,7 @@ use crate::durable::TaskId;
 use crate::id::{LfProcessId, LfSessionId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LfProcess {
     pub id: LfProcessId,
     pub pid: Option<u32>,
@@ -31,7 +31,7 @@ pub struct LfProcess {
 
 /// Who started a Process, derived from its ancestry: the first Session an
 /// agent ran it from, else the person at the root of its chain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Starter {
@@ -70,7 +70,7 @@ impl std::fmt::Display for Starter {
 }
 
 /// Both kinds have one durable identity and one inventory entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessKind {
     Lf,

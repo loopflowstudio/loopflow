@@ -47,7 +47,7 @@ impl crate::ops::Progress for Diagnostics {
 }
 
 /// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// No protocol revision in common; `data` names the side to update.

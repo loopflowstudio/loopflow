@@ -36,7 +36,8 @@ struct ServerProtocolTests {
         #expect(welcome.capabilities.contains("subscriptions"))
         #expect(welcome.limits.maxMessage == 33554432)
         #expect(welcome.limits.maxConnections == 64)
-        #expect(welcome.machine == .object([:]))
+        guard case .object(let machine) = welcome.machine else { Issue.record("Missing Machine"); return }
+        #expect(machine["label"] == .string("studio"))
     }
 
     @Test func readinessProbesWithoutHello() throws {

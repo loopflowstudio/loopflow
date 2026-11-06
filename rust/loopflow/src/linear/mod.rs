@@ -34,7 +34,7 @@ pub enum LinearBindingError {
 
 macro_rules! validated_string_id {
     ($name:ident, $label:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
         #[serde(transparent)]
         pub struct $name(String);
 

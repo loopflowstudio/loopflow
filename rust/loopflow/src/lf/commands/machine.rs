@@ -300,7 +300,7 @@ pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Resul
 }
 
 /// A Machine with your Wave and repository defaults that name it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,

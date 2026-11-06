@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::task;
 
 /// A typed mutation with the same defaults and effects as its CLI spelling.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 /// On the wire each write is a resource-named `kind` (`task.complete`);
 /// `desktop.*` writes are Desktop's own arrangement state.
 #[serde(tag = "kind", deny_unknown_fields)]
@@ -17,6 +17,7 @@ use crate::engine::task;
 pub enum Write {
     /// `lf task create --session <id> --title <title> --json`, without launching.
     #[serde(rename = "task.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
     TaskFromSession {
         directory: PathBuf,
         id: String,
@@ -24,12 +25,15 @@ pub enum Write {
     },
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
     #[serde(rename = "task.reopen")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
     TaskReopen { directory: PathBuf, issue: String },
     /// `lf task edit <issue> --notes=<notes>`.
     #[serde(rename = "task.update")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
     TaskNotes {
         directory: PathBuf,
         issue: String,
@@ -38,17 +42,21 @@ pub enum Write {
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and
     /// branches.
     #[serde(rename = "task.abandon")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
     TaskAbandon { directory: PathBuf, issue: String },
     /// `lf task claim <issue> --json`.
     #[serde(rename = "task.claim")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::TaskOwnership>()))]
     TaskClaim { directory: PathBuf, issue: String },
     /// `lf task unassign <issue> --json`.
     #[serde(rename = "task.unassign")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::TaskOwnership>()))]
     TaskUnassign { directory: PathBuf, issue: String },
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
     /// `approve` is `-b`: every step headless to `end`, approving Auto-Ship.
     #[serde(rename = "task.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::TaskRun>()))]
     TaskRun {
         directory: PathBuf,
         issue: String,
@@ -58,13 +66,16 @@ pub enum Write {
     },
     /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
     #[serde(rename = "task.ship")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::TaskShip>()))]
     TaskShip { directory: PathBuf, issue: String },
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::Hold>()))]
     TaskHold { directory: PathBuf, issue: String },
     /// `lf task steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::comment::TaskComments>()))]
     TaskSteer {
         directory: PathBuf,
         issue: String,
@@ -73,6 +84,7 @@ pub enum Write {
     /// `lf task report <issue> <message> --json`: progress for the Task's
     /// thread; an agent's carries its Session's provenance.
     #[serde(rename = "task.report")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::comment::TaskComments>()))]
     TaskReport {
         directory: PathBuf,
         issue: String,
@@ -80,9 +92,11 @@ pub enum Write {
     },
     /// `lf task interrupt <issue> --json`.
     #[serde(rename = "task.interrupt")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskControlResult>()))]
     TaskInterrupt { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     #[serde(rename = "task.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
     TaskMove {
         directory: PathBuf,
         issue: String,
@@ -91,6 +105,7 @@ pub enum Write {
     /// `lf task save <issue> <path> --revision <revision> --json`, with
     /// `content` on stdin.
     #[serde(rename = "task.save")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskFileSave>()))]
     TaskSave {
         directory: PathBuf,
         issue: String,
@@ -102,6 +117,7 @@ pub enum Write {
     /// one Session, every Session of the Wave or, with neither, every Session
     /// of the repository reads at its next boundary.
     #[serde(rename = "session.steer")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::steer::Steer>()))]
     SessionSteer {
         directory: PathBuf,
         session: Option<String>,
@@ -110,6 +126,7 @@ pub enum Write {
     },
     /// `lf session rename --json -- <id> <name>`.
     #[serde(rename = "session.rename")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionRename {
         directory: PathBuf,
         id: String,
@@ -118,6 +135,7 @@ pub enum Write {
     /// `lf session bind --json --task <task> -- <id>`; with `preview`,
     /// `--dry-run`: the Task a bind would assign, assigning nothing.
     #[serde(rename = "session.bind")]
+    #[schemars(extend("x-result" = (crate::server::schema::either::<crate::ops::human_session::SessionRecord, crate::ops::human_session::SessionBindingPreview>(generator))))]
     SessionBind {
         directory: PathBuf,
         id: String,
@@ -128,6 +146,7 @@ pub enum Write {
     /// --prepare --json`, with `--repo <directory>` when it names none of them:
     /// the conversation and the command that opens it, no provider started.
     #[serde(rename = "session.resume")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionResume {
         directory: PathBuf,
         id: Option<String>,
@@ -138,6 +157,7 @@ pub enum Write {
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
     #[serde(rename = "session.new")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionNew {
         directory: PathBuf,
         id: String,
@@ -146,6 +166,7 @@ pub enum Write {
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveAdded>()))]
     WaveAdd {
         directory: PathBuf,
         wave: String,
@@ -153,10 +174,12 @@ pub enum Write {
     },
     /// `lf wave sync <wave> --json`: the planning refresh.
     #[serde(rename = "wave.sync")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
     PlanningRefresh { directory: PathBuf, wave: String },
     /// `lf wave planning bind <wave> <project> --json`: the tracker Project
     /// bound as the Wave's current plan.
     #[serde(rename = "wave.planning.bind")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::project::Project>()))]
     WavePlanningBind {
         directory: PathBuf,
         wave: String,
@@ -165,6 +188,7 @@ pub enum Write {
     /// `lf wave planning connect [<wave>|--all] [--team-key <key>]
     /// [--team-name <name>] --json`: one receipt per Wave connected.
     #[serde(rename = "wave.planning.connect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::linear::LinearInitResult>>()))]
     WavePlanningConnect {
         directory: PathBuf,
         wave: Option<String>,
@@ -175,14 +199,17 @@ pub enum Write {
     /// `lf wave planning reteam [--apply] --json`: the moves onto the
     /// repository's Team; a plan without `apply`.
     #[serde(rename = "wave.planning.reteam")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::linear::LinearReteamResult>()))]
     WavePlanningReteam { directory: PathBuf, apply: bool },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
     #[serde(rename = "graph.customize")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::graph::Customized>()))]
     GraphCustomize { directory: PathBuf, name: String },
     /// `lf repository release run [<version>] [-t <target>] --json`, started
     /// detached: the Process carrying the release.
     #[serde(rename = "repository.release")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
     RepositoryRelease {
         directory: PathBuf,
         version: Option<String>,
@@ -190,6 +217,7 @@ pub enum Write {
     },
     /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
     #[serde(rename = "checkout.commit")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Committed>()))]
     CheckoutCommit {
         directory: PathBuf,
         message: Option<String>,
@@ -202,6 +230,7 @@ pub enum Write {
     /// --json`: the plan, a finished continue or abort, or the Process
     /// carrying a sync started detached.
     #[serde(rename = "checkout.sync")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Sync>()))]
     CheckoutSync {
         directory: PathBuf,
         onto: Option<String>,
@@ -214,6 +243,7 @@ pub enum Write {
     },
     /// `lf wt create <name> [--plan] [--persistent] --json`.
     #[serde(rename = "checkout.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Checkout>()))]
     CheckoutCreate {
         directory: PathBuf,
         name: String,
@@ -223,6 +253,7 @@ pub enum Write {
     /// `lf account disconnect <provider> [<email>]`: forget the provider's
     /// local credentials, or one managed login's.
     #[serde(rename = "account.disconnect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
     AccountDisconnect {
         provider: String,
         email: Option<String>,
@@ -231,6 +262,7 @@ pub enum Write {
     /// [--api-key]`. Served, no profile is chosen interactively: a login with
     /// no remembered profile needs `chrome_profile`.
     #[serde(rename = "account.connect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
     AccountConnect {
         provider: String,
         email: Option<String>,
@@ -241,6 +273,7 @@ pub enum Write {
     /// `lf account set <provider> [<email>] …`: a managed login's lifecycle,
     /// cooldown and browser choices, or the local credentials' browser choices.
     #[serde(rename = "account.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
     AccountSet {
         provider: String,
         email: Option<String>,
@@ -258,6 +291,7 @@ pub enum Write {
     /// long-lived Claude token for a managed login. `file` is a path on this
     /// Machine; the token itself never travels in the request.
     #[serde(rename = "account.token")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
     AccountToken {
         provider: String,
         email: String,
@@ -267,6 +301,7 @@ pub enum Write {
     /// `lf account redeem-reset <provider> <email> [--idempotency-key]
     /// [--credit-id] --json`: spend one banked Codex reset.
     #[serde(rename = "account.redeem_reset")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Redemption>()))]
     AccountRedeemReset {
         provider: String,
         email: String,
@@ -276,10 +311,12 @@ pub enum Write {
     /// `lf account <provider> use <email>`: sign the provider's ordinary home
     /// in as a stored login.
     #[serde(rename = "account.use")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
     AccountUse { provider: String, email: String },
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
     #[serde(rename = "graph.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
     GraphRun {
         directory: PathBuf,
         name: String,
@@ -289,6 +326,7 @@ pub enum Write {
     /// `lf -b [--agent <agent>] skill <name> [message]`, started detached: the
     /// Process carrying the skill's headless run.
     #[serde(rename = "skill.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
     SkillRun {
         directory: PathBuf,
         name: String,
@@ -298,6 +336,7 @@ pub enum Write {
     /// `lf [--agent <agent>] pr publish [--title] [--body] --json`: push and
     /// create or refresh the checkout's ready PR.
     #[serde(rename = "pr.publish")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Published>()))]
     PrPublish {
         directory: PathBuf,
         title: Option<String>,
@@ -308,6 +347,7 @@ pub enum Write {
     /// create or refresh the checkout's draft PR; served, no review surface
     /// opens.
     #[serde(rename = "pr.open")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Published>()))]
     PrOpen {
         directory: PathBuf,
         title: Option<String>,
@@ -317,6 +357,7 @@ pub enum Write {
     /// `lf [--agent <agent>] pr submit [--strict] [--worktree] [--message]
     /// [--title] [--body] --json`: prepare the PR for a teammate's merge.
     #[serde(rename = "pr.submit")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Prepared>()))]
     PrSubmit {
         directory: PathBuf,
         strict: bool,
@@ -330,6 +371,7 @@ pub enum Write {
     /// [--message] [--title] [--body] --json`: arm exact-head auto-merge and
     /// return.
     #[serde(rename = "pr.arm")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Landed>()))]
     PrArm {
         directory: PathBuf,
         strict: bool,
@@ -344,6 +386,7 @@ pub enum Write {
     /// [--worktree] [--message] [--title] [--body] --json`, started
     /// detached: the Process carrying the landing.
     #[serde(rename = "pr.land")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
     PrLand {
         directory: PathBuf,
         wait_and_fix: bool,
@@ -359,6 +402,7 @@ pub enum Write {
     /// its worktree and branches. Served, unpublished work is deleted only
     /// with `force`.
     #[serde(rename = "pr.abandon")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Abandoned>()))]
     PrAbandon {
         directory: PathBuf,
         branch: Option<String>,
@@ -367,9 +411,11 @@ pub enum Write {
     /// `lf pr reconcile --json`: check recorded landings once and settle
     /// verified merges.
     #[serde(rename = "pr.reconcile")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::pr_landing::DeliveryCheck>()))]
     PrReconcile { directory: PathBuf },
     /// `lf pr request-review [<pr>] -r <reviewer>… --json`.
     #[serde(rename = "pr.request_review")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::ReviewRequested>()))]
     PrRequestReview {
         directory: PathBuf,
         pr: Option<String>,
@@ -378,11 +424,13 @@ pub enum Write {
     /// `lf desktop portfolio <change> --json`, run from `/`: which
     /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
     Portfolio {
         change: crate::portfolio::PortfolioCommand,
     },
     /// `lf desktop dashboard query [--revision <revision>] -- <id> <expression>`.
     #[serde(rename = "desktop.dashboard.query")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
     DashboardQuery {
         directory: PathBuf,
         id: String,
@@ -391,6 +439,7 @@ pub enum Write {
     },
     /// `lf desktop dashboard pin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.pin")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
     DashboardPin {
         directory: PathBuf,
         id: String,
@@ -398,6 +447,7 @@ pub enum Write {
     },
     /// `lf desktop dashboard unpin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.unpin")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
     DashboardUnpin {
         directory: PathBuf,
         id: String,
@@ -405,6 +455,7 @@ pub enum Write {
     },
     /// `lf desktop dashboard rename --revision <revision> -- query:<id> <name>`.
     #[serde(rename = "desktop.dashboard.rename")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
     DashboardRename {
         directory: PathBuf,
         id: String,
@@ -413,6 +464,7 @@ pub enum Write {
     },
     /// `lf desktop dashboard hide query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.hide")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
     DashboardHide {
         directory: PathBuf,
         id: String,
@@ -420,6 +472,7 @@ pub enum Write {
     },
     /// `lf desktop dashboard show query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.show")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
     DashboardShow {
         directory: PathBuf,
         id: String,
@@ -428,6 +481,7 @@ pub enum Write {
     /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
     /// `slots` (JSON) on stdin.
     #[serde(rename = "desktop.dashboard.slots")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
     DashboardSlots {
         directory: PathBuf,
         id: String,
@@ -437,6 +491,7 @@ pub enum Write {
     /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
     /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
     #[serde(rename = "desktop.dashboard.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
     TileMove {
         directory: PathBuf,
         board: String,
@@ -445,6 +500,7 @@ pub enum Write {
     },
     /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
     #[serde(rename = "desktop.layout.save")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::WorkPaneLayout>()))]
     PaneLayout {
         directory: PathBuf,
         work: String,
@@ -453,6 +509,7 @@ pub enum Write {
     /// `lf config set <key> <value> <destination flags> --json`: declare a
     /// setting in the destination's file; `value` is YAML.
     #[serde(rename = "config.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
     ConfigSet {
         destination: crate::config::files::Destination,
         key: String,
@@ -461,6 +518,7 @@ pub enum Write {
     /// `lf config unset <key> <destination flags> --json`: remove that
     /// declaration so other sources choose.
     #[serde(rename = "config.unset")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
     ConfigUnset {
         destination: crate::config::files::Destination,
         key: String,
@@ -468,6 +526,7 @@ pub enum Write {
     /// Appearance's theme file at `path`: set to `value`, or read when null.
     /// Desktop owns its Apply/Cancel transaction; no CLI spells it.
     #[serde(rename = "config.theme")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
     ConfigTheme {
         path: PathBuf,
         value: Option<String>,

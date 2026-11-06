@@ -1,156 +1,183 @@
 ---
 requires: product direction, an existing design, or a Task brief
-produces: an implementation plan with risks answered, sequencing and acceptance checks
+produces: an implementation plan with resolved risks, sequencing and acceptance checks
 ---
 Shape the supplied product direction into an implementation plan.
 
-Start from the intended experience and what people have already said. Find the
-technical risks, read the existing system, pick mechanisms that work today and
-sequence the work with concrete acceptance checks. Don't restart product
-discovery or swap in a technically convenient outcome. If an open product choice
-blocks planning, name it and ask. If the plan is already good enough, keep it.
+Start from the intended experience and decisions already established. Investigate
+technical risks, inspect the existing system, choose supported mechanisms and
+sequence the work with concrete acceptance checks. Preserve accepted product decisions;
+do not restart product discovery or substitute a technically convenient outcome.
+If an unresolved product choice prevents planning, identify that choice for the
+participant. Keep an already sufficient plan rather than forcing a rewrite.
 
-Read `scratch/` and `AGENTS.md` first. Read Wave or PM context only when the
-seed names the exact wave, Task or Project; never guess it. Continue an existing
-design instead of re-deriving it. A newly filed Task doesn't restart discovery,
-and launching a draft doesn't accept it. Keep the Task's original problem when
-the solution changes.
+## Task and design
 
-Write down what a later agent couldn't work out again from the code, git or a
-fresh run: what people said, word for word, with the speaker's name, what a
-probe or run showed at the time, and outside facts. Never turn a reply into
-"accepted" or "approved". Cut the rest; quality per word beats volume.
+Treat the request as the user's problem and desired experience. A Task is optional. Explore possible
+solutions before choosing one; distinguish observations, proposed mechanisms,
+real constraints, and accepted decisions. The design owns architecture,
+implementation sequencing, and acceptance checks. A Task need not arrive with an
+implementation plan. Preserve its original problem when the solution changes.
 
-## Keep context within budget
+Continue an existing design and investigate its material gaps; a newly filed
+Task does not require restarting discovery. Keep accepted decisions binding
+and linked, preserve draft status and open questions, and honor the selected
+Graph. Launching a draft does not approve it.
 
-Run `lf context` and bring over-budget memory and scratch under both token and
-byte limits: merge duplicates, summarize, drop notes inherited from a stacked
-parent, and leave history in git with a reference. Keep live decisions, open
-work and contrary findings. Re-run `lf context` after writing. Never raise a
-limit to hide overflow; if live decisions alone don't fit, write down the
-overage.
+## Orientation
+
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- Read wave/PM context only when the seed names the exact wave, task, project,
+  or a concrete coordination question; never infer it or repair access as a
+  prerequisite.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
+## Keep authored context within budget
+
+Run `lf context` to read memory and scratch size targets, their configuration
+sources, and current usage. Read complete sources before curating them.
+Bring over-budget material under both token and byte limits as part of this step.
+Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
+stacked parent, and keep historical detail in git rather than ambient context.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.
 
 ## Workflow
 
-1. **Read the intent.** What problem does it solve? Who benefits? What
-   have people said, and what's still open?
+1. **Recover the intent.** Read the design or Task brief. What problem does it solve? Who benefits? Which decisions are accepted, and what remains open?
 
-2. **De-risk.** Find what could sink the approach and answer it: search the web,
-   read docs, check APIs, run experiments. Come back with answers, not a worry
-   list.
+2. **De-risk.** Before choosing implementation mechanisms, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   Start with what's already flagged: risks named in the design, the Wave's
-   `GOAL.md` or `MEMORY.md`, or the chapter's KRs and metric targets. Confirm or
-   refute each one. Then look for what was missed: technical limits (does the
-   API actually support this?), prior art, ecosystem shifts, papers and
-   benchmarks. Focus where uncertainty is highest.
+   **Start with what's already flagged.** If the supplied design, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
-   "Linear's API doesn't support conditional assignment, so we need
-   read-then-assign with conflict detection" — not "there might be API
-   limitations." When two explanations both fit, run the smallest safe probe
-   that tells them apart. Keep the finding even when it kills the attractive
-   approach.
+   **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
-3. **Consider alternatives.** Where it's uncertain, compare approaches that
-   differ by mechanism, not presentation. Mark a route blocked when what it
-   still needs is as hard as the original problem. If parallel agents are part
-   of the work, give each a different approach and ask for working code or
-   counterexamples, not status reports.
+   The output of this step is concrete findings, not a worry list. "Linear's API doesn't support conditional assignment, so we need read-then-assign with conflict detection" — not "there might be API limitations." When two explanations remain plausible, run the smallest safe probe whose outcomes distinguish them. Preserve the observation even when it kills the attractive approach.
 
-4. **Imagine wild success.** It ships and people love it. What details made it
-   great? What surprised you about how they use it?
+3. **Consider alternatives.** Where uncertainty warrants it, compare approaches that differ by mechanism,
+   not presentation. Keep them independent long enough to expose their real
+   strengths and exact gaps. Mark a route blocked when its remaining dependency
+   is as hard as the original task; elegance does not make a deferred problem
+   progress. If parallel agent work is part of the task, assign approach
+   families dynamically and require concrete artifacts or counterexamples, not
+   status reports. Let the risks you found shape which alternatives are viable.
 
-5. **Imagine wild failure.** Six months later you're ripping it out. What went
-   wrong?
+4. **Imagine wild success.** The feature ships and users love it. What details made it great? What surprised you about how people use it?
 
-6. **Choose.** Be bold. Commit to a direction.
+5. **Imagine wild failure.** Six months later, you're ripping it out. What went wrong? What did you miss?
 
-7. **Name the demo.** The command a developer runs and what appears, or the
-   interaction that now works. If you can't describe it, the slice probably
-   stops one step short; carry it to where it shows itself. Only work
-   commissioned as infrastructure-only skips the demo, and the plan says so.
+6. **Make choices.** Given all this thinking, what's the right approach? Be bold. Commit to a direction.
 
-8. **Write the plan.** Update `scratch/<slug>.md`. Treat every other scratch file
-   as input to reconcile; an older, worse design doesn't win by being there
-   first.
+7. **Name the demo.** Before writing the design, state the demo: the moment a
+   developer sees the win working — the command they run and what appears, the
+   interaction that now works. If you can't describe the demo, the slice is
+   usually scoped one step short — carry it to where it shows itself. The one
+   exception: work explicitly commissioned as infrastructure-only. Then say so
+   in the doc instead of inventing a demo.
 
-## What the plan covers
-
-Cover these where they matter; skip the rest:
-
-- **User-visible outcome** — whose behavior changes and what they see.
-- **Acceptance check at gate** — one concrete scenario through the source of
-  truth and every affected consumer, with the headless command and expected
-  result.
-- **Source of truth** — the persisted record, model or API everything else
-  derives from.
-- **Affected surfaces and consumers** — every CLI, wire DTO, app, automation or
-  reader that changes or must keep working.
-- **Absent and error states** — what empty, missing, invalid or failed means at
-  each consumer.
-- **Operational boundary** — latency, subprocess, network, scale or recovery
-  limits the code must hold, when they matter.
-- **Exclusions** — nearby behavior left out of this Task.
-- **Current and target architecture** — the concepts, records, writers and
-  launch paths before and after; what is reshaped and what becomes obsolete.
-- **Delete — do not maintain** — files and symbols, with their exclusive tests
-  and fixtures, slated for removal. Never plan repairs to them. Name the
-  behavior, data and tests that must survive and any consumer cutover or
-  migration the removal needs. As you read the code, add earlier attempts the
-  design missed.
-- **Forbidden outcomes** — duplicate representations, Legacy/New splits,
-  adapters, fallbacks, dual writes, or a locally passing state that still
-  breaks the intended architecture. Any of these blocks unless the plan
-  justifies it and names when it is deleted.
-- **Internal slices** — for an indivisible change, keep the full end state.
-  Deepest deletions first, then build on what remains, with the minimum
-  cutover inside the deletion cut. Mark one `This slice` with a focused test
-  and update the plan in place as slices finish. Additive work needs no
-  deletion.
-
-"Done when" names behavior people see, not a list of files.
+8. **Write the design.** Update `scratch/<slug>.md` with a concrete, actionable
+   design. Treat every other scratch artifact as evidence to reconcile. It may
+   contain an older or poor design; do not continue it merely because it was
+   present first.
 
 ## Checks run unattended
 
 Specify headless acceptance commands and expected results for gate to run once.
 Desktop uses app builds and view/interaction tests. Never require a person,
-display session or permission dialog; leave unavailable checks to CI. Judgment
-belongs to demo and review. Implement and compress only build and run focused
-tests.
+display session or permission dialog. Defer unavailable checks to capable CI
+without blocking earlier steps. Put judgment in demo/review. Implement/compress
+only build and run focused tests; scratch keeps one command/result line.
+
+## Computable design contract
+
+Make the plan explicit where these boundaries matter; omit irrelevant sections:
+
+- **User-visible outcome** — whose behavior changes and what they can observe
+  when the Task holds.
+- **Acceptance check at gate** — one concrete scenario that crosses the source of truth
+  and every affected consumer, plus the headless command and expected result.
+- **Source of truth** — the authoritative persisted record, model, or API and
+  which views are derived from it.
+- **Affected surfaces and consumers** — every CLI, wire DTO, app, automation,
+  or downstream reader that must change or remain compatible.
+- **Absent and error states** — what missing evidence, empty state, invalid
+  input, or failed dependency means at each affected boundary.
+- **Operational boundary** — when relevant, the latency, subprocess, network,
+  scale, or recovery budget the implementation must hold.
+- **Exclusions** — adjacent behavior deliberately left outside this Task.
+- **Current and target architecture** — the concepts, authorities, persisted
+  records, writers, and launch paths before and after the change; state what is
+  reshaped and what becomes obsolete.
+- **Delete — do not maintain** — carry forward or identify concrete files/symbols
+  and their exclusive tests/fixtures slated for removal. Never plan repairs to
+  them. Name required behavior, data, and tests that must survive, plus any
+  consumer cutover or migration needed for removal.
+- **Forbidden outcomes** — duplicate representations, Legacy/New splits,
+  adapters, fallbacks, dual writes, or locally passing states that would still
+  violate the intended architecture.
+- **Internal slices** — for an indivisible change, keep the complete end state
+  intact with its integration/deletion path and acceptance conditions. Order the deepest
+  deletions first, then build on what remains. Include the minimum consumer
+  cutover or migration in the deletion cut, without modernizing the old path
+  first. Mark one `This slice` with a focused test, and update deletion targets,
+  remaining work, and evidence in place rather than narrowing the plan.
+  Additive work needs no invented deletion.
+
+Done when names observable behavior, not a list of implementation artifacts.
 
 ## Output
 
-Update `scratch/<slug>.md` around the problem, demo, chosen approach, risk
-findings, alternatives and decisions, scope and "Done when". Keep a clear
-existing structure. Include before/after numbers when the outcome is
-quantitative. Keep findings and remaining work next to the decisions they
-inform, and one command/result line for checks. Leave out session instructions
-and Machine facts; the plan doesn't direct its next reader. Write historical
-skill names without `$`.
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Machine
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
+
+Update the existing plan at `scratch/<slug>.md`. Organize it around the problem,
+demo, chosen approach, risk findings, alternatives and decisions, scope, and
+Done when checks. Use the contract above for relevant boundaries; preserve a
+clear existing structure rather than imposing a template. Include before/after
+measures when the outcome is quantitative. Keep consequential findings and
+remaining work beside the decisions they inform.
 
 ## Wave alignment
 
-If `<lf:wave>` is present, read `.lf/wave/<wave>/GOAL.md` and `MEMORY.md`:
+If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
-- The design serves the Wave's goal and excludes what `GOAL.md` rules out.
-- Derive "Done when" from chapter KRs and how people use it. Use a Wave metric
-  when the direction names one. A substantial new UI performance path is a good
-  reason to propose a new metric to the Wave.
-- Check `MEMORY.md` for known risks and past decisions; name any new risk.
+- **Intent** — design must serve the wave's north star, stated in GOAL.md.
+- **Evidence** — derive "Done when" from chapter KRs and user behavior. Use a
+  Wave-owned signal when the direction names one. Leave room for feature work
+  to reveal a better metric proposal; a substantial new UI performance path is
+  a strong reason to capture one for Wave sponsorship.
+- **Memory** — check `MEMORY.md` for known risks and prior decisions. If this design introduces a new risk, name it.
+- Scope must exclude what GOAL.md marks as out of scope.
 
 ## Principles
 
-**Bold over safe.** When unsure, pick the more ambitious option.
+**Bold over safe.** If you're not sure, pick the more ambitious option. Safe designs compound into mediocrity.
 
-**Concrete over abstract.** "Fast" means nothing. "P95 under 100ms" means
-something.
+**Concrete over abstract.** "Fast" means nothing. "P95 latency under 100ms" means something.
 
-**Decide implementation choices.** Make reversible choices yourself. Leave real
-product decisions open and named; a plan can't grant approval.
+**Resolve implementation choices.** Make supported reversible choices. Leave consequential product decisions explicit for the participant; a plan cannot manufacture approval.
 
-**Complete over incremental.** Land a whole architectural chunk at once.
-Splitting a coherent change breeds adapters and dual states. Split only when
-each piece is independent and noticeable on its own.
+**Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
 
-**Integrate over layer.** Map the current concepts, types, writers and launch
-paths before adding another.
+**Sufficient for the next reader.** Keep consequential decisions, alternatives
+and acceptance checks; omit repeated validation requirements and pass ledgers.
+
+**Integrate over layer.** Map current concepts, types, authorities, writers, and
+launch paths before adding another one. Name what the change reshapes and what
+becomes obsolete. Keep the design’s **Delete — do not maintain** list in the
+plan. As you read the code, look for earlier attempts the design missed. If
+the new approach replaces them, add them to the list. A Legacy/New split, v2,
+adapter, fallback, dual write, or parallel store is blocking unless the design
+explicitly justifies and bounds its deletion.

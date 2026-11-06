@@ -148,7 +148,7 @@ A viewer's stream is the bytes of its snapshot, out and err frames in order. The
 viewer counts them; the owner spools the last 1 MiB per viewer.
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null}
+{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"ssh":false}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","reconnect":"…","nonce":"…","token":"…","terminal":true,"grace_ms":60000,"owner":"…"}
 ```
 
@@ -235,3 +235,65 @@ Desktop terminal placement is validated on the launching viewer’s PTY, then ca
 across the owner’s private PTY before native admission. Stale inherited placement
 is discarded. The first Session reading can publish reports already restored on
 its surface; replacement providers begin with an empty observation.
+
+## Task shells and completed workspaces
+
+```sh
+lf task shell TASK --checkout /recorded/checkout --id SHELL --create
+lf task shell TASK --checkout /recorded/checkout --list
+lf task shell TASK --checkout /recorded/checkout --id SHELL
+lf task shell TASK --checkout /recorded/checkout --id SHELL --close
+```
+
+Choose a fresh shell identity once. Creation accepts literal initial argv after
+`--`, followed by the destination login shell; repeating that identity never runs
+its initial command again. Attachment, Hide and Desktop exit leave the shell
+running. Close ends its ordinary foreground, background and stopped jobs, even
+when job control assigned them separate process groups. Deliberately daemonized
+processes that created a different OS session are outside the shell's ownership.
+Ended shells retain their identity and saved screen. Undo restores that history;
+New Shell deliberately starts different execution. An unavailable destination
+never opens a local successor prompt. Prefix these commands with `--machine` to
+use the same operations on the Task's recorded Machine.
+
+Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
+viewers count, passive ones too; input control is separate. Closing the last
+viewer lets a completed Task follow its normal cleanup grace once requested work
+finishes. An ordinary shell in that directory does not retain the worktree.
+Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
+Task and conversation history remain after cleanup.
+
+The serving owner dates its own viewer evidence on its Process (`viewer_hold`,
+`viewer_hold_at`). Only Task Session viewers retain a checkout; Desktop shells
+already accompany those Sessions and add no hold. Losing the last connection
+starts the absence clock immediately, independently of the sixty-second stream
+replay grace. A resumed viewer cancels cleanup. Ending an unviewed owner preserves
+that absence time, so its two-minute idle ending adds no new workspace grace.
+
+LF's remote viewer path frames its PTY input/output over SSH. The viewing Machine
+sends heartbeats every ten seconds, independent of typing and provider output;
+the remote relay ends after thirty seconds without them, including silent network
+failure with no EOF. The detached Session or shell execution stays on its owner.
+Window dimensions travel on the same connection. There is no host registry or
+second provider conversation. An ordinary external SSH connection uses its host's
+connection-loss detection; LF's bounded heartbeat applies to its own remote path.
+
+Desktop departure, window close and orderly Quit send Ctrl+] to release their
+relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
+back to connection-loss cleanup. Only actual Session viewing retains the checkout.
+An owner's dated observation expires too if it crashes, so a stale Process row
+cannot retain a completed workspace indefinitely. The retirement executor keeps
+observing while viewed and uses that same absence window after owner loss.
+
+A completed, released Task keeps its checkout and Desktop shells for fifteen
+minutes total; eligible unviewed agents still end at two minutes. A returning
+viewer cancels that deadline and its queued shell closes; leaving again starts
+a new one. Requested active work, drafts, pending requests and running Graphs
+still prevent ending execution; finishing that work does not restart an
+already-due deadline. Completion and PR landing schedule one retirement pinned
+to the completion, checkout and branch; reopen or changed placement revokes it.
+An owner whose viewers release wakes waiting cleanup for its Tasks. Destination
+owners confirm shell job settlement before deletion. Eligible cleanup discards
+uncommitted files but preserves primary/persistent checkouts and changed
+committed refs. Failures record a pending reason and retry. Reopening a retired
+Task never silently recreates a checkout.

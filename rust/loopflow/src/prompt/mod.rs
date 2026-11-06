@@ -1943,7 +1943,7 @@ mod tests {
         assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
-        assert!(prompt.contains("Output is logged, not"));
+        assert!(prompt.contains("Output is logged, not displayed"));
         assert!(!prompt.contains("<lf:voice>"));
     }
 
@@ -2053,11 +2053,11 @@ mod tests {
 
             let prompt = render_full_prompt(components);
             assert!(
-                prompt.contains("Someone is in this conversation"),
+                prompt.contains("You are working directly with the user"),
                 "surface {surface:?}"
             );
             assert!(
-                prompt.contains("never\nstart another Session to reach them"),
+                prompt.contains("never create another session"),
                 "surface {surface:?}"
             );
         }
@@ -2198,9 +2198,9 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
         assert!(!prompt.contains("lf --task"));
-        assert!(prompt.contains("say what is missing and stop"));
-        assert!(prompt.contains("For a reversible choice"));
-        assert!(prompt.contains("Stop\nany server or watcher you started"));
+        assert!(prompt.contains("explain the failure in ordinary output and stop"));
+        assert!(prompt.contains("For reversible ambiguity"));
+        assert!(prompt.contains("Stop any\nlong-lived background process you started"));
     }
 
     #[test]
@@ -2227,7 +2227,7 @@ mod tests {
         );
         let chat = Surface::Chat.instructions();
         assert!(chat.contains("live chat channel"));
-        assert!(chat.contains("Don't narrate how you work"));
+        assert!(chat.contains("Never narrate your internal machinery"));
         assert_ne!(chat, Surface::Headless.instructions());
         assert_ne!(chat, Surface::Cli.instructions());
     }

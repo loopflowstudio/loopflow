@@ -1,60 +1,64 @@
 ---
-requires: Linear Project plans and dated results, or a baseline marked incomplete
-produces: one repository report and one report per Wave
+requires: Linear Project plans and dated evidence, or an explicitly incomplete baseline
+produces: one repository report and one scoped report per Wave
 ---
-Review how the repository's chapter went against what was promised, Wave by Wave, and return the report.
+Review the repository's chapter on dated evidence. Review never changes plans,
+Project status, Task state, KRs, or code. Return the complete report; a Task
+worktree may also retain temporary review notes under `scratch/`.
 
-Review changes nothing: no plans, Project status, Tasks, KRs or code. Temporary
-notes may go in `scratch/`.
+A chapter is the shared name of each Wave's one In Progress Linear Project.
+Planned and Completed Projects retain future and historical plans in Linear.
+Identify the requested chapter by name and each Wave's stable Project ID;
+names or dates alone never select between competing current Projects. Preserve
+available earlier reviews and dated observations. Union the evidenced starting
+Wave roster with today's roster so retired, unavailable and new Waves remain
+accounted for. Missing starting membership is an incomplete baseline.
 
-A chapter is the shared name of each Wave's In Progress Linear Project; Planned
-and Completed Projects hold future and past plans. Identify the chapter by name
-and each Wave's Project by ID; a name or date never picks between two current
-Projects. Use earlier reviews and dated observations. Cover the Waves at the
-start of the chapter and today's, so retired, unavailable and new Waves all
-appear. If the starting roster is missing, the baseline is incomplete.
-
-Read current planning and Task state:
+Read current cached planning and Task conditions:
 
 ```bash
 lf wave status <wave> --no-sync --json
 lf wave show --json
 ```
 
-Read past Project status, content and issue history through Linear, read-only,
-by ID. The CLI has no past-chapter selector. If those records are out of reach,
-name the missing source instead of using today's plan. Don't run `wave sync`
-here: it can rename Linear objects and convert old plans.
+Inspect historical Project status/content and available issue history through a
+read-only Linear interface, using stable IDs. The CLI status command has no
+historical chapter selector. If those records are inaccessible, name the missing
+source; do not substitute today's plan. Do not run `wave sync` as a review
+refresh: it can rename provider objects and apply legacy planning conversions.
 
-Record each KR's exact wording, its targets, when you read each source, and the
-interval the data actually covers. Today's issue membership doesn't show Tasks
-moved earlier, and today's metric readings aren't past measurements; use dated
-observations with their windows and instrument versions. A target with no data
-is unknown; one that was left out on purpose is unset. Shipping later doesn't
-meet a promise for an earlier interval.
+Record exact KR wording, targets, source read dates and the interval actually
+supported by evidence. Completed Projects retain plans, but current issue
+membership does not reconstruct Tasks moved at an earlier boundary. Current
+metric readings are not historical measurements. Use dated observations with
+their measurement windows and instrument revisions where available. Missing
+target evidence is unknown; an evidenced omitted target is unset. Later shipment
+cannot prove a promise inside an earlier interval.
 
-Launch one `lf -b --wave <name> wave-review-chapter "<chapter name, Project ID, interval, exact starting KRs>"`
-per Wave you can resolve, with the data and its gaps. There is no Project-level
-review. Keep each returned report. A failed or unfinished child is missing
-coverage, never success. Account for retired or unresolvable Waves from dated
-records.
+Launch one bounded `lf -b --wave <name> wave-review-chapter "<chapter name,
+Project ID, interval, exact starting KR ledger>"` per resolvable Wave. Supply
+the available evidence and its gaps; there is no Project review tier. Retain
+returned reports and launch references. A failed or unfinished child is
+incomplete coverage, never success inferred from elapsed time. Account for
+retired or unresolvable Waves from available dated records.
 
-Check that every KR appears once as **holds**, **does not hold** or **unknown**,
-and recount the totals from the rows. Holds needs the full window and
-denominator; one counterexample can break a universal claim; missing or stale
-data is unknown.
+Verify every exact KR appears once with **holds**, **does not hold**, or
+**unknown**. Recompute verdict totals from rows. Holds requires the full window
+and denominator; a counterexample can refute a universal claim; missing or stale
+evidence is unknown. Never promote an incomplete child into complete coverage.
 
-Lead with what changed for the people using and running the product, by Wave.
-Under that, keep exact claims, dates, counterexamples, Task and PR links, changed
-claims and gaps. Report Task moves and cancellations only where dated records
-show them. Given an exact-ID plan,
-`lf wave new-chapter --all <name> --plan <plan.json> --dry-run --json` shows
-where each Task would go; label that preview separately from what happened. It
-applies nothing. Don't sort Tasks yourself in prose.
+Lead with experienced changes for users, operators, maintainers and agents,
+organized by Wave. Preserve exact claims, evidence dates, counterexamples,
+Task/PR references, changed claims and coverage gaps underneath. Report actual
+Task transfers and cancellations only where dated evidence establishes them.
+If an exact-ID plan is supplied, `lf wave new-chapter --all <name> --plan <plan.json> --dry-run --json`
+can supply prospective dispositions for the entire repository. Label that dated
+preview separately from historical facts; it does not apply
+rotation. Never invent a second Task classifier in prose.
 
-List next-chapter proposals separately: goals worth pursuing, assumptions that
-changed, goals that weren't really priorities, and active work in the wrong Wave
-or with no one on it. Judge Wave scope without creating Projects or retiring
-unreviewed backlog. End each Wave and the repository with `Coverage: complete` or
-`Coverage: incomplete`, naming missing sources. Record corrections as dated
-observations.
+Separate next-chapter proposals: valuable goals, changed assumptions, goals not
+evidenced as priorities, and misplaced or unowned active work. Judge Wave
+boundaries without creating Projects or retiring unreviewed backlog. State
+`Coverage: complete` or `Coverage: incomplete` for each Wave and the repository,
+naming missing sources. Preserve corrections as dated observations. A review
+with incomplete history cannot claim an accepted starting boundary.

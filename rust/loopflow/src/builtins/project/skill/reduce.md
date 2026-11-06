@@ -4,51 +4,65 @@ produces: scratch/simplification-opportunities.md
 ---
 Find the highest-leverage simplifications in your area of responsibility.
 
-Read `scratch/` first. The included context is your area: given `src/cli/`,
-simplify the CLI, not the whole codebase.
+## Orientation
 
-Complexity usually lives in the gap between what the system is built to do and
-what the product needs. Code piles up to bridge it: conditionals, adapters,
-special cases. Don't ask "what's messy?" Ask "what would change if we rebuilt
-around what the product wants to be?"
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — design docs and notes for the current work live here
+  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
+  questions and assumptions).
+- Read wave/PM context only when the seed names the exact wave, task, project,
+  or a concrete coordination question; never infer it or repair access as a
+  prerequisite.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
+
+Write design artifacts, notes, and open questions under `scratch/`. Don't
+re-derive what these already record.
+
+## Scope
+
+The included context defines what you own. Focus your analysis there. If given `src/cli/`, find simplification opportunities in the CLI—don't audit the entire codebase. Your job is to improve your area, not everything.
+
+## Goal
+
+Identify where architecture and product intent are misaligned. Complexity usually lives in the gap between what the system is built to do and what users actually need. When those two things don't match, code accumulates to bridge the difference—conditionals, adapters, special cases.
+
+The question isn't "what's messy?" but "what would change if we rebuilt around what the product actually wants to be?"
 
 ## Workflow
 
-1. Learn the product from the README, CLI help and main entry points. What is it for?
-2. Read the architecture: main modules, data structures, key abstractions.
-3. Look for mismatches:
-   - Abstractions that don't map to concepts people use
+1. Understand the product: README, CLI help, main entry points. What is this for?
+2. Explore the architecture: main modules, data structures, key abstractions
+3. Look for misalignment:
+   - Abstractions that don't map to user concepts
    - Features that fight the architecture
    - Data structures shaped for old requirements
    - Code that translates between what exists and what's needed
-4. Pick 2–3 places where realigning would cascade into simpler code.
-5. Write `scratch/simplification-opportunities.md`.
+4. Identify 2-3 places where realignment would cascade into simplification
+5. Write `scratch/simplification-opportunities.md`
 
-## Signs of a mismatch
+## Signs of misalignment
 
-**Adapters and translators.** If data is always converted the same way between
-storage and use, the storage is wrong.
+**Adapters and translators.** Code that exists to convert between how data is stored and how it's used. If the conversion is always the same, the storage is wrong.
 
-**Feature-shaped holes.** The same conditional in many places because one feature
-doesn't fit the model.
+**Feature-shaped holes.** The same conditional appearing in multiple places because one feature doesn't fit the model.
 
-**Naming drift.** Code uses different words than the docs, CLI or UI. The words
-reveal a concept mismatch.
+**Naming drift.** When code uses different words than documentation, CLI, or UI. The words reveal a concept mismatch.
 
-**Config that never changes.** Options nobody sets mean the architecture is
-generic where the product is specific.
+**Config that's always the same.** Options nobody changes suggest the architecture is generic where the product is specific.
 
-**Compatibility shims for internal code.** Shims between modules that could just
-change together.
+**Backwards compatibility for internal code.** Shims between modules that could just be changed together.
 
-## Skip
+## What to skip
 
-- Performance (a different concern)
-- Missing features that don't simplify what exists
+- Performance issues (different concern)
+- Missing features unrelated to simplifying the existing system
 - Style inconsistencies (that's polish)
-- Complexity that matches real product complexity
+- Complexity that matches actual product complexity
 
 ## Output
+
+Write `scratch/simplification-opportunities.md`:
 
 ```markdown
 # Simplification Opportunities
@@ -57,7 +71,7 @@ change together.
 <What this product wants to be, in 2-3 sentences>
 
 ## Opportunity 1: <name>
-**Misalignment**: <How the architecture differs from product intent>
+**Misalignment**: <How architecture differs from product intent>
 **Symptom**: <Where this shows up in code>
 **Realignment**: <What would change to match product intent>
 **Cascade**: <What else would get simpler>
@@ -66,7 +80,7 @@ change together.
 ...
 
 ## Aligned areas
-<Where architecture and product match — patterns to keep>
+<Parts where architecture and product match well—patterns to preserve>
 ```
 
-Realignments, not cleanup tasks.
+Focus on realignment opportunities, not cleanup tasks.

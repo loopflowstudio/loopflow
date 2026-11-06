@@ -210,10 +210,17 @@ pub fn run(
         );
         if !record.open_argv.is_empty() {
             let script = build_preamble(
-                &record.open_argv,
+                &remote_viewer_args(&record.open_argv),
                 &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
             );
-            record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
+            let mut viewer = vec![
+                std::env::current_exe()?.to_string_lossy().into_owned(),
+                "session".into(),
+                "remote".into(),
+                "--".into(),
+            ];
+            viewer.extend(ssh_argv(&target.route, forward_agent, &script)?);
+            record.open_argv = viewer;
         }
         if connection.json {
             println!("{}", serde_json::to_string(&record)?);
@@ -225,8 +232,25 @@ pub fn run(
         }
         return Ok(());
     }
+    let cmd = if std::io::stdin().is_terminal() {
+        remote_viewer_args(&cmd)
+    } else {
+        cmd
+    };
     let preamble = build_preamble(&cmd, &extra_env);
     run_ssh(&target.route, forward_agent, &preamble)
+}
+
+fn remote_viewer_args(command: &[String]) -> Vec<String> {
+    let mut argv = vec![
+        "lf".into(),
+        "session".into(),
+        "remote".into(),
+        "--serve".into(),
+        "--".into(),
+    ];
+    argv.extend_from_slice(command);
+    argv
 }
 
 fn resident_args(
@@ -440,20 +464,8 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
 }
 
 /// Carry the script as an argument: stdin belongs to file drafts or terminal input.
-fn ssh_argv(
-    dest: &str,
-    forward_agent: bool,
-    preamble: &str,
-    terminal: bool,
-) -> anyhow::Result<Vec<String>> {
-    let mut args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
-    if terminal {
-        for arg in &mut args {
-            if arg == "-T" {
-                *arg = "-tt".into();
-            }
-        }
-    }
+fn ssh_argv(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<Vec<String>> {
+    let args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
     let mut argv = vec!["ssh".into()];
     argv.extend(args);
     argv.push(preamble.into());
@@ -461,12 +473,10 @@ fn ssh_argv(
 }
 
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let argv = ssh_argv(
-        dest,
-        forward_agent,
-        preamble,
-        std::io::stdin().is_terminal(),
-    )?;
+    let argv = ssh_argv(dest, forward_agent, preamble)?;
+    if std::io::stdin().is_terminal() {
+        return crate::transport::remote::client(&argv);
+    }
     let status = Command::new(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::inherit())

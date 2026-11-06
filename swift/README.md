@@ -1119,4 +1119,24 @@ Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
 A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
 and show an error; **Reload saved intent** reconciles retained content before another
 save. File drafts compare their saved base with disk before editing. Restored shell
-intent has no launch command: a saved tab alone does not reattach a Process.
+intent retains its identity without initial commands: opening it attaches to the
+same owner and never replays startup or creates replacement execution.
+
+Task shell views attach to a retained owner on the Task's recorded Machine.
+Hide, switching Work and app exit detach presentation. Close ends that shell and
+its ordinary jobs; Undo restores its identity and history. Use Reconnect for
+transport loss and New Shell for fresh execution. No remote failure opens a
+local prompt.
+
+Keep a Task Session viewer open to retain its worktree. Desktop shells accompany
+Task Sessions and add no separate hold. Switching Work, closing the window or
+quitting explicitly releases Desktop's viewers while execution stays on its
+owner. With no connected viewer, a completed Task's checkout and Desktop shells
+become eligible for cleanup after fifteen minutes. Requested work, drafts and
+pending requests delay cleanup without restarting that clock; eligible idle
+agents follow the two-minute policy. LF's remote connection detects silent loss
+with viewer heartbeats. Reconnecting before cleanup cancels it; a longer outage
+can leave a completed Task without its checkout. Failed Quit delivery follows
+that same bounded absence policy.
+Conversation history remains; a deleted checkout is not recreated. See the
+[shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

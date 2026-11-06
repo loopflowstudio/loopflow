@@ -400,9 +400,7 @@ fn one_task_waits_at_demo_after_writing_docs_and_pursuing() {
             (5, "loop-or-next"),
             (6, "concept-review"),
             (7, "loop-or-next"),
-            (8, "qa"),
-            (9, "loop-or-next"),
-            (10, "pr-publish"),
+            (8, "pr-publish"),
         ]
     );
 }

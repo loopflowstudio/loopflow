@@ -1,76 +1,87 @@
 ---
-description: Explore an idea and file useful Tasks in the Waves they belong to, across repositories.
+description: Explore an idea and capture useful Tasks for their owning Waves across repositories.
 requires: none
 action_style: exploratory
 ---
-Turn an idea into Tasks the right Waves can pick up later.
+Shape intention into useful Tasks that their owners can later operate.
 
 ## Explore the idea
 
-Start from the idea and any conversation or design behind it; don't redo settled
-discovery. Explore the desired experience, alternatives, constraints and what
-success looks like, as deeply as the idea needs. Read code when it settles a real
-question. Keep the ambition; a Task doesn't need a technical design to be filed.
+Start with the idea and relevant conversation or existing designs. Do not repeat
+settled discovery. Explore the desired experience, alternatives, constraints and
+observable success as deeply as the idea needs. Inspect code when it resolves a
+real uncertainty. Preserve ambition; a technical design is not a filing requirement.
 
-Favor larger, cohesive Tasks with a clear promise of what changes for whom.
-Split for independently deliverable outcomes, stacked where dependent, or where
-pipelining or parallelism truly helps; one Task can still publish several PRs.
-Keep speculative implementation steps inside the Task or its design.
+Favor larger, cohesive Tasks with clear behavioral promises and benefits. Choose
+boundaries thoughtfully: useful pipelining or parallelism can justify a split,
+but neither is a fragmentation rule. Keep speculative implementation steps inside
+the Task or its design. A recommendation may need no PR. Prefer separate Tasks
+for independently deliverable outcomes, stacked where dependent; continued work
+in one Task may publish several PRs in sequence. Several Tasks are supported, never a quota. Later proof of an accepted
+outcome can use another ordinary Task, with its source and expected evidence in
+the brief.
 
-## Find where each Task belongs
+## Resolve ownership
 
-The repository and Wave you started in are clues, not limits. Each Task
-belongs to one Wave; distinct outcomes may span Waves and repositories, but
-don't split a cohesive outcome just because it touches several repositories.
+The launch repository and Wave are starting clues, not filing boundaries. Correct
+initial attribution as understanding develops. Each Task has one owning Wave;
+distinct outcomes may span Waves and repositories. Do not split a cohesive outcome
+merely because it touches multiple repositories. Preserve dependencies and shared
+context when several Tasks are appropriate.
 
-In each destination repository, run `lf wave list --json` and
-`lf wave status <wave> --json` to read objectives, current plans and overlap.
-Run every scoped command from that repository. Same-named Waves in different
-repositories are different Waves. Refine an existing Task for the same work
-instead of filing a duplicate.
+In each relevant destination repository, run `lf wave list --json` and
+`lf wave status <wave> --json` to inspect objectives, current plans and overlap.
+Use that repository as the working directory for every scoped CLI call. Same-named
+Waves in different repositories are different destinations. Reuse or refine an
+existing Task for the same work rather than filing a duplicate.
 
-Plans don't show which open PRs already rewrite the code. Before filing work
+Plans do not show which open PRs already rewrite the code. Before filing work
 against specific files, list the open PRs that change them
 (`gh pr list --json number,title,headRefName,files`). The brief names each
-overlapping PR, its Task and what it changes there; a choice that Task leaves
-open stays open, and the brief says so rather than deciding it.
+overlapping PR, its Task and what it changes there; a choice that Task reserves
+for a person stays theirs, and the brief says so rather than deciding it.
 
-## File clear intent
+## Capture clear intent
 
-File once intent is clear. Show the brief in the conversation and file it; don't
-add another round of confirmation.
+File once intent is clear. Show the concrete brief in the conversation and capture it;
+do not impose another confirmation ritual.
+Exploratory possibilities remain proposals.
 
-Each Task stands alone: the problem, who benefits, the desired outcome, how to
-tell it's done, real constraints and open decisions that matter. Keep what
-people asked for, quoted, apart from possible mechanisms. Keep implementation sequencing in a
-design when one exists, but put the essential intent in the Task itself; a
-transcript or a path in another checkout doesn't travel. For dependent Tasks,
-write each child its own design excerpt with its own scope and done-when; never
-copy a shared plan and toggle "current slice." Whoever launches it later passes
-it with `lf checkout <child> --stack-on <parent> --design <path>`. Filing
-launches no work.
+Each Task must stand alone for its owner: include the problem, beneficiary,
+desired outcome, observable acceptance, real constraints and consequential open
+decisions. Separate accepted choices from possible mechanisms. Attribute requests
+and decisions using people's known names; leave unknown attribution unresolved.
+Keep implementation sequencing in a design when one exists, but include essential
+intent in the Task itself. A transcript or path in another checkout is insufficient.
+For dependent Tasks, prepare a self-contained child-specific design excerpt with
+its own scope and acceptance; never copy a common plan and toggle “current slice.”
+The later operator transfers it with `lf checkout <child> --stack-on <parent>
+--design <path>` before launch. Capture itself still launches no work.
 
-From the destination repository, file with `lf task create --wave <wave>`
-without `--run`. Pass the title with `--title` and the full brief on stdin or
-with `--notes`; refine a filed Task with `lf task edit`. Return each Task as one
-link from `lf --task <issue> open --link --format markdown`
-(`[ID · title](loopflow://…)`), with its repository and Wave; keep the provider
-issue link separate. Run `lf open '<url>'` only when asked to open a Task now,
-and report what it printed; a printed link opens nothing.
+From the destination repository, file with `lf task create --wave <owner>` without
+`--run`. Supply the title and complete brief through `--title` and stdin or
+`--notes`; use `lf task edit` for refinements to a confirmed Task.
+Return each actual Task as one readable link from
+`lf --task <issue> open --link --format markdown` (`[ID · title](loopflow://…)`),
+with its repository and owning Wave; keep the provider issue link separate.
+Run `lf open '<url>'` only when the person asks to open a Task now, and report
+its receipt; a printed link opens nothing.
 
-If the repository is unreachable, the Wave unclear or its Project unavailable,
-leave the unfiled brief in the conversation and say why. Report provider
-failures as they are. Every `lf task create` makes a new Task, even with
-identical input, so after a write that may have failed, check
-`lf wave status <wave> --json` in that repository before anything else. If the
-Task exists, refine it with `lf task edit`; if you still can't tell, report it
-rather than creating again. Report each Task separately. Keep successful filings
-when another fails; never refile the batch or fall back to the starting
-repository.
+If the repository is inaccessible, ownership unresolved, or its Project unavailable,
+leave an explicit unfiled brief in the conversation. Report provider failures
+honestly. After an uncertain write, reconcile with `lf wave status <wave> --json`
+in that destination. Every explicit create makes a distinct Task, even with
+identical input; only internal synchronization retries reuse the saved identity.
+Recover the created Task's identity and refine it with `lf task edit`. If the
+write remains uncertain, report it rather than issuing another create.
+Report each Task separately. Preserve successful filings when
+another fails; never recreate the batch or substitute the launch repository.
 
-## Stay available
+## Keep the conversation available
 
-Filing doesn't start or watch work. Stay in this Session's original repository
-and Wave for further ideas; don't bind it to the first Task, move its checkout,
-or switch Desktop focus after filing. Inside a Wave conversation, keep operating
-that Wave's Tasks while filing new ones.
+Capture does not start workers or supervise captured Tasks. Stay in this Session's
+original repository/Wave scope for further ideas; do not bind it to the first Task,
+move its checkout, or redirect Desktop focus after filing. Destination-scoped CLI
+calls do not relocate the conversation. The owning Waves operate their Tasks.
+When used inside an existing Wave conversation, follow this skill there; keep operating
+that Wave's Tasks while capturing new work.

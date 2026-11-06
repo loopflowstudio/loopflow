@@ -1,50 +1,58 @@
 ---
-description: Write the user docs before implementation, ready to read and edit while work continues.
+description: Write the intended user documentation before implementation, ready to read and edit while work continues.
 requires: a chosen direction
-produces: user docs edited in place, with their paths shared and shown in an attached Desktop
+produces: user documentation edited in place, with paths shared and presentation in an attached Desktop
 action_style: procedural
 ---
-Write the docs people will use when the change ships.
+Write the docs someone will use when the change ships.
 
-1. **Start from the chosen direction.** Read the request, settled decisions,
-   prototypes and existing docs. Don't reopen exploration or plan the
-   implementation. If the change has no user-facing docs, say so and finish.
+1. **Recover the chosen experience.** Read the request, settled decisions,
+   prototypes and existing docs. Work from the chosen direction; do not reopen
+   exploration or turn this into implementation planning. No preceding skill,
+   Graph or Task is required. For a change with no user-facing documentation,
+   say so briefly and finish without manufacturing a draft.
 
-2. **Write the docs in place.** Edit the README, guide or reference files that
-   will ship, following the project's structure. Lead with a realistic example
-   and its result: a call site for a library, commands and output for a CLI,
-   actions and what appears for an app. Cover the concepts, prerequisites,
-   options, defaults, failures and recovery this experience needs, and nothing
-   else. Publishable docs, not a press release, architecture plan or list of
-   things to document later. One revised paragraph can be enough.
+2. **Write the user docs in place.** Edit the actual README, guide, or reference
+   files that will ship. Follow the project's documentation structure. Lead with
+   a realistic usage example and its expected result. Explain the concepts,
+   prerequisites, options, defaults, failures and recovery needed to use the
+   change; include only what matters to this experience. For a library, show
+   a call site; for a CLI, commands and output; for an app, actions and what
+   appears. Write publishable documentation, not a press release, architecture
+   plan or list of promises to document later. Keep the scope proportional to
+   the change: one revised paragraph can be enough.
 
-   These docs describe intended behavior; don't say it's built or released.
-   Track that status in the plan and conversation, or follow the repo's
-   unreleased-docs convention. Keep saved edits and settled choices, and reuse
-   docs that are already good enough. `scratch/` holds design notes, never a
-   second copy of the docs.
+   The branch's docs describe intended behavior; do not claim it is implemented
+   or released yet. Keep that status in the working plan and conversation,
+   following any established unreleased-docs convention. Preserve saved edits
+   and settled choices. Reuse sufficient documentation rather than rewriting
+   it on every run. Scratch holds design notes, never a second copy of the docs.
 
 3. **Read it as a user.** Can someone follow the example without knowing the
    implementation? Awkward explanations and surprising prerequisites are design
-   feedback. Settle details the chosen direction implies. If writing exposes a
-   real open product choice, write the exact question into the working design
-   and report it. Don't write an answer into the design as settled unless
-   someone said so; quote what they said.
+   feedback. Resolve details implied by the chosen direction. If writing exposes
+   a consequential unsettled product choice, name the exact question in the
+   working design and report it; do not invent acceptance. Keep any independent
+   documentation useful and distinguish proposals from settled behavior.
 
-4. **Show it in an attached Desktop.** Run `lf open --host desktop --file <path>`
-   for the docs; repeat `--file` for several. It uses an existing Loopflow
-   Desktop Files view and never launches Desktop. If there is none, report the
-   paths and continue. Never fall back to a terminal editor, browser or the
-   conversation, including from Rex, Herdr, tmux or cmux, unless that editor was
-   asked for. No scratch wrapper. Record the changed doc paths in the existing
-   implementation plan so the next step reads them from this checkout.
+4. **Present in an attached Desktop.** Run
+   `lf open --host desktop --file <path>` for the actual docs; repeat `--file`
+   to present several. This uses only an existing Loopflow Desktop Files view,
+   with rendered Markdown/HTML and its draft/attention policy. It never launches
+   Desktop. If Desktop is absent, unavailable or has no matching Files view,
+   report the actual paths and continue. Never fall back to a terminal editor,
+   host, browser or conversation, including from Rex, Herdr, tmux or cmux.
+   Explicit user requests to use another editor remain separate from this
+   automatic presentation. Do not create a scratch wrapper.
+   Record the changed documentation paths in the existing implementation plan
+   so the next worker reads them from this checkout.
 
    In the conversation, link the files with a short invitation: “This is what's
    being built. Edit these docs or discuss changes while work continues.” Keep
-   that line out of the docs. If presenting fails, say so; the docs stay at
-   their paths.
+   that invitation out of the published docs. Report a presentation failure
+   honestly while leaving the edited docs available at their paths.
 
-Finish with the paths and any open product question. Writing docs adds no
-approval stop and launches no implementation. Don't wait for optional review,
-and silence is not approval. If a review before building was asked for, honor
-it; an open choice stays open.
+   Finish with the paths and any unresolved product question. Writing the docs
+   adds no approval stop and launches no implementation itself. Do not wait for
+   optional review or treat silence as approval. Respect an explicitly requested
+   review-before-build boundary; an unresolved choice remains unresolved.

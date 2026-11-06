@@ -1049,10 +1049,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Shell { .. }
+        TaskCommand::Retire { .. }
+        | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
-            unreachable!("location reads precede repository commands")
+            unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
@@ -1912,7 +1913,7 @@ fn run() -> anyhow::Result<()> {
         )
         || matches!(
             &cli.command,
-            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
+            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. } | loopflow::lf::SessionCommand::Remote { .. })
         );
     if reads_work
         && !cli.context
@@ -1956,12 +1957,37 @@ fn run() -> anyhow::Result<()> {
     }
     match &cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Shell { issue, checkout },
+            cmd: TaskCommand::Retire { issue },
         }) => {
+            journal::admit_process(&std::env::current_dir()?, &args);
+            return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Shell {
+                    issue,
+                    checkout,
+                    id,
+                    list,
+                    create,
+                    close,
+                    command,
+                },
+        }) => {
+            if *list {
+                return loopflow::ops::task::workspace::list_shells(issue, checkout);
+            }
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(issue, checkout);
+            return loopflow::ops::task::task_shell(
+                issue,
+                checkout,
+                id.as_deref().expect("Clap requires shell identity"),
+                *create,
+                *close,
+                command,
+            );
         }
         Some(Commands::Task {
             cmd:

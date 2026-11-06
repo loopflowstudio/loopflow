@@ -90,6 +90,29 @@ impl OsProcess {
         macos::sample()
     }
 
+    /// Only this owned OS session, without reading unrelated processes' argv.
+    pub(crate) fn session(session: u32) -> io::Result<Vec<Self>> {
+        #[cfg(target_os = "macos")]
+        let pids = macos::pids()?;
+        #[cfg(not(target_os = "macos"))]
+        let pids = std::fs::read_dir("/proc")?
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+            .collect::<Vec<_>>();
+        let mut processes = Vec::new();
+        for pid in pids {
+            // SAFETY: getsid reads the kernel's session membership for this PID.
+            if unsafe { libc::getsid(pid as i32) } != session as i32 {
+                continue;
+            }
+            if let Some(process) = Self::read(pid)? {
+                if !process.has_exited() {
+                    processes.push(process);
+                }
+            }
+        }
+        Ok(processes)
+    }
+
     /// The executable file `pid` runs, resolved by the kernel rather than the
     /// path it was launched by; `None` when the kernel withholds it.
     #[cfg(target_os = "macos")]

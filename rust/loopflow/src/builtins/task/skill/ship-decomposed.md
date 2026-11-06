@@ -3,73 +3,92 @@ requires: a large implemented change on this branch
 produces: multiple shippable PRs
 action_style: procedural
 ---
-Break a large working change into shippable parts, each an honest, substantial diff that lands on its own.
+Break a large working change into discrete shippable parts—each an honest, substantial diff that lands on its own.
 
-Read `scratch/<branch>.md` first: the design shows which parts were one idea and
-which only shared a branch. `git diff main --stat` shows the real footprint.
+## Orientation
 
-This is the remedial path. Additive work should be split into Tasks at plan
-time. Use this when the seams showed up only after the code existed, or when one
-branch quietly collected several independent ideas.
+Before starting, orient yourself in this branch:
+
+- Read `scratch/` — `scratch/<branch>.md` is the design behind the big
+  change; it tells you which parts were one idea and which merely shared a
+  branch.
+- Run `git diff main --stat` to see the change's real footprint.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
+
+## When this skill applies
+
+This is the remedial path. Additive work should be sliced into tasks at plan
+time (`lf launch-plan` or the design session), each increment shipping on its
+own from the start. Reach for this skill when divisibility showed up only
+after the code existed, or when one branch quietly accumulated several
+independent ideas.
 
 ## Find the seams
 
-Split along seams already in the work, in this order:
+Decompose along boundaries that already exist in the work, in order of
+preference:
 
-1. **Independent ideas.** Changes that ship together only because they were
-   built together. These split cleanly and land in any order.
-2. **Divisible impact.** One idea whose parts divide cleanly, by user-facing
-   behavior, files or layer. These land as an ordered series, foundation first.
+1. **Independent ideas.** Changes that shipped together only because they
+   were built together. These split cleanly and can land in any order.
+2. **Divisible impact.** One idea whose parts divide cleanly—by user-behavior
+   impact, by files touched, by layer. These land as an ordered series,
+   foundation first.
 
-Each slice is a real diff a reviewer holds in their head as one thing. Three
-meaty PRs beat ten confetti ones. If the parts only make sense together, ship it
-whole. An architectural change built in internal slices still lands as one PR;
-one large honest PR beats an artificially staged series.
+Each slice should be substantial: a real diff a reviewer holds in their head
+as one thing. Prefer three meaty PRs over ten confetti ones. If no clean
+seams exist—the parts only make sense together—ship it whole. An
+architectural change built in internal slices against its design still lands
+as one PR; one large honest PR beats an artificially staged series.
 
 ## Rules of an honest slice
 
-- **Every slice leaves main shippable.** It builds, affected tests pass, and no
-  user-visible behavior is half-changed.
-- **Dead code may land ahead of its wiring.** A foundation slice can add code the
-  next slice connects. Mark it as intentional (in Rust, `#[allow(dead_code)]`
-  with a one-line reason), and land the wiring slice promptly.
-- **No scaffolding to make the split possible.** No feature flag, adapter,
-  compat shim or `v2_` copy whose only job is staging the landing. If a seam
-  needs a shim, it's the wrong seam.
-- **Remove the old in the slice that adds the new.** The repo never holds both.
+- **Every slice leaves main shippable.** It builds, affected tests pass, and
+  no user-visible behavior is half-changed.
+- **Dead code may land ahead of its wiring.** A foundation slice can check in
+  code the next slice connects. Mark it so it reads as intentional (in Rust,
+  `#[allow(dead_code)]` with a one-line reason), and make sure the wiring
+  slice follows promptly.
+- **No scaffolding to make the split possible.** Never introduce a feature
+  flag, adapter, compat shim, or `v2_`/parallel implementation whose only
+  purpose is staging the landing. If a boundary needs a shim, it's the wrong
+  boundary—move it.
+- **Remove the old in the slice that creates the new.** A slice that adds a
+  replacement deletes what it replaces; the repo never holds both. Git keeps
+  the history.
 
 ## Mechanics
 
-1. Order the slices foundation first and name each one; the branch name becomes
-   the PR title prefix.
-2. Without a Task, stay without one: `lf wt create` for each branch, and publish
-   each PR with no Tasks. Use Tasks only when splitting an existing Task or when
-   managed work is asked for. Then give each independently deliverable outcome
-   its own Task, reuse existing Tasks for matching scope, and keep the original
-   Task's intended outcome with its slice. Independent Tasks start from main;
-   dependent Tasks stack on their parent. A published parent PR, even a draft,
-   is enough to start and publish a child; only landing waits for the parent.
-3. Save the original change with `lf commit` before moving anything. Use
-   Loopflow for checkouts and Git changes; carry the existing code into each
-   slice without rewriting it or losing mixed hunks. Keep the source until every
-   change has a home.
-4. Write each child its own design excerpt: brief, accepted scope, dependencies
-   and done-when. Without Tasks, copy it into the child's worktree. With Tasks,
-   pass it before launch with `lf checkout <child> --stack-on <parent> --design
-   <path>`, which records where it came from and keeps newer child work. Retry
-   with identical input; a different design at an occupied destination is a
-   conflict to reconcile, never permission to overwrite. Don't copy a whole plan
-   and toggle a "current slice" marker. Later parent scratch doesn't replace the
-   child's design.
-5. Verify each slice on its own branch: build and affected tests there, not on
-   the union.
+1. Order the slices foundation-first and name each one—the branch name
+   becomes the PR title prefix.
+2. Keep taskless delivery taskless: use `lf wt create` for the selected branches
+   and publish each PR without creating Tasks. Use the Task path below only
+   when splitting an existing Task or the user explicitly requests managed work.
+   For managed work, prefer a Task for each independently deliverable outcome.
+   Reuse existing Tasks for matching scope, including continued delivery;
+   preserve the original Task's intended outcome when assigning its slice.
+   Independent Tasks start from main; dependent Tasks stack on their parent.
+   A published parent PR, including a draft, is enough to start and publish a
+   child before the parent merges; only landing waits for that dependency.
+3. Preserve the original change with `lf commit` before moving work. Use
+   Loopflow for checkout and Git mutations; transfer the existing code into
+   each slice without rewriting it or losing mixed hunks. Keep the source
+   available until every intended change is accounted for.
+4. Prepare each child's self-contained design excerpt: its own brief, accepted
+   scope, dependencies and done-when. For taskless work, transfer the excerpt
+   into its selected worktree. For managed work, transfer it before launching with
+   `lf checkout <child> --stack-on <parent> --design <path>`. The command records
+   source identity and content and preserves newer child work. Retry identical
+   input; a changed handoff at an occupied destination is a conflict to reconcile,
+   never permission to overwrite. Do not copy a whole plan and toggle a current
+   slice marker. Later parent scratch does not replace the child's working design.
+5. Verify each slice standalone—build and affected tests on that branch, not
+   on the union.
 6. Publish each child with `lf pr publish` without waiting for its parent to
-   merge. `lf sync` picks up parent changes and, after the parent's squash
-   merge, retargets main; the child keeps its Task, branch, PR, Session and
-   design. Land approved work through `ship`: gate, then a waited landing.
-   Reaching the end of the Task's graph requests completion. Put accepted but
-   unverified outcomes in the PR description before scratch is cleared. Later
-   work is an ordinary new Task. If finishing stops after merge, check live work
-   and retry completion alone. Close a superseded original PR only once its code
-   and outcome live in other PRs and closing it is within what you were asked to
-   do; keep unrelated work.
+   merge. Use `lf sync` for parent code updates and after its squash merge;
+   the child retains its Task, branch, PR, Session and design while targeting main.
+   Land authorized work through `ship`: gate and waited landing. Reaching the
+   end of the Task's graph requests completion. Preserve accepted unverified outcomes in PR copy
+   before scratch cleanup. Optional later work uses ordinary Task creation.
+   If finishing stops, inspect live work and retry completion alone after merge.
+   Retire a superseded original PR only after its code and intended outcome have
+   owners and the caller's authority covers abandonment; preserve unrelated work.

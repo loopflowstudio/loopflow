@@ -1,84 +1,90 @@
 ---
 requires: a named Wave and accepted direction
-produces: a successor Project proposal by exact ID, KRs, separate Task candidates and gaps
+produces: exact-ID successor proposal, KRs, separate Task candidates and evidence gaps
 ---
-Shape this Wave's next chapter from accepted direction and dated findings.
+Shape this Wave's next chapter from accepted direction and dated evidence.
+Read its goal, memory, available review and `lf wave status <wave> --no-sync --json`.
+Use exact Project IDs; names and current status never reconstruct history.
+Return material challenges to the requesting conversation. Headless work lacking
+accepted direction reports the missing decision and stops. Existing acceptance
+remains valid.
 
-Read its goal, memory, any review, and `lf wave status <wave> --no-sync --json`.
-Use exact Project IDs; names and current status never rebuild history. Raise
-real disagreements with the conversation that asked. A headless run without
-accepted direction names the missing decision and stops. Earlier acceptance
-still stands.
+Name the beneficiary and experienced improvement. Author nonempty KRs before
+chapter creation, with targets and evidence windows where useful. Never carry
+forward checked verdicts. Graph is optional; an empty string is valid. Ordinary
+Project ensure has no chapter or KR requirement.
 
-Name who benefits and what gets better for them. Write nonempty KRs before the
-chapter exists, with targets and measurement windows where useful. Never carry
-a checked verdict forward. The Graph is optional; an empty string is valid.
-Ordinary Projects need no chapter or KRs.
-
-Return one entry for the chapter plan:
+Return one entry for the retained chapter plan:
 
 ```json
 {"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
 ```
 
-Generate a UUID v4 once, or reuse a chosen existing Project's UUID with
-`create:false`. Keep Task candidates separate, keyed locally and grouped by
-destination UUID, each with title, brief and acceptance. Candidates are optional
-and are filed only after the chapter Projects exist.
+Allocate a new UUID v4 once, or preserve an explicitly selected existing Project
+UUID with `create:false`. Keep proposed Task candidates separately, keyed locally
+and grouped by destination UUID; include title, brief and acceptance. Candidates
+are optional and are admitted only after chapter Projects exist.
 
-With a complete plan, preview this Wave on its own:
+With a complete retained plan, preview this Wave independently:
 
 ```bash
 lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
 ```
 
-Return agree or challenge, the exact input, the dated preview and any gaps.
-Started work keeps its identity and runs; unreviewed backlog stays in its
-Project; anything uncertain stays open. `new-chapter` classifies Tasks; don't
-write your own cancellation rules. Keep earlier KRs and history.
+Return agree/challenge, exact input, dated preview and evidence gaps. Started
+work carries identity and execution intact; unreviewed backlog remains in its
+original Project. Unknown work stays unresolved. The operation owns classification;
+do not substitute prose cancellation rules. Preserve predecessor KRs and history.
 
-This step only proposes. The caller confirms acceptance and applies it through
-repository or Wave `new-chapter` with this plan. Never write the future plan
-into the current Project, rotate on a read, or create successors with empty
-KRs to plan later. Filing Tasks keeps candidate notes and created issue IDs so
-a failed run resumes without duplicates.
+This contribution proposes only. The caller reconciles acceptance and applies
+through repository or Wave new-chapter with the retained plan. Never write the
+future plan into the current Project, rotate on a read, or create empty-KR
+successors awaiting later planning. Separate Task admission retains candidate
+notes and recovered issue IDs so failure can resume without duplicating work.
 
 ## Task briefs
 
-Write a description someone can follow without the planning conversation. Open
-with what someone is trying to do, what's in the way, and what should improve.
-The title is short and names that improvement. Keep useful phrasing from the
-conversation; use concrete verbs, not phrases like “establish the bounded
-outcome”.
+Write a description someone can understand without the planning conversation.
+Open with what the person is trying to do, what gets in their way, and what should
+improve. Use a short title naming that improvement. Preserve useful user language;
+use concrete verbs rather than process phrases such as “establish the bounded
+outcome” or “settle the publication commitment”.
 
-One or two short paragraphs and a few acceptance bullets are usually enough.
-Say what success looks like, including required numbers, windows, failure cases
-and constraints; short must not drop them. Technical Tasks can serve
-maintainers or operators without a made-up customer. Mark possible solutions as
-tentative. Architecture and implementation steps belong in the linked design.
+Usually one or two short paragraphs and a few acceptance bullets are enough.
+Use headings only when they help. Describe observable success, including required
+numbers, windows, failure cases, and constraints; brevity must not erase them.
+Technical Tasks can serve maintainers or operators without inventing a customer.
+Mark possible solutions as tentative. Keep architecture, implementation steps,
+and detailed proof in the design, linked and available to the worker.
 
-Keep the description current. Dated progress, chapter moves, queue changes,
-launch attempts and check results go in Task comments. A comment says what
-changed and what it means; link details instead of pasting raw IDs, timestamps
-or no-op logs. Proposals draft comments without posting them. Don't use
-description edits or worker steering as a log.
+Keep the description current. Put dated progress, chapter allocation, queue
+changes, launch attempts, and verification updates in Task comments.
+A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Retain
+dated application evidence in existing records. Proposals draft comments without posting.
+Do not use a description update or worker steering as a substitute log channel.
 
-Comments may be collapsed, so the description carries current blockers, real
-dependencies, accepted scope and open contrary findings that affect the work. A
-queue position isn't necessarily a dependency. When a comment changes accepted
-scope, update the description and leave the comment as history; never append
-dated amendments for readers to piece together. Before cutting superseded prose,
-make sure its decisions and findings are kept somewhere.
+Comments may be collapsed by default. Keep current blockers, actual dependencies,
+accepted scope, and unresolved contrary evidence summarized in the description
+when they affect the work. A queue position is not necessarily a dependency.
+When a comment changes the accepted scope, reconcile the description and retain
+the comment as history. Do not append dated amendments or require readers to
+reconstruct the current brief from the thread. Preserve decisions and evidence
+before removing superseded prose.
 
-For example, the description says: “After an interrupted release, maintainers
-need to see whether anything shipped and safely continue unfinished work.”
-Acceptance can require that a retry never publishes twice and failures stay
-visible. “Moved into the September chapter; scheduled after the installation
-repair” goes in a comment; put that repair in the description only if it really
-blocks. Give follow-up Tasks outcomes that are useful on their own, not
-implementation layers.
+For example, describe: “After an interrupted release, maintainers need to see
+whether anything shipped and safely continue unfinished work.” Acceptance can
+require that a retry never publishes twice and that failures remain visible.
+Put “Moved into the September chapter; scheduled after the installation repair”
+in a comment. Include that repair in the description only if it is a real blocker.
+Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
-Link related work where you explain why it matters. In prose and PR bodies, use
-`[Title · Task ID or PR number](known URL)` on first mention and shorten after;
-say the relationship (builds on, supersedes, verified by). In lists, put the ID
-first: `[Task ID or PR number · Title](known URL)`. Use only known URLs.
+Link related work where you explain its relevance. In prose and PR bodies, use
+`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
+when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
+Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
+In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
+
+Apply these rules within the chapter’s existing proposal and acceptance boundaries.
+Preserve the accepted brief when applying it; retain dated application evidence;
+summarize relevant changes in Task comments, never
+prepend or append allocation logs to the description.

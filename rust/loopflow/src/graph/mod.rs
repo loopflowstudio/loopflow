@@ -1561,8 +1561,7 @@ mod tests {
             edges(&pursue),
             [
                 ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 6),
-                ("loop-or-next".to_string(), 8)
+                ("loop-or-next".to_string(), 6)
             ]
         );
 
@@ -1887,7 +1886,7 @@ Design the feature.
                 _ => panic!("incident should contain only repair, analysis and planning"),
             })
             .collect();
-        assert_eq!(names, ["unbreak", "debug", "5whys", "launch-plan"]);
+        assert_eq!(names, ["unbreak", "5whys", "launch-plan"]);
     }
 
     #[test]

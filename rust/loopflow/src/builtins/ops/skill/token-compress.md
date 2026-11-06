@@ -2,41 +2,41 @@
 requires: text input and target token budget
 produces: compressed text
 ---
-Fit text into a token budget without silently losing what matters.
+Compress text into a target token budget without silently dropping important information.
 
-Compression is not truncation: keep the decisions, facts, risks, names, dates
-and structure the next reader needs, and reshape them to fit. Spend the budget
-on what can't be worked out again from code, git history or a fresh run: exact
-quotes, what a run showed, outside
-facts. Cut what a capable reader could recover.
+## Goal
+
+Produce a smaller artifact that preserves the decisions, facts, risks, names, dates, and structure the next reader needs. Compression is not truncation. Shape the information so it fits.
 
 ## Workflow
 
-1. Use the requested `N` tokens. Without one, ask in an interactive
-   conversation; headless, pick a practical budget and state it.
-2. Read the whole source before writing.
-3. Pull out what lasts:
-   - decisions and why
+1. Identify the target budget. Use the user's requested `N` tokens when provided. If no budget is provided, ask for one in interactive mode; in headless mode choose a practical budget and state it.
+2. Read the source text fully before writing the compressed version.
+3. Extract the durable content:
+   - decisions and rationale
    - constraints and requirements
-   - risks, blockers and open questions
-   - names, dates, versions, paths, commands, URLs and identifiers
-   - findings that would be expensive to rediscover
+   - risks, blockers, and open questions
+   - names, dates, versions, paths, commands, URLs, and identifiers
+   - evidence that would be expensive to rediscover
 4. Group related details before cutting. Replace repetition with structure.
-5. Write the compressed version under budget.
-6. If the budget forces real cuts, add an `Omitted` line naming what went. Don't hide loss.
+5. Write the compressed version under the target budget.
+6. If the budget forces meaningful omissions, add an `Omitted` line naming the categories omitted. Do not hide loss.
 
-## Rules
+## Compression rules
 
-- Keep causes: why something happened, not just what.
-- Keep interfaces: commands, API names, file paths, config keys, environment variables.
-- Keep uncertainty: open questions and weak assumptions are information.
-- Merge duplicates; don't drop unique facts because they come late.
-- Dense bullets beat vague prose. No "various fixes" when concrete categories fit.
-- Don't shorten a list by keeping its first items. Recency, impact and risk matter more than order.
+- Preserve causality: keep why something happened, not just what happened.
+- Preserve interfaces: commands, API names, file paths, config keys, environment variables, and external contracts usually matter.
+- Preserve uncertainty: open questions and weak assumptions are first-class information.
+- Merge duplicates; do not delete unique facts just because they appear late.
+- Prefer dense bullets over vague prose.
+- Do not use placeholders like "various fixes" when concrete categories fit.
+- Do not summarize a list by taking the first items. Recency, impact, and risk matter more than order.
 
 ## Output
 
-Return only the compressed text unless commentary was asked for. When useful:
+Return only the compressed text unless the user asked for commentary.
+
+When useful, use this shape:
 
 ```markdown
 Budget: <N> tokens

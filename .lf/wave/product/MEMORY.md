@@ -38,12 +38,9 @@
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-Jack folded LOO-430/431/432 into LOO-427: identity, window
-control and terminal I/O in one diff.
-
-October 8: LOO-427 leaves unknown checkout location unavailable; `92cafe61d`
-routes known Tasks without rewriting Machine defaults. Seeded IDs prove routing,
-not exchange/admission.
+Jack folded LOO-430/431/432 into LOO-427 (identity, windows, terminal I/O).
+October 8's `92cafe61d` routes known Tasks without changing Machine defaults;
+unknown checkouts stay unavailable. Seeded routing proves neither exchange nor admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
@@ -174,14 +171,11 @@ selects membership; `--no-wave` equals omission. Repository identity is required
 optional Project supplies the derived Wave. The read projection is validated on
 save, not a second owner. No synthetic inbox or query-owned workspace.
 
-Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
-default ownership, removing Project defaults/history. Repository `workflow:` uses
-strict local config; invalid selection is an error, absence needs selection.
-Captured graphs survive config, chapter and membership changes. Repository-default
-definitions bypass same-named Wave customizations.
+AGENTS.md owns current graph selection. Jack Heart's superseded Workflow defaults
+and commands remain at `781e5dc5b4:.lf/wave/product/MEMORY.md`, this heading.
 
-Jack renamed membership to `task move --wave/--no-wave`; position uses
-`task workflow move`. Same-repository moves may include active work and preserve
+Jack renamed membership to `task move --wave/--no-wave`. Same-repository moves
+may include active work and preserve
 execution, PR, checkout and conversation identity. Current Session membership
 follows the Task; capture/dispatch ownership, including null, remains historical.
 Next capture uses the new home; membership never transfers execution.
@@ -214,7 +208,7 @@ Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes
 against an unseen reopening. LOO-385 overlap does not establish closure.
 
-## Historical pointers
+## History
 
 - Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
   trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
@@ -256,7 +250,7 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
   exposes unstarted standalone captures in repository inventory/navigation.
 
-## Graph alignment (reconciled 2026-11-02)
+## Graph alignment (2026-11-02)
 
 AGENTS.md owns the current Graph/Task contract. Latest GraphProcessDetail grants
 no control authority; Task position, execution and TaskRunControl stay separate.
@@ -264,33 +258,36 @@ Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
 `fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
 That approval established no native/provider acceptance or chapter KR.
 
-## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
+## Task conversation and Graphs (reconciled 2026-11-03)
 
-Jack Heart approved the October 6 fixture Task view and landing; no configured
-provider or populated live store was shown. History and evidence limits: `28dc141671:.lf/wave/product/MEMORY.md`, this heading;
-design/demo: `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
-`questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
+Jack Heart approved LOO-353's October 6 fixture Task view and landing, not
+configured-provider or populated-store acceptance. AGENTS.md owns graph semantics; retired Workflow controls and evidence remain at `9ab296eeff:.lf/wave/product/MEMORY.md`, **Task conversation and Workflows**.
+One ongoing Task conversation holds review; additional Sessions are deliberate.
+Association includes checkout and explicit binds, excluding repo/Wave conversations.
+Capture models before records, delete replaced mechanisms, and use UPSERT when
+revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
+checks do not replace affected suites.
 
-- One ongoing Task conversation holds review; additional Sessions are deliberate.
-  Interactive Session and headless Run share LfSession continuity. Association
-  includes checkout and explicit binds, excluding repository/Wave conversations.
-- Jack removed Task workers, mutable Flow switching, automatic recovery and the
-  Session ready/complete handshake. Hiding/selecting never terminates or approves.
-  Stopped Flows are history; caller-owned recovery starts authorized remaining work.
-- Workflow is a captured graph with live position. Restart preserves graph/history;
-  October 17's Task → Wave → repository selection replaces Project defaults.
-  Completion remains independent under LOO-418. Each Flow process is equal work;
-  `--steers-after` filters nodes without restarting them.
-- Task pages consume the Work stream; the header owns Workflow presentation beside
-  retained conversations/shells/files/logs. Monitor, Session-sidebar toggle and Flow chip remain retired.
-- Whole failed Flows currently retry three times; held exit 3 stays held. LOO-435
-  owns failed-step retry. Driver death and step-registration gaps retain uncertain
-  liveness; disabled Desktop Start does not exclude another CLI run. Nonreporter
-  Waiting and lone headless-skill visibility remain unresolved as archived.
+## Native shell lifetimes (LOO-717, accepted November 3–5, 2026)
 
-Lessons: capture the model before records; delete jobs with their replacements.
-Upsert when revisions depend on update triggers (`INSERT OR REPLACE` skips them).
-SQL can compile against removed columns; focused passes do not replace suites.
+Jack Heart approved building/publication through demo, not landing/installation.
+Rex owns its shells/layouts; LF closes only Desktop-owned shells, never Rex's.
+LOO-498 owns Rex's adapter. No ordinary-shell relay or deleted-checkout
+restoration. Close ends Desktop shells/jobs; Hide/switch/quit preserve execution.
+Undo restores history. Nested lf preserves shell purpose.
+
+Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
+Return cancels grace. Active work, drafts and pending requests delay cleanup
+without restarting elapsed grace. Uncommitted files are discarded; committed-ref
+safeguards and history survive.
+
+Jack's November 5 rule: an open LF viewer of a Task Session retains the checkout
+(hidden, unfocused and passive count); a shell with that cwd does not; a native tab
+left after the viewer exits is no hold. LF persists no host/occurrence identity:
+the serving owner records `processes.viewer_hold` from its own connections. A local
+drop past reconnect grace is exit; an SSH drop is unknown until a fresh attach, so
+a quit Desktop releases remote viewers only once viewed again. Agent exit is never
+viewer exit. Superseded occurrence/lease design: `b81df60579:scratch/`.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -662,17 +659,13 @@ selects one destination. Anonymous arrangement remains a draft save-first choice
 clause IDs; distinct Dashboards need distinct occurrence roots. Intent proves no
 liveness; Waiting's 2:1 weight is provisional.
 
-Jack's October 17 tab decision: each Task has at most one Shell and one Files pane;
-shell tabs own independent processes, file tabs share Task/path documents. No
-tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
-arrangement groups existing panes. Shell identity is independent of pane/selection;
-empty Files keeps location. Delayed reads merge missing content without replacing
-newer tabs, selection, geometry or drafts (October 18 tests).
-Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
-launch still records no Shell Process ID, so cold attachment and mounted restart/
-cross-machine continuity remain unproved with 416.
-Pane ownership follows Task.repository_id, not optional Project/Wave membership;
-leaving a Project must preserve the same saved panes and drafts.
+Jack Heart (October 17): one Shell pane per Task, independent processes per tab;
+one Files pane shares Task/path documents. No tear-out, extra tools or non-Task
+shells. Creation selects; arrangement groups existing panes. Shell identity ignores pane/selection; empty Files retains location.
+Delayed restoration merges missing content, preserving newer tabs, selection,
+geometry and drafts; conflicts preserve live and saved edits. Pane ownership is
+Task.repository_id, independent of Project/Wave membership. Cold-shell and native
+continuity limits with LOO-416: `17cf6a71f9:.lf/wave/product/MEMORY.md`, this heading.
 
 October 15, LOO-492: Jack Heart required even nested-corner clearance; text
 padding alone is insufficient. Lower workspace radii derive from pane radius

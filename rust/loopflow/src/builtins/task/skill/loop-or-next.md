@@ -1,54 +1,63 @@
 ---
-requires: objective, current results and feedback, and the caller's decision protocol
-produces: Advance or Iterate with the reasons, or Blocked with what needs resolving
+requires: objective, current evidence and feedback, and the caller's decision protocol
+produces: Advance or Iterate with evidence, or a Blocked outcome for human resolution
 action_style: procedural
 ---
 Decide whether the Graph should advance, iterate, or stop because progress is blocked.
 
-Judge against the objective, success conditions and constraints the caller
-supplies. Work and review steps bring their own criteria; this step decides
-where the Graph goes.
+Use the objective, success conditions, and constraints supplied by the caller.
+Do not impose a particular workflow, producer skill, artifact format, or
+progress metric. Work and review steps supply domain-specific criteria and
+evidence; this step owns the navigation judgment.
 
-Read the previous direction, what changed or was learned, current feedback and
-open findings. Open the files they point to when those may have changed.
-Accepted changes stand; a newer proposal doesn't override an accepted
-requirement. A process exiting is not the work being done.
+Read the previous direction, what changed or was learned, current feedback,
+and unresolved findings. Follow supplied artifact paths and inspect their
+current contents when they may have changed. Reconcile earlier evidence and
+accepted changes; a newer proposal does not override an accepted requirement.
+Reuse applicable results without treating a process exit as task completion.
 
-A check that can't run here, or needs a person, is never a reason for Blocked.
-Use a headless equivalent or leave it to gate or CI and continue. Before gate,
-a build and focused tests are enough. Real failures and missing behavior still
-need work. Never claim a deferred check passed or skip an authored review.
+An unavailable or human-dependent check alone never means Blocked. Use a
+headless equivalent or name its later gate/CI owner and continue. Before gate,
+build/focused-test sanity is enough. Actual failures and missing behavior still
+need work. Leave judgment to demo/review; neither claim deferred checks passed
+nor bypass an authored review.
 
-- **Advance** when what this step requires is done, including acceptance
-  conditions and earlier findings. Later obligations belong to later steps.
-- **Iterate** when the last pass made real progress and specific work remains
-  that the backward edge can do. Give the next action and the result it should
-  produce, within the accepted scope. Ruling out a hypothesis or narrowing the
-  problem counts as progress; activity doesn't.
-- **Blocked** when the last pass made no real progress, repeated the same
-  failure with nothing new learned, or needs an input or judgment you can't
-  supply. Say what needs resolving. Don't spend another pass on unchanged
-  direction. If results are missing, say so; missing results don't prove there
-  was no progress.
+- **Advance** when the work required at this boundary is satisfied, including
+  applicable acceptance conditions and findings from earlier attempts. Leave
+  later obligations to their declared steps.
+- **Iterate** when meaningful progress was made and specific remaining work can
+  use the declared backward edge. Supply the next action and observable result,
+  within the accepted scope. Learning that rules out a hypothesis or narrows
+  the problem counts as progress; activity alone does not.
+- **Blocked** when the previous iteration made no meaningful progress, repeated
+  the same failure without new evidence, or exposed an input or judgment the
+  agent cannot supply. Honor unresolved blockers in the supplied criteria and
+  evidence. Explain what needs resolving. Do not spend another iteration repeating unchanged direction.
+  If evidence is missing, name that gap rather than pretending it establishes no progress.
 
-Before deciding, answer separately: which obligations are met, what changed or
-was learned, and what useful action or missing input remains. Look at actual
-results, not a confidence score. There is no pass limit: decide from the work,
-not the iteration count. The runner owns edge targets.
+Separate the questions before deciding: which obligations are satisfied, what
+changed or was learned, and what useful action or missing human input remains.
+Inspect the relevant evidence; do not substitute a confidence score for observed results.
+The runner owns edge targets and execution identity. There is no pass limit;
+judge whether to continue from the work and evidence, not the iteration count.
 
-Answer through the supplied decision protocol for this exact decision. Advance
-and Iterate move the Graph; Blocked stops it here. Existing output and logs are
-enough; no separate handoff is needed.
+Use the supplied decision protocol for this exact occurrence. Advance and
+Iterate navigate; Blocked stops execution at the current position. Explain the
+missing input or repeated failure in the declared outcome. Existing output and
+logs are sufficient; no separate handoff or conversation is required.
 
-On a retry, reassess with the new results or direction; a retry doesn't mean
-the work is done. Authored reviews feed this assessment; they aren't verdicts.
-Carry accepted changes, open questions and the next action into the summary,
-with paths the next step can follow.
+On an explicit retry, reassess using the new evidence or direction. Retry does
+not establish that the work is done and does not choose navigation. Authored
+reviews return feedback for this assessment, not a verdict.
+Carry accepted changes, unresolved questions, and the concrete next action into
+the decision summary, with references the next step can follow.
 
-If output validation asks for a corrected value, correct it in this
-conversation; don't rerun implementation. Malformed output doesn't mean no
-progress. If the protocol still can't be satisfied, leave the failure visible.
+Output validation feedback requests a corrected value in this same conversation.
+Return the declared verdict and evidence summary;
+do not rerun implementation to repair output. Missing or malformed output does
+not establish that the work made no progress. If the protocol still cannot be
+satisfied, leave the specific failure visible rather than inventing success.
 
-Without a decision protocol, give the assessment in the conversation. Don't
-make up a decision command, create a Task, launch the next step, or write a
-file for a later agent to act on.
+Without a bound decision protocol, return this assessment in the conversation.
+Do not invent a decision command, create a Task, launch a successor, or write a
+file for a later agent to interpret as execution authority.

@@ -192,6 +192,19 @@ INSTALLER
 }
 
 fn executable(path: &Path, content: &str) {
+    // Mock the remote command/Machine identity, while exercising real framing.
+    let content = if path.file_name().is_some_and(|name| name == "lf") {
+        content.replacen(
+            "#!/bin/sh\n",
+            &format!(
+                "#!/bin/sh\nif [ \"$1 $2\" = 'session remote' ]; then exec env -u LF_EXPECTED_MACHINE_ID {} \"$@\"; fi\n",
+                shlex::try_quote(env!("CARGO_BIN_EXE_lf")).unwrap()
+            ),
+            1,
+        )
+    } else {
+        content.to_owned()
+    };
     fs::write(path, content).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -257,7 +270,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "LF_HOME=/remote/private home",
         "/bin/sh",
         "-c",
-        "printf '%s\\n' \"$LF_HOME\" \"$1\"; cat",
+        "stty -echo; printf '%s\\n' \"$LF_HOME\" \"$1\"; read -r line; printf '%s\\n' \"$line\"",
         "fixture",
         "literal ' quote"
     ]);
@@ -281,8 +294,8 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(argv[0], "ssh");
-    assert!(argv.contains(&"-tt"));
+    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
+    assert!(argv.contains(&"-T"));
     for target in [
         vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
@@ -299,24 +312,22 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    let mut command = Command::new(fixture.root.path().join("bin/ssh"));
+    let mut command = fixture.command(&argv[1..]);
     command
-        .args(&argv[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = command.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all("unfinished draft\n".as_bytes())
-        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"unfinished draft\n").unwrap();
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "/remote/private home\nliteral ' quote\nunfinished draft\n"
+    let text = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(
+        text.contains("/remote/private home\nliteral ' quote\nunfinished draft\n"),
+        "{text}"
     );
     assert_eq!(opened["workspace"], record["workspace"]);
 }

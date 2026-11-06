@@ -69,6 +69,24 @@ past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
+`cargo test -p loopflow --test transport_tests ssh_shells::` starts a disposable
+loopback sshd with generated keys, pinned known-hosts and two isolated Machine
+stores. It requires OpenSSH client/server binaries (`/usr/bin/ssh`,
+`/usr/sbin/sshd`, `ssh-keygen`; Ubuntu also needs `/run/sshd`). CI installs the
+server package. On macOS, run that command directly with `-- --ignored`:
+Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
+tests are explicitly ignored in its default suite. Linux runs them normally
+inside network isolation. No system SSH configuration, keys or installed lf are used.
+Twenty cycles exercise the public Machine route, abrupt transport loss,
+reattachment to the same shell, Close and process/PTY/socket settlement;
+a separate case covers failed authentication, stale checkout and shell exit.
+These are real SSH protocol checks on one Machine, not a two-Machine or installed
+Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
+holds, unknown viewers, cancellation, unconfirmed job cleanup and retry after
+partial Git deletion with disposable worktrees and a bare remote.
+`session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown`
+records a real owner's hold through leave, reconnect grace and SSH loss.
+
 `transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
 holds a SQLite writer while typing and returning to the viewer. Control stays
 responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery

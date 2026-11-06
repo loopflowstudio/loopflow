@@ -2529,13 +2529,35 @@ esac
         String::from_utf8_lossy(&selected.stderr)
     );
     assert!(String::from_utf8_lossy(&selected.stdout).contains("already merged"));
-    // Completion is durable even when dirty notes prevent checkout cleanup.
+    // Completion starts one grace period; dirty notes survive that grace.
     let completed = command()
         .args(["task", "complete", "INF-123"])
         .output()
         .unwrap();
-    assert!(String::from_utf8_lossy(&completed.stderr)
-        .contains("is complete, but cleanup is incomplete"));
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    let read_retirement = || {
+        database
+            .query_row(
+                "SELECT phase,due_at,reason FROM task_retirements",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap()
+    };
+    let (phase, due_at, _) = read_retirement();
+    assert_eq!(phase, "waiting");
+    assert!(due_at.unwrap() > time::OffsetDateTime::now_utc().unix_timestamp());
+    assert!(worktree.join("scratch/retained.md").exists());
     assert_eq!(
         runtime
             .block_on(fixture.store.task_state(&fixture.task.id))
@@ -2560,6 +2582,34 @@ esac
         .unwrap()
         .unwrap();
     assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
+    assert_eq!(
+        read_retirement().1,
+        due_at,
+        "repeated landing must preserve the completion's deadline"
+    );
+    // No viewer holds the checkout: once its grace elapses the executor retires it.
+    database
+        .execute("UPDATE task_retirements SET due_at=unixepoch()-1", [])
+        .unwrap();
+    let retired = command()
+        .current_dir(repo.path())
+        .args(["task", "retire", "INF-123"])
+        .output()
+        .unwrap();
+    assert!(
+        retired.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retired.stderr)
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while worktree.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        !worktree.exists(),
+        "pending retirement: {:?}",
+        read_retirement()
+    );
     let log = fs::read_to_string(&log_path).unwrap();
     assert_eq!(
         log.lines()

@@ -14,7 +14,7 @@ struct LaunchJournalTests {
         journal.mark(.usable, ["source": "saved"], ms: 300)
         journal.mark(.usable, ["source": "fresh"], ms: 9000)
         journal.read(["task", "show", "LOO-1", "--json"], ms: 12.34, ok: true)
-        journal.read(["planning", "list", "--all", "--json"], ms: 14000, ok: false)
+        journal.read(["plan", "list", "--all", "--json"], ms: 14000, ok: false)
         journal.refreshed("planning", ms: 14001, ok: false)
         journal.mark(.fresh, ms: 15000)
         journal.refreshed("sessions", ms: 20, ok: false)
@@ -117,7 +117,7 @@ struct LaunchJournalTests {
         let directory = try temporaryDirectory()
         let journal = LaunchJournal(directory: directory)
         journal.mark(.usable, ms: 1)
-        journal.read(["planning", "list"], ms: 1, ok: true)
+        journal.read(["plan", "list"], ms: 1, ok: true)
         journal.flush()
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }

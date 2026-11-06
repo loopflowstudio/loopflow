@@ -99,7 +99,7 @@ mod tests {
         ("checkout_created", "checkout.create"),
         ("checkout_sync_planned", "checkout.sync"),
         ("checkout_syncing", "checkout.sync"),
-        ("launched", "repository.release"),
+        ("launched", "repo.release"),
         ("owner", "session.owner"),
         ("pr_abandoned", "pr.abandon"),
         ("pr_checks_report", "pr.checks"),
@@ -108,15 +108,15 @@ mod tests {
         ("pr_published", "pr.publish"),
         ("pr_review_requested", "pr.request_review"),
         ("pr_reviews_report", "pr.reviews"),
-        ("repository_ci_report", "repository.ci"),
+        ("repo_ci_report", "repo.ci"),
         ("response", "session.rename"),
         ("session_steered", "session.steer"),
         ("skill_entries", "skill.list"),
         ("task_held", "task.hold"),
         ("task_running", "task.run"),
         ("task_shipping", "task.ship"),
-        ("wave_planning_connected", "wave.planning.connect"),
-        ("wave_planning_reteamed", "wave.planning.reteam"),
+        ("wave_plan_connected", "wave.plan.connect"),
+        ("wave_plan_reteamed", "wave.plan.reteam"),
     ];
 
     fn fixtures_root() -> PathBuf {

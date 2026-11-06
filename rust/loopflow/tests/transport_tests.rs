@@ -4530,7 +4530,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
-    let query = json!({"kind":"planning.list","directory":"/","wave":null,"task":null,"all":true});
+    let query = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let tasks = watch
         .subscribe(serde_json::from_value(query).unwrap())

@@ -30,7 +30,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["wave", "planning", "connect"]`).
+    /// Subcommand path for the completeness guard (e.g. `["wave", "plan", "connect"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -70,7 +70,7 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 const FILTER_ONLY: &[&[&str]] = &[
     &["task", "list"],
     &["session", "history"],
-    &["repository", "ci"],
+    &["repo", "ci"],
     &["session", "history", "list"],
     &["session", "history", "search"],
     &["session", "usage"],
@@ -102,15 +102,15 @@ const COMMANDS: &[Cmd] = &[
     },
     Cmd {
         id: "wave planning",
-        path: &["wave", "planning"],
-        base_args: &["wave", "planning", "--json"],
+        path: &["wave", "plan"],
+        base_args: &["wave", "plan", "--json"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },
     Cmd {
         id: "planning list",
-        path: &["planning", "list"],
-        base_args: &["planning", "list", "--json"],
+        path: &["plan", "list"],
+        base_args: &["plan", "list", "--json"],
         wave_form: WaveForm::Positional,
         global_default: true,
     },
@@ -131,8 +131,8 @@ const COMMANDS: &[Cmd] = &[
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
         id: "wave planning connect",
-        path: &["wave", "planning", "connect"],
-        base_args: &["wave", "planning", "connect"],
+        path: &["wave", "plan", "connect"],
+        base_args: &["wave", "plan", "connect"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },

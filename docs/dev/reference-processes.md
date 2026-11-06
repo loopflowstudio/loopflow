@@ -190,7 +190,7 @@ unchanged UUID. A target-local `.lf/tmp/wave-relocations/<uuid>.json` receipt
 bridges the filesystem/SQLite commit boundary; retrying after a committed crash
 finishes verified source cleanup, then removes the receipt. Repository moves
 also require compatible configured planning Teams so relocation cannot impersonate
-the separate `lf wave planning reteam` operation.
+the separate `lf wave plan reteam` operation.
 
 ## Promotion and long-running old processes
 

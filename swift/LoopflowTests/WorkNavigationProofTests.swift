@@ -155,7 +155,7 @@ struct WorkNavigationProofTests {
         let planning = RoadmapSource(roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("planning", "list"): return await planning.read()
+            case ("plan", "list"): return await planning.read()
             case ("wave", "list"): return "[]"
             case ("session", "history"): return #"{"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)

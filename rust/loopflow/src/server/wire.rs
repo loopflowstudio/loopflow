@@ -55,7 +55,7 @@ pub struct ClientIdentity {
 }
 
 /// What a request asks for, named by its `kind`: a dotted resource and verb
-/// (`task.complete`, `planning.list`). `desktop.*` kinds are Desktop's own
+/// (`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own
 /// arrangement state, not part of what other clients are offered.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -208,11 +208,11 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
-            include_str!("../../../../tests/fixtures/dto/server/wave_planning_bind.json"),
-            include_str!("../../../../tests/fixtures/dto/server/wave_planning_connect.json"),
-            include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteam.json"),
-            include_str!("../../../../tests/fixtures/dto/server/repository_ci.json"),
-            include_str!("../../../../tests/fixtures/dto/server/repository_release.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_bind.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_connect.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_ci.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_release.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
@@ -256,9 +256,9 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
-            include_str!("../../../../tests/fixtures/dto/server/wave_planning_connected.json"),
-            include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteamed.json"),
-            include_str!("../../../../tests/fixtures/dto/server/repository_ci_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_connected.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_ci_report.json"),
             include_str!("../../../../tests/fixtures/dto/server/launched.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_committed.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_sync_planned.json"),

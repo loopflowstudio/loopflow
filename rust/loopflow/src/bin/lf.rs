@@ -771,31 +771,26 @@ fn print_task_control(
     Ok(())
 }
 
-fn dispatch_repository(
-    cmd: &loopflow::lf::RepositoryCommand,
-    args: &[String],
-) -> anyhow::Result<()> {
-    use loopflow::lf::RepositoryCommand;
+fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyhow::Result<()> {
+    use loopflow::lf::RepoCommand;
     match cmd {
-        RepositoryCommand::Planning { cmd, json, watch } => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::planning::run(cmd.as_ref(), *json, *watch)
+        RepoCommand::Plan { cmd, json, watch } => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *watch)
         }),
-        RepositoryCommand::Path => in_directory_runtime(args, |_| {
+        RepoCommand::Path => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, true, false)
         }),
-        RepositoryCommand::Release { cmd } => {
+        RepoCommand::Release { cmd } => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
         }
-        RepositoryCommand::Ci {
+        RepoCommand::Ci {
             since,
             wave,
             repo,
             json,
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
-        RepositoryCommand::People { json } => loopflow::lf::commands::people::run(*json),
-        RepositoryCommand::Tokens { json, days } => {
-            loopflow::lf::commands::tokens::run(*json, *days)
-        }
+        RepoCommand::People { json } => loopflow::lf::commands::people::run(*json),
+        RepoCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
     }
 }
 
@@ -846,13 +841,13 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             })
         }
 
-        WaveCommand::Planning { cmd: None, .. } => {
+        WaveCommand::Plan { cmd: None, .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Planning { cmd: Some(cmd), .. } => {
-            use loopflow::lf::WavePlanningCommand;
+        WaveCommand::Plan { cmd: Some(cmd), .. } => {
+            use loopflow::lf::WavePlanCommand;
             match cmd {
-                WavePlanningCommand::Connect {
+                WavePlanCommand::Connect {
                     wave,
                     all,
                     team_key,
@@ -866,10 +861,10 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     team_name.as_deref(),
                     *json,
                 ),
-                WavePlanningCommand::Reteam { apply, json } => {
+                WavePlanCommand::Reteam { apply, json } => {
                     loopflow::lf::commands::ops::reteam(repo, *apply, *json)
                 }
-                WavePlanningCommand::Bind {
+                WavePlanCommand::Bind {
                     wave,
                     project,
                     json,
@@ -1732,11 +1727,11 @@ fn run() -> anyhow::Result<()> {
                 Commands::Task { .. }
                     | Commands::Ship { .. }
                     | Commands::Wave { .. }
-                    | Commands::Repository {
+                    | Commands::Repo {
                         cmd: Some(
-                            loopflow::lf::RepositoryCommand::Release { .. }
-                                | loopflow::lf::RepositoryCommand::Ci { .. }
-                                | loopflow::lf::RepositoryCommand::Planning { .. }
+                            loopflow::lf::RepoCommand::Release { .. }
+                                | loopflow::lf::RepoCommand::Ci { .. }
+                                | loopflow::lf::RepoCommand::Plan { .. }
                         ),
                         ..
                     }
@@ -1762,7 +1757,7 @@ fn run() -> anyhow::Result<()> {
         && !matches!(
             cli.command,
             Some(Commands::Config {
-                cmd: loopflow::lf::ConfigCommand::Repository { .. }
+                cmd: loopflow::lf::ConfigCommand::Repo { .. }
             })
         )
     {
@@ -2303,8 +2298,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             | Some(Commands::Pr {
                 cmd: Some(loopflow::lf::PrCommand::Land { .. })
             })
-            | Some(Commands::Repository {
-                cmd: Some(loopflow::lf::RepositoryCommand::Release {
+            | Some(Commands::Repo {
+                cmd: Some(loopflow::lf::RepoCommand::Release {
                     cmd: loopflow::lf::ReleaseCommand::Run { .. }
                 }),
                 ..
@@ -2433,8 +2428,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 | WaveCommand::Sync { .. }
                 | WaveCommand::List { .. }
                 | WaveCommand::Show { .. }
-                | WaveCommand::Planning { cmd: None, .. }
-        }) | Some(Commands::Planning { .. })
+                | WaveCommand::Plan { cmd: None, .. }
+        }) | Some(Commands::Plan { .. })
             | Some(Commands::Session {
                 cmd: loopflow::lf::SessionCommand::History {
                     cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
@@ -2777,7 +2772,7 @@ fn execute_command(
             | loopflow::lf::ConfigCommand::Explain { .. } => {
                 unreachable!("settings dispatch precedes Work binding")
             }
-            loopflow::lf::ConfigCommand::Repository {
+            loopflow::lf::ConfigCommand::Repo {
                 bind,
                 relocate,
                 json,
@@ -2871,9 +2866,9 @@ fn execute_command(
                 )
             })
         }
-        Some(Commands::Repository { cmd: Some(cmd), .. }) => dispatch_repository(cmd, args),
-        // Bare `lf repository`: the identity read `lf config repository` keeps for its edits.
-        Some(Commands::Repository { cmd: None, json }) => in_directory_runtime(args, |_| {
+        Some(Commands::Repo { cmd: Some(cmd), .. }) => dispatch_repository(cmd, args),
+        // Bare `lf repo`: the identity read `lf config repo` keeps for its edits.
+        Some(Commands::Repo { cmd: None, json }) => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, false, *json)
         }),
         Some(Commands::Self_ {
@@ -2909,13 +2904,13 @@ fn execute_command(
             )
         }
         Some(Commands::Wave {
-            cmd: WaveCommand::Planning {
+            cmd: WaveCommand::Plan {
                 wave, cmd: None, ..
             },
         }) => loopflow::lf::commands::waves::status(wave.as_deref(), true, false),
-        Some(Commands::Planning {
+        Some(Commands::Plan {
             cmd:
-                loopflow::lf::PlanningCommand::List {
+                loopflow::lf::PlanCommand::List {
                     wave,
                     task,
                     all,
@@ -3487,19 +3482,16 @@ mod tests {
 
     #[test]
     fn reorder_args_moves_flags_to_nested_owners() {
-        let args: Vec<String> = ["lf", "wave", "planning", "--all", "connect"]
+        let args: Vec<String> = ["lf", "wave", "plan", "--all", "connect"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec!["lf", "wave", "planning", "connect", "--all"]
-        );
+        assert_eq!(reordered, vec!["lf", "wave", "plan", "connect", "--all"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Wave {
-                cmd: loopflow::lf::WaveCommand::Planning {
-                    cmd: Some(loopflow::lf::WavePlanningCommand::Connect { all: true, .. }),
+                cmd: loopflow::lf::WaveCommand::Plan {
+                    cmd: Some(loopflow::lf::WavePlanCommand::Connect { all: true, .. }),
                     ..
                 }
             })

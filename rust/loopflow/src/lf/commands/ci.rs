@@ -77,7 +77,7 @@ pub struct CiIncidentDto {
 }
 
 pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> Result<()> {
-    let report = crate::engine::repository::ci(since, wave, repo)?;
+    let report = crate::engine::repo::ci(since, wave, repo)?;
     if json {
         println!("{}", serde_json::to_string(&report)?);
     } else {

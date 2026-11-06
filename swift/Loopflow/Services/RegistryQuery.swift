@@ -87,7 +87,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// Rows in one `sessionPage`.
     static let sessionPageLimit = 100
 
-    /// `lf planning list --all`: every repository's Waves and Tasks.
+    /// `lf plan list --all`: every repository's Waves and Tasks.
     public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
 
     /// The equivalent `lf` command, `--json` included.
@@ -121,7 +121,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .paneLayout(_, let work):
             return ["desktop", "layout", work]
         case .people:
-            return ["repository", "people", "--json"]
+            return ["repo", "people", "--json"]
         case .graphs:
             return ["graph", "list", "--json"]
         case .viewPlan(_, let expression):
@@ -135,7 +135,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskContext(let task):
             return ["task", "context", task, "--json"]
         case .waveDetail(_, let wave):
-            return ["wave", "planning", wave, "--json"]
+            return ["wave", "plan", wave, "--json"]
         case .closedTasks(_, let wave, let after):
             return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
         case .machines:
@@ -144,27 +144,27 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["session", "history", "--since", since, "--limit", String(limit)]
                 + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .roadmap(_, let wave, let task, let all):
-            return ["planning", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
+            return ["plan", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
         case .planningStatus:
-            return ["repository", "planning", "--json"]
+            return ["repo", "plan", "--json"]
         case .workLink(_, let url):
             return ["open", url, "--link", "--json"]
         case .repositoryPath(let id):
-            return ["--repository", id, "repository", "path"]
+            return ["--repo-id", id, "repo", "path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
         case .sessionPage(_, let headless, let after):
             return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                 + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
         case .tokens(_, let days):
-            return ["repository", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
+            return ["repo", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
         case .retention:
             return ["session", "retention", "--json"]
         case .doctor:
             return ["machine", "doctor", "--json"]
         case .ci(let since, let wave, let repo):
-            return ["repository", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
+            return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
         case .accountList(let provider, let cached, let details):
             return ["account"] + argument(nil, provider) + (cached ? ["--cached"] : []) + (details ? ["--details"] : [])
                 + ["--json"]
@@ -217,7 +217,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
             TaggedFields("desktop.layout", ["directory": directory, "work": work])
-        case .people(let directory): TaggedFields("repository.people", ["directory": directory])
+        case .people(let directory): TaggedFields("repo.people", ["directory": directory])
         case .graphs(let directory): TaggedFields("graph.list", ["directory": directory])
         case .viewPlan(let directory, let expression):
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
@@ -228,29 +228,29 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
         case .waveDetail(let directory, let wave):
-            TaggedFields("wave.planning", ["directory": directory, "wave": wave])
+            TaggedFields("wave.plan", ["directory": directory, "wave": wave])
         case .closedTasks(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
         case .machines: TaggedFields("machine.list")
         case .history(let since, let limit, let wave, let project, let task):
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .roadmap(let directory, let wave, let task, let all):
-            TaggedFields("planning.list", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .planningStatus(let directory): TaggedFields("repository.planning", ["directory": directory])
+            TaggedFields("plan.list", ["directory": directory, "wave": wave, "task": task, "all": all])
+        case .planningStatus(let directory): TaggedFields("repo.plan", ["directory": directory])
         case .workLink(let directory, let url):
             TaggedFields("work.resolve", ["directory": directory, "url": url])
-        case .repositoryPath(let id): TaggedFields("repository.path", ["id": id])
+        case .repositoryPath(let id): TaggedFields("repo.path", ["id": id])
         case .waveGraph(let directory, let wave):
             TaggedFields("wave.graph", ["directory": directory, "wave": wave])
         case .sessionPage(let directory, let headless, let after):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after,
                                           "limit": Self.sessionPageLimit])
         case .tokens(let directory, let days):
-            TaggedFields("repository.tokens", ["directory": directory, "days": days])
+            TaggedFields("repo.tokens", ["directory": directory, "days": days])
         case .retention: TaggedFields("session.retention")
         case .doctor: TaggedFields("machine.doctor")
         case .ci(let since, let wave, let repo):
-            TaggedFields("repository.ci", ["since": since, "wave": wave, "repo": repo])
+            TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
         case .accountList(let provider, let cached, let details):
             TaggedFields("account.list", ["provider": provider, "cached": cached, "details": details])
         case .accountRoute(let directory, let repo, let `default`):
@@ -391,14 +391,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return Self.prepared(agent, ["session", "new", id], repo: nil)
         case .waveAdd(_, let wave, let objective): return ["wave", "create", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
-        case .wavePlanningBind(_, let wave, let project): return ["wave", "planning", "bind", wave, project, "--json"]
+        case .wavePlanningBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
         case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
-            return ["wave", "planning", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
+            return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
                 + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
-        case .wavePlanningReteam(_, let apply): return ["wave", "planning", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
+        case .wavePlanningReteam(_, let apply): return ["wave", "plan", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
         case .graphCustomize(_, let name): return ["graph", "customize", name, "--json"]
         case .repositoryRelease(_, let version, let target):
-            return ["repository", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
+            return ["repo", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
         case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
             var argv = Self.option("--agent", agent) + ["commit"] + Self.option("--message", message)
             argv += Self.flags([("--push", push), ("--no-add", noAdd)])
@@ -584,16 +584,16 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .planningRefresh(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
         case .wavePlanningBind(let directory, let wave, let project):
-            TaggedFields("wave.planning.bind", ["directory": directory, "wave": wave, "project": project])
+            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project])
         case .wavePlanningConnect(let directory, let wave, let all, let teamKey, let teamName):
-            TaggedFields("wave.planning.connect", ["directory": directory, "wave": wave, "all": all,
+            TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
                                                    "team_key": teamKey, "team_name": teamName])
         case .wavePlanningReteam(let directory, let apply):
-            TaggedFields("wave.planning.reteam", ["directory": directory, "apply": apply])
+            TaggedFields("wave.plan.reteam", ["directory": directory, "apply": apply])
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .repositoryRelease(let directory, let version, let target):
-            TaggedFields("repository.release", ["directory": directory, "version": version, "target": target])
+            TaggedFields("repo.release", ["directory": directory, "version": version, "target": target])
         case .checkoutCommit(let directory, let message, let push, let noAdd, let paths, let agent):
             TaggedFields("checkout.commit", ["directory": directory, "message": message, "push": push, "no_add": noAdd,
                                              "paths": paths, "agent": agent])
@@ -809,7 +809,7 @@ public struct RegistryQuery: Sendable {
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
     /// connection identity, repository lookup and every operation on that Machine.
     public func onMachine(_ machine: String, repository: String) -> RegistryQuery {
-        let prefix = ["--machine", machine, "--repository", repository]
+        let prefix = ["--machine", machine, "--repo-id", repository]
         var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
             try await runWithInput(prefix + args, nil, input)
         }, watchFiles: { [observeFiles] args, _ in

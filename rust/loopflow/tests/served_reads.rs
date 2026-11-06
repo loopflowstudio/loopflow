@@ -447,7 +447,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::Machines
         | Read::History(_)
         | Read::Roadmap { .. }
-        | Read::PlanningStatus { .. }
+        | Read::PlanStatus { .. }
         | Read::WorkLink { .. }
         | Read::RepositoryPath { .. }
         | Read::WaveGraph { .. }
@@ -558,7 +558,7 @@ fn server_operations_match_their_lf_commands() {
                     task: Some("INF-123".into()),
                     all: false,
                 },
-                Read::PlanningStatus {
+                Read::PlanStatus {
                     directory: repo.path().to_owned(),
                 },
                 Read::WorkLink {
@@ -614,7 +614,7 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(false),
                 sessions(true),
-                Read::PlanningStatus {
+                Read::PlanStatus {
                     directory: work_folder,
                 },
                 task_pane(),
@@ -636,7 +636,7 @@ fn server_operations_match_their_lf_commands() {
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
-            // `config repository --path` prints a path, not JSON: its value is that text.
+            // `config repo --path` prints a path, not JSON: its value is that text.
             assert_eq!(served, Value::String(printed.trim().into()), "{argv:?}");
             continue;
         };
@@ -1687,7 +1687,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             project,
         } => (
             path(directory),
-            words(&["wave", "planning", "bind", wave, project, "--json"]),
+            words(&["wave", "plan", "bind", wave, project, "--json"]),
         ),
         Write::WavePlanningConnect {
             directory,
@@ -1696,7 +1696,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             team_key,
             team_name,
         } => {
-            let mut spelled = words(&["wave", "planning", "connect"]);
+            let mut spelled = words(&["wave", "plan", "connect"]);
             spelled.extend(wave.clone());
             if *all {
                 spelled.push("--all".into());
@@ -1711,7 +1711,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             (path(directory), spelled)
         }
         Write::WavePlanningReteam { directory, apply } => {
-            let mut spelled = words(&["wave", "planning", "reteam"]);
+            let mut spelled = words(&["wave", "plan", "reteam"]);
             if *apply {
                 spelled.push("--apply".into());
             }
@@ -1727,7 +1727,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             version,
             target,
         } => {
-            let mut spelled = words(&["repository", "release", "run"]);
+            let mut spelled = words(&["repo", "release", "run"]);
             spelled.extend(version.clone());
             if let Some(target) = target {
                 spelled.extend(words(&["--target", target]));

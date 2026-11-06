@@ -72,7 +72,7 @@ by a test and every server fixture must decode.
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"capabilities":[…],"limits":{"max_message":33554432,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"planning.list","directory":"/","wave":null,"task":null,"all":true}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
@@ -166,15 +166,15 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
-| `wave.planning` | `lf wave planning <wave>` | read |
+| `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
-| `planning.list` | `lf planning list` | read |
-| `repository.planning` | `lf repository planning` | read |
-| `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |
-| `repository.release` | `lf repository release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repository::release` |
-| `repository.ci` | `lf repository ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repository::ci` |
+| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
+| `plan.list` | `lf plan list` | read |
+| `repo.plan` | `lf repo plan` | read |
+| `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
+| `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
+| `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `process.get` | `lf process show <id>` | read |
@@ -221,15 +221,15 @@ part of what a phone or bot client is offered.
   omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
-  (`repository path`) answers a JSON string. Every shared read is
-  supported. Repository IDs resolve on the destination with `repository.path`;
+  (`repo path`) answers a JSON string. Every shared read is
+  supported. Repository IDs resolve on the destination with `repo.path`;
   paths in local reads are destination paths. `desktop.view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; planning membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
 - `subscribe {id, operation}` takes a read with a watch: `desktop.view.list`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
-  `planning.list`, `repository.planning` and `process.list`. It answers
+  `plan.list`, `repo.plan` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries

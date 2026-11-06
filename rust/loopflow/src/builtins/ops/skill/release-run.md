@@ -18,7 +18,7 @@ tag; patch notes cover only what's new since the last patch.
 ## Run
 
 ```bash
-lf repository release run <version>
+lf repo release run <version>
 ```
 
 That command:
@@ -44,10 +44,10 @@ publication, deployment and secrets go in the publisher.
 ## Regressions and stable
 
 ```bash
-lf repository release regress v0.15.3 "Sessions lose their name"  # file one against a release
-lf repository release issues v0.15.3                              # what it carries, and what each issue holds
-lf repository release promote --dry-run                           # what would move, or what holds it
-lf repository release promote                                     # move stable now, outside a run
+lf repo release regress v0.15.3 "Sessions lose their name"  # file one against a release
+lf repo release issues v0.15.3                              # what it carries, and what each issue holds
+lf repo release promote --dry-run                           # what would move, or what holds it
+lf repo release promote                                     # move stable now, outside a run
 ```
 
 A GitHub issue labelled `regressed-in:v<version>` is all a regression takes.

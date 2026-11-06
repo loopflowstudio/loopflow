@@ -17,7 +17,7 @@ appear. If the starting roster is missing, the baseline is incomplete.
 Read current planning and Task state:
 
 ```bash
-lf wave planning <wave> --json
+lf wave plan <wave> --json
 lf wave show --json
 ```
 

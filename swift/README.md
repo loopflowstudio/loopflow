@@ -602,11 +602,11 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf wave planning <wave> --json`.
+from `lf wave plan <wave> --json`.
 
 Open a Task from the planning list in its repository window, start its legal Graph,
 or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf planning list`; unknown means
+Rows show the shared condition and reason from `lf plan list`; unknown means
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -669,7 +669,7 @@ Main-Machine commands forward to installed lf; new Sessions and agent children
 use its stable entry. Private-Home launches retain the bundled helper selection.
 Existing providers keep their environment when reattached.
 
-`run` and `run-debug` check `config repository --json` through that helper before
+`run` and `run-debug` check `config repo --json` through that helper before
 launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
@@ -750,10 +750,10 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf planning list --all --json --watch       # every Wave's plan and open Tasks as Desktop shows them
+lf plan list --all --json --watch       # every Wave's plan and open Tasks as Desktop shows them
 lf task show LOO-1 --json --watch       # the shown Task: work, Graphs, thread
 lf session list --json --watch         # the repository's Sessions as Desktop lists them
-lf repository planning --json --watch          # stored sync receipts
+lf repo plan --json --watch          # stored sync receipts
 ```
 
 A window observes these reads through `RegistryQuery.watchWork()`, one server
@@ -880,7 +880,7 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 
 `lf open` delivers the resolved Task/Session to this same repository
-window. After explicit `config repository --bind`, the next open reuses the existing
+window. After explicit `config repo --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane
 targets become stale, so inspect again before control. Restoration accepts a

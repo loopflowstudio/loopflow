@@ -132,7 +132,7 @@ lf task status LOO-12 --watch --json      # one Task with its conversations, Gra
 lf session list --watch --json            # conversations, with which ones are available for you
 lf session history --since 7d --watch --json   # what Sessions did, tagged with their Task and Wave
 lf process list --watch --json                      # live lf call trees
-lf repository planning --watch --json         # planning sync; keeps it exchanged while it runs
+lf repo plan --watch --json         # planning sync; keeps it exchanged while it runs
 lf desktop view list --watch --json           # every plan a repository window shows
 ```
 
@@ -141,7 +141,7 @@ lf desktop view list --watch --json           # every plan a repository window s
 ```
 
 Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
-`lf planning list`) prints the same Task record the server sends:
+`lf plan list`) prints the same Task record the server sends:
 
 ```json
 {"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", …},
@@ -170,10 +170,10 @@ A Session record:
 `unknown`); `availability` is `"available"` when it is ready for your next
 turn and `null` while it works. `lf resume <id>` opens it.
 
-Desktop reads the same records through `lf planning list`, `lf task show`,
-`lf wave planning`, `lf task list --closed` and `lf session list`, with the
+Desktop reads the same records through `lf plan list`, `lf task show`,
+`lf wave plan`, `lf task list --closed` and `lf session list`, with the
 same `--watch`. `lf wave status` and `lf wave show` exchange planning with the
-tracker first; `lf wave planning` and `lf planning list` read what the store
+tracker first; `lf wave plan` and `lf plan list` read what the store
 records, and `lf wave sync` refreshes it.
 
 `body` is what the same command prints with `--json` alone. Write

@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
         let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
         let query = RegistryQuery(watchRead: { args, cwd in
-            guard args == ["--machine", "peer", "--repository", "plan", "task", "show", "task", "--json", "--watch"], cwd == nil else {
+            guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--watch"], cwd == nil else {
                 throw RegistryQueryError("A peer run page must never use local execution")
             }
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
@@ -77,7 +77,7 @@ struct RegistryQueryTests {
     @Test("Step history uses the exact process on the content Machine")
     func contentRoutedStepHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args == ["--machine", "peer", "--repository", "plan", "session", "history", "show", "process-step"], cwd == nil else {
+            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "process-step"], cwd == nil else {
                 throw RegistryQueryError("Wrong process history owner")
             }
             return "gate failed: exit 1"
@@ -153,7 +153,7 @@ struct RegistryQueryTests {
     func recordingRemoteQuery(recordFirst: Bool) async throws {
         let json = #"{"id":"peer"}"#
         let local = RegistryQuery { args, cwd in
-            guard args.starts(with: ["--machine", "peer", "--repository", "plan"]), cwd == nil else {
+            guard args.starts(with: ["--machine", "peer", "--repo-id", "plan"]), cwd == nil else {
                 throw RegistryQueryError("The reading lost its remote selectors")
             }
             return json
@@ -397,7 +397,7 @@ struct RegistryQueryTests {
 }
 """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["wave", "planning", "goals", "--json"])
+            #expect(args == ["wave", "plan", "goals", "--json"])
             return json
         }
 
@@ -421,7 +421,7 @@ struct RegistryQueryTests {
     @Test("lf wave show is one optionally scoped machine query")
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["planning", "list", "product", "--json"])
+            #expect(args == ["plan", "list", "product", "--json"])
             #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
@@ -434,7 +434,7 @@ struct RegistryQueryTests {
     @Test("lf wave show requests every repository when no Wave narrows it")
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["planning", "list", "--all", "--json"])
+            #expect(args == ["plan", "list", "--all", "--json"])
             #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }

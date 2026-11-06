@@ -138,12 +138,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
-            ("wave_planning_bind", "bind-1", .wavePlanningBind(directory: "/repo", wave: "product",
+            ("wave_plan_bind", "bind-1", .wavePlanningBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
-            ("wave_planning_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
+            ("wave_plan_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
-            ("wave_planning_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
-            ("repository_release", "release-1", .repositoryRelease(directory: "/repo", version: "minor", target: nil)),
+            ("wave_plan_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
+            ("repo_release", "release-1", .repositoryRelease(directory: "/repo", version: "minor", target: nil)),
             ("checkout_commit", "commit-1", .checkoutCommit(directory: "/repo", message: "Serve the checkout namespace",
                                                             push: false, noAdd: false, paths: [], agent: nil)),
             ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
@@ -203,25 +203,25 @@ struct ServerProtocolTests {
             Issue.record("Missing session.steer result"); return
         }
         #expect(steered["text"] == .string("Ship the smallest slice first"))
-        guard case .response(_, _, .array(let connected)) = try message("wave_planning_connected") else {
-            Issue.record("Missing wave.planning.connect result"); return
+        guard case .response(_, _, .array(let connected)) = try message("wave_plan_connected") else {
+            Issue.record("Missing wave.plan.connect result"); return
         }
         #expect(connected.count == 1)
-        guard case .response(_, _, .object(let reteamed)) = try message("wave_planning_reteamed") else {
-            Issue.record("Missing wave.planning.reteam result"); return
+        guard case .response(_, _, .object(let reteamed)) = try message("wave_plan_reteamed") else {
+            Issue.record("Missing wave.plan.reteam result"); return
         }
         #expect(reteamed["applied"] == .bool(false))
         guard case .response(_, _, .object(let launched)) = try message("launched") else {
             Issue.record("Missing detached result"); return
         }
-        #expect(launched["operation"] == .string("repository.release"))
+        #expect(launched["operation"] == .string("repo.release"))
         guard case .response(_, _, .object(let planned)) = try message("checkout_sync_planned") else {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
         let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)))
-        #expect(try encoded(ci) == value("repository_ci"))
-        #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repository", "ci", "--since", "7d", "--json"])
+        #expect(try encoded(ci) == value("repo_ci"))
+        #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
                                    message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
             == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])

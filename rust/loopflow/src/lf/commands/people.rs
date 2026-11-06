@@ -1,4 +1,4 @@
-//! `lf repository people`: the people who own this repository's Tasks.
+//! `lf repo people`: the people who own this repository's Tasks.
 use anyhow::{anyhow, Result};
 
 use std::path::Path;
@@ -9,7 +9,7 @@ use crate::ops::people::{repo_people, RepoPerson};
 /// warnings for GitHub lookups that failed.
 pub fn people(directory: &Path) -> Result<(Vec<RepoPerson>, Vec<String>)> {
     let repo = crate::repository::CanonicalRepo::containing(directory)?
-        .ok_or_else(|| anyhow!("run `lf repository people` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf repo people` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(crate::store::open_store(
         &crate::store::storage_config_from_env()?,

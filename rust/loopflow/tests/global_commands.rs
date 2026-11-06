@@ -685,7 +685,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         .unwrap();
     for (flag, value) in [
         ("--repo", selected.path().to_str().unwrap()),
-        ("--repository", repository.as_str()),
+        ("--repo-id", repository.as_str()),
     ] {
         let status: serde_json::Value = serde_json::from_str(&success(
             command(
@@ -1850,7 +1850,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         command(
             target_home.path(),
             target.path(),
-            &["--repository", &id, "config", "repository", "--json"],
+            &["--repo-id", &id, "config", "repository", "--json"],
         )
         .output()
         .unwrap(),
@@ -1868,7 +1868,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
             target_home.path(),
             source.path(),
             &[
-                "--repository",
+                "--repo-id",
                 &id,
                 "task",
                 "run",

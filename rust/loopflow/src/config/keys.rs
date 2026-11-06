@@ -1,8 +1,8 @@
-//! Setting keys sit on their primitive: `repository.planning.team`,
+//! Setting keys sit on their primitive: `repo.plan.team`,
 //! `skill.<name>.agent`, `wave.graph`, `wave.<id>.account`. The typed catalogue
 //! (`Config`) keeps the released layout (`planning`, `skills`, `graph`,
 //! `waves`), which is also each key's shorthand; the released `linear.team`
-//! spells `repository.planning.team`. Readers accept every spelling and fold a
+//! spells `repo.plan.team`, and `plan.team` is its shorthand. Readers accept every spelling and fold a
 //! document into the typed layout; writers relocate the key's group to its
 //! canonical spelling before they edit it.
 use serde_yaml_ng::{Mapping, Value};
@@ -23,7 +23,9 @@ pub fn typed(parts: &[&str]) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     match parts {
-        ["repository", "planning", rest @ ..] => [vec!["planning".into()], own(rest)].concat(),
+        ["repo", "plan", rest @ ..] | ["plan", rest @ ..] => {
+            [vec!["planning".into()], own(rest)].concat()
+        }
         ["linear", "team"] => vec!["planning".into(), "team".into()],
         ["skill", name, rest @ ..] => [vec!["skills".into(), (*name).into()], own(rest)].concat(),
         ["wave", "graph"] => vec!["graph".into()],
@@ -47,9 +49,7 @@ pub fn canonical(parts: &[&str], root: Root) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     match parts {
-        ["planning", rest @ ..] => {
-            [vec!["repository".into(), "planning".into()], own(rest)].concat()
-        }
+        ["planning", rest @ ..] => [vec!["repo".into(), "plan".into()], own(rest)].concat(),
         ["skills", name, rest @ ..] => [vec!["skill".into(), (*name).into()], own(rest)].concat(),
         ["graph"] if root == Root::General => vec!["wave".into(), "graph".into()],
         ["waves", id, rest @ ..] => [
@@ -81,13 +81,15 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
     };
     match parts {
         ["planning", "team"] => vec![
-            vec!["repository".into(), "planning".into(), "team".into()],
+            vec!["repo".into(), "plan".into(), "team".into()],
+            vec!["plan".into(), "team".into()],
             vec!["planning".into(), "team".into()],
             vec!["linear".into(), "team".into()],
         ],
         ["planning", rest @ ..] => group(
             vec![
-                vec!["repository".into(), "planning".into()],
+                vec!["repo".into(), "plan".into()],
+                vec!["plan".into()],
                 vec!["planning".into()],
             ],
             rest,
@@ -123,10 +125,23 @@ pub fn fold(document: &mut Value) {
     let Some(map) = document.as_mapping_mut() else {
         return;
     };
-    if let Some(Value::Mapping(repository)) = map.remove("repository") {
-        for (key, value) in repository {
-            merge(map, key, value);
-        }
+    // `repo:` also keys a settings recovery file by repository path; only its
+    // `plan` group is a setting.
+    let repo_plan = map
+        .get_mut("repo")
+        .and_then(Value::as_mapping_mut)
+        .and_then(|repo| repo.remove("plan"));
+    if map
+        .get("repo")
+        .is_some_and(|repo| repo.as_mapping().is_some_and(Mapping::is_empty))
+    {
+        map.remove("repo");
+    }
+    if let Some(plan) = repo_plan {
+        merge(map, "planning".into(), plan);
+    }
+    if let Some(plan) = map.remove("plan") {
+        merge(map, "planning".into(), plan);
     }
     // The released `linear: {team}` block; a Wave file's `linear: {initiative}` stays.
     if let Some(team) = map
@@ -269,7 +284,8 @@ mod tests {
     #[test]
     fn every_spelling_names_one_typed_path() {
         for (spelled, expected) in [
-            ("repository.planning.team", "planning.team"),
+            ("repo.plan.team", "planning.team"),
+            ("plan.team", "planning.team"),
             ("planning.provider", "planning.provider"),
             ("linear.team", "planning.team"),
             ("skill.design.agent", "skills.design.agent"),
@@ -310,9 +326,8 @@ mod tests {
                 "planning: {provider: linear, team: released}\nskills: {design: {agent: claude}, review: {agent: pi}}\ngraph: feature\nwaves:\n  abc: {skills: {design: {agent: codex, chrome: false}}, account: {claude: [me]}}\n"
             )
         );
-        let mut explicit = yaml(
-            "repository: {planning: {provider: linear, team: typed}}\nlinear: {team: released}\n",
-        );
+        let mut explicit =
+            yaml("repo: {plan: {provider: linear, team: typed}}\nlinear: {team: released}\n");
         fold(&mut explicit);
         assert_eq!(explicit["planning"]["team"], "typed");
     }
@@ -323,10 +338,10 @@ mod tests {
             "planning: {provider: linear}\nlinear: {team: released}\nskills: {design: {agent: codex}}\nagent: claude\n",
         );
         let path = canonicalize(&mut document, &["planning", "team"], Root::General);
-        assert_eq!(path, ["repository", "planning", "team"]);
+        assert_eq!(path, ["repo", "plan", "team"]);
         assert_eq!(
             document,
-            yaml("repository: {planning: {provider: linear, team: released}}\nskills: {design: {agent: codex}}\nagent: claude\n")
+            yaml("repo: {plan: {provider: linear, team: released}}\nskills: {design: {agent: codex}}\nagent: claude\n")
         );
         let path = canonicalize(
             &mut document,

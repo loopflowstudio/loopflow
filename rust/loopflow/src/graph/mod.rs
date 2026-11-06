@@ -181,7 +181,7 @@ impl Command {
             "list" | "top" => Some("process"),
             "usage" => Some("session"),
             "replay" => Some("history"),
-            "release" | "ci" | "tokens" => Some("repository"),
+            "release" | "ci" | "tokens" => Some("repo"),
             _ => None,
         };
         if let Some(owner) = owner {

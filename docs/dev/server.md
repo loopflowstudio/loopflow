@@ -124,15 +124,15 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
-| `wave.planning` | `lf wave planning <wave>` | read |
+| `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
-| `planning.list` | `lf planning list` | read |
-| `repository.planning` | `lf repository planning` | read |
-| `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |
-| `repository.release` | `lf repository release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repository::release` |
-| `repository.ci` | `lf repository ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repository::ci` |
+| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
+| `plan.list` | `lf plan list` | read |
+| `repo.plan` | `lf repo plan` | read |
+| `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
+| `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
+| `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `process.get` | `lf process show <id>` | read |

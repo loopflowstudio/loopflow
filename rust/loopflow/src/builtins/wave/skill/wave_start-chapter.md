@@ -21,7 +21,7 @@ Return one entry for the chapter plan:
 {"wave_id":"<Wave UUID>","project_id":"<Project UUID>","project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
 ```
 
-The plan lands in the Wave's current Linear Project (`lf wave planning <wave> --json`
+The plan lands in the Wave's current Linear Project (`lf wave plan <wave> --json`
 names it). Keep Task candidates separate, keyed locally and grouped by
 destination UUID, each with title, brief and acceptance. Candidates are optional
 and are filed only after the plan has landed.

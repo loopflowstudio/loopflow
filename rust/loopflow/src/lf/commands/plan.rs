@@ -4,11 +4,11 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::RepositoryPlanningCommand as PlanningCommand;
+use crate::lf::RepoPlanCommand as PlanCommand;
 use crate::store::Store;
 
-/// `lf repository planning [key|journal]`; bare, the planning status.
-pub fn run(cmd: Option<&PlanningCommand>, json: bool, watch: bool) -> Result<()> {
+/// `lf repo plan [key|journal]`; bare, the planning status.
+pub fn run(cmd: Option<&PlanCommand>, json: bool, watch: bool) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
     if cmd.is_none() && watch {
         return watch_status(&repo, super::watch::Transport::Stdio).map(drop);
@@ -75,18 +75,18 @@ async fn open_store() -> Result<Store> {
         })
 }
 
-async fn run_async(repo: &Path, cmd: Option<&PlanningCommand>, status_json: bool) -> Result<()> {
+async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) -> Result<()> {
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
-        Some(PlanningCommand::Key { new, recover }) => {
+        Some(PlanCommand::Key { new, recover }) => {
             let saved = store.planning_user_key().await?;
             let key = match (recover, saved, new) {
                 (Some(key), _, _) => key.clone(),
                 (None, Some(key), _) => key,
                 (None, None, true) => uuid::Uuid::new_v4().to_string(),
                 _ => return Err(anyhow!(
-                    "No planning user key. Use `lf repository planning key --new` once, then recover that key on other machines with `--recover <UUID>`."
+                    "No planning user key. Use `lf repo plan key --new` once, then recover that key on other machines with `--recover <UUID>`."
                 )),
             };
             if *new || recover.is_some() {
@@ -95,7 +95,7 @@ async fn run_async(repo: &Path, cmd: Option<&PlanningCommand>, status_json: bool
             println!("{key}");
         }
         None => print_status(&store, &repo_key, status_json).await?,
-        Some(PlanningCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
+        Some(PlanCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
     }
     Ok(())
 }
@@ -122,10 +122,10 @@ pub(crate) fn watch_status(
     )
 }
 
-/// What `repository.planning` answers: the transport, and for Git the
+/// What `repo.plan` answers: the transport, and for Git the
 /// destinations with their import and publication evidence.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct PlanningStatus {
+pub(crate) struct PlanStatus {
     /// `git`, or the tracker's lowercased name.
     transport: String,
     destinations: Vec<crate::store::PeerPlanningStatus>,
@@ -140,13 +140,13 @@ enum Status {
 
 impl Status {
     /// What `lf planning status --json` prints.
-    fn report(self) -> PlanningStatus {
+    fn report(self) -> PlanStatus {
         match self {
-            Self::Remote(provider) => PlanningStatus {
+            Self::Remote(provider) => PlanStatus {
                 transport: provider.to_ascii_lowercase(),
                 destinations: Vec::new(),
             },
-            Self::Git(destinations) => PlanningStatus {
+            Self::Git(destinations) => PlanStatus {
                 transport: "git".to_owned(),
                 destinations,
             },
@@ -160,7 +160,7 @@ fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
 }
 
 /// What `lf --cwd <directory> config planning status --json` prints.
-pub(crate) fn read_status(directory: &Path) -> Result<PlanningStatus> {
+pub(crate) fn read_status(directory: &Path) -> Result<PlanStatus> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;

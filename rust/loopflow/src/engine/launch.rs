@@ -26,7 +26,7 @@ static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 #[serde(deny_unknown_fields)]
 pub struct Launched {
     /// The operation the Process carries: `checkout.sync`, `pr.land`,
-    /// `repository.release`, `graph.run`, `skill.run`.
+    /// `repo.release`, `graph.run`, `skill.run`.
     pub operation: String,
     pub process: LfProcessId,
     /// What it set out to do, for messages: `sync onto origin/main`.

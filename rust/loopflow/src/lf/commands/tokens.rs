@@ -1,4 +1,4 @@
-//! `lf repository tokens` — how big is this codebase, in the units a model pays for.
+//! `lf repo tokens` — how big is this codebase, in the units a model pays for.
 //!
 //! Lines measure source size; tokens are what a run costs. They disagree
 //! wildly — a minified file or a lockfile is cheap in lines and ruinous in
@@ -320,7 +320,7 @@ fn print_history(snapshots: &[CodeSnapshot]) {
     }
 }
 
-/// What `lf repository tokens --json` prints in `directory`: its repository's
+/// What `lf repo tokens --json` prints in `directory`: its repository's
 /// tree, or with `days`, how big it was on each day it changed.
 pub(crate) fn codebase(directory: &Path, days: Option<u32>) -> Result<serde_json::Value> {
     let root = repo_root(directory)?;

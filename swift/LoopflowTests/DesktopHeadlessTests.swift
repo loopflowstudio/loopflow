@@ -74,7 +74,7 @@ struct DesktopHeadlessTests {
         let status = String(decoding: data, as: UTF8.self)
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
-            if args == ["repository", "planning", "--json"], cwd == "/src/loopflow" {
+            if args == ["repo", "plan", "--json"], cwd == "/src/loopflow" {
                 return "{\"destinations\":\(status)}"
             }
             if args.first == "roadmap" { return roadmap }
@@ -342,7 +342,7 @@ struct DesktopHeadlessTests {
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(
             run: { args, _ in
-                if args.prefix(2) == ["planning", "list"] { return String(decoding: planning, as: UTF8.self) }
+                if args.prefix(2) == ["plan", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
                     || args.contains("ship") || args.prefix(2) == ["task", "hold"] {
                     await started.add(args)

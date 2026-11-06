@@ -62,7 +62,7 @@ pub struct WaveSnapshot {
     pub machine: Option<Machine>,
 }
 
-/// `lf wave status <wave>` and `lf wave planning <wave>`: current planning,
+/// `lf wave status <wave>` and `lf wave plan <wave>`: current planning,
 /// Task conditions and Session history. Wire type; no defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveDetailSnapshot {
@@ -580,7 +580,7 @@ pub async fn save_steer(
 }
 
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
-/// `lf wave status [<wave>]` observes the tracker first; `lf wave planning
+/// `lf wave status [<wave>]` observes the tracker first; `lf wave plan
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
@@ -603,7 +603,7 @@ pub fn status_json(directory: &Path, wave: Option<&str>, observe: bool) -> Resul
     Ok(serde_json::to_string(&status)?)
 }
 
-/// `lf --cwd <directory> wave planning <wave>`: one Wave's stored plan; None
+/// `lf --cwd <directory> wave plan <wave>`: one Wave's stored plan; None
 /// without a registry.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
     tokio::runtime::Runtime::new()?.block_on(read_status(directory, Some(wave), false))
@@ -706,7 +706,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
 /// section. Deterministic and local: one runtime observation for the whole
 /// read and bounded Git probes for Task Work, after a fresh team check. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
-/// could be". `lf wave show` observes the tracker first; `lf planning list`
+/// could be". `lf wave show` observes the tracker first; `lf plan list`
 /// reads what the store records.
 pub fn show(
     wave: Option<&str>,

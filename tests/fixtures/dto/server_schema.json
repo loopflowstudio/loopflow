@@ -3510,7 +3510,7 @@
           "type": "string"
         },
         "operation": {
-          "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repository.release`, `graph.run`, `skill.run`.",
+          "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
           "type": "string"
         },
         "process": {
@@ -5133,7 +5133,7 @@
           "$ref": "#/$defs/Write"
         }
       ],
-      "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `planning.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
+      "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
     },
     "OwnershipKind": {
       "oneOf": [
@@ -5419,19 +5419,8 @@
       ],
       "type": "string"
     },
-    "PlanningState": {
-      "description": "Availability of retained planning facts, independent of execution permission.",
-      "enum": [
-        "available",
-        "invalid",
-        "removed",
-        "absent",
-        "unavailable"
-      ],
-      "type": "string"
-    },
-    "PlanningStatus": {
-      "description": "What `repository.planning` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
+    "PlanStatus": {
+      "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
       "properties": {
         "destinations": {
           "items": {
@@ -5449,6 +5438,17 @@
         "destinations"
       ],
       "type": "object"
+    },
+    "PlanningState": {
+      "description": "Availability of retained planning facts, independent of execution permission.",
+      "enum": [
+        "available",
+        "invalid",
+        "removed",
+        "absent",
+        "unavailable"
+      ],
+      "type": "string"
     },
     "PlanningSyncChange": {
       "properties": {
@@ -7010,13 +7010,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repository people`: who owns the repository's Tasks.",
+          "description": "`lf --cwd <directory> repo people`: who owns the repository's Tasks.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repository.people",
+              "const": "repo.people",
               "type": "string"
             }
           },
@@ -7207,13 +7207,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> wave planning <wave>`: one Wave's Projects and\nTasks, after syncing its repository with the tracker.",
+          "description": "`lf --cwd <directory> wave plan <wave>`: one Wave's Projects and\nTasks, after syncing its repository with the tracker.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "wave.planning",
+              "const": "wave.plan",
               "type": "string"
             },
             "wave": {
@@ -7239,7 +7239,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> task list --closed --wave <wave> [--after\n<after>]`: one page of a Wave's closed Tasks. Only `closed` lists\nexist; open Tasks are `planning.list`'s.",
+          "description": "`lf --cwd <directory> task list --closed --wave <wave> [--after\n<after>]`: one page of a Wave's closed Tasks. Only `closed` lists\nexist; open Tasks are `plan.list`'s.",
           "properties": {
             "after": {
               "type": [
@@ -7343,7 +7343,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> planning list [wave] [--task <task>] [--all]`:\nWaves and Tasks. Read once, it first asks the tracker about each\nrepository read; its watch reads the store.",
+          "description": "`lf --cwd <directory> plan list [wave] [--task <task>] [--all]`:\nWaves and Tasks. Read once, it first asks the tracker about each\nrepository read; its watch reads the store.",
           "properties": {
             "all": {
               "type": "boolean"
@@ -7352,7 +7352,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "planning.list",
+              "const": "plan.list",
               "type": "string"
             },
             "task": {
@@ -7382,13 +7382,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repository planning`: where the repository's\nplanning is exchanged. Its watch exchanges it while it runs.",
+          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its watch exchanges it while it runs.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repository.planning",
+              "const": "repo.plan",
               "type": "string"
             }
           },
@@ -7398,7 +7398,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/PlanningStatus"
+            "$ref": "#/$defs/PlanStatus"
           }
         },
         {
@@ -7431,13 +7431,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --repository <id> repository path`: a repository plan's\ncheckout on this Machine.",
+          "description": "`lf --repo-id <id> repo path`: a repository plan's\ncheckout on this Machine.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "repository.path",
+              "const": "repo.path",
               "type": "string"
             }
           },
@@ -7480,7 +7480,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repository tokens [--days <days>]`: the codebase's size.",
+          "description": "`lf --cwd <directory> repo tokens [--days <days>]`: the codebase's size.",
           "properties": {
             "days": {
               "format": "uint32",
@@ -7494,7 +7494,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "repository.tokens",
+              "const": "repo.tokens",
               "type": "string"
             }
           },
@@ -7554,10 +7554,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf repository ci --since <since> [--wave <wave>] [--repo <repo>]`:\nhow failed CI was detected, repaired and landed on this Machine.",
+          "description": "`lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:\nhow failed CI was detected, repaired and landed on this Machine.",
           "properties": {
             "kind": {
-              "const": "repository.ci",
+              "const": "repo.ci",
               "type": "string"
             },
             "repo": {
@@ -13327,7 +13327,7 @@
       "type": "object"
     },
     "WaveDetailSnapshot": {
-      "description": "`lf wave status <wave>` and `lf wave planning <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
+      "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
           "$ref": "#/$defs/Evidence3",
@@ -14773,13 +14773,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave planning bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
+          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "wave.planning.bind",
+              "const": "wave.plan.bind",
               "type": "string"
             },
             "project": {
@@ -14802,7 +14802,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave planning connect [<wave>|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
+          "description": "`lf wave plan connect [<wave>|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
           "properties": {
             "all": {
               "type": "boolean"
@@ -14811,7 +14811,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "wave.planning.connect",
+              "const": "wave.plan.connect",
               "type": "string"
             },
             "team_key": {
@@ -14851,7 +14851,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave planning reteam [--apply] --json`: the moves onto the\nrepository's Team; a plan without `apply`.",
+          "description": "`lf wave plan reteam [--apply] --json`: the moves onto the\nrepository's Team; a plan without `apply`.",
           "properties": {
             "apply": {
               "type": "boolean"
@@ -14860,7 +14860,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "wave.planning.reteam",
+              "const": "wave.plan.reteam",
               "type": "string"
             }
           },
@@ -14901,13 +14901,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf repository release run [<version>] [-t <target>] --json`, started\ndetached: the Process carrying the release.",
+          "description": "`lf repo release run [<version>] [-t <target>] --json`, started\ndetached: the Process carrying the release.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repository.release",
+              "const": "repo.release",
               "type": "string"
             },
             "target": {

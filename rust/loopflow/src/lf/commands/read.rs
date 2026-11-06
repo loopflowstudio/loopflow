@@ -167,8 +167,8 @@ pub enum Read {
     #[serde(rename = "desktop.layout")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopLayoutRecord>()))]
     PaneLayout { directory: PathBuf, work: String },
-    /// `lf --cwd <directory> repository people`: who owns the repository's Tasks.
-    #[serde(rename = "repository.people")]
+    /// `lf --cwd <directory> repo people`: who owns the repository's Tasks.
+    #[serde(rename = "repo.people")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::people::RepoPerson>>()))]
     People { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
@@ -211,14 +211,14 @@ pub enum Read {
     #[serde(rename = "task.context")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::context_usage::ContextReport>()))]
     TaskContext { task: String },
-    /// `lf --cwd <directory> wave planning <wave>`: one Wave's Projects and
+    /// `lf --cwd <directory> wave plan <wave>`: one Wave's Projects and
     /// Tasks, after syncing its repository with the tracker.
-    #[serde(rename = "wave.planning")]
+    #[serde(rename = "wave.plan")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
     WaveDetail { directory: PathBuf, wave: String },
     /// `lf --cwd <directory> task list --closed --wave <wave> [--after
     /// <after>]`: one page of a Wave's closed Tasks. Only `closed` lists
-    /// exist; open Tasks are `planning.list`'s.
+    /// exist; open Tasks are `plan.list`'s.
     #[serde(rename = "task.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::ClosedTaskPageSnapshot>()))]
     ClosedTasks {
@@ -235,10 +235,10 @@ pub enum Read {
     #[serde(rename = "session.history")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
     History(HistoryWindow),
-    /// `lf --cwd <directory> planning list [wave] [--task <task>] [--all]`:
+    /// `lf --cwd <directory> plan list [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its watch reads the store.
-    #[serde(rename = "planning.list")]
+    #[serde(rename = "plan.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::RoadmapSnapshot>()))]
     Roadmap {
         directory: PathBuf,
@@ -246,18 +246,18 @@ pub enum Read {
         task: Option<String>,
         all: bool,
     },
-    /// `lf --cwd <directory> repository planning`: where the repository's
+    /// `lf --cwd <directory> repo plan`: where the repository's
     /// planning is exchanged. Its watch exchanges it while it runs.
-    #[serde(rename = "repository.planning")]
-    #[schemars(extend("x-result" = generator.subschema_for::<super::planning::PlanningStatus>()))]
-    PlanningStatus { directory: PathBuf },
+    #[serde(rename = "repo.plan")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::plan::PlanStatus>()))]
+    PlanStatus { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::open::WorkLink>>()))]
     WorkLink { directory: PathBuf, url: String },
-    /// `lf --repository <id> repository path`: a repository plan's
+    /// `lf --repo-id <id> repo path`: a repository plan's
     /// checkout on this Machine.
-    #[serde(rename = "repository.path")]
+    #[serde(rename = "repo.path")]
     #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
     RepositoryPath { id: RepositoryId },
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
@@ -268,8 +268,8 @@ pub enum Read {
         directory: PathBuf,
         wave: Option<String>,
     },
-    /// `lf --cwd <directory> repository tokens [--days <days>]`: the codebase's size.
-    #[serde(rename = "repository.tokens")]
+    /// `lf --cwd <directory> repo tokens [--days <days>]`: the codebase's size.
+    #[serde(rename = "repo.tokens")]
     #[schemars(extend("x-result" = (crate::server::schema::either::<crate::lf::commands::tokens::CodeNode, Vec<crate::lf::commands::tokens::CodeSnapshot>>(generator))))]
     Tokens {
         directory: PathBuf,
@@ -283,9 +283,9 @@ pub enum Read {
     #[serde(rename = "machine.doctor")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::doctor::DoctorReport>()))]
     Doctor,
-    /// `lf repository ci --since <since> [--wave <wave>] [--repo <repo>]`:
+    /// `lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:
     /// how failed CI was detected, repaired and landed on this Machine.
-    #[serde(rename = "repository.ci")]
+    #[serde(rename = "repo.ci")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::ci::CiReportDto>()))]
     Ci {
         since: String,
@@ -413,7 +413,7 @@ impl Read {
             }
             // `desktop layout` always prints JSON.
             Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
-            Self::People { directory } => at(directory, &["repository", "people", "--json"]),
+            Self::People { directory } => at(directory, &["repo", "people", "--json"]),
             Self::Graphs { directory } => at(directory, &["graph", "list", "--json"]),
             Self::ViewPlan {
                 directory,
@@ -450,7 +450,7 @@ impl Read {
             }
             Self::TaskContext { task } => words(&["task", "context", task, "--json"]),
             Self::WaveDetail { directory, wave } => {
-                at(directory, &["wave", "planning", wave, "--json"])
+                at(directory, &["wave", "plan", wave, "--json"])
             }
             Self::ClosedTasks {
                 directory,
@@ -477,7 +477,7 @@ impl Read {
                 task,
                 all,
             } => {
-                let mut argv = at(directory, &["planning", "list"]);
+                let mut argv = at(directory, &["plan", "list"]);
                 argv.extend(wave.clone());
                 argv.extend(optional("--task", task.as_ref()));
                 if *all {
@@ -486,13 +486,9 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::PlanningStatus { directory } => {
-                at(directory, &["repository", "planning", "--json"])
-            }
+            Self::PlanStatus { directory } => at(directory, &["repo", "plan", "--json"]),
             Self::WorkLink { directory, url } => at(directory, &["open", url, "--link", "--json"]),
-            Self::RepositoryPath { id } => {
-                words(&["--repository", &id.to_string(), "repository", "path"])
-            }
+            Self::RepositoryPath { id } => words(&["--repo-id", &id.to_string(), "repo", "path"]),
             Self::WaveGraph { directory, wave } => {
                 let mut argv = at(directory, &["wave", "graph", "show"]);
                 argv.push(wave.clone().unwrap_or_else(|| "--no-wave".into()));
@@ -500,14 +496,14 @@ impl Read {
                 argv
             }
             Self::Tokens { directory, days } => {
-                let mut argv = at(directory, &["repository", "tokens", "--json"]);
+                let mut argv = at(directory, &["repo", "tokens", "--json"]);
                 argv.extend(optional("--days", *days));
                 argv
             }
             Self::Retention => words(&["session", "retention", "--json"]),
             Self::Doctor => words(&["machine", "doctor", "--json"]),
             Self::Ci { since, wave, repo } => {
-                let mut argv = words(&["repository", "ci", "--since", since]);
+                let mut argv = words(&["repo", "ci", "--since", since]);
                 if let Some(wave) = wave {
                     argv.extend(words(&["--wave", wave]));
                 }
@@ -598,7 +594,7 @@ impl Read {
     }
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
-    /// A command that prints bare text (`config repository --path`) is a string.
+    /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
             Self::MonitorPs => value(&super::top::load_snapshot()?),
@@ -716,10 +712,9 @@ impl Read {
             Self::WaveDetail { directory, wave } => {
                 value(&super::waves::desktop_status(directory, wave)?)
             }
-            Self::ClosedTasks { closed: false, .. } => Err(invalid(
-                "only closed Tasks are listed; read planning.list for open ones",
-            )
-            .into()),
+            Self::ClosedTasks { closed: false, .. } => {
+                Err(invalid("only closed Tasks are listed; read plan.list for open ones").into())
+            }
             Self::ClosedTasks {
                 directory,
                 wave,
@@ -738,7 +733,7 @@ impl Read {
                 task,
                 all,
             } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
-            Self::PlanningStatus { directory } => value(&super::planning::read_status(directory)?),
+            Self::PlanStatus { directory } => value(&super::plan::read_status(directory)?),
             Self::WorkLink { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
             Self::RepositoryPath { id } => {
@@ -770,7 +765,7 @@ impl Read {
                 },
             )?),
             Self::Doctor => value(&super::doctor::report()?),
-            Self::Ci { since, wave, repo } => value(&crate::engine::repository::ci(
+            Self::Ci { since, wave, repo } => value(&crate::engine::repo::ci(
                 since,
                 wave.as_deref(),
                 repo.as_deref(),
@@ -833,10 +828,9 @@ impl Read {
                 task,
                 all,
             } => super::waves::watch_show(directory, wave, task, all, transport),
-            Self::PlanningStatus { directory } => super::planning::watch_status(
-                &super::planning::status_repository(&directory)?,
-                transport,
-            ),
+            Self::PlanStatus { directory } => {
+                super::plan::watch_status(&super::plan::status_repository(&directory)?, transport)
+            }
             Self::TaskWait { issue, until } => {
                 crate::engine::task::watch_wait(issue, until, transport)
             }

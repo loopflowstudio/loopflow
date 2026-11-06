@@ -21,7 +21,7 @@ pub mod mutation;
 pub mod open;
 pub mod ops;
 pub mod people;
-pub mod planning;
+pub mod plan;
 pub mod process;
 pub mod profile;
 pub mod read;

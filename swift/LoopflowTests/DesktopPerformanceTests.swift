@@ -1472,8 +1472,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.prefix(2) == ["planning", "list"], !args.contains("--task") {
-                let owned = try await fixture.read(["planning", "list", "--all", "--json"])
+            if args.prefix(2) == ["plan", "list"], !args.contains("--task") {
+                let owned = try await fixture.read(["plan", "list", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))

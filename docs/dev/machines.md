@@ -165,8 +165,8 @@ metrics and Session history; no process needs to be running.
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
-use the same binding, and `lf repository` covers repositories without Work.
-`lf config repository --bind ID` explicitly associates even an established checkout.
+use the same binding, and `lf repo` covers repositories without Work.
+`lf config repo --bind ID` explicitly associates even an established checkout.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no

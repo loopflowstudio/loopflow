@@ -782,8 +782,8 @@ pub fn sync_planning(
 /// Returns the Wave a Linear refresh resolved.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
     let repo = crate::repo::working_directory_in(directory)?;
-    if crate::lf::commands::planning::plans_through_git(&repo)? {
-        crate::lf::commands::planning::refresh(&repo)?;
+    if crate::lf::commands::plan::plans_through_git(&repo)? {
+        crate::lf::commands::plan::refresh(&repo)?;
         return Ok(None);
     }
     let wave =
@@ -915,7 +915,7 @@ fn release_run_cmd(
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let outcome =
-        crate::engine::repository::carry_release(&repo_root, version_input, target_name, progress)?;
+        crate::engine::repo::carry_release(&repo_root, version_input, target_name, progress)?;
     if json {
         println!("{}", serde_json::to_string(&outcome)?);
         return Ok(());

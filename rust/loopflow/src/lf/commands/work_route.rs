@@ -24,14 +24,14 @@ pub fn identity(
 }
 
 /// The repository containing `directory` and its planning identity,
-/// registering it on first sight as `lf config repository` does.
+/// registering it on first sight as `lf config repo` does.
 pub fn repository_identity(
     directory: &std::path::Path,
     bind: Option<&RepositoryId>,
     relocate: Option<&RepositoryId>,
 ) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
     let repo = crate::repository::CanonicalRepo::containing(directory)?
-        .ok_or_else(|| anyhow!("run `lf repository` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
         let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
@@ -49,7 +49,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repository --bind {id}` in its repository on this Machine"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 
@@ -586,8 +586,8 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     }
     if cli.repository.is_none() {
         let repository = repository
-        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repository` here so it can address the repository"))?;
-        forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo` here so it can address the repository"))?;
+        forwarded.splice(0..0, ["--repo-id".into(), repository.to_string()]);
     }
     Ok(Some(Forward {
         machine,
@@ -778,7 +778,7 @@ mod tests {
         let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
         store.bind_repository(selected_repo, &selected).unwrap();
-        let cli = Cli::try_parse_from(["lf", "--repository", prior.as_str()]).unwrap();
+        let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
             Some(store.task_execution_route(&first).unwrap())
@@ -798,7 +798,7 @@ mod tests {
             .unwrap()
             .is_none());
         let unbound = RepositoryId::new();
-        let cli = Cli::try_parse_from(["lf", "--repository", unbound.as_str()]).unwrap();
+        let cli = Cli::try_parse_from(["lf", "--repo-id", unbound.as_str()]).unwrap();
         assert!(resolve_task(&store, &cli, first.as_str(), Path::new("/"))
             .unwrap_err()
             .to_string()

@@ -217,7 +217,7 @@ struct TaskGraphTests {
             case ("session", "resume"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
             case ("session", "list"): return try await reader.inventory()
-            case ("planning", "list"): return roadmapJSON
+            case ("plan", "list"): return roadmapJSON
             case ("machine", "self"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
@@ -696,7 +696,7 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("planning", "list"):
+        case ("plan", "list"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
         case ("session", "history"): return #"{"truncated":false,"items":[]}"#

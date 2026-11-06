@@ -135,7 +135,7 @@ pub struct Cli {
     pub repo: Option<String>,
 
     /// Select a registered repository plan on this Machine, not a clone name
-    #[arg(long, value_name = "ID")]
+    #[arg(long = "repo-id", value_name = "ID")]
     pub repository: Option<crate::durable::RepositoryId>,
 
     /// Forward the SSH agent to the selected machine
@@ -268,8 +268,8 @@ impl Cli {
                         | PrCommand::Land { .. }
                 )
             ),
-            Some(Commands::Repository {
-                cmd: Some(RepositoryCommand::Release { cmd }),
+            Some(Commands::Repo {
+                cmd: Some(RepoCommand::Release { cmd }),
                 ..
             }) => matches!(
                 cmd,
@@ -528,9 +528,9 @@ pub enum Commands {
         cmd: commands::process::ProcessCommand,
     },
     /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
-    Planning {
+    Plan {
         #[command(subcommand)]
-        cmd: PlanningCommand,
+        cmd: PlanCommand,
     },
     /// Pull request lifecycle
     Pr {
@@ -589,12 +589,12 @@ pub enum Commands {
     /// This repository: its identity and checkout, where it exchanges planning,
     /// its releases, CI, people and size
     #[command(args_conflicts_with_subcommands = true)]
-    Repository {
+    Repo {
         /// Print the identity as JSON
         #[arg(long)]
         json: bool,
         #[command(subcommand)]
-        cmd: Option<RepositoryCommand>,
+        cmd: Option<RepoCommand>,
     },
     /// Read and declare Loopflow settings
     Config {
@@ -675,13 +675,13 @@ pub enum Commands {
 /// `repository.*`: one repository's planning exchange, releases, CI, people,
 /// size and checkout.
 #[derive(Subcommand, Debug)]
-pub enum RepositoryCommand {
+pub enum RepoCommand {
     /// Where this repository exchanges planning: selection, retained imports and
     /// held records, without contacting Git
     #[command(args_conflicts_with_subcommands = true)]
-    Planning {
+    Plan {
         #[command(subcommand)]
-        cmd: Option<RepositoryPlanningCommand>,
+        cmd: Option<RepoPlanCommand>,
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
@@ -1135,14 +1135,14 @@ impl Commands {
             Self::Skill { cmd } => cmd.changes_work(),
             Self::Desktop { cmd } => cmd.changes_work(),
             Self::Process { cmd } => cmd.changes_work(),
-            Self::Planning { cmd } => cmd.changes_work(),
+            Self::Plan { cmd } => cmd.changes_work(),
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
             Self::Server { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
-            Self::Repository { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
@@ -1202,7 +1202,7 @@ impl WaveCommand {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } | Self::Status { .. } => {
                 false
             }
-            Self::Planning { cmd, .. } => cmd.is_some(),
+            Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
             | Self::Create { .. }
@@ -1213,7 +1213,7 @@ impl WaveCommand {
     }
 }
 
-impl PlanningCommand {
+impl PlanCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::List { .. } => false,
@@ -1313,12 +1313,12 @@ impl DesktopCommand {
     }
 }
 
-impl RepositoryCommand {
+impl RepoCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Planning { cmd, .. } => match cmd {
-                Some(RepositoryPlanningCommand::Key { new, recover }) => *new || recover.is_some(),
-                Some(RepositoryPlanningCommand::Journal { .. }) | None => false,
+            Self::Plan { cmd, .. } => match cmd {
+                Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoPlanCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1445,7 +1445,7 @@ impl ConfigCommand {
             Self::Import { .. } => true,
             Self::Migrate { accept } => *accept,
             Self::Retained { replace, keep } => *replace || *keep,
-            Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
+            Self::Repo { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
         }
     }
 }
@@ -1901,12 +1901,12 @@ pub enum WaveCommand {
     /// Print one Wave's Projects and Tasks as Desktop shows them; `bind`,
     /// `connect` and `reteam` change where its planning lives
     #[command(args_conflicts_with_subcommands = true)]
-    Planning {
+    Plan {
         wave: Option<String>,
         #[arg(long)]
         json: bool,
         #[command(subcommand)]
-        cmd: Option<WavePlanningCommand>,
+        cmd: Option<WavePlanCommand>,
     },
     /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
     Sync {
@@ -1963,7 +1963,7 @@ pub enum WaveCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum WavePlanningCommand {
+pub enum WavePlanCommand {
     /// Bind an existing Project UUID as this Wave's shared current selection
     Bind {
         wave: String,
@@ -2694,7 +2694,7 @@ pub enum PrCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum PlanningCommand {
+pub enum PlanCommand {
     /// Print each Wave's plan as Desktop shows it: every Task's section, condition and controls
     List {
         /// One Wave; omitted reads the repository's Waves
@@ -2714,7 +2714,7 @@ pub enum PlanningCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RepositoryPlanningCommand {
+pub enum RepoPlanCommand {
     /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
@@ -2856,7 +2856,7 @@ pub enum ConfigCommand {
         json: bool,
     },
     /// Establish or print this repository's selected planning identity
-    Repository {
+    Repo {
         /// Associate this checkout with a repository identity, retaining prior IDs
         #[arg(long)]
         bind: Option<crate::durable::RepositoryId>,
@@ -2891,7 +2891,7 @@ pub enum MachineCommand {
     /// Diagnose installation, storage and Process integrity
     Doctor {
         /// Diagnose repository planning without changing it
-        #[arg(long)]
+        #[arg(long = "plan")]
         planning: bool,
         /// Emit the audit as JSON
         #[arg(long)]
@@ -3405,7 +3405,6 @@ mod tests {
         for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
-        assert!(command.find_subcommand("repo").is_none());
         assert!(
             Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
                 .is_err()
@@ -3439,7 +3438,7 @@ mod tests {
             ],
             vec!["lf", "config", "unset", "account.claude", "--global"],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "machine", "doctor", "--planning", "--json"],
+            vec!["lf", "machine", "doctor", "--plan", "--json"],
             vec!["lf", "wave", "sync", "product"],
             vec![
                 "lf",
@@ -3624,7 +3623,7 @@ mod tests {
     fn ci_report_accepts_machine_wide_filters() {
         let cli = Cli::try_parse_from([
             "lf",
-            "repository",
+            "repo",
             "ci",
             "--since",
             "24h",
@@ -3637,8 +3636,8 @@ mod tests {
         .expect("parse CI report");
         assert!(matches!(
             cli.command,
-            Some(Commands::Repository {
-                cmd: Some(RepositoryCommand::Ci {
+            Some(Commands::Repo {
+                cmd: Some(RepoCommand::Ci {
                     since,
                     wave: Some(wave),
                     repo: Some(repo),
@@ -3870,11 +3869,11 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "wave", "planning", "connect", "pm"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "wave", "plan", "connect", "pm"]).expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Planning {
-                    cmd: Some(WavePlanningCommand::Connect { wave, all, .. }),
+                WaveCommand::Plan {
+                    cmd: Some(WavePlanCommand::Connect { wave, all, .. }),
                     ..
                 },
         }) = cli.command
@@ -4250,13 +4249,12 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli =
-            Cli::try_parse_from(["lf", "wave", "planning", "connect", "--all"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "wave", "plan", "connect", "--all"]).expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Planning {
+                WaveCommand::Plan {
                     cmd:
-                        Some(WavePlanningCommand::Connect {
+                        Some(WavePlanCommand::Connect {
                             wave,
                             all,
                             team_key,
@@ -4281,7 +4279,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "lf",
             "wave",
-            "planning",
+            "plan",
             "connect",
             "product",
             "--team-key",
@@ -4292,9 +4290,9 @@ mod tests {
         .expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Planning {
+                WaveCommand::Plan {
                     cmd:
-                        Some(WavePlanningCommand::Connect {
+                        Some(WavePlanCommand::Connect {
                             team_key,
                             team_name,
                             ..
@@ -4312,11 +4310,11 @@ mod tests {
 
     #[test]
     fn pm_reteam_defaults_to_dry_run() {
-        let cli = Cli::try_parse_from(["lf", "wave", "planning", "reteam"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "wave", "plan", "reteam"]).expect("parse");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Planning {
-                    cmd: Some(WavePlanningCommand::Reteam { apply, .. }),
+                WaveCommand::Plan {
+                    cmd: Some(WavePlanCommand::Reteam { apply, .. }),
                     ..
                 },
         }) = cli.command
@@ -4325,12 +4323,12 @@ mod tests {
         };
         assert!(!apply);
 
-        let cli = Cli::try_parse_from(["lf", "wave", "planning", "reteam", "--apply"])
-            .expect("parse apply");
+        let cli =
+            Cli::try_parse_from(["lf", "wave", "plan", "reteam", "--apply"]).expect("parse apply");
         let Some(Commands::Wave {
             cmd:
-                WaveCommand::Planning {
-                    cmd: Some(WavePlanningCommand::Reteam { apply, .. }),
+                WaveCommand::Plan {
+                    cmd: Some(WavePlanCommand::Reteam { apply, .. }),
                     ..
                 },
         }) = cli.command

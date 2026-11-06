@@ -34,7 +34,7 @@ struct DesktopLogTests {
         log.begin()
         let journal = LaunchJournal(directory: url.deletingLastPathComponent())
         journal.begin(app: "9.9.9", preMainMs: 1)
-        journal.read(["planning", "list", "--all"], ms: 5, ok: true)
+        journal.read(["plan", "list", "--all"], ms: 5, ok: true)
         journal.read(["task", "diff", "task_87e0"], ms: 5, ok: false)
         journal.killed(["task", "diff", "task_87e0"])
         let sample = DesktopVitals.Sample(footprintMB: 412, peakMB: 600, fds: 61, threads: 40)

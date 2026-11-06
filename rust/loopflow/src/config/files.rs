@@ -673,12 +673,12 @@ mod tests {
             repository: repo.path().to_owned(),
         };
         let declared = crate::engine::config::get(&shared, "linear.team").unwrap();
-        assert_eq!(declared.key, "repository.planning.team");
+        assert_eq!(declared.key, "repo.plan.team");
         assert_eq!(declared.value, "released");
         crate::engine::config::set(&shared, "planning", "{provider: linear, team: typed}").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("# shared\n"), "{text}");
-        assert!(text.contains("repository:\n  planning:\n"), "{text}");
+        assert!(text.contains("repo:\n  plan:\n"), "{text}");
         assert!(!text.contains("linear:"), "{text}");
         assert!(text.contains("skills:\n  design:\n"), "{text}");
         assert_eq!(

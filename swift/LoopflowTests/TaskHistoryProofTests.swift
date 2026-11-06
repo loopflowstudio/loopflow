@@ -210,7 +210,7 @@ private actor HistorySource {
 
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("planning", "list"): return roadmap
+        case ("plan", "list"): return roadmap
         case ("wave", "list"): return "[]"
         case ("session", "history"): return #"{"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#

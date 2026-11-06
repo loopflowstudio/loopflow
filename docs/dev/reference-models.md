@@ -155,7 +155,7 @@ disclosure tree. Invalid sources remain visible with their error.
 repository's, new Tasks take up and which setting chose it, independently of
 planning history; `lf set wave.graph` changes it.
 
-Task status and `planning list` separate `graph_name` with its `graph_source`
+Task status and `plan list` separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
 `execution` and `run_control`. Task work and overview carry `graph`, a
 `TaskGraph` of name, interactive steps and position. The latest

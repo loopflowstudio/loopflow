@@ -15,7 +15,7 @@ first, then the engineering words it borrows.
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
-| **Planning** | A Wave's plan: its Tasks, KRs and targets. `lf wave planning` reads it; `lf planning list` reads every Wave's. |
+| **Planning** | A Wave's plan: its Tasks, KRs and targets. `lf wave plan` reads it; `lf plan list` reads every Wave's. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation you work in interactively, with identity, feedback and native history. |

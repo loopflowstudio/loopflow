@@ -816,14 +816,13 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
-    assert!(tree.find_subcommand("repo").is_none());
     for (short, path) in [
         (vec!["land"], vec!["pr", "land"]),
         (vec!["pool"], vec!["machine", "pool"]),
-        (vec!["release", "run"], vec!["repository", "release", "run"]),
-        (vec!["ci"], vec!["repository", "ci"]),
-        (vec!["tokens"], vec!["repository", "tokens"]),
-        (vec!["reteam"], vec!["wave", "planning", "reteam"]),
+        (vec!["release", "run"], vec!["repo", "release", "run"]),
+        (vec!["ci"], vec!["repo", "ci"]),
+        (vec!["tokens"], vec!["repo", "tokens"]),
+        (vec!["reteam"], vec!["wave", "plan", "reteam"]),
     ] {
         assert!(tree.find_subcommand(short[0]).is_none(), "{short:?}");
         let help = success(run(
@@ -844,11 +843,8 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     }
     // `lf planning` is the plans namespace; its old repository spellings move.
     for (old, path) in [
-        (
-            vec!["planning", "key"],
-            vec!["repository", "planning", "key"],
-        ),
-        (vec!["planning"], vec!["repository", "planning"]),
+        (vec!["planning", "key"], vec!["repo", "plan", "key"]),
+        (vec!["planning"], vec!["repo", "plan"]),
         (vec!["monitor", "ps"], vec!["process", "list"]),
         (vec!["ship", "--stop"], vec!["task", "hold"]),
         (vec!["desktop", "task"], vec!["task", "show"]),

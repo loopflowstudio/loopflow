@@ -289,7 +289,7 @@ or machine availability can still require runtime observations.
 personal global file. Bare `set` edits private repository settings; `--wave`
 selects a Wave within that private file. Add `--shared` to edit the committed repository or Wave file.
 
-Keys sit on their primitive: `repository.planning.team`, `skill.<name>.agent`,
+Keys sit on their primitive: `repo.plan.team`, `skill.<name>.agent`,
 `wave.graph`, `wave.<id>.account`. A file or command may spell a key by its
 trailing path (`planning.team`, `graph`), by the typed layout
 (`skills.<name>.agent`, `waves.<id>.account`) or, for the Linear team, the
@@ -408,7 +408,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `repository.planning`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |
@@ -541,15 +541,15 @@ release:
       completion: github-release
 ```
 
-`lf repository release run patch --target cli` selects changes from the exact
+`lf repo release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf repository release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf repository release check`
+`verify` runs during `lf repo release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf repo release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The

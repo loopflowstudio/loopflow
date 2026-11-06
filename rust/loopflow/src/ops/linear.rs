@@ -172,8 +172,8 @@ pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repository.planning.team`. \
-             Run `lf wave planning connect <wave> --team-key <KEY>` before creating or mutating work."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -196,7 +196,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository Linear identity from Git origin: {error}. \
-             Configure an origin before running `lf wave planning connect`."
+             Configure an origin before running `lf wave plan connect`."
         ))
     })
 }
@@ -236,7 +236,7 @@ pub(crate) async fn resolve_context(
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
             ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
-             Run `lf wave planning connect {wave}` to connect its Linear Initiative."
+             Run `lf wave plan connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok((repository, initiative))
@@ -649,7 +649,7 @@ async fn connect_async(
                 ".lf/config.yaml".to_string(),
                 super::wave_lifecycle::authored_path(&wave),
             ],
-            &format!("lf wave planning connect: {wave} to Linear"),
+            &format!("lf wave plan connect: {wave} to Linear"),
         )
     } else {
         super::wave_lifecycle::AuthoredFiles::Unchanged
@@ -1066,8 +1066,8 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repository.planning.team`. \
-             Run `lf wave planning connect <wave> --team-key <KEY>` to establish the migration target."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -1529,7 +1529,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no `repository.planning.team`; run `lf wave planning connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1811,7 +1811,7 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
-/// Declare `repository.planning` as Linear with `team_id`, at its canonical
+/// Declare `repo.plan` as Linear with `team_id`, at its canonical
 /// spelling; other keys keep their text and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
@@ -1882,7 +1882,7 @@ fn matching_initiative_id(
         [] => Ok(None),
         [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave planning connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave plan connect`",
             many.iter()
                 .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
@@ -2476,7 +2476,7 @@ mod tests {
                         assert!(git(&["ls-files", ".lf/wave/ops"], &main).contains("GOAL.md"));
                         assert_eq!(git(&["status", "--porcelain"], &main), "");
                         let log = git(&["log", "--format=%s", "-3"], &main);
-                        assert!(log.contains("lf wave planning connect: ops to Linear"), "{log}");
+                        assert!(log.contains("lf wave plan connect: ops to Linear"), "{log}");
                         assert!(log.contains("lf wave add: ops"), "{log}");
                         assert_eq!(
                             read_initiative(&main, "ops").as_deref(),

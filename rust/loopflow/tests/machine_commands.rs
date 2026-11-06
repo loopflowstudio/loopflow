@@ -375,7 +375,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
     let arguments = arguments.lines().collect::<Vec<_>>();
     let at = arguments
         .iter()
-        .position(|arg| *arg == "--repository")
+        .position(|arg| *arg == "--repo-id")
         .unwrap();
     assert_eq!(arguments[at + 1], repository);
     assert!(arguments.contains(&"resume"), "{arguments:?}");
@@ -1502,7 +1502,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
 
     // Moving it to the laptop sends it from mini, the writer, over SSH.
     let handed = fixture.json(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "task",
         "move",
@@ -1533,7 +1533,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
 
     // The laptop now writes; unassign keeps the history and leaves it unowned.
     let unassigned = fixture.json(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "task",
         "unassign",
@@ -1723,7 +1723,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
         .unwrap()
         .wave_id;
     let output = fixture.run(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "--wave",
         "owners",
@@ -1793,7 +1793,7 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let args = [
         "--machine",
         "mini",
-        "--repository",
+        "--repo-id",
         repository.as_str(),
         "task",
         "shell",
@@ -1831,7 +1831,7 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
         .command(&[
             "--machine",
             "mini",
-            "--repository",
+            "--repo-id",
             repository.as_str(),
             "task",
             "watch-files",

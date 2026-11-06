@@ -1,7 +1,7 @@
-//! The `wave` namespace's planning binding: `wave.planning.bind`, `.connect`
+//! The `wave` namespace's planning binding: `wave.plan.bind`, `.connect`
 //! and `.reteam` tie a Wave's plan to the repository's tracker. `wave.sync`
-//! is the explicit exchange; the planning reads (`wave.planning`,
-//! `planning.list`, `wave.list`) read the stored snapshot and exchange nothing.
+//! is the explicit exchange; the planning reads (`wave.plan`,
+//! `plan.list`, `wave.list`) read the stored snapshot and exchange nothing.
 
 use std::path::Path;
 
@@ -10,8 +10,8 @@ use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
 use crate::work::project::Project;
 
-/// `wave.planning.bind`: bind the existing tracker Project `project` as the
-/// Wave's shared current selection, as `lf wave planning bind <wave>
+/// `wave.plan.bind`: bind the existing tracker Project `project` as the
+/// Wave's shared current selection, as `lf wave plan bind <wave>
 /// <project>` does, and return the Project as stored.
 pub fn planning_bind(directory: &Path, wave: &str, project: &str) -> Result<Project> {
     let repo = repo_root(directory)?;
@@ -21,9 +21,9 @@ pub fn planning_bind(directory: &Path, wave: &str, project: &str) -> Result<Proj
         .map_err(written)
 }
 
-/// `wave.planning.connect`: connect `wave` (the ambient Wave with none, every
+/// `wave.plan.connect`: connect `wave` (the ambient Wave with none, every
 /// authored Wave with `all`) to its tracker Initiative and the repository's
-/// Team, as `lf wave planning connect` does; one receipt per Wave connected.
+/// Team, as `lf wave plan connect` does; one receipt per Wave connected.
 pub fn planning_connect(
     directory: &Path,
     wave: Option<&str>,
@@ -56,7 +56,7 @@ pub fn planning_connect(
                 .ok_or_else(|| {
                     Error::new(
                         ErrorCode::Invalid,
-                        "cannot determine wave; run `lf wave planning connect <name>`",
+                        "cannot determine wave; run `lf wave plan connect <name>`",
                     )
                 })?,
         };
@@ -79,8 +79,8 @@ pub fn planning_connect(
         .collect()
 }
 
-/// `wave.planning.reteam`: reconcile the linked Waves' Projects and Tasks onto
-/// the repository's tracker Team, as `lf wave planning reteam [--apply]`
+/// `wave.plan.reteam`: reconcile the linked Waves' Projects and Tasks onto
+/// the repository's tracker Team, as `lf wave plan reteam [--apply]`
 /// does. Without `apply` the receipt is the plan and nothing moves.
 pub fn planning_reteam(
     directory: &Path,
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn planning_receipts_match_the_shared_fixtures() {
         let connected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/wave_planning_connected.json"
+            "../../../../tests/fixtures/dto/server/wave_plan_connected.json"
         ))
         .unwrap();
         let results: Vec<LinearInitResult> =
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(serde_json::to_value(&results).unwrap(), connected["result"]);
         assert_eq!(results[0].wave, "product");
         let reteamed: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/wave_planning_reteamed.json"
+            "../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"
         ))
         .unwrap();
         let result: LinearReteamResult =

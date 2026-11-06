@@ -11,7 +11,7 @@ cancel Tasks, edit Projects or change Task state.
 Read any dated reviews supplied, the Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
-lf wave planning <wave> --json
+lf wave plan <wave> --json
 lf wave show <wave> --json
 ```
 

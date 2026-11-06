@@ -75,7 +75,7 @@ which is not a failure. `--logs` pulls failed GitHub Actions logs.
 ```bash
 lf ship                        # a Task: the remaining steps, then land and repair until merge
 lf land --wait-and-fix         # this PR: land and repair in the foreground
-lf repository ci --since 7d    # how each failure was detected, repaired and landed
+lf repo ci --since 7d    # how each failure was detected, repaired and landed
 ```
 
 The waiting process is the only one that repairs. It starts one `ci-fix` when
@@ -85,7 +85,7 @@ whose ship process died starts again on the next read of this Machine's work
 (`lf task status`, `lf process list`, Desktop). After bare `lf land` returns, nothing
 repairs its PR.
 
-`lf repository ci` reads the local record, not GitHub: how much of CI repair happened without you.
+`lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.
 
 Stop repair for one Task, or cap startup retries within one repair:
 
@@ -158,7 +158,7 @@ and cannot reach the Keychain:
   <key>Label</key><string>com.example.product-release</string>
   <key>ProgramArguments</key>
   <array><string>/bin/zsh</string><string>-lc</string>
-    <string>cd ~/src/product &amp;&amp; lf repository release run patch</string></array>
+    <string>cd ~/src/product &amp;&amp; lf repo release run patch</string></array>
   <key>StartCalendarInterval</key>
   <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer></dict>
 </dict></plist>
@@ -178,10 +178,10 @@ merges, then exits. It repairs nothing.
 ### Release
 
 ```bash
-lf repository release check          # has anything merged since the last tag?
-lf repository release run            # patch release, end to end
-lf repository release run minor
-lf repository release status         # where the release workflow stands
+lf repo release check          # has anything merged since the last tag?
+lf repo release run            # patch release, end to end
+lf repo release run minor
+lf repo release status         # where the release workflow stands
 ```
 
 `release run` bumps manifests, writes release notes, lands a release PR, builds
@@ -191,10 +191,10 @@ failed build is fixed with another commit under the same version, never by
 bumping. `lf skill release-run minor` hands the same command to an agent.
 
 ```bash
-lf repository release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
-lf repository release issues                                      # every open regression
-lf repository release promote --dry-run                           # what would move, or what holds it
-lf repository release promote                                     # move stable now, outside a run
+lf repo release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
+lf repo release issues                                      # every open regression
+lf repo release promote --dry-run                           # what would move, or what holds it
+lf repo release promote                                     # move stable now, outside a run
 ```
 
 A target with `completion: github-release` has a `stable` stream, GitHub's Latest
@@ -217,7 +217,7 @@ release:
 ```
 
 ```bash
-lf repository release run patch --target cli   # changes since cli/v<previous> only
+lf repo release run patch --target cli   # changes since cli/v<previous> only
 ```
 
 [Configuration](config.md#releases) has every field. The first release of a
@@ -347,8 +347,8 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
 | `lf ship [ISSUE]` / `lf task hold ISSUE` | Run a Task's remaining steps to merge, repairing CI / withdraw that approval |
-| `lf repository ci [--since 7d]` | Report CI incidents and their repairs |
-| `lf repository release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
+| `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
+| `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |
 | `lf machine add\|list\|status\|use\|connect\|end` | Where work runs |
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
@@ -357,7 +357,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
-[`lf repository`](lf-reference.md#lf-repository), [`lf wt`](lf-reference.md#lf-wt),
+[`lf repo`](lf-reference.md#lf-repository), [`lf wt`](lf-reference.md#lf-wt),
 [`lf machine`](lf-reference.md#lf-machine), [`lf account`](lf-reference.md#lf-account).
 
 Next: [Surfaces](surfaces.md): see this work in Desktop, cmux, Herdr or tmux.

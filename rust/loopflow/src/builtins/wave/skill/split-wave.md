@@ -40,7 +40,7 @@ Each child gets a fresh GOAL, not a slice of the parent's prose:
    - `GOAL.md`: fresh intent and judgment, with clear scope lines between
      siblings. `MEMORY.md`: what this child inherits. `metrics/*.md`: the
      metrics allocated to it.
-   - `lf wave planning connect <wave>/<child>` links each child's Linear Initiative. Create
+   - `lf wave plan connect <wave>/<child>` links each child's Linear Initiative. Create
      starts the first Project; check each child's plan after connecting and keep
      existing Project IDs and Planned/Completed history.
    - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the

@@ -1,7 +1,7 @@
-//! The `repository` namespace's operations: `repository.ci`, the Machine's
-//! record of failed-CI recovery, and `repository.release`, which runs the
+//! The `repository` namespace's operations: `repo.ci`, the Machine's
+//! record of failed-CI recovery, and `repo.release`, which runs the
 //! release workflow detached ([`super::launch`]) and reports the Process that
-//! carries it. The other `lf repository release` verbs are its steps and stay
+//! carries it. The other `lf repo release` verbs are its steps and stay
 //! CLI commands.
 
 use std::path::Path;
@@ -10,14 +10,14 @@ use super::{launch, Error, ErrorCode, Result};
 use crate::lf::commands::ci::CiReportDto;
 use crate::ops::{Progress, ReleaseRunOutcome};
 
-/// `repository.ci`: how failed CI was detected, repaired and landed since
-/// `since` (`7d`, `24h`, or an RFC 3339 instant), as `lf repository ci` does.
+/// `repo.ci`: how failed CI was detected, repaired and landed since
+/// `since` (`7d`, `24h`, or an RFC 3339 instant), as `lf repo ci` does.
 pub fn ci(since: &str, wave: Option<&str>, repo: Option<&str>) -> Result<CiReportDto> {
     crate::lf::commands::ci::report(since, wave, repo)
         .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))
 }
 
-/// `repository.release`: start `lf repository release run [<version>] [-t
+/// `repo.release`: start `lf repo release run [<version>] [-t
 /// <target>]` detached in the repository containing `directory`, and return
 /// the Process that carries it. `version` is `patch` (the default), `minor`,
 /// `major` or `X.Y.Z`.
@@ -26,7 +26,7 @@ pub fn release(
     version: Option<&str>,
     target: Option<&str>,
 ) -> Result<launch::Launched> {
-    let mut args = ["repository", "release", "run"].map(str::to_owned).to_vec();
+    let mut args = ["repo", "release", "run"].map(str::to_owned).to_vec();
     args.extend(version.map(str::to_owned));
     if let Some(target) = target {
         args.extend(["--target".to_owned(), target.to_owned()]);
@@ -35,7 +35,7 @@ pub fn release(
     launch::start(directory, &args)
 }
 
-/// `lf repository release run` in this process: the whole workflow, through
+/// `lf repo release run` in this process: the whole workflow, through
 /// to the tag and the published artifacts. Started by [`release`], it reports
 /// its Process first and carries on in its own log.
 pub fn carry_release(
@@ -46,7 +46,7 @@ pub fn carry_release(
 ) -> Result<ReleaseRunOutcome> {
     let version = version.unwrap_or("patch");
     launch::carry(
-        "repository.release",
+        "repo.release",
         format!(
             "release {version} ({})",
             target.unwrap_or("the default target")
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let ci: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/repository_ci_report.json"
+            "../../../../tests/fixtures/dto/server/repo_ci_report.json"
         ))
         .unwrap();
         let report: CiReportDto = serde_json::from_value(ci["result"].clone()).unwrap();

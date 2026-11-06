@@ -265,7 +265,7 @@ final class SessionsWorkspace {
             throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
         }
         return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
-            "--repository", location.repositoryID, "task", "shell", task,
+            "--repo-id", location.repositoryID, "task", "shell", task,
             "--checkout", identity.worktree]
     }
     let multiplexer: MultiplexerStore

@@ -906,7 +906,7 @@ private actor RemoteFilesFixture {
     private var changeOwnerDuringRead = false
 
     func watch(_ args: [String], cwd: String?) throws -> TaskFilesObservation {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan", "task", "watch-files", "remote-task"]),
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan", "task", "watch-files", "remote-task"]),
               let flag = args.firstIndex(of: "--request") else { throw RegistryQueryError("Not the pinned peer") }
         request = args[flag + 1]
         emit()
@@ -927,7 +927,7 @@ private actor RemoteFilesFixture {
             checkout: "/peer/checkout", paths: ["note.txt"]))
     }
     func read(_ args: [String], cwd: String?) throws -> String {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan"]) else {
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan"]) else {
             throw RegistryQueryError("Peer paths must not reach local reads")
         }
         let command = Array(args.dropFirst(4))

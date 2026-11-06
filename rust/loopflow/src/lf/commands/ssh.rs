@@ -188,7 +188,7 @@ pub(super) fn run_with_io(
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
         if let Some(repository) = &repository {
-            cmd.extend(["--repository".into(), repository.to_string()]);
+            cmd.extend(["--repo-id".into(), repository.to_string()]);
         }
     }
     cmd.extend(if preview {
@@ -480,7 +480,7 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 }
 
 /// The caller's repository by identity; `None` outside a repository or before
-/// `lf repository`, when the destination runs in its home directory.
+/// `lf repo`, when the destination runs in its home directory.
 fn current_repository(
     directory: &std::path::Path,
 ) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
@@ -628,7 +628,7 @@ mod tests {
         let script = build_preamble(
             &[
                 "lf".into(),
-                "--repository".into(),
+                "--repo-id".into(),
                 "repo_exact".into(),
                 "--task".into(),
                 "task_exact".into(),
@@ -655,7 +655,7 @@ mod tests {
         assert_eq!(
             &lines[1..],
             &[
-                "--repository",
+                "--repo-id",
                 "repo_exact",
                 "--task",
                 "task_exact",

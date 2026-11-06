@@ -89,8 +89,8 @@ forgets finished Process rows nothing references and compacts the store.
 ## How big the codebase is
 
 ```bash
-lf repository tokens            # lines and tokens per directory, tracked files only
-lf repository tokens --days 90  # the codebase's size on each day it changed
+lf repo tokens            # lines and tokens per directory, tracked files only
+lf repo tokens --days 90  # the codebase's size on each day it changed
 ```
 
 Tokens are counted with the same tokenizer the prompt assembler budgets with,
@@ -101,7 +101,7 @@ cheap in lines and expensive in tokens; this shows it.
 
 ```bash
 lf machine doctor             # store, process records, lineage, attribution, installation, lock contention
-lf machine doctor --planning  # repository planning, read without changing it
+lf machine doctor --plan  # repository planning, read without changing it
 ```
 
 Each check reports ok, warn or fail with its detail. `--json` returns the same audit.
@@ -120,8 +120,8 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf replay ID` | New work from a captured request |
 | `lf process list`, `lf process top` | Live process trees |
 | `lf process prune` | Remove dead receipts, orphaned providers and finished Process rows |
-| `lf repository tokens [--days N]` | Codebase size in lines and tokens |
-| `lf machine doctor [--planning]` | Installation, storage and process integrity |
+| `lf repo tokens [--days N]` | Codebase size in lines and tokens |
+| `lf machine doctor [--plan]` | Installation, storage and process integrity |
 
 `lf usage`, `lf history` and `lf doctor` resolve to the same commands. Every
 flag is in the [`lf` reference](lf-reference.md#lf-session).

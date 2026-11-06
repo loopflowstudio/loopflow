@@ -12,7 +12,7 @@ lf wave update-plan --wave product --plan scratch/product-plan.json
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its planning owns Tasks,
 KRs and targets; connected to Linear, that planning is one In Progress Linear
-Project. Each Wave's plan is authored in place and `lf wave planning bind`
+Project. Each Wave's plan is authored in place and `lf wave plan bind`
 selects another existing Linear Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
@@ -47,7 +47,7 @@ never participate in Git planning exchange; Wave identity and retirement remain
 planning-writer facts.
 A Wave's default graph is a committed `.lf/graphs/` file or a builtin. A Wave
 records only the selected name, which travels with planning.
-Wave list, status and `planning list` emit each Wave's `machine` from the reader's
+Wave list, status and `plan list` emit each Wave's `machine` from the reader's
 Machine-local Wave → Machine default (the Wave, then its parents), or
 `machine: null` when unset, never a fabricated local Machine.
 Desktop consumes the same optional value.
@@ -216,9 +216,9 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `lf repository planning`
+`PlanningSyncStatus` presents local Linear delivery evidence; `lf repo plan`
 presents Git acquisition/publication receipts and held projections. The retained
-mutation journal grows with every edit, so `lf repository planning journal` reads it on
+mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
@@ -271,7 +271,7 @@ The documented unconditional-update race remains a protocol limit.
 ## Plan creation and selection
 
 ```bash
-lf wave planning bind product <project-uuid> --json
+lf wave plan bind product <project-uuid> --json
 lf wave create product --json
 ```
 
@@ -281,12 +281,12 @@ a different existing binding is left unchanged. Setup preserves provider status,
 content and identity, including a Backlog Project. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
-`planning list` retain predecessor plans and Tasks. Registration and unstarted managed
+`plan list` retain predecessor plans and Tasks. Registration and unstarted managed
 work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
-Wave and `planning list` Task summaries read saved Work directly: `id` is the local Task
+Wave and `plan list` Task summaries read saved Work directly: `id` is the local Task
 identity, `linear_id` is its optional provider binding, and `sync` is required
 read-only evidence. Missing provider inventory does not erase saved prose, due
 dates or assignments. Graph, execution and checkout evidence remain separate.
@@ -303,7 +303,7 @@ Project export uses the original transition receipt on the foreground connection
 Creation and Initiative attachment retain separate attempted effects and exact
 mutation acknowledgements; a missing response never permits another create or attachment.
 Mapped status receipts use foreground delivery;
-a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates; status and `planning list` never call it. Desktop
+a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates; status and `plan list` never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
 `project_readiness` through `lf wave show --watch --json`. Committed selection,
@@ -328,7 +328,7 @@ its terminal outcome and error. Swift retains command transport feedback only.
 ```bash
 lf wave edit-plan product --name "2026-10 — customer work"
 lf wave update-plan --wave product --plan scratch/product-plan.json
-lf wave planning bind product <Project UUID>     # select another existing Project
+lf wave plan bind product <Project UUID>     # select another existing Project
 ```
 
 `update-plan` replaces the current Project's KRs and metric targets with the
@@ -352,7 +352,7 @@ lf task show INF-124 --json     # the planning evidence below
 Project-less observation returns acquisition evidence without fabricating owned
 Work; its concrete record remains retained internally. Status may acquire planning
 but never completes a Task, allocates a checkout or moves a Task's graph.
-Wave, `planning list` and Work frames expose the same acquisition state and age separately
+Wave, `plan list` and Work frames expose the same acquisition state and age separately
 from saved content and outbound delivery.
 
 Exact lookups and Wave views share normalized SQLite entities scoped to a
@@ -584,7 +584,7 @@ from the worktree. It blocks until the Graph ends; a caller that will not wait
 backgrounds it. `--reason` publishes direction to the Task first. To change
 direction, interrupt, inspect, then run.
 
-Task status and `planning list` `execution` observe the Task's most recently launched
+Task status and `plan list` `execution` observe the Task's most recently launched
 Graph: `none`, `latest` or `finished`. Its only control is `start`, available
 whenever the Task can run, even when an earlier Graph exists.
 

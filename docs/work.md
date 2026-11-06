@@ -104,12 +104,12 @@ lf task list --watch                          # a JSON line each time the list c
 it answers instantly and offline.
 
 `--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf session history`, `lf repository planning`, `lf process list` and the
+`lf session list`, `lf session history`, `lf repo plan`, `lf process list` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf repository planning --watch` also
+answers that id. It stops when stdin closes. `lf repo plan --watch` also
 keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
@@ -131,7 +131,7 @@ until you complete it. Publishing, landing and CI repair are covered in
 ## Share the plan
 
 ```bash
-lf repository planning                 # which plan this repository reads, and what's pending
+lf repo plan                 # which plan this repository reads, and what's pending
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
 lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
@@ -152,18 +152,18 @@ A different ref, or a plan only you see:
 planning:
   provider: git
   shared: team        # refs/loopflow/planning/shared/team
-  # personal: true    # refs/loopflow/planning/users/<key>; see `lf repository planning key`
+  # personal: true    # refs/loopflow/planning/users/<key>; see `lf repo plan key`
 ```
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf repository planning journal`, ready to copy back.
+value stays in `lf repo plan journal`, ready to copy back.
 
 ### Linear, Asana or Notion
 
 ```bash
 lf account connect linear                  # or asana, or notion
-lf wave planning connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
+lf wave plan connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 
 ```yaml
@@ -207,7 +207,7 @@ lf task create --wave billing --title "Meter usage events"
 ```
 
 A clone's committed `.lf/wave/` directories register when the repository joins
-the Desktop portfolio, and on `lf wave create` or `lf wave planning connect --all`; Desktop
+the Desktop portfolio, and on `lf wave create` or `lf wave plan connect --all`; Desktop
 and `lf wave list` read the same rows. A removed Wave's directory stays removed.
 
 ```markdown
@@ -323,7 +323,7 @@ released lf still reads (LOO-640 removes that).
 ### Plan it: KRs and targets
 
 ```bash
-lf wave planning billing --json                     # its Tasks, KRs and metric targets
+lf wave plan billing --json                     # its Tasks, KRs and metric targets
 lf wave update-plan --wave billing --plan plan.json
 ```
 

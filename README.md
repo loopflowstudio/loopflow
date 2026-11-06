@@ -121,7 +121,7 @@ You want to do something; here's how through `lf`.
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |
-| cut a release | `lf repository release run <version>` |
+| cut a release | `lf repo release run <version>` |
 
 ## Needs
 

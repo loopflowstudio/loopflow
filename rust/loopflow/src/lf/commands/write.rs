@@ -176,18 +176,18 @@ pub enum Write {
     #[serde(rename = "wave.sync")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
     PlanningRefresh { directory: PathBuf, wave: String },
-    /// `lf wave planning bind <wave> <project> --json`: the tracker Project
+    /// `lf wave plan bind <wave> <project> --json`: the tracker Project
     /// bound as the Wave's current plan.
-    #[serde(rename = "wave.planning.bind")]
+    #[serde(rename = "wave.plan.bind")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::project::Project>()))]
     WavePlanningBind {
         directory: PathBuf,
         wave: String,
         project: String,
     },
-    /// `lf wave planning connect [<wave>|--all] [--team-key <key>]
+    /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
     /// [--team-name <name>] --json`: one receipt per Wave connected.
-    #[serde(rename = "wave.planning.connect")]
+    #[serde(rename = "wave.plan.connect")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::linear::LinearInitResult>>()))]
     WavePlanningConnect {
         directory: PathBuf,
@@ -196,9 +196,9 @@ pub enum Write {
         team_key: Option<String>,
         team_name: Option<String>,
     },
-    /// `lf wave planning reteam [--apply] --json`: the moves onto the
+    /// `lf wave plan reteam [--apply] --json`: the moves onto the
     /// repository's Team; a plan without `apply`.
-    #[serde(rename = "wave.planning.reteam")]
+    #[serde(rename = "wave.plan.reteam")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::linear::LinearReteamResult>()))]
     WavePlanningReteam { directory: PathBuf, apply: bool },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
@@ -206,9 +206,9 @@ pub enum Write {
     #[serde(rename = "graph.customize")]
     #[schemars(extend("x-result" = generator.subschema_for::<super::graph::Customized>()))]
     GraphCustomize { directory: PathBuf, name: String },
-    /// `lf repository release run [<version>] [-t <target>] --json`, started
+    /// `lf repo release run [<version>] [-t <target>] --json`, started
     /// detached: the Process carrying the release.
-    #[serde(rename = "repository.release")]
+    #[serde(rename = "repo.release")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
     RepositoryRelease {
         directory: PathBuf,
@@ -695,7 +695,7 @@ impl Write {
             }),
             Self::RepositoryRelease {
                 version, target, ..
-            } => value(&crate::engine::repository::release(
+            } => value(&crate::engine::repo::release(
                 directory,
                 version.as_deref(),
                 target.as_deref(),
@@ -1216,10 +1216,10 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.planning.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
-            r#"{"kind":"wave.planning.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
-            r#"{"kind":"wave.planning.reteam","directory":"/r","apply":false}"#,
-            r#"{"kind":"repository.release","directory":"/r","version":"minor","target":null}"#,
+            r#"{"kind":"wave.plan.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
+            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
+            r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
+            r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,

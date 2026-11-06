@@ -329,7 +329,7 @@ fn plan_in(
                             [
                                 "--machine".into(),
                                 location.machine_id.clone(),
-                                "--repository".into(),
+                                "--repo-id".into(),
                                 repository.to_string(),
                             ],
                         );

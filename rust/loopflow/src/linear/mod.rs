@@ -919,7 +919,7 @@ impl LinearClient {
             ))),
             None => Err(LinearError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf wave planning connect --team-key {}` to claim it for {repository}",
+                 run `lf wave plan connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }
@@ -928,8 +928,8 @@ impl LinearClient {
     fn require_team_id(&self) -> LinearResult<String> {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
-                "Linear write requires `repository.planning.team` in .lf/config.yaml; \
-                 run `lf wave planning connect <wave> --team-key <KEY>`"
+                "Linear write requires `repo.plan.team` in .lf/config.yaml; \
+                 run `lf wave plan connect <wave> --team-key <KEY>`"
                     .to_string(),
             )
         })

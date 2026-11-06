@@ -169,16 +169,14 @@ again. Connecting logins and setting routes: [Ops](ops.md).
 ```bash
 lf session list --blocked                    # whose next message would fail
 lf session move --blocked -a claude:opus     # continue them on Opus
-lf session move --on jack@ --account work@   # switch the shared login; every open Claude follows
-lf account claude drain jack@                # stop routing to a login; its Sessions go to the route's next one
+lf account claude use work@                  # switch the Machine's login; every open Claude follows
 ```
 
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-A login switch is one act every open Claude follows, selected or not, so
-`move` lists each of them and says when the new login cannot take a Session's
-model either. Interactive Sessions only; nothing is written to your
+Logins belong to the Machine, not to a Session: every open Session runs on the
+active one. Interactive Sessions only; nothing is written to your
 preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Reference

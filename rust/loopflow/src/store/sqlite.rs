@@ -1728,7 +1728,7 @@ impl SqliteStore {
             .expect("record account-home conversation");
     }
 
-    /// The eligible candidate with the most room for `model` (`None`: a
+    /// The most urgent eligible candidate for `model` (`None`: a
     /// launch whose model the provider picks, held back by every scoped limit).
     pub fn select_provider_account(
         &self,
@@ -1790,7 +1790,7 @@ impl SqliteStore {
         }
         drop(account_statement);
 
-        crate::provider_account::order_accounts_by_reset(&mut available, &limits, model, now);
+        crate::provider_account::order_accounts_by_urgency(&mut available, &limits, model, now);
         let Some(mut account) = available.into_iter().next() else {
             transaction.commit()?;
             return Ok(None);

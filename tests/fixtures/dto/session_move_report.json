@@ -17,7 +17,7 @@
     {
       "id": "session_00000000000000000000000000000003",
       "title": "Release notes",
-      "reason": "pinned to work; `lf resume --account work@example.com session_00000000000000000000000000000003` moves it"
+      "reason": "its transcript is missing"
     }
   ]
 }

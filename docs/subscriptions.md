@@ -184,16 +184,18 @@ unavailable and retains prior account evidence. Claude refresh coordination with
 native sessions is still under development; these comparisons do not serialize
 native refresh or credential writes.
 
-Eligible accounts are ordered by plan, then reset, then room: Codex Pro leads
-Plus, then the account whose most-used window (not yet reset) resets soonest
-leads, so no account resets with quota unused; among accounts resetting
-together the lowest use leads, and declared route order decides ties. In shared
-mode the signed-in account also wins ties, so a launch switches every running
-Claude only when another account ranks ahead. A resumed conversation runs on
-the active login; the account it began under is history. `lf session move
---account <email>` switches the shared login for the Sessions it selects. A
-named login that cannot launch fails rather than falling back to another
-account.
+Eligible accounts are ordered by plan, then by how fast each must be used to
+spend its quota before it resets: Codex Pro leads Plus, then the account with
+the most weekly quota left per hour until its weekly window resets leads, so no
+account resets with quota unused. 70% left with 3 hours to go leads 40% left
+with 5 days to go. The weekly window counts its model's own limit when there
+is one; the short window decides only whether an account has room. An account
+with no observed weekly window comes after the scored ones, and declared route
+order decides ties. Every launch takes the top account, whichever is signed in,
+so the shared login switches, and every running Claude follows, whenever
+another account ranks ahead. A resumed conversation runs on the active login;
+the account it began under is history. A named login that cannot launch fails
+rather than falling back to another account.
 
 Claude's cached identity is bound to the credential bytes checked by the profile
 endpoint. Cached status reports changed or previously unverified credentials as
@@ -320,7 +322,7 @@ limit, holds back only launches of that model: Sonnet on the same account keeps
 going, and a launch that names no model waits for every scope on the account.
 
 Open Claude Sessions need nothing either. When one hits a limit in shared mode,
-the login moves to the eligible account that resets soonest, and every open Claude
+the login moves to the eligible account that ranks first, and every open Claude
 follows at its next request. Send your next message where you left off. Isolated
 Sessions and Codex keep their login until you `lf resume` them, which moves them.
 
@@ -330,15 +332,15 @@ To see what would fail next, and move it in one go:
 lf session list --blocked                       # Sessions whose login cannot take their model now
 lf session list --on claude:fable               # every open Fable Session
 lf session move --blocked -a claude:opus        # continue them on Opus: idle ones at their next open, busy ones after their turn
-lf session move --on jack@ --account work@      # switch the shared login; every open Claude follows
-lf account claude drain jack@ --to work@        # stop routing to a login and move what is on it
-lf account set claude jack@ --routing automatic # route to it again after a drain
+lf account set claude jack@ --routing explicit-only  # stop routing to a login; when it is active, the Machine switches off it now
+lf account set claude jack@ --routing automatic # route to it again
 ```
 
 `--blocked` and `--on` are the one Session selector; `list` previews what
-`move` acts on. A move never writes preferences; `drain` is the one that
-changes routing, setting the drained login `explicit-only`. In the Desktop,
-View → Move Blocked Sessions… runs the same move.
+`move` acts on. A move never writes preferences. Taking the active login out
+of automatic routing switches the Machine to the route's next login, and every
+open Claude follows; `lf account <provider> use` switches by hand. In the
+Desktop, View → Move Blocked Sessions… runs the same move.
 
 ## Switch the shared account
 
@@ -389,15 +391,15 @@ Loopflow asks Claude whose it is before the next launch or switch and brings
 that account's stored copy up to date. If it cannot ask, a switch keeps the
 unrecognized login beside the stored accounts rather than discarding it.
 
-A shared launch moves the home to the eligible account that resets soonest,
-staying on the active account when nothing ranks ahead of it.
+A shared launch moves the home to the eligible account that ranks first, even
+when the active account could take it.
 `--account codex=work@` makes that account active before launching.
 These launch-time switches do not restart Codex's shared daemon. If plain
 `codex` keeps the old login, run `lf account codex use` with the selected account.
 
 Every launch runs in the shared home; `isolate:` in `.lf/config.yaml` is read
 and ignored. Load spreads across accounts over time, as each launch takes the
-login that resets soonest.
+login with the most quota to spend before its reset.
 
 Codex's own conversation ID works wherever a Session ID does:
 

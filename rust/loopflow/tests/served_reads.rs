@@ -497,8 +497,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: directory.clone(),
                     blocked: true,
                     on: None,
-                    agent: Some("codex".into()),
-                    account: None,
+                    agent: "codex".into(),
                 },
                 Write::TaskComplete {
                     directory: directory.clone(),

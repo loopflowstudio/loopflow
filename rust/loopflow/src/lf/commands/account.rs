@@ -76,9 +76,6 @@ pub fn run(
         (Some(AccountCommand::Use { email }), Some(provider)) => {
             rt.block_on(use_account(provider.as_str(), email))
         }
-        (Some(AccountCommand::Drain { email, to }), Some(provider)) => {
-            rt.block_on(drain_account(provider, email, to.as_deref()))
-        }
         (Some(cmd), _) => rt.block_on(run_async(cmd)),
         (None, provider) => rt.block_on(account_status::run(provider, !cached, details, json)),
     }
@@ -125,8 +122,8 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             )
             .await
         }
-        AccountCommand::Use { .. } | AccountCommand::Drain { .. } => {
-            unreachable!("run handles use and drain with their provider")
+        AccountCommand::Use { .. } => {
+            unreachable!("run handles use with its provider")
         }
         AccountCommand::Route {
             repo,
@@ -220,20 +217,6 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
             format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account codex use {login}`", native.display())
         })?;
     }
-    Ok(())
-}
-
-/// `lf account <provider> drain <email> [--to <email>]`.
-async fn drain_account(provider: Provider, email: &str, to: Option<&str>) -> Result<()> {
-    let store = open_account_store().await?;
-    let (target, report) =
-        crate::ops::human_session::moves_bulk::drain_account(&store, provider, email, to).await?;
-    println!(
-        "{email} is explicit-only; {} Sessions go to {}",
-        provider.display_name(),
-        account_login(&target)
-    );
-    report.print();
     Ok(())
 }
 
@@ -1314,7 +1297,35 @@ async fn set_account_lifecycle(
         .await
         .map_err(|error| account_store_error(provider, account_login(&account), error))?;
     println!("Updated {}", format_account(&account));
+    if account.routing_state != RoutingState::Automatic {
+        switch_away(&store, provider, &account).await?;
+    }
     Ok(())
+}
+
+/// A login taken out of automatic routing stops taking work at once: when it
+/// is the active login, the Machine switches to the route's next one, and
+/// every open Session follows.
+async fn switch_away(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<()> {
+    let repo = crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?;
+    match crate::provider_account::replacement_login(store, provider, account, repo.as_ref())
+        .await?
+    {
+        Some(next) => use_account(provider.as_str(), account_login(&next)).await,
+        None if crate::provider_account::is_active_login(store, provider, account).await? => {
+            println!(
+                "{} stays signed in as {}: no other login can take its work; `lf account {provider} use <email>` switches by hand",
+                provider.display_name(),
+                account_login(account)
+            );
+            Ok(())
+        }
+        None => Ok(()),
+    }
 }
 
 fn parse_routing_state(value: &str) -> Result<RoutingState> {

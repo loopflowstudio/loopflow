@@ -768,7 +768,7 @@ struct DTOFixtureTests {
         let report = try JSONDecoder().decode(SessionMoveReport.self, from: loadFixtureData("session_move_report.json"))
         #expect(report.moved.count == 1)
         #expect(report.pending.first?.how == "continues on claude:opus after its turn")
-        #expect(report.summary.contains("Release notes: skipped, pinned to work"))
+        #expect(report.summary.contains("Release notes: skipped, its transcript is missing"))
         #expect(try JSONDecoder().decode(SessionMoveReport.self, from: JSONEncoder().encode(report)) == report)
     }
 

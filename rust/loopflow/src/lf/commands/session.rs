@@ -158,12 +158,11 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::List(_) => unreachable!("lists return before any runtime"),
         SessionCommand::Move {
             selector,
-            account,
             all,
             json,
         } => {
-            use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
-            let target = MoveTarget::parse(account.as_deref(), cli.agent.as_deref())?;
+            use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
+            let target = parse_target(cli.agent.as_deref())?;
             let filter = crate::session::SessionFilter {
                 blocked: selector.blocked,
                 on: selector.on.clone(),
@@ -475,15 +474,14 @@ pub(crate) fn binding_preview(
     })
 }
 
-/// The report `lf session move --all --json` prints for the selector and target.
+/// The report `lf session move --all --json` prints for the selector and agent.
 pub(crate) fn moved(
     blocked: bool,
     on: Option<&str>,
-    agent: Option<&str>,
-    account: Option<&str>,
+    agent: &str,
 ) -> anyhow::Result<crate::ops::human_session::moves_bulk::MoveReport> {
-    use crate::ops::human_session::moves_bulk::{move_sessions, MoveTarget};
-    let target = MoveTarget::parse(account, agent)?;
+    use crate::ops::human_session::moves_bulk::{move_sessions, parse_target};
+    let target = parse_target(Some(agent))?;
     let filter = crate::session::SessionFilter {
         blocked,
         on: on.map(str::to_owned),

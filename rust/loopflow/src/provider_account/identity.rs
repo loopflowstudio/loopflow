@@ -233,7 +233,7 @@ pub(crate) fn acquire_identity_install_lock(account_home: &Path) -> anyhow::Resu
 pub(crate) mod tests {
     use super::{check_account_identity, same_claude_grant, validate_identity};
     use crate::profile::EmailAddress;
-    use crate::provider_account::{new_account, order_accounts_by_reset};
+    use crate::provider_account::{new_account, order_accounts_by_urgency};
     use crate::provider_auth::{codex_identity_from_home, Provider};
     use crate::store::ProviderAccountId;
     use base64::prelude::*;
@@ -360,7 +360,7 @@ pub(crate) mod tests {
             model: None,
             limited_until: None,
         };
-        order_accounts_by_reset(&mut accounts, &[limit], None, 100);
+        order_accounts_by_urgency(&mut accounts, &[limit], None, 100);
         assert_eq!(accounts, vec![pro, plus]);
     }
 }

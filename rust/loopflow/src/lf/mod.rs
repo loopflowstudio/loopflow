@@ -1307,8 +1307,7 @@ fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
             | AccountCommand::Connect { .. }
             | AccountCommand::Set { .. }
             | AccountCommand::RedeemReset { .. }
-            | AccountCommand::Use { .. }
-            | AccountCommand::Drain { .. },
+            | AccountCommand::Use { .. },
         ) => true,
     }
 }
@@ -1634,17 +1633,14 @@ pub struct SessionSelectorArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
-    /// Move the selected open Sessions to another login (--account) or agent
-    /// (-a harness[:model]); `lf session list` with the same flags previews them
+    /// Move the selected open Sessions to another agent (-a harness[:model]);
+    /// `lf session list` with the same flags previews them
     #[command(
-        after_help = "Idle Sessions move now; a busy one moves after its turn. A login switch is one act every open Claude follows at its next request; Codex follows when resumed. Sessions pinned to their own login are listed for `lf resume --account`. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus\n  lf session move --on jack@ --account work@   switch the shared login"
+        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Session follows the active one, which `lf account <provider> use <email>` switches. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
     )]
     Move {
         #[command(flatten)]
         selector: SessionSelectorArgs,
-        /// Another login of the same provider
-        #[arg(long, value_name = "EMAIL")]
-        account: Option<String>,
         /// Sessions from every repository on this machine
         #[arg(long)]
         all: bool,
@@ -1705,7 +1701,7 @@ pub enum SessionCommand {
     List(SessionListArgs),
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked --account <email>  switch the shared login for blocked Sessions\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID
@@ -2896,17 +2892,6 @@ pub enum AccountCommand {
     /// `lf account <provider> use <email>`
     #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
     Use { email: String },
-    /// Stop routing to a login and move its open Sessions elsewhere:
-    /// `lf account <provider> drain <email> [--to <email>]`
-    #[command(
-        override_usage = "lf account <PROVIDER> drain <EMAIL> [--to <EMAIL>]",
-        after_help = "Marks the login explicit-only, then moves the open Sessions on it to --to or the route's next login: the shared login switches once and every open Claude follows; Sessions pinned to the login are listed for `lf resume --account`."
-    )]
-    Drain {
-        email: String,
-        #[arg(long, value_name = "EMAIL")]
-        to: Option<String>,
-    },
     /// Explain configured and automatic account selection; `lf set
     /// account.<provider>` replaces a route
     Route {
@@ -2931,10 +2916,7 @@ impl AccountCommand {
             (Some(Self::Use { .. }), None) => {
                 Some("name the provider: lf account <provider> use <email>")
             }
-            (Some(Self::Drain { .. }), None) => {
-                Some("name the provider: lf account <provider> drain <email>")
-            }
-            (Some(Self::Use { .. } | Self::Drain { .. }), Some(_)) | (None, _) => None,
+            (Some(Self::Use { .. }), Some(_)) | (None, _) => None,
             (Some(_), None) if !overview_flags => None,
             (Some(_), _) => Some(
                 "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone",
@@ -3533,7 +3515,6 @@ mod tests {
                         blocked: true,
                         on: None
                     },
-                    account: None,
                     ..
                 }
             })
@@ -3552,40 +3533,6 @@ mod tests {
                 })
             })
         ));
-    }
-
-    #[test]
-    fn account_drain_takes_its_provider_before_the_verb() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "ops",
-            "account",
-            "claude",
-            "drain",
-            "jack@example.com",
-            "--to",
-            "work@example.com",
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Ops { cmd: OpsCommand::Account {
-                cmd: Some(AccountCommand::Drain { email, to: Some(to) }),
-                provider: Some(crate::provider_auth::Provider::Claude),
-                ..
-            } }) if email == "jack@example.com" && to == "work@example.com"
-        ));
-        assert_eq!(
-            AccountCommand::misuse(
-                Some(&AccountCommand::Drain {
-                    email: "jack@example.com".into(),
-                    to: None
-                }),
-                None,
-                false
-            ),
-            Some("name the provider: lf account <provider> drain <email>")
-        );
     }
 
     #[test]

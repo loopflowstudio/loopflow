@@ -1225,7 +1225,7 @@ struct SessionsContentView: View {
         let agent = agent.trimmingCharacters(in: .whitespaces)
         Task {
             do {
-                let report = try await query.moveBlockedSessions(agent: agent, account: nil, cwd: store.repoPath)
+                let report = try await query.moveBlockedSessions(agent: agent, cwd: store.repoPath)
                 launchErrorTitle = "Blocked Sessions"
                 launchError = report.summary
             } catch {

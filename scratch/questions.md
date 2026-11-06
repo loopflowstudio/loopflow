@@ -6,7 +6,6 @@ Assumptions made in the headless implement step, each reversible.
 2. **No model or harness fallback.** Preferences hold one resolved agent with no ordered alternates, so any fallback would invent policy. A model-scoped limit cools the whole account. Overturned at demo: limits are scoped and headless steps fall through account, model, provider (Accepted at demo, items 2–3).
 3. **A rejected event cools the account until its reset**, including `seven_day_overage_included`. If overage rejection leaves the plan's own quota usable, this cools too much.
 4. **Waits have no upper bound.** A weekly limit can hold a step for days, in one idle process, until someone interrupts it.
-5. **Isolated Session resume** no longer passes its recorded account as exact, so a cooled account moves the conversation instead of refusing. Settled by item 7: isolation is deleted and a resume never names its original account.
 
 # Jack's direction at demo (November 5, 2026; under discussion, not yet accepted design)
 
@@ -35,8 +34,6 @@ Bias against an interactive Session changing provider by itself; no surprising e
 Bulk move scope (Jack, November 5): default to blocked Sessions, not all. Interactive Sessions only, never Runs. Sketch under discussion: blocked means the Session's account or model has no capacity, derived from limit observations, so provider follows from what ran out; isolation decides how a Session moves, not whether. `--all` widens it. Gaps: no per-Session blocked state (`agent_limit_recoveries` is keyed by headless Process); account-wide cooldown cannot separate a Fable Session from a Sonnet one until limits are scoped; a shared Session's real account is uncertain until the live login test.
 
 Session selection (Jack, November 5): a hidden "blocked only" default on move is confusing. Jack imagines a query over Sessions with actions on top; `all blocked` is the most important query. Sketch under discussion: `lf session list` filters are the query, the same selector flags go on every bulk action (`--blocked`, `--on <account|agent>`), and list is the preview. Replaces the earlier `move --all` sketch: `--all` already means every repository on `list`, and `--account` / `-a` are move targets, so filters need other names.
-
-Design comps (November 5): Rex 0.1.0 (shared target resolver, `ls -q`, variadic `kill`, named action registry), Taskwarrior, kubectl, docker, Gmail/Linear; detail in git.
 
 Comps chosen (Jack, November 5): kubectl and Linear. CLI follows kubectl: one selector shared by list and actions, list as preview. Desktop follows Linear: filtered view, select, act. Query string versus flags and `drain` remain undecided.
 
@@ -79,7 +76,6 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 - ccdaddy (third-party): daemon swaps `~/.claude/.credentials.json` account keys under Claude's own locks at a usage threshold (default 80%); running sessions pick it up on the next request.
 11. **Unobserved logins.** Settled at demo (Jack, November 6): a window past its reset, one with no reset time, and a login with no weekly reading score a full week (100% over 168h); `lf account connect` also polls once.
 12. **No draft signal.** Nothing records a typed-but-unsent draft, so `lf session move` treats an available Session as idle and moves it; a busy one (no availability) waits for its Stop hook. The design's "draft-holding Session listed as skipped" has no source yet.
-13. **Pinned Sessions** — settled by item 7, and `session move --account` is deleted.
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.
 15. **Items 7–9 built (November 5).** Choices made headless, each reversible:
     - Replay keeps running in the recorded capture's profile (`AccountLogin::Replayed`): switching this Machine's shared login to another catalog's account would record a switch and move every open Session.
@@ -99,4 +95,4 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 23. **A login argument needs `@`, `=`, a provider name or `auto`**, so a mistyped verb (`lf account status`) still exits 2 before anything runs. A bare prefix without `@` (`jack`) no longer resolves; `claude=<id>` reaches an account with no email.
 24. **`use` does not count Sessions.** It says open Claude Sessions follow at their next request and Codex ones when resumed, instead of the mock's "3 open Sessions follow".
 25. **`next` reasons.** Held, then the order naming only it, then "the only login ready", else the urgency reason (`31% left before Wed 12:00`). "without that order" appears only when no default order exists either.
-26. **lf's own Claude refresh** — settled by the concept review after the CLI pass: the refresh lock exists to keep lf and a running Claude from refreshing one login at once, so `fresh_claude_token` takes it too (usage poll, `claude_identity`, rental renewal). Built; callers already holding it pass it in.
+26. **lf's own Claude refresh** takes Claude's refresh lock (settled by the concept review after the CLI pass; built in b840306cf).

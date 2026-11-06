@@ -256,14 +256,7 @@ pub(crate) async fn claude_access_token(
     home: &Path,
     margin: i64,
 ) -> Result<ClaudeAccess, SubscriptionError> {
-    let expiry = |credential: &str| {
-        let value: Value = serde_json::from_str(credential).ok()?;
-        let oauth = value.get("claudeAiOauth").unwrap_or(&value);
-        oauth
-            .get("expiresAt")
-            .and_then(Value::as_i64)
-            .map(|ms| ms / 1000)
-    };
+    let expiry = |credential: &str| claude_access(credential).ok()?.1.map(|ms| ms / 1000);
     let stored = crate::provider_auth::read_claude_login(home)
         .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
         .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?;

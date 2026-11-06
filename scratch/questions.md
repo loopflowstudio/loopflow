@@ -26,15 +26,10 @@ The existing `Controlled` query supplies the ten-second liveness pulse on an
 attached connection; unattached control probes refresh no viewer. This keeps
 one protocol and adds no message an already-running owner cannot decode.
 
-The prior Claude Graph failed before edits on a credential-write error. The new
-implementation run uses Codex within the existing feature graph, starting at
-implement and returning to demo. No credential repair or account change is needed.
-
-The PR walkthrough also identified a separate source-derived finding: the
-retirement worker exits after a cleanup error; the existing retry test manually
-calls advance again and does not prove automatic retry. Keep this visible for
-review; the transport choice does not itself resolve it. `scratch/pr-review.html`
-is pinned to the prior published head `a1067c99cc`, not this replacement.
+The separate cleanup-error retry finding remains for review in the contract's
+remaining-work section. The historical PR walkthrough at
+`scratch/pr-review.html` describes the prior published head
+`a1067c99cc`, not this replacement.
 
 ## November 5 corrections
 
@@ -49,15 +44,9 @@ cleanup; active requested work, drafts and pending requests remain protected.
 Expiry does not prove a remote client died. There is no extra fifteen-minute
 window after expiry, and no automatic deleted-checkout restoration.
 
-The requested pursue `04ebc0ed-1382-4328-99e8-15a7d7e3696d` failed before edits:
-implement Process `42c298fe-0173-4f43-93cb-514776d208fc` could not write its Claude
-Keychain credential (“the item did not take the login”). After Jack's “hmm”,
-the existing Codex conversation continued the authorized repair directly. The
-failed Graph stays stopped; accounts and credentials remain unchanged.
-
 The repair removes shell holds and indefinite unknown viewing. Dated evidence
-on existing Session owners and a foreground SSH heartbeat give disconnects a
-bound. The cleanup executor observes owner disappearance even while a Task is
+on existing Session owners and the shared viewer heartbeat bound disconnects.
+The cleanup executor observes owner disappearance even while a Task is
 viewed. A quick reconnect/leave between cleanup observations starts a new window.
 Desktop Quit delivers the existing leave input and waits briefly for relay exit.
 Tests/builds and native proof limits are recorded in the design.
@@ -85,11 +74,11 @@ runtime roots; see loo-717-demo.md. Earlier review notes are retained at
 The superseded external-host occurrence design remains at
 `b81df60579:scratch/questions.md`.
 
-## Proposed Wave memory correction
+## November 6 reconciliation
 
-The current Product memory's LOO-717 description of indefinite unknown SSH holds
-and Desktop-shell holds is superseded by Jack's November 5 decisions above.
-Replace those claims with Session-only retention, explicit Desktop Quit leave,
-and bounded disconnected absence. This direct repair leaves Wave memory read-only;
-its next selected memory-maintaining Graph can reconcile that paragraph. No
-change to LOO-498's host ownership or LOO-672's conversation-opening responsibility.
+Product memory now reflects Session-only retention, explicit Desktop Quit leave,
+bounded disconnected absence and the single viewer protocol across SSH. Earlier
+credential failures and the proposed memory correction remain at
+`d5cab9ba60:scratch/questions.md`; they add no remaining implementation work.
+The current plan separates implemented transport, inherited focused checks,
+cleanup-error retry limits and the native demonstration still owed.

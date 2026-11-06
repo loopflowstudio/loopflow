@@ -4,8 +4,8 @@ Jack Heart selected option 1 on November 6, 2026: carry the existing viewer
 protocol across SSH and remove the additional remote terminal relay. Implementation
 and review publication are authorized; shipping, installation and live-store
 migration are not. The existing feature graph returns to demo review after this
-revision. The prior repair at `a1067c99cc` is the starting point, not the final
-transport design.
+revision. The replacement is implemented at `f86a9a3e6`, integrated with main at
+`d5cab9ba60`. The earlier repair at `a1067c99cc` is historical.
 
 ## Accepted experience
 
@@ -131,41 +131,68 @@ two seconds for their exit. Failure to finish within that bound uses network-los
 cleanup. Shell views do not independently veto retirement; requested work nested
 inside a shell remains protected by existing work/draft/request evidence.
 
-## Delete — do not maintain
+## Implemented replacement — reconciled November 6
 
-- `transport/remote.rs`'s outer client/server heartbeat protocol and PTY-owning
-  relay; its dedicated tests are replaced with coverage on the shared viewer path.
-- The hidden `SessionCommand::Remote` wrapper contract, its dispatch and SSH argv
-  wrapping. Remove the redundant path rather than renaming it or retaining a fallback.
-- Duplicate terminal raw-mode/resize/input/output machinery unique to that wrapper.
-- The old unretained-shell portion of `machine_commands::remote_companions_*`
-  and its shell stub. Real shell coverage lives in `transport/ssh_shells.rs`;
-  the surviving file-observer test keeps its checkout and Machine checks.
-- `retirement_requires_job_settlement_after_owner_death_and_retries` duplicates
-  the final-work/settlement case; its retired-phase and repeat-call assertions
-  now live in `retirement_waits_for_final_work_drafts_and_shell_job_settlement`.
-- Independent Desktop-shell viewer holds in Task retirement.
-- Indefinite `ViewerHold::Unknown`, aggregate `lost_remote`, and SSH-vs-local
-  hold classification. Per-connection transport loss feeds dated absence.
-- Documentation that any fresh attachment proves a lost viewer exited, that
-  remote Quit retains forever, or that Desktop shell views retain checkouts.
-- `scratch/explore.html`'s superseded host-occurrence simulation and
-  `scratch/concept-review.html`'s prior transport/proof summary. Both remain at
-  `a1067c99cc:scratch/`; the current contract and demo record replace them.
-- The already removed host occurrence/presence/settlement machinery stays removed.
+The existing `transport::relay_over` reads the same frames over command pipes;
+`transport/stream.rs` bridges destination stdio to the owner socket. SSH Session
+preparation returns the local viewer prefix around SSH argv; direct routing runs
+that argv without nesting viewers. Saved history arrives as a snapshot before
+attachment and grants no input or retention. Only the owner evaluates heartbeats.
 
-These runtime, fixture and documentation targets are removed, including the
-obsolete `ssh` attachment field in the viewer fixture. Product memory remains
-read-only here; its pending correction is in `questions.md`. The surviving
-attachment accepts SSH pipes, and only the execution owner evaluates heartbeats.
-SSH routing executes its transport argv
-directly and adds the local viewer prefix only when returning a prepared command.
-Preview handoff follows attachment state; the bridge polls open endpoints and
-pending writes after enforcing its queue bound.
+Removed: `transport/remote.rs`, `SessionCommand::Remote`, its dispatch/SSH wrapper,
+and the duplicate PTY, framing, raw-mode and resize machinery. Shared viewer and
+real SSH tests replace its dedicated tests. The shell stub in the remote companion
+test is gone; file observers retain their own Machine/checkout checks. Retirement
+settlement/repeat-call assertions are consolidated in the final-work test.
+Desktop-shell holds, indefinite unknown holds and host-occurrence machinery remain
+removed. Superseded HTML simulations and deletion details remain at
+`a1067c99cc:scratch/`; `d5cab9ba60:scratch/loo-717-shell-lifetimes.md` records the
+replacement's full deletion checklist.
 
-Keep: Desktop shell receipts, create-once/attach/Close/Undo, ordinary job settlement,
-current Session/process/provider identities, input fencing, requested-work/draft
-protections and the Task's one unreleased migration, edited in place.
+Desktop shell receipts, create-once/attach/Close/Undo, job settlement, Session and
+provider identity, input fencing and requested-work/draft protections remain.
+The Task still has one unreleased migration. Product memory now reflects the
+November 5–6 decisions; no child Product memories exist in this checkout.
+
+The upstream sync at `c8d7a7f4a8` changes builtins/Graph guidance, not the shared
+viewer or retirement implementation. The current refresh Graph includes this
+memory reconciliation. LOO-498 and LOO-672 remain separately owned; their native
+behavior is not established by this branch's transport tests.
+
+## Concept review — November 6
+
+No design change or open product choice. The implemented local/SSH viewer path
+fits the accepted interaction: open on the recorded Machine, detach without
+ending execution, reconnect to that owner, and use New Shell deliberately after
+execution ends. A shell receipt represents execution; a Session viewer represents
+checkout retention; the retirement record represents completed Task cleanup.
+Each has a separate job. No host registry or second remote terminal is needed.
+
+The decisive counterexample is a lost controlling viewer with a second passive
+viewer still connected. Input ownership may change, but checkout retention must
+remain. The owner judges each connection before recording aggregate viewing;
+the bridge cannot keep a lost endpoint alive with its own heartbeat. On last-viewer
+loss, dated absence supplies one cleanup window. Return before deletion cancels
+retirement and its queued shell closes, while explicit Close remains explicit.
+Return after deletion shows history without reconstructing a checkout or replaying
+commands. Ordinary Rex shells remain outside LF's closure policy in every case.
+
+The existing transport and Desktop usage docs describe these actions consistently;
+no skill instruction needs a new concept. The cleanup-error retry finding below
+remains separate from the transport decision and is not resolved by this review.
+Next proof remains the affected gate and native demo already listed below,
+especially orderly Quit delivery and repeated reconnect/Close with survivor
+inspection. This was source review; no runtime or native checks were rerun.
+
+## Remaining implementation finding
+
+`ops/task/retirement.rs::run` records a cleanup error and returns. A later
+retirement invocation can retry, but no automatic retry follows from that error.
+`retirement_retries_after_remote_deletion_and_worktree_failure` manually invokes
+`advance` again; it proves repeatability, not unattended recovery. This is the
+separate finding retained for review in the November 6 direction. Automatic retry
+remains unimplemented and must not be reported as covered by the consolidated
+settlement test. No product decision is needed for the accepted transport revision.
 
 ## Related work
 
@@ -189,7 +216,7 @@ CLI binary, Session routing and Task workspace/retirement suites, plus architect
 website and Swift checks selected by `scripts/test.py --list`. macOS loopback SSH
 checks run directly with `--ignored`, outside the nested network sandbox.
 
-November 6 focused checks: `cargo test -p loopflow --test transport_tests viewer_stream_` passed (4); `cargo test -p loopflow --lib transport::viewer_tests::` passed (7); `cargo test -p loopflow --lib ops::task::retirement::tests::` passed (5, after consolidation); separately filtered real SSH prepared-viewer and shell-failure tests passed (2, `-- --ignored`); `cargo test -p loopflow --test integration machine_commands::remote_file_` passed (2) and the separately filtered `remote_session_open_returns_an_owner_pinned_terminal_command` passed (1). These cover expiry under continuous output, passive-view retention, backpressure, delayed attachment, same-PID reattachment, preview handoff, terminal sizing/restoration, final Session JSON, retained ended-shell history, SSH failure and retirement settlement. Gate owns the broader checks above.
+Inherited November 6 checks (before upstream sync): `cargo test -p loopflow --test transport_tests viewer_stream_` passed (4); `cargo test -p loopflow --lib transport::viewer_tests::` passed (7); `cargo test -p loopflow --lib ops::task::retirement::tests::` passed (5, after consolidation); separately filtered real SSH prepared-viewer and shell-failure tests passed (2, `-- --ignored`); `cargo test -p loopflow --test integration machine_commands::remote_file_` passed (2) and the separately filtered `remote_session_open_returns_an_owner_pinned_terminal_command` passed (1). These cover expiry under continuous output, passive-view retention, backpressure, delayed attachment, same-PID reattachment, preview handoff, terminal sizing/restoration, final Session JSON, retained ended-shell history, SSH failure and retirement settlement. Gate owns the broader checks above.
 
 Native demo is still owed: local and real remote Desktop shell reconnect/Close,
 orderly Quit delivery, Rex end-to-end Session viewing, lost connection and return,
@@ -197,3 +224,5 @@ and no unintended process/PTY/socket survivors. The private demo roots and input
 contract are in `loo-717-demo.md`; no private demo provider/app was launched.
 Headless framed-transport tests do not establish a physical remote-Machine or
 native-host demonstration. Publication, merge and Task completion remain separate.
+
+Reconciliation check: `git diff --check` — passed; no runtime code changed or tests rerun. Broader gate and native demo remain assigned above.

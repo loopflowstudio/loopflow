@@ -196,7 +196,7 @@ pub(crate) fn order_accounts_by_urgency(
 /// How an account ranks for routing, lowest first: plan preference, then its
 /// urgency negated. An account with no observed weekly window has no urgency
 /// and ranks after every scored one.
-pub(crate) type RouteRank = (u8, i64);
+type RouteRank = (u8, i64);
 
 fn route_rank(
     account: &ProviderAccount,

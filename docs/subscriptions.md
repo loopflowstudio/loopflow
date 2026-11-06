@@ -340,8 +340,7 @@ lf account set claude jack@ --routing automatic # route to it again
 `move` acts on. A move never writes preferences. Taking the active login out
 of automatic routing switches the Machine to the route's next login, and every
 open Claude follows; `lf account <provider> use` switches by hand until the
-next launch. In the
-Desktop, View → Move Blocked Sessions… runs the same move.
+next launch. In the Desktop, View → Move Blocked Sessions… runs the same move.
 
 ## Switch the shared account
 

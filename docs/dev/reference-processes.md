@@ -83,7 +83,7 @@ tools retain their own execution ownership; there is no tool PID registry or
 postmortem discovery of signal targets.
 
 One exception to local-handle control exists. The scheduled repository check and
-`lf mon prune` terminate an AgentProcess that outlived its attachment: the recorded PID and
+`lf process prune` terminate an AgentProcess that outlived its attachment: the recorded PID and
 start time still name a live provider server leading its own process group, and
 every Session naming it is headless with an attached LfProcess that is provably dead.
 Unknown evidence, a live attachment, an interactive Session or a reused PID leaves it
@@ -185,12 +185,12 @@ read or mutation chooses one by order. A scoped lookup repairs an equivalent
 legacy path spelling to the canonical repository in one transaction.
 `lf wave rename <uuid>` is the only semantic locator mutation: it fences
 the Wave chord, moves authored files, commits the new locator
-transactionally, and leaves PM and Work rows joined to the
+transactionally, and leaves planning and Work rows joined to the
 unchanged UUID. A target-local `.lf/tmp/wave-relocations/<uuid>.json` receipt
 bridges the filesystem/SQLite commit boundary; retrying after a committed crash
 finishes verified source cleanup, then removes the receipt. Repository moves
-also require compatible configured PM Teams so relocation cannot impersonate
-the separate `lf reteam` operation.
+also require compatible configured planning Teams so relocation cannot impersonate
+the separate `lf wave planning reteam` operation.
 
 ## Promotion and long-running old processes
 
@@ -207,7 +207,7 @@ the separate `lf reteam` operation.
 Any build may select a store it reads; promotion advances the store only with
 migrations origin/main carries. A release and a CI build of a main commit both
 qualify (`lf install --dev`). An unreleased build's receipt, `lf --version`
-and `lf doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
+and `lf machine doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
 when it carries an unmerged migration.
 
 The promotion lock serializes artifact selection. After it is released,

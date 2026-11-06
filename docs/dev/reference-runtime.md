@@ -97,10 +97,9 @@ operations. Binding selects an unfinished interactive conversation for done Work
 reopening the Work.
 Legacy review boundaries remain readable history when their Work is terminal.
 
-Chapter rotation preserves Task, LfSession, PR and worktree
-identity when moving started unfinished Tasks. Local selection, membership and
-pending effects commit atomically across the selected Waves. Provider delivery
-converges independently; there is no cross-system atomic switch.
+Replacing a plan or moving a Task preserves Task, LfSession, PR and worktree
+identity. Local selection, membership and pending effects commit atomically.
+Provider delivery converges independently; there is no cross-system atomic switch.
 
 ## Durable communication
 
@@ -115,7 +114,7 @@ lf session steers SESSION --source STEER_ID
 lf session steers SESSION --retry STEER_ID
 ```
 
-Steers retain immutable source revisions and authorship. Task comments and
+Steers retain immutable source revisions and authorship. Task steers and
 definition acquisition save steers in their existing planning transaction; their
 Linear delivery receipts remain separate. Repository and Wave steers are
 Machine-local and report unavailable shared planning exchange for those scopes.
@@ -177,7 +176,7 @@ to Loopflow without separate UI evidence.
 ## Graph execution
 
 ```bash
-lf task run INF-123                  # Project's Graph
+lf task run INF-123                  # the Wave's Graph
 lf task run INF-124 incident  # explicit override
 lf graph example                    # with or without Task attribution
 ```
@@ -234,7 +233,7 @@ Task row ----> managed worktree ----> commits
                               complete Task
 ```
 
-1. `lf checkout` resolves one Linear Issue inside one Project and creates
+1. `lf checkout` resolves one Linear Issue inside one Wave's planning and creates
    or reuses Task Work and its checkout placement without creating a PR. It starts no
    agent work.
 2. Independent `lf --task ...` conversations may work in that substrate directly.
@@ -242,7 +241,7 @@ Task row ----> managed worktree ----> commits
    same `lf graph` path as any other launch.
 3. `lf commit` snapshots the worktree. `lf pr publish` creates or refreshes the
    current PR without opening a browser.
-4. `lf submit` leaves the exact-head merge click to a person. `lf arm`
+4. `lf pr submit` leaves the exact-head merge click to a person. `lf pr arm`
    and `lf land` request exact-head auto-merge, record the landing, and
    return; `lf pr reconcile` checks recorded landings once. All operate on Task delivery state when it exists and require
    no Graph-driving claim or execution receipt.

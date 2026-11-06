@@ -37,7 +37,7 @@ Task Work ----> managed worktree ----> commits
 
 | Object | Authority |
 | --- | --- |
-| Task directive and Project membership | Local planning; when connected, the change sent last wins |
+| Task directive and Wave membership | Local planning; when connected, the change sent last wins |
 | managed checkout placement and optional PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
@@ -50,7 +50,7 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf checkout` resolves a saved Task inside one Project and
+`lf checkout` resolves a saved Task inside one Wave's planning and
 creates or reuses its managed worktree without creating a PR. Saved planning
 works without Linear; an unknown provider alias needs initial acquisition.
 It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
@@ -58,7 +58,7 @@ runs a fresh Graph there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
 
-Only Task Work owns a delivery worktree. Project and Wave processes coordinate;
+Only Task Work owns a delivery worktree. Wave processes coordinate;
 they do not edit product files in substitute worktrees.
 
 A dependent change that must begin before its parent merges uses another Task:
@@ -87,7 +87,7 @@ The child retains its Task, PR, branch and Session identity and its own design.
 lf commit -m "parser: accept nested groups" # local checkpoint
 lf pr open                             # prepare a draft and open its page
 lf pr publish                          # ready for review
-lf arm                                 # request auto-merge and return
+lf pr arm                              # request auto-merge and return
 lf land                                # hand off delivery and return
 lf pr reconcile                        # check recorded landings once
 lf land --wait-and-fix                 # land, repairing failed CI until merge
@@ -271,7 +271,7 @@ authoritative GitHub merge finishes the landing.
 
 When a PR loses its merge request, landing and release read its latest
 merge-request event. A person's dequeue or disabled auto-merge stops them,
-naming who and when; `lf arm` resumes. Every other removal (a queue eviction,
+naming who and when; `lf pr arm` resumes. Every other removal (a queue eviction,
 a repair's own disarm, no event) is a CI incident, and the repair re-arms the PR.
 
 Landing and release read PR state, head, merge commit, auto-merge request, and
@@ -299,7 +299,7 @@ to this one judgment.
 
 A blocked landing stays observable: later checks still settle its merge,
 checks that stop failing clear the block, and a waited landing keeps checking.
-Use `lf history show SESSION --final` to inspect a repair's conclusion.
+Use `lf session history show SESSION --final` to inspect a repair's conclusion.
 
 Repairs return `published` or `blocked` with a summary in their final answer.
 A blocked result ends that attempt; the next one starts after its backoff.

@@ -26,7 +26,7 @@ lf implement
 
 That command discovers `implement`, assembles its context, chooses a provider,
 records its Process, reserves an LfSession, captures the input, then launches the
-provider. It needs no Wave, Project, Task, or daemon. The conversation persists
+provider. It needs no Wave, Task, or server process. The conversation persists
 after that command exits; a later command can connect to the same LfSession.
 
 ```text
@@ -108,7 +108,6 @@ wave/{mod,config,context,
 project
 task
 
-ops/chapter.rs                deterministic chapter rotation
 ops/task.rs                   Task launch: a fresh Graph in the Task checkout
 lf/commands/graph.rs           Graph process: one process per Graph
 
@@ -155,7 +154,7 @@ user / agent --> lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Graphs /       Wave -> Project -> Task
+  Skills / Graphs /       Wave -> Task
   goals / memory                  |
           |                       +---------> Task delivery
           |                       |                ^
@@ -171,7 +170,7 @@ user / agent --> lf CLI --------+----------+-----------+
                         Process / LfSession
                               |
                               v
-                  status / roadmap / usage / app
+                  status / planning / usage / app
 
 another machine is another Machine; cross it explicitly with `lf --machine`
 ```
@@ -190,8 +189,8 @@ ledger.
 ```text
 Repository
   `-- Wave                    enduring objective, memory and cadence
-        `-- Project           status + shared chapter name + Graph + KRs
-              `-- Task        identity, worktree, PR and every Graph process for it
+        |   planning          status + Graph + KRs (one Linear Project when connected)
+        `-- Task              identity, worktree, PR and every Graph process for it
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
@@ -208,8 +207,7 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Chapter | Shared name of each Wave's In Progress Project | Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
+| Planning | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
 | Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
@@ -245,8 +243,8 @@ Process captured. Mechanical work creates no agent conversation. A Session reach
 its Graph through the step Process that captured its input. A killed Graph process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.
 
-Task requires repository identity and may belong to a Project; its Wave is derived
-from that Project. Constructors fill omitted ancestors and reject mismatches.
+Task requires repository identity and may belong to a Wave through its planning
+row. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
 or change Graph membership. Done and landed Tasks remain valid targets. Earlier
@@ -255,11 +253,8 @@ mid-turn allocation remains unknown.
 
 Reserving actual Task work (`lf task run` or `lf task checkout` allocating a
 checkout) claims an unowned Task in its append-only ownership log. Recording an
-inspection command's Process does not claim a Task. Chapter retirement
-also checks authored work, PRs and Graphs; missing history alone cannot
-prove untouched backlog. Rotation converges from fresh provider facts using the
-explicit target name and stable Project identities. A partially rotated repository
-must be retryable; unrelated competing plans remain unresolved.
+inspection command's Process does not claim a Task. Missing history alone cannot
+prove untouched backlog; unrelated competing plans remain unresolved.
 
 The [reference](reference-models.md#core-models-and-apis) owns the field and
 write contracts and the current-state conversion boundary. Process and LfSession
@@ -285,7 +280,7 @@ lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
-lf submit
+lf pr submit
 lf task status INF-123 --json
 ```
 
@@ -307,8 +302,8 @@ lf wave status product
 
 `task run` places the Task, then runs a fresh Graph in its checkout exactly as
 `lf --task ISSUE graph GRAPH` does, returning when the Graph ends; it never
-continues an earlier one. Repository rotation converges every Wave on the
-requested Project name, preserving active Task identity and execution. Direct
+continues an earlier one. A plan is replaced in place, preserving active Task
+identity and execution. Direct
 questions and helpers use attributed LfSessions without gaining Graph
 authority. Graphs hold autonomous steps only; review happens in the Task
 conversation.
@@ -332,7 +327,7 @@ the behavior.
 | If you are changing… | Read |
 | --- | --- |
 | provider launch, retries, usage, or telemetry | [Execution](execution.md) |
-| Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement | [Planning](planning.md) |
+| Graph semantics, Work state, Steer, questions, review GraphSteps and Task advancement | [Planning](planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](delivery.md) |
 | remote execution, Task ownership, process control, promotion | [Machines and processes](machines.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](data.md) |

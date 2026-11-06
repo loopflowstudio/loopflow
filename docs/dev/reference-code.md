@@ -12,7 +12,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Territory | Main paths | Approx. LOC | What lives there |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/chapter control, sessions, PR, Git, release, metrics, PM operations |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
@@ -118,8 +118,8 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf <skill>` and `lf graph` | Direct Skill execution and Graph composition | Current process and Machine |
 | `lf wave`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf session` | Sessions and explicit resolution | Current Machine LfSession state |
-| `lf wt`, `commit`, `sync`, `pr`, `ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
-| `lf process list`, `top`, `prune`; `lf session usage`, `lf history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
+| `lf wt`, `commit`, `sync`, `pr`, `repository ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
+| `lf process list`, `process top`, `process prune`; `lf session usage`, `lf session history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
 | `lf machine` | Machine identity | Current Machine unless routed explicitly |
 | `lf task claim`, `unassign` | Task ownership | The writer Machine, reached over `lf --machine` |
 | `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |

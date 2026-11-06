@@ -98,6 +98,16 @@ pub enum Write {
         revision: String,
         content: String,
     },
+    /// `lf [--wave <wave>] session steer [<id>] <message> --json`: a steer
+    /// one Session, every Session of the Wave or, with neither, every Session
+    /// of the repository reads at its next boundary.
+    #[serde(rename = "session.steer")]
+    SessionSteer {
+        directory: PathBuf,
+        session: Option<String>,
+        wave: Option<String>,
+        message: String,
+    },
     /// `lf session rename --json -- <id> <name>`.
     #[serde(rename = "session.rename")]
     SessionRename {
@@ -144,6 +154,28 @@ pub enum Write {
     /// `lf wave sync <wave> --json`: the planning refresh.
     #[serde(rename = "wave.sync")]
     PlanningRefresh { directory: PathBuf, wave: String },
+    /// `lf wave planning bind <wave> <project> --json`: the tracker Project
+    /// bound as the Wave's current plan.
+    #[serde(rename = "wave.planning.bind")]
+    WavePlanningBind {
+        directory: PathBuf,
+        wave: String,
+        project: String,
+    },
+    /// `lf wave planning connect [<wave>|--all] [--team-key <key>]
+    /// [--team-name <name>] --json`: one receipt per Wave connected.
+    #[serde(rename = "wave.planning.connect")]
+    WavePlanningConnect {
+        directory: PathBuf,
+        wave: Option<String>,
+        all: bool,
+        team_key: Option<String>,
+        team_name: Option<String>,
+    },
+    /// `lf wave planning reteam [--apply] --json`: the moves onto the
+    /// repository's Team; a plan without `apply`.
+    #[serde(rename = "wave.planning.reteam")]
+    WavePlanningReteam { directory: PathBuf, apply: bool },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
     #[serde(rename = "graph.customize")]
@@ -334,6 +366,25 @@ impl Write {
                     issue, path, revision, &content,
                 )?)
             }
+            Self::SessionSteer {
+                session,
+                wave,
+                message,
+                ..
+            } => {
+                use crate::engine::session::SteerScope;
+                let scope = match (session.as_deref(), wave.as_deref()) {
+                    (Some(id), _) => SteerScope::Session(id),
+                    (None, Some(wave)) => SteerScope::Wave(wave),
+                    (None, None) => SteerScope::Repository,
+                };
+                value(&tokio::runtime::Runtime::new()?.block_on(async {
+                    let store = super::session::open_shared_store().await?;
+                    anyhow::Ok(
+                        crate::engine::session::steer(&store, directory, scope, message).await?,
+                    )
+                })?)
+            }
             Self::SessionRename { id, name, .. } => value(&super::session::renamed(id, name)?),
             Self::SessionBind {
                 id, task, preview, ..
@@ -360,6 +411,28 @@ impl Write {
                     false,
                 )?)?)
             }
+            Self::WavePlanningBind { wave, project, .. } => value(
+                &crate::engine::wave::planning_bind(directory, wave, project)?,
+            ),
+            Self::WavePlanningConnect {
+                wave,
+                all,
+                team_key,
+                team_name,
+                ..
+            } => value(&crate::engine::wave::planning_connect(
+                directory,
+                wave.as_deref(),
+                *all,
+                team_key.as_deref(),
+                team_name.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::WavePlanningReteam { apply, .. } => value(&crate::engine::wave::planning_reteam(
+                directory,
+                *apply,
+                &crate::engine::Diagnostics,
+            )?),
             Self::GraphCustomize { name, .. } => value(&super::graph::Customized {
                 path: crate::graph::customize(
                     name,
@@ -575,12 +648,16 @@ impl Write {
             | Self::TaskInterrupt { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
+            | Self::SessionSteer { directory, .. }
             | Self::SessionRename { directory, .. }
             | Self::SessionBind { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::WaveAdd { directory, .. }
             | Self::PlanningRefresh { directory, .. }
+            | Self::WavePlanningBind { directory, .. }
+            | Self::WavePlanningConnect { directory, .. }
+            | Self::WavePlanningReteam { directory, .. }
             | Self::GraphCustomize { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
@@ -624,6 +701,10 @@ mod tests {
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
+            r#"{"kind":"wave.planning.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
+            r#"{"kind":"wave.planning.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
+            r#"{"kind":"wave.planning.reteam","directory":"/r","apply":false}"#,
         ] {
             let write: Write = serde_json::from_str(json).unwrap();
             assert_eq!(

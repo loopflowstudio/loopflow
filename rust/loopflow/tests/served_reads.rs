@@ -710,12 +710,18 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
+        | Write::SessionSteer { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
+        // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
+        // compares their spelling.
+        | Write::WavePlanningBind { .. }
+        | Write::WavePlanningConnect { .. }
+        | Write::WavePlanningReteam { .. }
         | Write::GraphCustomize { .. }
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
@@ -1510,6 +1516,21 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 "--json",
             ]),
         ),
+        Write::SessionSteer {
+            directory,
+            session,
+            wave,
+            message,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(wave) = wave {
+                spelled.extend(words(&["--wave", wave]));
+            }
+            spelled.extend(words(&["session", "steer"]));
+            spelled.extend(session.clone());
+            spelled.extend(words(&[message, "--json"]));
+            (path(directory), spelled)
+        }
         Write::SessionRename {
             directory,
             id,
@@ -1582,6 +1603,43 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         }
         Write::PlanningRefresh { directory, wave } => {
             (path(directory), words(&["wave", "sync", wave, "--json"]))
+        }
+        Write::WavePlanningBind {
+            directory,
+            wave,
+            project,
+        } => (
+            path(directory),
+            words(&["wave", "planning", "bind", wave, project, "--json"]),
+        ),
+        Write::WavePlanningConnect {
+            directory,
+            wave,
+            all,
+            team_key,
+            team_name,
+        } => {
+            let mut spelled = words(&["wave", "planning", "connect"]);
+            spelled.extend(wave.clone());
+            if *all {
+                spelled.push("--all".into());
+            }
+            if let Some(key) = team_key {
+                spelled.extend(words(&["--team-key", key]));
+            }
+            if let Some(name) = team_name {
+                spelled.extend(words(&["--team-name", name]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::WavePlanningReteam { directory, apply } => {
+            let mut spelled = words(&["wave", "planning", "reteam"]);
+            if *apply {
+                spelled.push("--apply".into());
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
         }
         Write::GraphCustomize { directory, name } => (
             path(directory),

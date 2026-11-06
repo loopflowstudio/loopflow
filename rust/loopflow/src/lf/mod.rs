@@ -1710,7 +1710,13 @@ pub enum SessionCommand {
     /// Save a steer for this Session, or without one for the current Wave's or
     /// repository's Sessions, without starting a turn
     #[command(allow_missing_positional = true)]
-    Steer { id: Option<String>, message: String },
+    Steer {
+        id: Option<String>,
+        message: String,
+        /// Print the saved steer
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect steer delivery or retry delivery
     Steers {
         id: String,
@@ -1988,11 +1994,17 @@ pub enum WavePlanningCommand {
         /// Repository Team display name. Defaults to the repository name.
         #[arg(long = "team-name")]
         team_name: Option<String>,
+        /// Print one receipt per connected Wave
+        #[arg(long)]
+        json: bool,
     },
     /// Reconcile linked Waves to the repository's Linear Team
     Reteam {
         #[arg(long)]
         apply: bool,
+        /// Print the plan, or what moved
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -4229,6 +4241,7 @@ mod tests {
                             all,
                             team_key,
                             team_name,
+                            ..
                         }),
                     ..
                 },
@@ -4283,7 +4296,7 @@ mod tests {
         let Some(Commands::Wave {
             cmd:
                 WaveCommand::Planning {
-                    cmd: Some(WavePlanningCommand::Reteam { apply }),
+                    cmd: Some(WavePlanningCommand::Reteam { apply, .. }),
                     ..
                 },
         }) = cli.command
@@ -4297,7 +4310,7 @@ mod tests {
         let Some(Commands::Wave {
             cmd:
                 WaveCommand::Planning {
-                    cmd: Some(WavePlanningCommand::Reteam { apply }),
+                    cmd: Some(WavePlanningCommand::Reteam { apply, .. }),
                     ..
                 },
         }) = cli.command

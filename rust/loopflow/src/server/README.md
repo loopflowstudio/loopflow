@@ -138,12 +138,12 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
-| `session.steer` | `lf session steer [<id>] <message>` | `engine::session`; not served yet |
+| `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.planning` | `lf wave planning <wave>` | read |
 | `wave.create` | `lf wave create` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | CLI handler; not served |
+| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `planning.list` | `lf planning list` | read |
 | `repository.planning` | `lf repository planning` | read |
 | `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |

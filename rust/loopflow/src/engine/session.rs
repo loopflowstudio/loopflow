@@ -1,7 +1,8 @@
 //! The `session` namespace: direction for conversations. `session.steer`
-//! saves a steer that one Session, every Session of a Wave or every Session of
-//! a repository reads at its next provider boundary, without starting a turn.
-//! A Task's steer is its thread entry ([`super::task::steer`]).
+//! saves a steer that one Session, every Session of a Wave, every Session of
+//! a Task or every Session of a repository reads at its next provider
+//! boundary, without starting a turn. The Task scope is what `task.steer`
+//! delivers through ([`super::task::steer`]); its entry joins the Task's thread.
 
 use std::path::Path;
 
@@ -15,6 +16,12 @@ pub enum SteerScope<'a> {
     Session(&'a str),
     /// Every Session on the Wave, by name.
     Wave(&'a str),
+    /// Every Session on the Task, now or later: the steer is the Task's, and
+    /// its text joins the Task's thread as a comment.
+    Task {
+        issue: &'a str,
+        wave: Option<&'a str>,
+    },
     /// Every Session of the repository containing the directory.
     Repository,
 }
@@ -49,6 +56,35 @@ pub async fn steer(
             crate::lf::commands::waves::save_steer(store, wave, &author, message)
                 .await
                 .map_err(written)
+        }
+        SteerScope::Task { issue, wave } => {
+            if message.trim().is_empty() {
+                return Err(Error::new(
+                    ErrorCode::Invalid,
+                    "Task comment cannot be empty",
+                ));
+            }
+            // The comment's transaction derives the Task's steer from the entry.
+            let thread =
+                crate::ops::task::task_comment_async(directory, wave, issue, Some(message), true)
+                    .await
+                    .map_err(written)?;
+            let comment = thread.comments.last().ok_or_else(|| {
+                Error::new(
+                    ErrorCode::OutcomeUnknown,
+                    format!("the thread of {issue} does not show the saved entry"),
+                )
+            })?;
+            store
+                .sqlite
+                .steer_by_source(&format!("comment:{}", comment.id), "local")
+                .map_err(written)?
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorCode::OutcomeUnknown,
+                        format!("comment {} of {issue} derived no steer", comment.id),
+                    )
+                })
         }
         SteerScope::Repository => {
             let root = crate::repo::discover_repo_root(directory)

@@ -904,23 +904,24 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     all,
                     team_key,
                     team_name,
+                    json,
                 } => loopflow::lf::commands::ops::connect_wave(
                     repo,
                     wave.as_deref(),
                     *all,
                     team_key.as_deref(),
                     team_name.as_deref(),
+                    *json,
                 ),
-                WavePlanningCommand::Reteam { apply } => {
-                    loopflow::lf::commands::ops::reteam(repo, *apply)
+                WavePlanningCommand::Reteam { apply, json } => {
+                    loopflow::lf::commands::ops::reteam(repo, *apply, *json)
                 }
                 WavePlanningCommand::Bind {
                     wave,
                     project,
                     json,
                 } => {
-                    let result = tokio::runtime::Runtime::new()?
-                        .block_on(project::bind_project(repo, wave, project))?;
+                    let result = loopflow::engine::wave::planning_bind(repo, wave, project)?;
                     if *json {
                         println!("{}", serde_json::to_string_pretty(&result)?);
                     } else {

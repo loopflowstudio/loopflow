@@ -13,11 +13,32 @@ pub mod config;
 pub mod launch;
 pub mod session;
 pub mod task;
+pub mod wave;
 
 use serde::{Deserialize, Serialize};
 
 /// What an operation returns.
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The progress a served operation reports: status and warnings go to the
+/// request's diagnostics, and nothing can confirm, so a step that needs a
+/// person's yes is refused unless the input already says so (`force`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Diagnostics;
+
+impl crate::ops::Progress for Diagnostics {
+    fn status(&self, msg: &str) {
+        crate::journal::request::diagnostic(format_args!("{msg}"));
+    }
+
+    fn error(&self, msg: &str) {
+        crate::journal::request::diagnostic(format_args!("{msg}"));
+    }
+
+    fn confirm(&self, _msg: &str) -> bool {
+        false
+    }
+}
 
 /// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

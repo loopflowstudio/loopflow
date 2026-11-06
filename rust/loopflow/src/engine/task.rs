@@ -190,17 +190,32 @@ pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold>
 }
 
 /// `task.steer`: direction for the Task's runs, as `lf task steer <issue>
-/// <message>` does. The entry joins the Task's thread, and the store saves it
-/// as the Task's steer, which every Session on the Task, now or later, reads
-/// at its next boundary ([`super::session::steer`] is the Session-scoped
-/// write). Returns the thread with the entry.
+/// <message>` does. The delivery is [`super::session::steer`]'s Task scope:
+/// the entry joins the Task's thread and the store saves it as the Task's
+/// steer, which every Session on the Task, now or later, reads at its next
+/// boundary. Returns the thread with the entry.
 pub fn steer(
     directory: &Path,
     issue: &str,
     wave: Option<&str>,
     message: &str,
 ) -> Result<TaskComments> {
-    thread_entry(directory, issue, wave, message, true)
+    let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
+    tokio::runtime::Runtime::new()
+        .map_err(written)?
+        .block_on(async {
+            let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
+                .await
+                .map_err(written)?;
+            super::session::steer(
+                &store,
+                &repo,
+                super::session::SteerScope::Task { issue, wave },
+                message,
+            )
+            .await?;
+            store.sqlite.task_comments(&task.id).map_err(written)
+        })
 }
 
 /// `task.report`: progress for the Task's thread, as `lf task report <issue>
@@ -213,16 +228,6 @@ pub fn report(
     wave: Option<&str>,
     message: &str,
 ) -> Result<TaskComments> {
-    thread_entry(directory, issue, wave, message, false)
-}
-
-fn thread_entry(
-    directory: &Path,
-    issue: &str,
-    wave: Option<&str>,
-    message: &str,
-    steer: bool,
-) -> Result<TaskComments> {
     if message.trim().is_empty() {
         return Err(Error::new(
             ErrorCode::Invalid,
@@ -230,7 +235,7 @@ fn thread_entry(
         ));
     }
     let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
-    crate::ops::task::task_comment(&repo, issue, wave, Some(message), steer).map_err(written)
+    crate::ops::task::task_comment(&repo, issue, wave, Some(message), false).map_err(written)
 }
 
 /// `task.interrupt`: stop the Task's live Graph or Task run and its scheduled

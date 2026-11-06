@@ -28,6 +28,7 @@ use crate::store::{
 use crate::work::task::Task;
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -40,7 +41,8 @@ pub struct LinearInitOptions {
     pub team_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinearInitResult {
     pub wave: String,
     pub initiative_id: String,
@@ -87,7 +89,8 @@ pub struct LinearReteamOptions {
 
 /// One issue that moves into the repository Team. `new_identifier` is filled only
 /// after an applied move (Linear assigns the number then).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamMove {
     pub wave: String,
     pub project_id: String,
@@ -100,7 +103,8 @@ pub struct LinearReteamMove {
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamProjectMove {
     pub wave: String,
     pub id: String,
@@ -108,7 +112,8 @@ pub struct LinearReteamProjectMove {
     pub from_teams: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamResult {
     pub repository: String,
     pub waves: Vec<String>,

@@ -193,6 +193,10 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_report.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_planning_bind.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_planning_connect.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteam.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -211,6 +215,9 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_running.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_planning_connected.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteamed.json"),
             include_str!("../../../../tests/fixtures/dto/server/ended.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();

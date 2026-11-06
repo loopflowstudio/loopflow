@@ -764,7 +764,10 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
+pub(crate) fn planning_wave(
+    repo: &std::path::Path,
+    explicit: Option<&str>,
+) -> Result<Option<String>> {
     use crate::work::wave::context::WaveResolveError;
     match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
         Ok(wave) => Ok(Some(wave.slug().to_string())),
@@ -779,37 +782,21 @@ pub fn connect_wave(
     all: bool,
     team_key: Option<&str>,
     team_name: Option<&str>,
+    json: bool,
 ) -> Result<()> {
-    let progress = &CliProgress;
-    let ambient_wave = |explicit| planning_wave(repo_root, explicit);
-    let targets = if all {
-        // A clone's authored directories register before the store is listed.
-        tokio::runtime::Runtime::new()?
-            .block_on(crate::ops::wave_lifecycle::register_authored(repo_root))?;
-        crate::ops::linear::list_local_waves(repo_root)?
-    } else {
-        let explicit = wave;
-        // An explicit name the store does not know is added first by `connect`,
-        // so it is only normalized here; ambient uses the validating resolver.
-        let name = if let Some(raw) = explicit {
-            crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("wave connect requires a non-empty wave name"))?
-        } else {
-            ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; run `lf wave connect <name>`"))?
-        };
-        vec![name]
-    };
-    for wave in targets {
-        let result = crate::ops::linear::connect(
-            repo_root,
-            &crate::ops::linear::LinearInitOptions {
-                wave: Some(wave),
-                team_key: team_key.map(str::to_string),
-                team_name: team_name.map(str::to_string),
-            },
-            progress,
-        )?;
+    let results = crate::engine::wave::planning_connect(
+        repo_root,
+        wave,
+        all,
+        team_key,
+        team_name,
+        &CliProgress,
+    )?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+        return Ok(());
+    }
+    for result in &results {
         let initiative_state = if result.created { "created" } else { "linked" };
         let team_state = if result.team_created {
             format!(
@@ -886,13 +873,13 @@ pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result
     Ok(Some(wave))
 }
 
-pub fn reteam(repo: &std::path::Path, apply: bool) -> Result<()> {
-    let result = crate::ops::linear::reteam(
-        repo,
-        &crate::ops::linear::LinearReteamOptions { apply },
-        &CliProgress,
-    )?;
-    print_pm_reteam_result(&result);
+pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {
+    let result = crate::engine::wave::planning_reteam(repo, apply, &CliProgress)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        print_pm_reteam_result(&result);
+    }
     Ok(())
 }
 

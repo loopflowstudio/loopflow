@@ -107,6 +107,13 @@ struct ServerProtocolTests {
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
+            ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
+                                                       message: "Ship the smallest slice first")),
+            ("wave_planning_bind", "bind-1", .wavePlanningBind(directory: "/repo", wave: "product",
+                                                               project: "5e55105e-0000-4000-8000-000000000042")),
+            ("wave_planning_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
+                                                                        teamKey: "LOO", teamName: nil)),
+            ("wave_planning_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
         ]
         for (name, id, write) in writes {
             #expect(try encoded(.request(id: id, operation: .command(write))) == value(name), "\(name)")
@@ -126,6 +133,18 @@ struct ServerProtocolTests {
             Issue.record("Missing task.hold result"); return
         }
         #expect(held["stopped"] == .bool(true))
+        guard case .response(_, _, .object(let steered)) = try message("session_steered") else {
+            Issue.record("Missing session.steer result"); return
+        }
+        #expect(steered["text"] == .string("Ship the smallest slice first"))
+        guard case .response(_, _, .array(let connected)) = try message("wave_planning_connected") else {
+            Issue.record("Missing wave.planning.connect result"); return
+        }
+        #expect(connected.count == 1)
+        guard case .response(_, _, .object(let reteamed)) = try message("wave_planning_reteamed") else {
+            Issue.record("Missing wave.planning.reteam result"); return
+        }
+        #expect(reteamed["applied"] == .bool(false))
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {

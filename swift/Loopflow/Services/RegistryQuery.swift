@@ -252,6 +252,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
+    /// A steer one Session, every Session of the Wave or, with neither, every
+    /// Session of the repository reads at its next boundary.
+    case sessionSteer(directory: String, session: String?, wave: String?, message: String)
     case sessionRename(directory: String, id: String, name: String)
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
@@ -260,6 +263,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionNew(directory: String, id: String, agent: String?)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
+    case wavePlanningBind(directory: String, wave: String, project: String)
+    case wavePlanningConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
+    /// Without `apply`, the plan: nothing moves.
+    case wavePlanningReteam(directory: String, apply: Bool)
     case graphCustomize(directory: String, name: String)
     /// Run from `/`, as the app's `lf` ran it.
     case portfolio(change: [String])
@@ -292,6 +299,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
             ["task", "save", issue, path, "--revision", revision, "--json"]
+        case .sessionSteer(_, let session, let wave, let message):
+            Self.option("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task, let preview):
             ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
@@ -303,6 +312,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             Self.prepared(agent, ["session", "new", id], repo: nil)
         case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): ["wave", "sync", wave, "--json"]
+        case .wavePlanningBind(_, let wave, let project): ["wave", "planning", "bind", wave, project, "--json"]
+        case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
+            ["wave", "planning", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
+                + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
+        case .wavePlanningReteam(_, let apply): ["wave", "planning", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
         case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
         case .portfolio(let change): ["desktop", "portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
@@ -391,6 +405,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskSave(let directory, let issue, let path, let revision, let content):
             TaggedFields("task.save", ["directory": directory, "issue": issue, "path": path,
                                        "revision": revision, "content": content])
+        case .sessionSteer(let directory, let session, let wave, let message):
+            TaggedFields("session.steer", ["directory": directory, "session": session, "wave": wave, "message": message])
         case .sessionRename(let directory, let id, let name):
             TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
         case .sessionBind(let directory, let id, let task, let preview):
@@ -404,6 +420,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
+        case .wavePlanningBind(let directory, let wave, let project):
+            TaggedFields("wave.planning.bind", ["directory": directory, "wave": wave, "project": project])
+        case .wavePlanningConnect(let directory, let wave, let all, let teamKey, let teamName):
+            TaggedFields("wave.planning.connect", ["directory": directory, "wave": wave, "all": all,
+                                                   "team_key": teamKey, "team_name": teamName])
+        case .wavePlanningReteam(let directory, let apply):
+            TaggedFields("wave.planning.reteam", ["directory": directory, "apply": apply])
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
         case .portfolio(let change):

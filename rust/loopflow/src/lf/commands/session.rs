@@ -51,7 +51,7 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
         SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
-        SessionCommand::Steer { id, message } => {
+        SessionCommand::Steer { id, message, json } => {
             use crate::engine::session::SteerScope;
             let store = open_shared_store().await?;
             // Global `--repo` has already entered the selected repository.
@@ -62,7 +62,11 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             };
             let directory = std::env::current_dir()?;
             let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
-            println!("Saved {}", steer.id);
+            if *json {
+                println!("{}", serde_json::to_string(&steer)?);
+            } else {
+                println!("Saved {}", steer.id);
+            }
             Ok(())
         }
         SessionCommand::Steers {
@@ -751,7 +755,7 @@ fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     Ok(text)
 }
 
-async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
+pub(crate) async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     Ok(Arc::new(
         open_store(&config)

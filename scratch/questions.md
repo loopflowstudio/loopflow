@@ -439,3 +439,27 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   (the identity read `lf config repository` keeps for `--bind`/`--relocate`)
   into Clap help. The owner now takes an optional subcommand: bare prints the
   identity, `--json` the record; the edits stay under `config repository`.
+
+### Step 4 — the remaining namespaces
+
+- **`task.steer` delivers through `session::steer`'s Task scope, not a fan-out.**
+  `SteerScope::Task` saves the thread entry (the comment transaction derives
+  the Task's steer from it, as before) and returns that steer; `task::steer`
+  calls it and reads the thread back from the store. Fanning out one
+  Session-scoped steer per current Session was rejected: a Session that joins
+  the Task later would miss it, and the store already delivers Task-scoped
+  steers to every Session on the Task at reconcile. `lf task steer` no longer
+  refreshes the thread from Linear after saving (`task_comment(None)` did);
+  the thread it prints is the stored one.
+- **Served planning progress.** `wave.planning.connect` and `.reteam` take a
+  `Progress`; served, it is `engine::Diagnostics` (status lines become request
+  diagnostics, `confirm` answers no). The CLI keeps `CliProgress`.
+- **Pure reads, audited.** `wave.planning` (`desktop_status`, `observe=false`),
+  `planning.list` (`show_json(.., observe=false)`), `wave.list`, `task.get`
+  (`read_task_status`), `task.list` and `repository.planning` (`status_json`)
+  already read the stored snapshot only; no tracker call, cache write or
+  Linear exchange was found, so nothing was removed. `wave.sync` and
+  `repository.planning`'s watch remain the explicit exchanges. `task.steer`
+  lost its post-save Linear refresh (above).
+- **BindPreview.** No separate operation or read exists; `session.bind
+  {preview}` is the one path. Nothing to fold.

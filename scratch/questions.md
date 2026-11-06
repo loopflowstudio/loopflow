@@ -518,3 +518,4 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   terminal.
 - **Account routes read the launch's directory.** Resolved: `resolve_provider_account_exact` takes the launch directory, so a served launch routes by its repository, not the server's. The `cfg!(test)` return is gone.
 - **`lf task show` on an unsaved selector now errors** (`task.get` answers `not_found`). It printed a null Task with planning evidence; that evidence is now only in text `lf task status`, and `lf task status --json` errors as it did.
+- **Served account operations.** `account::served` marks a served write: narration goes to `logs/lf.log`, and terminal prompts refuse. `account.connect` still holds its request for the whole browser wait; it is not detached like `pr.land`.

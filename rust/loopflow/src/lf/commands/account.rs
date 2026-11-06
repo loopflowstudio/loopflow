@@ -62,6 +62,32 @@ pub(crate) struct AccountLifecycleUpdate<'a> {
     pub(crate) clear_paid_through: bool,
 }
 
+tokio::task_local! {
+    /// Set while the server runs an account operation: no person is at this
+    /// process's terminal, and its stdout is not an API.
+    static SERVED: ();
+}
+
+/// Run `operation` for the server. Narration goes to `logs/lf.log`, and a step
+/// that would ask at a terminal refuses instead of waiting on the server's stdin.
+pub(crate) fn served<T>(operation: impl FnOnce() -> T) -> T {
+    SERVED.sync_scope((), operation)
+}
+
+fn is_served() -> bool {
+    SERVED.try_with(|()| ()).is_ok()
+}
+
+macro_rules! narrate {
+    ($($line:tt)*) => {
+        if is_served() {
+            tracing::info!($($line)*);
+        } else {
+            println!($($line)*);
+        }
+    };
+}
+
 pub fn run(
     cmd: Option<&AccountCommand>,
     provider: Option<Provider>,
@@ -210,13 +236,13 @@ pub(crate) async fn use_account(raw_provider: &str, raw_email: &str) -> Result<(
     .await?;
     let login = account_login(&account);
     if switched.is_some() {
-        println!(
+        narrate!(
             "{} is now signed in as {login} in {}",
             provider.display_name(),
             native.display()
         );
     } else {
-        println!(
+        narrate!(
             "{} is already signed in as {login}",
             provider.display_name()
         );
@@ -242,7 +268,7 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
         return Ok(());
     }
     if !matches!(daemon_has_running_turn(native).await, Ok(false)) {
-        println!(
+        narrate!(
             "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its turns to finish or become readable before restarting it",
             CODEX_DAEMON_TURN_WAIT.as_secs() / 60
         );
@@ -258,14 +284,14 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
         .await
         .is_err();
         if expired {
-            println!(
+            narrate!(
                 "Codex daemon grace period expired; restarting now may interrupt remaining turns"
             );
         }
     }
     restart_daemon(native).await?;
     match daemon_login(native).await? {
-        Some(now) if now.eq_ignore_ascii_case(login) => println!(
+        Some(now) if now.eq_ignore_ascii_case(login) => narrate!(
             "Restarted Codex's background app-server, which was still signed in as {held}"
         ),
         now => bail!(
@@ -296,8 +322,8 @@ pub(crate) async fn connect(raw_provider: &str, selection: Option<&str>) -> Resu
             .context("provider launch / URL discovery")?;
         let result = async {
             let url = flow.verification_uri_complete.as_deref().unwrap_or(&flow.verification_uri);
-            println!("Connecting local {} through profile '{}'...", provider.display_name(), profile.id);
-            if matches!(flow.completion, AuthCompletion::Manual) { println!("Manual authorization is required."); }
+            narrate!("Connecting local {} through profile '{}'...", provider.display_name(), profile.id);
+            if matches!(flow.completion, AuthCompletion::Manual) { narrate!("Manual authorization is required."); }
             open_chrome_profile(&chrome, url).context("browser launch")?;
             let manual = async {
                 if service.pending_supports_authorization_code(provider).await {
@@ -319,7 +345,7 @@ pub(crate) async fn connect(raw_provider: &str, selection: Option<&str>) -> Resu
         if remember {
             remember_browser_profile(&store, provider, None, &profile).await?;
         }
-        println!("Connected local {}", provider.display_name());
+        narrate!("Connected local {}", provider.display_name());
         return Ok(());
     }
     Err(anyhow!(
@@ -367,14 +393,14 @@ async fn browser_profiles(
     let login = account
         .map(|a| format!(" {}", account_login(a)))
         .unwrap_or_default();
-    if !std::io::stdin().is_terminal() {
+    if is_served() || !std::io::stdin().is_terminal() {
         return Err(anyhow!("No saved Chrome profile. Run lf account connect {provider}{login} --chrome-profile <profile>"));
     }
     let choices = crate::profile::local_chrome_profiles().map_err(anyhow::Error::msg)?;
     for (index, choice) in choices.iter().enumerate() {
-        println!("{}. {} ({})", index + 1, choice.name, choice.directory);
+        narrate!("{}. {} ({})", index + 1, choice.name, choice.directory);
     }
-    println!("Choose a Chrome profile number (remembered after successful login):");
+    narrate!("Choose a Chrome profile number (remembered after successful login):");
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;
     let choice = line
@@ -440,7 +466,11 @@ pub(crate) async fn redeem_reset(
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     // Print before the request so a lost reply can be retried without another spend.
-    eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    if is_served() {
+        tracing::info!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    } else {
+        eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    }
     let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
         .await
         .with_context(|| {
@@ -604,7 +634,7 @@ async fn connect_managed_account(
         _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     }
     register_managed_account(store, provider, account_id, account_home, identity, plan).await?;
-    println!(
+    narrate!(
         "Connected {} login '{}' through profile '{}'",
         provider.display_name(),
         account_login(account),
@@ -654,7 +684,7 @@ async fn approve_in_chrome(
         .verification_uri_complete
         .clone()
         .unwrap_or_else(|| flow.verification_uri.clone());
-    println!(
+    narrate!(
         "Connecting {} login '{}' through profile '{}'...",
         provider.display_name(),
         account_login(account),
@@ -669,9 +699,9 @@ async fn approve_in_chrome(
         std::future::pending::<Result<()>>().await
     };
     if matches!(flow.completion, AuthCompletion::Manual) {
-        println!("Manual authorization is required; approve in Chrome, then enter the code here.");
+        narrate!("Manual authorization is required; approve in Chrome, then enter the code here.");
     } else {
-        println!("Approve authorization in Chrome; login completes automatically.");
+        narrate!("Approve authorization in Chrome; login completes automatically.");
     }
     open_chrome_profile(chrome_profile, &verification_url).context("browser launch")?;
     let completion = wait_for_browser_confirmation(
@@ -805,6 +835,9 @@ pub(crate) async fn token_account(
     match file {
         Some(path) => {
             let raw = if path == Path::new("-") {
+                if is_served() {
+                    bail!("the server has no stdin to read a token from; name a file");
+                }
                 let mut raw = String::new();
                 std::io::stdin().take(4096).read_to_string(&mut raw)?;
                 raw
@@ -818,7 +851,7 @@ pub(crate) async fn token_account(
             mint_long_lived_token(&store, &account, chrome_profile).await?;
         }
     }
-    println!(
+    narrate!(
         "Stored a long-lived Claude token for {}; rented machines install it without a browser approval. Renew within a year.",
         account_login(&account)
     );
@@ -857,7 +890,7 @@ pub(super) async fn fresh_opencode_login(
                 .find(|word| word.starts_with("https://") && word.contains("/device?"))
             {
                 open_chrome_profile(&chrome, url)?;
-                println!("Approve the OpenCode login in Chrome; it completes automatically.");
+                narrate!("Approve the OpenCode login in Chrome; it completes automatically.");
             }
         }
         let status = child.wait().await?;
@@ -909,7 +942,7 @@ where
                 ));
             }
             _ = heartbeat.tick() => {
-                println!(
+                narrate!(
                     "Still waiting for browser approval ({}s elapsed); the login listener is still running. Press Ctrl-C to cancel.",
                     started_at.elapsed().as_secs()
                 );
@@ -1156,7 +1189,7 @@ pub(crate) async fn import_account(raw_provider: &str, raw_email: &str) -> Resul
         install_claude_login(staged_home.path(), &account_home)?;
     }
     register_managed_account(&store, provider, &account_id, account_home, identity, plan).await?;
-    println!(
+    narrate!(
         "Imported {} login '{}'",
         provider.display_name(),
         expected_login
@@ -1203,6 +1236,9 @@ async fn manual_authorization(
     flow: &AuthFlowResponse,
     profile: &LocalChromeProfile,
 ) -> Result<SecretString> {
+    if is_served() {
+        return std::future::pending().await;
+    }
     let Some(mut terminal) = auth_input::AuthInput::open()? else {
         return std::future::pending().await;
     };
@@ -1210,7 +1246,7 @@ async fn manual_authorization(
         let Some(url) = manual_uri.as_deref() else {
             return std::future::pending().await;
         };
-        println!(
+        narrate!(
             "If callback completion is unavailable, type m then Enter to open the manual route."
         );
         loop {
@@ -1220,7 +1256,7 @@ async fn manual_authorization(
             }
         }
     }
-    println!("Paste the one-time authorization code, then Enter (input hidden).");
+    narrate!("Paste the one-time authorization code, then Enter (input hidden).");
     loop {
         let code = terminal.line().await?;
         if !code.expose_secret().trim().is_empty() {
@@ -1249,7 +1285,7 @@ pub(crate) async fn disconnect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
-    println!("Disconnected local {}", provider.display_name());
+    narrate!("Disconnected local {}", provider.display_name());
     Ok(())
 }
 
@@ -1282,7 +1318,7 @@ pub(crate) async fn disconnect_account(raw_provider: &str, raw_email: &str) -> R
     account.cooldown_reason = None;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
-    println!(
+    narrate!(
         "Disconnected {} login '{}'",
         provider.display_name(),
         account_login(&account)
@@ -1321,7 +1357,7 @@ pub(crate) async fn set_browser_profiles(
     store
         .set_auth_browser_profiles(provider, account.as_ref().map(|a| &a.account_id), &profiles)
         .await?;
-    println!(
+    narrate!(
         "Updated {provider} browser choices for {}",
         account
             .as_ref()
@@ -1396,7 +1432,7 @@ pub(crate) async fn set_account_lifecycle(
         .update_provider_account_lifecycle(&account)
         .await
         .map_err(|error| account_store_error(provider, account_login(&account), error))?;
-    println!("Updated {}", format_account(&account));
+    narrate!("Updated {}", format_account(&account));
     Ok(())
 }
 
@@ -1433,7 +1469,7 @@ pub(crate) async fn clear_account_cooldown(raw_provider: &str, raw_email: &str) 
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
         .map_err(|error| account_store_error(provider, account_login(&account), error))?;
-    println!(
+    narrate!(
         "Cleared {} login '{}' cooldown",
         provider.display_name(),
         account_login(&account)
@@ -1529,9 +1565,9 @@ pub(crate) async fn configure(raw_provider: &str) -> Result<()> {
         .await?;
 
     if provider.api_key_bills_per_token() {
-        println!("API key auth bills per token. OAuth uses your existing subscription.");
+        narrate!("API key auth bills per token. OAuth uses your existing subscription.");
     }
-    println!("Stored {} API key", provider.display_name());
+    narrate!("Stored {} API key", provider.display_name());
     Ok(())
 }
 
@@ -1635,6 +1671,18 @@ mod tests {
         assert!(error
             .to_string()
             .contains("timed out waiting for Claude account 'operator@example.com'"));
+    }
+
+    #[test]
+    fn a_served_operation_stays_served_across_its_runtime() {
+        assert!(!super::is_served());
+        let served = super::served(|| {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async { super::is_served() })
+        });
+        assert!(served);
+        assert!(!super::is_served());
     }
 
     #[test]

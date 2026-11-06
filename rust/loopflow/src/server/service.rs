@@ -505,7 +505,10 @@ async fn operate(
                     fields.remove(field);
                 }
             }
-            effect(target, id, instance, trace_id, move || change.run()).await
+            effect(target, id, instance, trace_id, move || {
+                crate::lf::commands::account::served(|| change.run())
+            })
+            .await
         }
         Operation::Server(ServerOperation::Attach { .. }) => {
             unreachable!("the session dispatches attachment")

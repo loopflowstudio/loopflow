@@ -4388,13 +4388,6 @@ impl<'a> ServerProof<'a> {
         connection
     }
 
-    fn request(&self, operation: Value) -> Value {
-        self.connect()
-            .request(serde_json::from_value(operation).unwrap())
-            .unwrap()
-            .result
-    }
-
     fn viewer(&self, owner: &str) -> Viewer {
         let session = self.fixture.bound_session(owner);
         let socket = loopflow::server::client::attach(
@@ -5129,7 +5122,6 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let _cleanup = StopOwner(&fixture, owner.clone());
     let first = fixture.launches(1);
     let owner_pid = pid_of_process(&fixture, &owner);
-    let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");

@@ -1680,8 +1680,8 @@ struct GhosttyTerminalView: View {
 
 #endif
 
-// Block geometry and the header format stay outside the Ghostty build: the
-// shell bootstrap below names the header marker in every configuration.
+// Block geometry and the header format stay outside the Ghostty build.
+// GhosttyResources/task-zshenv prints the same marker in the shell prompt.
 
 /// The directory line above a command. The Loopflow prompt prints it as
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;

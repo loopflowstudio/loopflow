@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{wait_hold, Fixture, ShellOwnerGuard};
+use super::{desktop_shell_bootstrap, wait_hold, Fixture, ShellOwnerGuard};
 use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
@@ -444,6 +444,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
     for cycle in 0..20 {
         let id = format!("ssh-shell-{cycle}");
         let mut command = fixture.command(&id, "--create");
+        command.args(["--bootstrap", &desktop_shell_bootstrap()]);
         command.args([
             "--",
             "/bin/sh",

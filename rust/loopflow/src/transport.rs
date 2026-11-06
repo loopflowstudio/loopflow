@@ -1642,8 +1642,7 @@ fn release_viewer_hold(owner: &LfProcessId, previous: Option<ViewerHold>) {
         time::OffsetDateTime::now_utc().unix_timestamp(),
     );
     let recorded = crate::journal::process_ledger()
-        .map_err(anyhow::Error::from)
-        .and_then(|store| lifetime::record_hold(&store, owner, hold));
+        .and_then(|store| store.record_owner_viewer_hold(owner, hold));
     if let Err(error) = recorded {
         tracing::warn!(%error, %owner, "cannot record Session viewer release; last observation expires");
     }

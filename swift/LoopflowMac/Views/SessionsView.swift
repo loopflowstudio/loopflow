@@ -282,7 +282,7 @@ final class SessionsWorkspace {
         guard let location = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
         var argv = try shellCommand(id: tab.id, at: location, execution: tab.execution)
         if let initial = tab.command {
-            argv += ["--create"]
+            argv += ["--create", "--bootstrap", try taskShellBootstrap()]
             if !initial.isEmpty { argv += ["--"] + initial }
         }
         return argv

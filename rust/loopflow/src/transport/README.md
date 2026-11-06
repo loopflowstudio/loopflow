@@ -280,8 +280,8 @@ Desktop departure, window close and orderly Quit send Ctrl+] to release their
 relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
 back to connection-loss cleanup. Only actual Session viewing retains the checkout.
 An owner's dated observation expires too if it crashes, so a stale Process row
-cannot retain a completed workspace indefinitely. The retirement executor keeps
-observing while viewed and uses that same absence window after owner loss.
+cannot retain a completed workspace indefinitely. The Machine's scheduled cleanup
+pass also reconciles viewed Tasks and uses that same absence window after owner loss.
 
 A completed, released Task keeps its checkout and Desktop shells for fifteen
 minutes total; eligible unviewed agents still end at two minutes. A returning
@@ -290,9 +290,23 @@ a new one. Requested active work, drafts, pending requests and running Graphs
 still prevent ending execution; finishing that work does not restart an
 already-due deadline. Completion and PR landing schedule one retirement pinned
 to the completion, checkout and branch; reopen or changed placement revokes it.
-An owner whose viewers release wakes waiting cleanup for its Tasks. Destination
-owners confirm shell job settlement before deletion. Eligible cleanup discards
+Installation provisions a separate launchd/cron job running `lf task retire` once
+a minute. Each pass reads the local retirement queue, reconciles viewers, attempts
+eligible cleanup and exits. No Task owns a waiting cleanup process. Eligibility
+normally reaches a pass in 15–16 minutes while awake; wall-clock deadlines survive
+sleep and reboot. Destination owners confirm shell job settlement before deletion;
+a pending close finishes on a later pass. Eligible cleanup discards
 uncommitted files but preserves primary/persistent checkouts and changed
-committed refs. Failures record a pending reason; another retirement run can retry.
-Reopening a retired
-Task never silently recreates a checkout.
+committed refs. Failures record a reason and retry after one minute, doubling up
+to an hour independently of the absence deadline. One failed Task does not stop
+other queued Tasks. Overlapping passes serialize, and interrupted effects can be
+retried. `lf task retire <task>` runs one pass for a specific Task. Reopening a
+retired Task never silently recreates a checkout.
+
+Task shell creation accepts an optional `--bootstrap` JSON object with a `script`
+and relative UTF-8 `files`. Desktop supplies its bundled Ghostty integration;
+the generic launcher selects no terminal integration. Resource contents cross
+SSH and are materialized on the destination under the Machine's `shell-resources`
+cache, keyed by payload digest. The startup script sees `LF_SHELL_RESOURCES`,
+`SHELL`, and terminal identity after the literal initial command finishes.
+Only creation applies it; reattachment never reruns startup.

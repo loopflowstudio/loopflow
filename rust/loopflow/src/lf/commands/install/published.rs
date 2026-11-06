@@ -69,11 +69,13 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     let directory = install_dir()?;
     let app = app_destination(&directory.join("lf"));
     if stream == Stream::Dev {
-        return main_build(&directory, app.as_deref());
+        main_build(&directory, app.as_deref())?;
+    } else {
+        let client = http_client()?;
+        let tag = stream_release(&client, stream)?;
+        install_release(&client, stream, &tag, &directory, app.as_deref())?;
     }
-    let client = http_client()?;
-    let tag = stream_release(&client, stream)?;
-    install_release(&client, stream, &tag, &directory, app.as_deref())
+    schedule(None)
 }
 
 /// The release a release stream is at: preview's newest, or stable's GitHub Latest.
@@ -146,7 +148,8 @@ pub fn adopt() -> Result<()> {
         },
         true,
         false,
-    )
+    )?;
+    schedule(None)
 }
 
 /// CLI-only omits initial Desktop setup; an existing app stays in the installation.
@@ -275,7 +278,7 @@ fn main_build(directory: &Path, app: Option<&Path>) -> Result<()> {
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
     );
-    schedule(None)
+    Ok(())
 }
 
 fn promote_build(candidate: &Path, directory: &Path, app: Option<(&Path, &Path)>) -> Result<()> {
@@ -581,9 +584,11 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     // launchd and cron schedule for the whole account; a disposable HOME
     // (release smoke tests) must not replace the account's job.
-    if home != crate::installation::account_home()? {
+    if home != crate::installation::account_home()?
+        || crate::store::lf_home_dir() != home.join(".lf")
+    {
         println!(
-            "Not scheduling installation: HOME {} is not this account's home",
+            "Not scheduling installation or cleanup for disposable home {}",
             home.display()
         );
         return Ok(());
@@ -592,9 +597,16 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let logs = crate::store::lf_home_dir().join("logs");
     fs::create_dir_all(&logs)?;
     if cfg!(target_os = "macos") {
-        launchd_schedule(&home, &binary, &logs, frequency)
-    } else {
+        launchd_schedule(&home, &binary, &logs, frequency)?;
+        install_launchd(
+            &home,
+            "com.loopflow.cleanup",
+            &cleanup_plist(&home, &binary, &logs),
+        )
+    } else if cfg!(target_os = "linux") {
         cron_schedule(&home, &binary, &logs, frequency)
+    } else {
+        bail!("automatic cleanup needs launchd on macOS or cron on Linux")
     }
 }
 
@@ -623,7 +635,6 @@ fn launchd_schedule(
     frequency: Option<InstallFrequency>,
 ) -> Result<()> {
     let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
-    fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
     let current = fs::read_to_string(&path).ok();
     let frequency = frequency.unwrap_or_else(|| {
         installed_frequency(|frequency| {
@@ -636,6 +647,20 @@ fn launchd_schedule(
         })
     });
     let payload = schedule_plist(home, binary, logs, frequency);
+    install_launchd(home, "com.loopflow.refresh", &payload)?;
+    println!(
+        "Installation scheduled at login and {}: {}; logs: {}",
+        cadence(frequency),
+        path.display(),
+        logs.join("refresh.log").display()
+    );
+    Ok(())
+}
+
+fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<()> {
+    let path = home.join(format!("Library/LaunchAgents/{name}.plist"));
+    fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
+    let current = fs::read_to_string(&path).ok();
     let uid = Command::new("id")
         .arg("-u")
         .output()
@@ -644,14 +669,14 @@ fn launchd_schedule(
         bail!("cannot determine launchd user");
     }
     let domain = format!("gui/{}", String::from_utf8_lossy(&uid.stdout).trim());
-    let label = format!("{domain}/com.loopflow.refresh");
+    let label = format!("{domain}/{name}");
     let loaded = Command::new("launchctl")
         .args(["print", &label])
         .output()?
         .status
         .success();
-    if loaded && current.as_deref() == Some(payload.as_str()) {
-        println!("Installation already scheduled: {}", path.display());
+    if loaded && current.as_deref() == Some(payload) {
+        println!("Already scheduled: {}", path.display());
         return Ok(());
     }
     if loaded
@@ -660,7 +685,7 @@ fn launchd_schedule(
             .status()?
             .success()
     {
-        bail!("could not unload the previous installation schedule; rerun `lf install schedule`");
+        bail!("could not unload the previous {name} schedule; rerun `lf install schedule`");
     }
     fs::write(&path, payload)?;
     if !Command::new("launchctl")
@@ -669,15 +694,41 @@ fn launchd_schedule(
         .status()?
         .success()
     {
-        bail!("could not load the installation schedule; rerun `lf install schedule`");
+        bail!("could not load the {name} schedule; rerun `lf install schedule`");
     }
-    println!(
-        "Installation scheduled at login and {}: {}; logs: {}",
-        cadence(frequency),
-        path.display(),
-        logs.join("refresh.log").display()
-    );
     Ok(())
+}
+
+const CLEANUP_CRON_MARKER: &str = "# loopflow cleanup schedule";
+
+fn cleanup_plist(home: &Path, binary: &Path, logs: &Path) -> String {
+    let binary = plist_path(binary);
+    let machine = plist_path(&home.join(".lf"));
+    let log = plist_path(&logs.join("workspace-retirement.log"));
+    let home = plist_path(home);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>com.loopflow.cleanup</string>
+<key>ProgramArguments</key><array><string>{binary}</string><string>task</string><string>retire</string></array>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{machine}</string><key>HOME</key><string>{home}</string><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>WorkingDirectory</key><string>{machine}</string>
+<key>RunAtLoad</key><true/>
+<key>StartInterval</key><integer>60</integer>
+<key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>
+"#
+    )
+}
+
+fn cleanup_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
+    format!(
+        "* * * * * cd {} && LF_HOME={} {} task retire >> {} 2>&1 {CLEANUP_CRON_MARKER}",
+        cron_quote(&home.join(".lf").to_string_lossy()),
+        cron_quote(&home.join(".lf").to_string_lossy()),
+        cron_quote(&binary.to_string_lossy()),
+        cron_quote(&logs.join("workspace-retirement.log").to_string_lossy())
+    )
 }
 
 /// Marks the one crontab line `lf install schedule` owns.
@@ -689,15 +740,7 @@ fn cron_schedule(
     logs: &Path,
     frequency: Option<InstallFrequency>,
 ) -> Result<()> {
-    let listed = Command::new("crontab").arg("-l").output().context(
-        "automatic installation uses cron; install it, or run `lf install` to update manually",
-    )?;
-    // `crontab -l` fails when the user has no crontab yet.
-    let current = if listed.status.success() {
-        String::from_utf8(listed.stdout)?
-    } else {
-        String::new()
-    };
+    let current = read_crontab()?;
     let frequency = frequency.unwrap_or_else(|| {
         installed_frequency(|frequency| {
             let line = cron_line(home, binary, logs, frequency);
@@ -710,9 +753,36 @@ fn cron_schedule(
             })
         })
     });
-    let table = cron_table(&current, &cron_line(home, binary, logs, frequency));
+    let table = cron_table(
+        &current,
+        &cron_line(home, binary, logs, frequency),
+        &cleanup_cron_line(home, binary, logs),
+    );
+    write_crontab(&current, &table)?;
+    println!(
+        "Installation scheduled {} in your crontab; logs: {}",
+        cadence(frequency),
+        logs.join("refresh.log").display()
+    );
+    Ok(())
+}
+
+fn read_crontab() -> Result<String> {
+    let listed = Command::new("crontab").arg("-l").output().context(
+        "automatic installation and cleanup need cron; install it and rerun `lf install schedule`",
+    )?;
+    // `crontab -l` fails when the user has no crontab yet.
+    let current = if listed.status.success() {
+        String::from_utf8(listed.stdout)?
+    } else {
+        String::new()
+    };
+    Ok(current)
+}
+
+fn write_crontab(current: &str, table: &str) -> Result<()> {
     if table == current {
-        println!("Installation already scheduled in your crontab");
+        println!("Installation and cleanup already scheduled in your crontab");
         return Ok(());
     }
     let mut child = Command::new("crontab")
@@ -725,13 +795,8 @@ fn cron_schedule(
         table.as_bytes(),
     )?;
     if !child.wait()?.success() {
-        bail!("could not install the installation schedule; rerun `lf install schedule`");
+        bail!("could not install the schedules; rerun `lf install schedule`");
     }
-    println!(
-        "Installation scheduled {} in your crontab; logs: {}",
-        cadence(frequency),
-        logs.join("refresh.log").display()
-    );
     Ok(())
 }
 
@@ -744,24 +809,34 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
     };
     let bin = binary.parent().expect("installation binary has a parent");
     format!(
-        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
-        bin.display(),
-        bin.display(),
-        home.display(),
-        binary.display(),
-        logs.join("refresh.log").display()
+        "{when} LF_INSTALL_DIR={} PATH={} {} install >> {} 2>&1 {CRON_MARKER}",
+        cron_quote(&bin.to_string_lossy()),
+        cron_quote(&format!(
+            "{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+            bin.display(),
+            home.display()
+        )),
+        cron_quote(&binary.to_string_lossy()),
+        cron_quote(&logs.join("refresh.log").to_string_lossy())
     )
 }
 
-/// `current` with its Loopflow line replaced by `line`; other entries stay.
-fn cron_table(current: &str, line: &str) -> String {
+fn cron_quote(value: &str) -> String {
+    // Cron consumes percent escapes before the shell parses its quoted words.
+    format!("'{}'", value.replace('\'', "'\"'\"'")).replace('%', "\\%")
+}
+
+/// Replace both owned jobs in one crontab update; unrelated entries stay.
+fn cron_table(current: &str, install: &str, cleanup: &str) -> String {
     let mut table: String = current
         .lines()
-        .filter(|entry| !entry.ends_with(CRON_MARKER))
+        .filter(|entry| !entry.ends_with(CRON_MARKER) && !entry.ends_with(CLEANUP_CRON_MARKER))
         .map(|entry| format!("{entry}\n"))
         .collect();
-    table.push_str(line);
-    table.push('\n');
+    for line in [install, cleanup] {
+        table.push_str(line);
+        table.push('\n');
+    }
     table
 }
 
@@ -779,17 +854,18 @@ fn schedule_calendar(frequency: InstallFrequency) -> String {
     }
 }
 
+fn plist_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
-    let escape = |path: &Path| {
-        path.to_string_lossy()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-    };
-    let binary_path = escape(binary);
-    let bin = escape(binary.parent().expect("installation binary has a parent"));
-    let home = escape(home);
-    let log = escape(&logs.join("refresh.log"));
+    let binary_path = plist_path(binary);
+    let bin = plist_path(binary.parent().expect("installation binary has a parent"));
+    let home = plist_path(home);
+    let log = plist_path(&logs.join("refresh.log"));
     let calendar = schedule_calendar(frequency);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -810,10 +886,10 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, launchd_schedule, DiskImage, InstallFrequency};
+    use super::{checked, launchd_schedule, DiskImage};
     use super::{
-        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
-        recorded_stream, release_tag, run_verified_installer, Stream, CRON_MARKER,
+        is_current, newest_release, newest_run, package_target, record_stream, recorded_stream,
+        release_tag, run_verified_installer, InstallFrequency, Stream,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1164,6 +1240,93 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     }
 
     #[test]
+    fn cleanup_schedule_never_provisions_a_disposable_home() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _machine = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+        super::schedule(None).unwrap();
+        assert_eq!(fs::read_dir(home.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn cleanup_schedule_keeps_one_minute_job_separate_from_updates() {
+        let home = Path::new("/home/person's % home");
+        let binary = home.join("bin/lf");
+        let logs = home.join(".lf/logs");
+        let update = super::cron_line(home, &binary, &logs, InstallFrequency::Daily);
+        let cleanup = super::cleanup_cron_line(home, &binary, &logs);
+        let current = "MAILTO=me\n0 0 * * * backup\n";
+        let first = super::cron_table(current, &update, &cleanup);
+        assert_eq!(first, format!("{current}{update}\n{cleanup}\n"));
+        assert_eq!(super::cron_table(&first, &update, &cleanup), first);
+        let hourly = super::cron_line(home, &binary, &logs, InstallFrequency::Hourly);
+        assert_eq!(
+            super::cron_table(&first, &hourly, &cleanup),
+            format!("{current}{hourly}\n{cleanup}\n")
+        );
+        assert!(cleanup.starts_with("* * * * * "));
+        assert!(cleanup.contains(" task retire "));
+        assert!(cleanup.contains("LF_HOME="));
+        // Both commands quote paths for the shell after cron unescapes percent.
+        for line in [&update, &cleanup] {
+            assert!(line.contains("\\%"));
+            let words = shlex::split(&line.replace("\\%", "%")).unwrap();
+            assert!(words.contains(&binary.to_string_lossy().into_owned()));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cleanup_schedule_pins_machine_and_reloads_only_when_needed() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
+        fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        let binary = home.path().join("installed & current/lf");
+        let payload = super::cleanup_plist(home.path(), &binary, &home.path().join(".lf/logs"));
+        let path = home
+            .path()
+            .join("Library/LaunchAgents/com.loopflow.cleanup.plist");
+        let run = || super::install_launchd(home.path(), "com.loopflow.cleanup", &payload).unwrap();
+        run();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        for _ in 0..3 {
+            run();
+        }
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([binary, "task", "retire"])
+        );
+        assert_eq!(
+            plist["EnvironmentVariables"]["LF_HOME"],
+            home.path().join(".lf").to_str().unwrap()
+        );
+        assert_eq!(plist["StartInterval"], 60);
+        assert_eq!(plist["RunAtLoad"], true);
+        assert!(plist.get("KeepAlive").is_none());
+        fs::remove_file(home.path().join("loaded")).unwrap();
+        run();
+        assert!(home.path().join("loaded").exists());
+    }
+
+    #[test]
     fn installer_verifies_bytes_and_passes_the_pinned_release() {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nprintf '%s' \"$2\" > \"$LF_INSTALL_DIR/installed\"\n";
@@ -1256,18 +1419,6 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         ]"#;
         assert_eq!(newest_release(releases).unwrap(), "v0.16.2");
         assert!(newest_release("[]").is_err());
-    }
-
-    #[test]
-    fn the_cron_schedule_replaces_only_its_own_line() {
-        let ours = format!("0 9 * * 1 lf install {CRON_MARKER}");
-        let current = format!("MAILTO=me\n*/10 * * * * backup\n{ours}\n");
-        let daily = format!("0 9 * * * lf install {CRON_MARKER}");
-        assert_eq!(
-            cron_table(&current, &daily),
-            format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
-        );
-        assert_eq!(cron_table("", &daily), format!("{daily}\n"));
     }
 
     #[test]

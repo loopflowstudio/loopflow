@@ -3036,6 +3036,43 @@ mod tests {
     }
 
     #[test]
+    fn task_workspace_upgrade_preserves_checkout_and_adds_retry_queue() {
+        let conn = open();
+        apply_before_migration(&conn, "task_workspace_lifetimes");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/task_workspace_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        apply_pending_migrations(&conn);
+        let checkout: String = conn
+            .query_row(
+                "SELECT worktree FROM tasks WHERE id='task_workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(checkout, "/repo.task");
+        conn.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase) SELECT id,planning_completed_at,worktree,branch,900,'waiting' FROM tasks WHERE id='task_workspace'", []).unwrap();
+        let retry: (Option<i64>, i64) = conn
+            .query_row("SELECT retry_at,failures FROM task_retirements", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(retry, (None, 0));
+        conn.execute(
+            "UPDATE tasks SET planning_completed=0 WHERE id='task_workspace'",
+            [],
+        )
+        .unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT count(*) FROM task_retirements", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn ownership_log_records_released_evidence_without_inventing_owners() {
         let conn = open();
         apply_before_migration(&conn, "task_ownership");

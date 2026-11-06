@@ -6,7 +6,7 @@ use std::sync::Arc;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
-use super::{advance, now, VIEWED};
+use super::{advance, now, sweep, VIEWED};
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::store::sqlite::ViewerHold;
@@ -18,6 +18,7 @@ struct Workspace {
     _directory: tempfile::TempDir,
     checkout: PathBuf,
     remote: PathBuf,
+    branch: String,
     store: SharedStore,
     task: Task,
 }
@@ -46,7 +47,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
         );
         let first = fixture.session_owner("first", Some(ViewerHold::Viewed(now())));
         let second = fixture.session_owner("second", Some(ViewerHold::Viewed(now())));
-        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         let intent = fixture.intent();
         assert_eq!(
             (intent.due_at, intent.reason.as_deref()),
@@ -58,7 +59,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
             .sqlite
             .record_owner_viewer_hold(&first, None)
             .unwrap();
-        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         assert_eq!(fixture.intent().due_at, None);
         fixture.assert_retained();
         fixture
@@ -66,7 +67,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
             .sqlite
             .record_owner_viewer_hold(&second, None)
             .unwrap();
-        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         let released = fixture.intent();
         assert!(released.due_at.unwrap() >= now() + 899);
         fixture.assert_retained();
@@ -76,7 +77,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
             .sqlite
             .record_owner_viewer_hold(&first, Some(ViewerHold::Viewed(now())))
             .unwrap();
-        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         assert_eq!(fixture.intent().due_at, None);
         fixture
             .store
@@ -88,7 +89,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
             .execute("UPDATE task_retirements SET due_at=NULL", [])
             .unwrap();
         fixture.due();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         assert!(!fixture.checkout.exists());
         assert!(
             shell.0.try_wait().unwrap().is_none(),
@@ -123,7 +124,7 @@ fn retirement_lost_viewers_and_crashed_owners_expire_without_reopening() {
                 .sql()
                 .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&owner])
                 .unwrap();
-            assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+            advance(&fixture.store, &fixture.task).await.unwrap();
             assert!(!fixture.checkout.exists());
         }
     });
@@ -164,12 +165,12 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
         fixture.sql().execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('final-turn',?1,1,1,0,0)", [&agent]).unwrap();
         for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
             fixture.sql().execute("UPDATE session_activity SET open_tools=?1,pending_input=?2,yielded=?3", params![tools,pending,yielded]).unwrap();
-            assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+            advance(&fixture.store, &fixture.task).await.unwrap();
             fixture.assert_retained();
         }
         fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
         assert!(fixture.store.sqlite.try_record_owner_input(&agent, b"unfinished draft").unwrap());
-        assert!(!advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         fixture.store.sqlite.clear_owner_input(&agent).unwrap();
         worker.0.kill().unwrap();
         worker.0.wait().unwrap();
@@ -179,10 +180,10 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
         assert!(error.to_string().contains("without confirmed job cleanup"));
         fixture.assert_retained();
         fixture.store.sqlite.settle_shell_jobs(&shell).unwrap();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
         assert!(!fixture.checkout.exists());
         assert_eq!(fixture.intent().phase, "retired");
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
     });
 }
 
@@ -198,6 +199,12 @@ fn git(repo: &Path, args: &[&str]) -> String {
 
 impl Workspace {
     async fn new() -> Self {
+        Self::with_store(None).await
+    }
+
+    async fn with_store(existing: Option<SharedStore>) -> Self {
+        let id = TaskId::new();
+        let branch = format!("completed-{id}");
         let repo = TestRepo::new();
         let directory = tempfile::tempdir().unwrap();
         let checkout = directory.path().canonicalize().unwrap().join("checkout");
@@ -209,30 +216,28 @@ impl Workspace {
         );
         git(
             repo.path(),
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "completed",
-                checkout.to_str().unwrap(),
-            ],
+            &["worktree", "add", "-b", &branch, checkout.to_str().unwrap()],
         );
-        git(repo.path(), &["push", "origin", "completed"]);
+        git(repo.path(), &["push", "origin", &branch]);
         let head = repo.head_sha();
         let database = directory.path().join("loopflow.db");
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-                .await
-                .unwrap(),
-        );
+        let store = match existing {
+            Some(store) => store,
+            None => Arc::new(
+                crate::store::open_ephemeral_store(&StorageConfig::sqlite(database))
+                    .await
+                    .unwrap(),
+            ),
+        };
         let repository = store
             .sqlite
             .ensure_repository(repo.path().to_str().unwrap())
             .unwrap();
-        let id = TaskId::new();
-        let conn = rusqlite::Connection::open(database).unwrap();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,worktree,branch,workspace_slug,base_commit,planning_completed,planning_completed_at) VALUES(?1,?2,'RETIRE-1','Retire workspace','',1,1,?3,'completed','completed',?4,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),checkout.to_str().unwrap(),head]).unwrap();
-        conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES('pr-retirement',?1,1,'completed','completed',?2,1,1,'https://example.test/pull/1',?2,?2,1,1)", params![id.as_str(),head]).unwrap();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,worktree,branch,workspace_slug,base_commit,planning_completed,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,?5,?5,?4,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),checkout.to_str().unwrap(),head,branch]).unwrap();
+            conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES(?1,?1,1,?3,?3,?2,1,1,'https://example.test/pull/1',?2,?2,1,1)", params![id.as_str(),head,branch]).unwrap();
+        }
         let task = store.get_task(&id).await.unwrap().unwrap();
         std::fs::write(checkout.join("discard-me"), "uncommitted work").unwrap();
         Self {
@@ -240,13 +245,14 @@ impl Workspace {
             _directory: directory,
             checkout,
             remote,
+            branch,
             store,
             task,
         }
     }
 
-    fn sql(&self) -> rusqlite::Connection {
-        rusqlite::Connection::open(self._directory.path().join("loopflow.db")).unwrap()
+    fn sql(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.store.sqlite.conn.lock().unwrap()
     }
 
     /// A Task Session whose live serving owner records its viewers' hold.
@@ -292,11 +298,11 @@ impl Workspace {
         assert!(self.checkout.join("discard-me").exists());
         assert!(!git(
             self.repo.path(),
-            &["ls-remote", "--heads", "origin", "completed"]
+            &["ls-remote", "--heads", "origin", &self.branch]
         )
         .is_empty());
         assert_eq!(
-            git(self.repo.path(), &["rev-parse", "completed"]),
+            git(self.repo.path(), &["rev-parse", &self.branch]),
             self.repo.head_sha()
         );
     }
@@ -326,10 +332,7 @@ fn retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion() {
             } else {
                 fixture.session_owner("returned", Some(ViewerHold::Viewed(now())));
             }
-            assert_eq!(
-                advance(&fixture.store, &fixture.task).await.unwrap(),
-                reopen
-            );
+            advance(&fixture.store, &fixture.task).await.unwrap();
             fixture.assert_retained();
             let intent = fixture
                 .store
@@ -357,11 +360,26 @@ fn retirement_retries_after_remote_deletion_and_worktree_failure() {
             fixture.repo.path(),
             &["worktree", "lock", fixture.checkout.to_str().unwrap()],
         );
-        let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
+        let other = Workspace::with_store(Some(fixture.store.clone())).await;
+        other.due();
+        let tasks = vec![fixture.task.id.clone(), other.task.id.clone()];
+        let error = sweep(&fixture.store, &tasks).await.unwrap_err();
+        assert!(
+            !other.checkout.exists(),
+            "one failure starved the next Task"
+        );
+        let failed = fixture.intent();
+        assert_eq!(failed.failures, 1);
+        assert!(failed.retry_at.unwrap() >= now() + 59);
+        assert!(failed.reason.unwrap().contains("locked"));
+        // The next invocation observes backoff without changing the absence deadline.
+        sweep(&fixture.store, &tasks).await.unwrap();
+        assert_eq!(fixture.intent().failures, 1);
+        assert_eq!(fixture.intent().due_at, failed.due_at);
         assert!(error.to_string().contains("locked"), "{error}");
         assert!(git(
             fixture.repo.path(),
-            &["ls-remote", "--heads", "origin", "completed"]
+            &["ls-remote", "--heads", "origin", &fixture.branch]
         )
         .is_empty());
         assert!(fixture.checkout.join("discard-me").exists());
@@ -383,9 +401,14 @@ fn retirement_retries_after_remote_deletion_and_worktree_failure() {
             fixture.repo.path(),
             &["worktree", "unlock", fixture.checkout.to_str().unwrap()],
         );
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        fixture
+            .sql()
+            .execute("UPDATE task_retirements SET retry_at=0", [])
+            .unwrap();
+        let pending = fixture.store.sqlite.pending_retirements().unwrap();
+        sweep(&fixture.store, &pending).await.unwrap();
         assert!(!fixture.checkout.exists());
-        assert!(git(fixture.repo.path(), &["branch", "--list", "completed"]).is_empty());
+        assert!(git(fixture.repo.path(), &["branch", "--list", &fixture.branch]).is_empty());
         assert!(fixture.repo.path().join(".git").exists());
         assert!(fixture
             .store
@@ -393,6 +416,36 @@ fn retirement_retries_after_remote_deletion_and_worktree_failure() {
             .await
             .unwrap()
             .is_some());
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
+        advance(&fixture.store, &fixture.task).await.unwrap();
+    });
+}
+
+#[test]
+fn retirement_sweep_empty_queue_and_interrupted_close_are_finite() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_retirements()
+            .unwrap()
+            .is_empty());
+        sweep(&fixture.store, &[]).await.unwrap();
+        fixture.due();
+        fixture
+            .store
+            .sqlite
+            .retirement_progress(&fixture.intent(), "closing", None)
+            .unwrap();
+        let pending = fixture.store.sqlite.pending_retirements().unwrap();
+        sweep(&fixture.store, &pending).await.unwrap();
+        assert!(!fixture.checkout.exists());
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_retirements()
+            .unwrap()
+            .is_empty());
     });
 }

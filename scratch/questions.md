@@ -5,6 +5,34 @@ contract is [shell lifetimes](loo-717-shell-lifetimes.md). Task remains feature/
 shipping, installation, live-store migration and credentials changes are outside
 this request. No product question is open.
 
+## November 6 follow-up — accepted scheduled cleanup and generic launch
+
+Jack Heart accepted one minute-based OS cleanup sweep per Machine, with the
+existing retirement rows as its durable queue, replacing the waiting process per
+Task. Eligibility normally begins in 15–16 minutes while awake; existing viewer,
+work and Git safeguards remain. Each invocation exits; later invocations recover
+interrupted work and retry failures with backoff. This includes the previously
+deferred retry finding. Reuse installation's launchd/cron approach without combining
+the updater and cleanup jobs. The development run must not register a live schedule.
+
+Jack also accepted a generic shell-launch boundary with Desktop explicitly
+supplying Ghostty integration. Reuse existing scripts and terminal conventions;
+remove hard-coded Ghostty bootstrap selection from shared Task shell launching.
+No new shell integration implementation or host registry. Preserve remote startup,
+command blocks, LF availability and identity; reconnect never replays bootstrap.
+
+The authoritative contract contains the deletion list and verification cases.
+Continue the existing feature graph from implement through sync and publication
+to demo review, using Codex. Earlier transport validation does not validate these
+new changes. No ship, installation or live-store migration approval is implied.
+
+Implementation choices, November 6: retry delay starts at sixty seconds, doubles
+per cleanup failure and caps at one hour. A returning viewer clears retry state;
+absence timing stays separate. The account's normal installation provisions the
+schedule; alternate HOME or LF_HOME skips account-wide registration. Desktop sends
+a generic JSON startup script plus relative UTF-8 resources, materialized under
+a content-addressed destination cache. Reattachment ignores creation inputs.
+
 ## November 6 — one viewer protocol
 
 Jack Heart selected option 1 after reviewing alternatives: remove the added
@@ -26,8 +54,8 @@ The existing `Controlled` query supplies the ten-second liveness pulse on an
 attached connection; unattached control probes refresh no viewer. This keeps
 one protocol and adds no message an already-running owner cannot decode.
 
-The separate cleanup-error retry finding remains for review in the contract's
-remaining-work section. The historical PR walkthrough at
+The later scheduled-cleanup decision above includes the cleanup-error retry repair.
+The historical PR walkthrough at
 `scratch/pr-review.html` describes the prior published head
 `a1067c99cc`, not this replacement.
 
@@ -46,8 +74,9 @@ window after expiry, and no automatic deleted-checkout restoration.
 
 The repair removes shell holds and indefinite unknown viewing. Dated evidence
 on existing Session owners and the shared viewer heartbeat bound disconnects.
-The cleanup executor observes owner disappearance even while a Task is
-viewed. A quick reconnect/leave between cleanup observations starts a new window.
+The earlier cleanup executor observes owner disappearance even while a Task is
+viewed; the accepted sweep must preserve that behavior. A quick reconnect/leave
+between cleanup observations starts a new window.
 Desktop Quit delivers the existing leave input and waits briefly for relay exit.
 Tests/builds and native proof limits are recorded in the design.
 
@@ -81,4 +110,4 @@ bounded disconnected absence and the single viewer protocol across SSH. Earlier
 credential failures and the proposed memory correction remain at
 `d5cab9ba60:scratch/questions.md`; they add no remaining implementation work.
 The current plan separates implemented transport, inherited focused checks,
-cleanup-error retry limits and the native demonstration still owed.
+scheduled cleanup verification and the native demonstration still owed.

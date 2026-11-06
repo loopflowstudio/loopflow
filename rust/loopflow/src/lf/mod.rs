@@ -2136,13 +2136,16 @@ until `lf ship`."
         /// End this shell and its ordinary jobs
         #[arg(long)]
         close: bool,
+        /// Host startup JSON (script and relative UTF-8 files); applied only at creation
+        #[arg(long, requires = "create")]
+        bootstrap: Option<String>,
         /// Initial command, followed by the destination login shell
         #[arg(last = true)]
         command: Vec<String>,
     },
-    /// Run the Task's recorded workspace retirement
+    /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
-    Retire { issue: String },
+    Retire { issue: Option<String> },
     /// Stream invalidations from an existing Task checkout (JSON lines)
     WatchFiles {
         issue: String,
@@ -2296,12 +2299,12 @@ impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Retire { issue }
-            | Self::Shell { issue, .. }
+            Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2325,12 +2328,12 @@ impl TaskCommand {
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Retire { issue }
-            | Self::Shell { issue, .. }
+            Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }

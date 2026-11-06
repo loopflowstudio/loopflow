@@ -143,6 +143,12 @@ unless a cadence is already installed, so a Machine stays on its stream unasked.
 [Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
 install adds the line back.
 
+Installation also provisions a separate minute-based cleanup job: `lf task retire`
+reads completed Tasks' local retirement queue and exits after one pass. It pins
+the installed executable and Machine home; alternate HOME or LF_HOME skips
+account-wide scheduling. Cleanup does not update LF, and the updater does not
+execute cleanup. See [Task shell cleanup](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
+
 The installed Loopflow.app updates itself through Sparkle from its stream's
 appcast. `dev` has no appcast and runs no updater: each `lf install --dev`
 replaces the app itself, quitting and reopening it when it runs. Publishing writes `appcast-preview.xml`;

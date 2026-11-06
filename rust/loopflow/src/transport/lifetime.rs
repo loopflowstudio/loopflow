@@ -25,7 +25,7 @@ use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 use crate::store::sqlite::sessions::OwnerRetention;
-use crate::store::sqlite::{SqliteStore, ViewerHold};
+use crate::store::sqlite::ViewerHold;
 use crate::store::RecordingGap;
 
 /// How often an owner looks at the clock.
@@ -164,19 +164,6 @@ impl Grace {
     }
 }
 
-/// Record this owner's checkout hold; a release wakes waiting Task cleanup.
-pub(super) fn record_hold(
-    store: &SqliteStore,
-    owner: &LfProcessId,
-    hold: Option<ViewerHold>,
-) -> Result<()> {
-    store.record_owner_viewer_hold(owner, hold)?;
-    if !matches!(hold, Some(ViewerHold::Viewed(_))) {
-        crate::ops::task::retirement::wake_released(store, owner)?;
-    }
-    Ok(())
-}
-
 fn watch(
     owner: &LfProcessId,
     terminal: bool,
@@ -239,7 +226,7 @@ fn watch(
             && report_result(
                 &mut hold_failure,
                 "Session viewer hold",
-                record_hold(store, owner, hold),
+                store.record_owner_viewer_hold(owner, hold),
             )
             .is_some()
         {

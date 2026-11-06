@@ -31,7 +31,9 @@ CREATE TABLE task_retirements (
     branch TEXT NOT NULL,
     due_at INTEGER,
     phase TEXT NOT NULL CHECK(phase IN ('waiting','closing','retired')),
-    reason TEXT
+    reason TEXT,
+    retry_at INTEGER,
+    failures INTEGER NOT NULL DEFAULT 0
 );
 CREATE TRIGGER store_revision_task_retirements_insert AFTER INSERT ON task_retirements BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';

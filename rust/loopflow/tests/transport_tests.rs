@@ -4221,8 +4221,53 @@ impl Drop for ShellOwnerGuard<'_> {
     }
 }
 
+fn desktop_shell_bootstrap() -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../swift/LoopflowMac/GhosttyResources/share/ghostty");
+    let mut files = std::collections::BTreeMap::new();
+    for (destination, source) in [
+        (".zshenv", "task-zshenv"),
+        ("bash-env", "task-bash-env"),
+        (
+            "ghostty/shell-integration/zsh/.zshenv",
+            "shell-integration/zsh/.zshenv",
+        ),
+        (
+            "ghostty/shell-integration/zsh/ghostty-integration",
+            "shell-integration/zsh/ghostty-integration",
+        ),
+        (
+            "ghostty/shell-integration/bash/ghostty.bash",
+            "shell-integration/bash/ghostty.bash",
+        ),
+        (
+            "ghostty/shell-integration/bash/bash-preexec.sh",
+            "shell-integration/bash/bash-preexec.sh",
+        ),
+        (
+            "ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+            "shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+        ),
+    ] {
+        files.insert(
+            destination.to_owned(),
+            std::fs::read_to_string(root.join(source)).unwrap(),
+        );
+    }
+    serde_json::to_string(&loopflow::ops::task::workspace::ShellBootstrap {
+        script: std::fs::read_to_string(root.join("task-shell.sh")).unwrap(),
+        files,
+    })
+    .unwrap()
+}
+
 #[test]
 fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
+    shell_reconnects_and_settles(false);
+    shell_reconnects_and_settles(true);
+}
+
+fn shell_reconnects_and_settles(integrated: bool) {
     let fixture = Fixture::new();
     let task = "task_5e55105e000040008000000000000005";
     fixture.shell_task(task);
@@ -4240,9 +4285,12 @@ fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
         "--id",
         "desktop-shell",
     ];
-    let mut launch = fixture
-        .command(&base)
-        .arg("--create")
+    let mut command = fixture.command(&base);
+    command.arg("--create");
+    if integrated {
+        command.args(["--bootstrap", &desktop_shell_bootstrap()]);
+    }
+    let mut launch = command
         .args([
             "--",
             "/bin/sh",
@@ -4266,6 +4314,22 @@ fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
     launch.wait().unwrap();
     viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
     until_out(&mut viewer, "state-ready");
+    viewer.input(
+        "printf 'integration:%s\\n' \"${GHOSTTY_RESOURCES_DIR-unset}\" > \"$HOME/integration\"\r",
+    );
+    let integration = fixture.wait_file("integration");
+    viewer.input("command -v lf > \"$HOME/lf-path\"; printf '%s\\n' \"$LF_TERMINAL_ID\" > \"$HOME/terminal-id\"\r");
+    assert_eq!(
+        fixture.wait_file("lf-path").trim(),
+        env!("CARGO_BIN_EXE_lf")
+    );
+    assert_eq!(fixture.wait_file("terminal-id").trim(), "desktop-shell");
+    if integrated {
+        assert!(integration.contains("shell-resources"), "{integration}");
+    } else {
+        assert_eq!(integration.trim(), "integration:unset");
+        assert!(!fixture.home.path().join("shell-resources").exists());
+    }
     let job = fixture
         .wait_file("job")
         .trim()

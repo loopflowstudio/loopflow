@@ -2587,7 +2587,7 @@ esac
         due_at,
         "repeated landing must preserve the completion's deadline"
     );
-    // No viewer holds the checkout: once its grace elapses the executor retires it.
+    // No viewer holds the checkout: once its grace elapses a scheduled pass retires it.
     database
         .execute("UPDATE task_retirements SET due_at=unixepoch()-1", [])
         .unwrap();
@@ -2601,10 +2601,6 @@ esac
         "{}",
         String::from_utf8_lossy(&retired.stderr)
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while worktree.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
     assert!(
         !worktree.exists(),
         "pending retirement: {:?}",

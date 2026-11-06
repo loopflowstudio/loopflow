@@ -1942,7 +1942,7 @@ fn run() -> anyhow::Result<()> {
             cmd: TaskCommand::Retire { issue },
         }) => {
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
+            return loopflow::ops::task::retirement::run(issue.as_deref()).map_err(Into::into);
         }
         Some(Commands::Task {
             cmd:
@@ -1954,6 +1954,7 @@ fn run() -> anyhow::Result<()> {
                     create,
                     close,
                     command,
+                    bootstrap,
                 },
         }) => {
             if *list {
@@ -1969,6 +1970,7 @@ fn run() -> anyhow::Result<()> {
                 *create,
                 *close,
                 command,
+                bootstrap.as_deref(),
             );
         }
         Some(Commands::Task {

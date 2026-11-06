@@ -5,7 +5,88 @@ protocol across SSH and remove the additional remote terminal relay. Implementat
 and review publication are authorized; shipping, installation and live-store
 migration are not. The existing feature graph returns to demo review after this
 revision. The replacement is implemented at `f86a9a3e6`, integrated with main at
-`d5cab9ba60`. The earlier repair at `a1067c99cc` is historical.
+`d5cab9ba60`. The earlier repair at `a1067c99cc` is historical. Jack subsequently
+accepted the scheduled cleanup and generic shell-launch revisions below; those
+are implemented in the working tree, with focused verification complete and
+the same review/publication boundary.
+
+## Accepted follow-up — scheduled cleanup and shell launch
+
+Jack Heart accepted this direction on November 6 after questioning the cost of
+one retirement process per Task and Ghostty coupling in the Task shell bootstrap.
+
+### One scheduled sweep per Machine
+
+Use the existing SQLite retirement rows as the durable cleanup queue. A single
+OS-scheduled command per Machine runs once a minute, reconciles pending retirements,
+attempts eligible cleanup and exits. There is no sleeping per-Task worker or
+resident replacement daemon. Reuse the launchd/cron scheduling approach already
+used by installation, keeping cleanup's job and purpose distinct from updating LF.
+Keep the installed binary and Machine data directory pinned in the job. Disposable
+homes/tests must never replace the account's real schedule.
+
+The fifteen-minute absence deadline remains authoritative; a minute cadence means
+eligible cleanup normally begins in 15–16 minutes while the Machine is running.
+After sleep/reboot, the next scheduled invocation evaluates overdue rows from
+wall-clock timestamps. Slow job settlement or protected work may delay deletion.
+Completion records pending cleanup; viewer release records dated absence. Neither
+starts a dedicated retirement process. The sweep must also reconcile retained
+rows without a due time so a crashed viewing owner cannot retain a checkout forever.
+
+Each pass rechecks completion identity, viewer evidence, work/drafts/requests,
+shell settlement and existing Git safeguards. Return cancels queued cleanup;
+reopening or changing the checkout/completion revokes the old intent. If owners
+are still closing, persist that phase and finish on a later sweep, without waiting
+in a two-second loop. Keep runs serialized and effects repeatable; one failed Task
+must not prevent processing other pending Tasks. Persist failure reasons and retry
+eligible failures with backoff, separately from the absence deadline. Interrupted
+passes remain recoverable on the next scheduled invocation. Do not repeatedly
+query providers or scan all repositories when the local queue has no work.
+
+This explicitly resolves the previously deferred cleanup-worker retry finding.
+Implement schedule provisioning in the normal Machine installation/setup path;
+validate it with isolated fixtures. This development run does not install/register
+a real job on Jack's Machine or migrate its live store. Report missing scheduler
+support rather than silently restoring the removed per-Task process.
+
+### Generic launch, Desktop-owned shell integration
+
+Separate shell execution/lifetime from terminal-host integration. The shared Task
+shell launcher accepts ordinary launch inputs and does not unconditionally select
+Ghostty, materialize its scripts, or reach into the Swift app's resource tree.
+Desktop explicitly supplies/selects its existing Ghostty shell integration through
+the launch boundary; transport carries the needed launch inputs/resources to the
+recorded Machine rather than forwarding a caller-local filesystem path.
+
+Reuse the maintained integration scripts and their prompt/command/cwd markers.
+Do not write a competing shell integration or add a generic plugin/host registry.
+The generic path must work without Ghostty-specific environment or startup changes.
+Preserve personal login startup, literal initial argv, selected LF availability,
+terminal identity, command blocks and remote reconnect semantics. Integration is
+applied on shell creation, never by replaying startup on reattachment. Rex still
+owns its ordinary shells and their integration; LF adds no Rex-shell ownership.
+
+### Delete — do not maintain
+
+Removed: `retirement::start`, its executor loop and executor-only locks;
+`lifetime::record_hold` and viewer-release process launching; `transport/remote.rs`
+and `SessionCommand::Remote`; Rust's `workspace-bash-env` / `workspace-zshenv`;
+Swift's `LoopflowZshBootstrap` and `buildWorkspaceShellCommand`.
+The finite sweep returns only success/failure; its former finished-worker boolean
+is gone. Tests inspect checkout and queue state. No deletion target remains.
+
+Verification obligations for the surviving paths:
+
+The sweep retains cleanup intent, effect serialization, final rechecks and
+explicit cleanup commands. Scheduled-pass tests cover many Tasks sharing one
+schedule, prompt empty-queue exit, returning viewers and active work, expired/dead
+viewers, interrupted/partial deletion, retry/backoff and failure isolation.
+
+Desktop owns its integration scripts; shared shell creation selects no Ghostty
+bootstrap. Generic creation, Desktop command/cwd integration and local/loopback-SSH
+reattachment must preserve PID/state without reapplying integration. Keep one
+unreleased migration, the shared viewer protocol and existing cleanup safeguards.
+Sync, focused verification, publication and demo review remain the delivery path.
 
 ## Accepted experience
 
@@ -72,7 +153,7 @@ protected work permits. A second connected viewer keeps the checkout throughout.
 | Hide a still-open native view | Same connection | No host focus report |
 | Open a shell | Shell execution receipt | task shell create/attach/Close; no checkout hold |
 | Leave or lose the last connection | Dated absence | Serving Process viewer evidence |
-| Complete and leave | One pinned retirement | Task completion/checkout/branch; existing executor |
+| Complete and leave | One pinned retirement | Task completion/checkout/branch; scheduled Machine sweep |
 | Cleanup becomes eligible | Owned execution and Git resources | Work checks, Desktop shell settlement, Git safeguards |
 
 The owner's existing Process stores `viewer_hold` (`viewed` / `absent`) and
@@ -84,11 +165,12 @@ unviewed owner preserves its absence timestamp instead of restarting cleanup.
 A fresh unrelated viewer never erases uncertainty into immediate deletion:
 connected viewing holds, then its later departure starts the normal absence window.
 
-The retirement executor also observes while a completed Task is viewed, so owner
-crash needs no new app launch to restart cleanup. Dated absence supplies the
-existing deadline; new viewing cancels queued retirement and shell closes.
-Unchanged observation must not churn store revisions. Final deletion rechecks
-retention and pinned completion/checkout identity.
+The scheduled sweep reconciles pending cleanup even while a completed Task is
+viewed, so owner crash needs no new app launch. Dated absence supplies the existing
+deadline; new viewing cancels queued retirement and shell closes. Unchanged
+observation must not churn store revisions. Final deletion rechecks retention and
+pinned completion/checkout identity. The previously published per-Task executor
+is superseded by the accepted follow-up above.
 
 ### Accepted transport revision — November 6
 
@@ -178,21 +260,62 @@ Return after deletion shows history without reconstructing a checkout or replayi
 commands. Ordinary Rex shells remain outside LF's closure policy in every case.
 
 The existing transport and Desktop usage docs describe these actions consistently;
-no skill instruction needs a new concept. The cleanup-error retry finding below
-remains separate from the transport decision and is not resolved by this review.
+no skill instruction needs a new concept. This review did not resolve cleanup-error
+retry; Jack's subsequent scheduled-sweep decision above now includes that repair.
 Next proof remains the affected gate and native demo already listed below,
 especially orderly Quit delivery and repeated reconnect/Close with survivor
 inspection. This was source review; no runtime or native checks were rerun.
 
-## Remaining implementation finding
+## Scheduled cleanup and generic launch — November 6 implementation
 
-`ops/task/retirement.rs::run` records a cleanup error and returns. A later
-retirement invocation can retry, but no automatic retry follows from that error.
-`retirement_retries_after_remote_deletion_and_worktree_failure` manually invokes
-`advance` again; it proves repeatability, not unattended recovery. This is the
-separate finding retained for review in the November 6 direction. Automatic retry
-remains unimplemented and must not be reported as covered by the consolidated
-settlement test. No product decision is needed for the accepted transport revision.
+The per-Task detached worker, executor lock, two-second loop and viewer-release
+spawn path are removed. `task retire [task]` runs one finite pass over the existing
+queue, including held rows. A Machine lock serializes sweeps; existing Task locks
+serialize effects with reopen/completion. Pending shell closes continue on later
+passes. Errors record their reason and exponential retry deadline (60 seconds,
+up to one hour), independently of absence; another Task still runs. Return clears
+retry state. The same unreleased migration owns the final queue fields.
+
+Normal installation/adoption provisions a separate `com.loopflow.cleanup` launchd
+job or marked cron entry, every minute, with the installed binary and Machine
+home pinned. Disposable HOME/LF_HOME never replaces account schedules. No live
+schedule, installed app or live-store migration was performed in this run.
+Linux renders both distinct jobs into one crontab update, sharing path quoting;
+launchd shares plist path escaping. The final sweep recheck reads viewing and
+pinned completion/placement together instead of querying the intent twice.
+
+`workspace.rs` no longer selects Ghostty or embeds Swift resources. Its optional
+bootstrap input is a script and relative UTF-8 resource contents. Desktop packages
+its maintained scripts from GhosttyResources; the destination materializes a
+content-addressed resource directory. Only creation evaluates it. Existing
+Desktop-specific wrappers moved out of Rust into Desktop resources; the core
+keeps terminal identity, login shell and literal initial argv.
+
+The earlier manual retry check is replaced by a scheduled-pass test that records
+backoff after partial Git deletion, lets another Task complete, then recovers on a
+later pass without replaying the completed remote deletion. Empty queue,
+interrupted close, backoff reset, schedule idempotence/isolation and final-schema
+upgrade have focused checks. Local and loopback-SSH shell tests carry the real
+Desktop scripts and retain generic no-integration coverage. Gate and native demo
+remain separate from these focused checks.
+
+Focused follow-up verification (November 6; fixture commands cleared inherited
+`LF_*`, no live installation or store migration):
+
+- `scripts/check_migrations.py` — passed; one final draft migration.
+- `cargo nextest run -p loopflow --lib -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(cleanup_schedule_) | test(launchd_schedule_preserves_frequency) | test(task_workspace_upgrade_)'` — 17 passed. An initial fixture branch collision was corrected before this pass.
+- `cargo build -p loopflow --bin lf --jobs 4` — passed.
+- `cargo test -p loopflow --test transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs` — passed, both generic and Desktop bootstrap variants; selected LF, terminal identity, literal argv, retained state and settled jobs.
+- `cargo test -p loopflow --test transport_tests ssh_shells::ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets -- --ignored --test-threads=1` — passed, twenty real loopback-SSH cycles (111.28 s) carrying Desktop resource bytes, reconnecting and settling processes/PTYs/sockets.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'GhosttyShellBlockTests|WorkDestinationTests'` — app/FFI built; 66 headless tests passed. Existing Swift warnings and the Rust test linker's compact-unwind warning remain unchanged.
+- `lf task retire` in a disposable Machine home outside a repository — passed with an empty queue in 0.15 s.
+- `scripts/check_architecture.py`, `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` — passed. Clippy's fixture mutex-scope finding was fixed. Gate owns the broader affected suites and demo owns native Desktop/Rex and physical remote-Machine checks.
+
+Compression verification (November 6; inherited `LF_*` cleared for tests):
+
+- `cargo nextest run -p loopflow --lib --build-jobs 4 --test-threads 4 -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(lf::commands::install::published::tests::) | test(transport::lifetime::tests::)'` — 35 passed; existing macOS compact-unwind linker warning.
+- `cargo nextest run -p loopflow --lib --build-jobs 4 --test-threads 4 -E 'test(ops::task::retirement::tests::) | test(store::sqlite::task_retirement::tests::) | test(cleanup_schedule_)'` — 15 passed after the final query/import edits.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed, including FFI. Broader gate and native demo retain their owners below.
 
 ## Related work
 

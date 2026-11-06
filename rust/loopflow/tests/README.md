@@ -82,8 +82,14 @@ reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
 Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
-holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and retry after
-partial Git deletion with disposable worktrees and a bare remote.
+holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and
+scheduled retry after partial Git deletion with disposable worktrees and a bare
+remote. Scheduled-pass tests cover interrupted closing, retry/backoff, an empty
+queue and failure isolation across Tasks. Installation schedule fixtures use fake
+launchctl and disposable files; never register a real cleanup job for a test.
+Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
+public CLI, then reattach without replay. The generic local case has no Ghostty
+resources or environment.
 `session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
 records a real owner's hold through leave, reconnect grace and connection loss.
 `viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under

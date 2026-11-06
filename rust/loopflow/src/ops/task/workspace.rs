@@ -1,5 +1,5 @@
 //! Retained-checkout companions. Neither operation prepares or starts Task work.
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, ensure, Result};
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{file_context, file_store};
 use crate::durable::{MachineId, TaskId};
@@ -70,6 +71,7 @@ pub fn task_shell(
     create: bool,
     close: bool,
     initial: &[String],
+    bootstrap: Option<&str>,
 ) -> Result<()> {
     let store = crate::journal::process_ledger()?;
     // Only creation requires the recorded directory to exist. Existing receipts
@@ -77,8 +79,8 @@ pub fn task_shell(
     // launches execution, including when concurrent creation loses its reply.
     if create && store.task_shell(id)?.is_none() {
         let checkout = pinned_checkout(issue, expected)?;
+        let argv = shell_command(id, initial, bootstrap)?;
         if store.create_task_shell(id, &checkout.task_id, &expected.to_string_lossy())? {
-            let argv = shell_command(id, initial)?;
             crate::transport::start(&argv, true, expected, &|command| {
                 command.env("LF_DESKTOP_SHELL", id);
             })?;
@@ -112,25 +114,41 @@ pub fn task_shell(
     crate::transport::attach(&owner, None, None)
 }
 
-fn shell_command(id: &str, initial: &[String]) -> Result<Vec<String>> {
-    let bootstrap = crate::store::lf_home_dir().join("shell-integration");
-    // Embed the same pinned shell integration Desktop ships, so remote owners
-    // need no app bundle or caller-local resource path. Publish each file whole.
-    for (name, contents) in [
-        (".zshenv", include_str!("workspace-zshenv")),
-        ("bash-env", include_str!("workspace-bash-env")),
-        ("ghostty/shell-integration/zsh/.zshenv", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/.zshenv")),
-        ("ghostty/shell-integration/zsh/ghostty-integration", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/ghostty-integration")),
-        ("ghostty/shell-integration/bash/ghostty.bash", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/bash/ghostty.bash")),
-        ("ghostty/shell-integration/bash/bash-preexec.sh", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/bash/bash-preexec.sh")),
-        ("ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish", include_str!("../../../../../swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish")),
-    ] {
-        let destination = bootstrap.join(name);
-        if std::fs::read_to_string(&destination).ok().as_deref() == Some(contents) { continue; }
-        std::fs::create_dir_all(destination.parent().expect("resource has a directory"))?;
-        let temporary = destination.with_extension(format!("{}.draft", uuid::Uuid::new_v4()));
-        std::fs::write(&temporary, contents)?;
-        std::fs::rename(&temporary, &destination)?;
+/// Host-supplied startup code and its relative UTF-8 resources. Carried as JSON
+/// through Machine routing; no caller-local path is interpreted on the destination.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ShellBootstrap {
+    pub script: String,
+    pub files: BTreeMap<String, String>,
+}
+
+fn shell_command(id: &str, initial: &[String], bootstrap: Option<&str>) -> Result<Vec<String>> {
+    let mut script = String::new();
+    let mut resources = String::new();
+    if let Some(payload) = bootstrap {
+        let bootstrap: ShellBootstrap = serde_json::from_str(payload)?;
+        let directory = crate::store::lf_home_dir()
+            .join("shell-resources")
+            .join(format!("{:x}", Sha256::digest(payload.as_bytes())));
+        for (name, contents) in bootstrap.files {
+            ensure!(
+                !name.is_empty()
+                    && Path::new(&name)
+                        .components()
+                        .all(|part| matches!(part, std::path::Component::Normal(_))),
+                "Shell resource must be a relative file: {name}"
+            );
+            let destination = directory.join(name);
+            if std::fs::read_to_string(&destination).ok().as_deref() == Some(&contents) {
+                continue;
+            }
+            std::fs::create_dir_all(destination.parent().expect("resource has a directory"))?;
+            let temporary = destination.with_extension(format!("{}.draft", uuid::Uuid::new_v4()));
+            std::fs::write(&temporary, contents)?;
+            std::fs::rename(temporary, destination)?;
+        }
+        script = bootstrap.script;
+        resources = directory.to_string_lossy().into_owned();
     }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let mut argv = vec![
@@ -139,7 +157,8 @@ fn shell_command(id: &str, initial: &[String]) -> Result<Vec<String>> {
         include_str!("workspace-shell.sh").into(),
         id.into(),
         shell,
-        bootstrap.to_string_lossy().into_owned(),
+        script,
+        resources,
     ];
     argv.extend_from_slice(initial);
     Ok(argv)

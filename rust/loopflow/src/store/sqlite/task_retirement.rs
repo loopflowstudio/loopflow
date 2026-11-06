@@ -43,6 +43,8 @@ pub struct TaskRetirement {
     pub due_at: Option<i64>,
     pub phase: String,
     pub reason: Option<String>,
+    pub retry_at: Option<i64>,
+    pub failures: u32,
 }
 
 impl SqliteStore {
@@ -98,23 +100,23 @@ impl SqliteStore {
         .collect()
     }
 
-    /// Done Tasks whose waiting cleanup this owner's release may unblock.
-    pub(crate) fn owner_waiting_retirements(
-        &self,
-        owner: &LfProcessId,
-    ) -> StoreResult<Vec<TaskId>> {
+    pub(crate) fn pending_retirements(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT r.task_id FROM task_retirements r WHERE r.phase!='retired' AND
-                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.transport_lf_process_id=?1 AND s.id IN ({}))",
-            super::task_work::session_ids("r.task_id")
-        ))?;
-        let rows = query
-            .query_map([owner.as_str()], |r| {
-                Ok(TaskId::from_raw(r.get::<_, String>(0)?))
-            })?
+        let mut query = conn.prepare(
+            "SELECT task_id FROM task_retirements WHERE phase!='retired' ORDER BY task_id",
+        )?;
+        let tasks = query
+            .query_map([], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        Ok(rows)
+        Ok(tasks)
+    }
+
+    pub(crate) fn fail_retirement(&self, task: &TaskId, now: i64, reason: &str) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE task_retirements SET reason=?3,retry_at=?2+MIN(3600,60*(1 << MIN(failures,6))),failures=failures+1
+             WHERE task_id=?1 AND phase!='retired' AND due_at IS NOT NULL",
+            params![task.as_str(), now, reason])?;
+        Ok(())
     }
 
     /// `hold` names why a viewer still retains the checkout. Holds clear any
@@ -148,8 +150,8 @@ impl SqliteStore {
                     hold_retirement(&tx, task, None)?;
                 }
                 tx.execute(
-                    "UPDATE task_retirements SET due_at=COALESCE(due_at,?2+?3),reason=NULL
-                     WHERE task_id=?1 AND phase='waiting' AND (due_at IS NULL OR reason IS NOT NULL)",
+                    "UPDATE task_retirements SET due_at=?2+?3,reason=NULL
+                     WHERE task_id=?1 AND phase='waiting' AND due_at IS NULL",
                     params![task.as_str(), absent_since.unwrap_or(now), WORKSPACE_GRACE],
                 )?;
             }
@@ -163,7 +165,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT task_id,completion,checkout,branch,due_at,phase,reason
+                "SELECT task_id,completion,checkout,branch,due_at,phase,reason,retry_at,failures
                  FROM task_retirements WHERE task_id=?1",
                 [task.as_str()],
                 |r| {
@@ -175,6 +177,8 @@ impl SqliteStore {
                         due_at: r.get(4)?,
                         phase: r.get(5)?,
                         reason: r.get(6)?,
+                        retry_at: r.get(7)?,
+                        failures: r.get(8)?,
                     })
                 },
             )
@@ -208,7 +212,7 @@ fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> St
         [task.as_str()],
     )?;
     conn.execute(
-        "UPDATE task_retirements SET due_at=NULL,phase='waiting',reason=?2
+        "UPDATE task_retirements SET due_at=NULL,phase='waiting',reason=?2,retry_at=NULL,failures=0
          WHERE task_id=?1 AND phase!='retired'
            AND (due_at IS NOT NULL OR phase!='waiting' OR reason IS NOT ?2)",
         params![task.as_str(), reason],
@@ -288,21 +292,6 @@ mod tests {
             )
             .unwrap();
         assert!(held(&store, &task).is_empty());
-        assert_eq!(
-            store.owner_waiting_retirements(&replacement).unwrap(),
-            vec![]
-        );
-        store
-            .reconcile_task_retirement(&task, 100, None, None)
-            .unwrap();
-        assert_eq!(
-            store.owner_waiting_retirements(&replacement).unwrap(),
-            vec![task.clone()]
-        );
-        assert!(store
-            .owner_waiting_retirements(&unrelated)
-            .unwrap()
-            .is_empty());
     }
 
     #[test]
@@ -377,7 +366,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(ended.due_at, lost.due_at);
-        // A short reconnect may begin and end between executor observations,
+        // A short reconnect may begin and end between cleanup passes,
         // after retirement has already queued shell closes.
         store
             .create_task_shell("shell", &task, "/repo.task")
@@ -402,6 +391,36 @@ mod tests {
                 .due_at,
             Some(2900)
         );
+    }
+
+    #[test]
+    fn retry_backoff_is_bounded_and_returning_viewer_revokes_it() {
+        let (_home, store, task) = fixture();
+        let initial = store
+            .reconcile_task_retirement(&task, 100, None, None)
+            .unwrap()
+            .unwrap();
+        for (attempt, seconds) in [60, 120, 240, 480, 960, 1920, 3600, 3600]
+            .into_iter()
+            .enumerate()
+        {
+            store.fail_retirement(&task, 2000, "offline").unwrap();
+            let failed = store
+                .reconcile_task_retirement(&task, 2000, None, None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(failed.retry_at, Some(2000 + seconds));
+            assert_eq!(failed.failures as usize, attempt + 1);
+            assert_eq!(failed.due_at, initial.due_at);
+            assert_eq!(failed.reason.as_deref(), Some("offline"));
+        }
+        let returned = store
+            .reconcile_task_retirement(&task, 2100, Some("viewed"), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(returned.retry_at, None);
+        assert_eq!(returned.failures, 0);
+        assert_eq!(returned.due_at, None);
     }
 
     #[test]

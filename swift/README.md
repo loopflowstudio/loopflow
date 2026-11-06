@@ -1117,6 +1117,9 @@ intent retains its identity without initial commands: opening it attaches to the
 same owner and never replays startup or creates replacement execution.
 
 Task shell views attach to a retained owner on the Task's recorded Machine.
+Desktop supplies its existing Ghostty startup script and resource bytes when
+creating the shell; destination creation installs those resources, while reconnect
+only attaches. The shared Task shell launcher has no Ghostty dependency.
 Hide, switching Work and app exit detach presentation. Close ends that shell and
 its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a
@@ -1126,7 +1129,10 @@ Keep a Task Session viewer open to retain its worktree. Desktop shells accompany
 Task Sessions and add no separate hold. Switching Work, closing the window or
 quitting explicitly releases Desktop's viewers while execution stays on its
 owner. With no connected viewer, a completed Task's checkout and Desktop shells
-become eligible for cleanup after fifteen minutes. Requested work, drafts and
+become eligible for cleanup after fifteen minutes. Installation's separate minute
+cleanup schedule normally starts deletion in 15–16 minutes while awake. Failed
+cleanup retries with backoff; a pending shell close continues on a later pass.
+Requested work, drafts and
 pending requests delay cleanup without restarting that clock; eligible idle
 agents follow the two-minute policy. LF's remote connection detects silent loss
 with viewer heartbeats. Reconnecting before cleanup cancels it; a longer outage

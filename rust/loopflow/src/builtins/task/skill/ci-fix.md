@@ -40,7 +40,7 @@ Task completion.
    - Before changing code, check whether the same check also fails on the base
      branch's latest commit, or fails on a timeout, hang or race unrelated to
      the diff. That is a flake: rerun it (`gh run rerun <run-id> --failed`), or
-     re-queue a failed merge-queue run with `lf arm`, and report `published`
+     re-queue a failed merge-queue run with `lf pr arm`, and report `published`
      with no code change.
 
 3. **Repair and verify**
@@ -51,11 +51,11 @@ Task completion.
      nothing, e.g. `merge_conflict`, supplies none.
      A runner fault (Docker or service unavailable, cancelled infrastructure,
      a check that never started) needs no code change: verify the PR head's own
-     checks pass and run `lf arm` to queue it again. A real failure gets repaired
+     checks pass and run `lf pr arm` to queue it again. A real failure gets repaired
      like any other check. Rerunning the merge-group run does not re-queue it.
    - A `merge-request (<cause>)` check means auto-merge disappeared with no
      person's removal behind it and nothing failing. Verify the head's checks
-     pass, then run `lf arm`.
+     pass, then run `lf pr arm`.
    - Reproduce each failure locally and apply the smallest correct fix.
    - Run focused checks first; broaden only when needed. Do not ignore tests
      or publish an empty commit to manufacture a rerun.
@@ -65,7 +65,7 @@ Task completion.
 4. **Publish and enable auto-merge**
    - Inspect the complete diff and keep unrelated work out of the repair.
    - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
-     `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
+     `lf pr arm`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
    - Preserve the recorded Task and PR identity. CI repair does not complete
      the Task; its caller owns completion after merge.

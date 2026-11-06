@@ -1,5 +1,5 @@
 ---
-description: Use Loopflow's Task, Wave and Project APIs while preserving the caller's workflow.
+description: Use Loopflow's Task and Wave APIs while preserving the caller's workflow.
 ---
 # Working with Tasks and Waves
 
@@ -10,8 +10,7 @@ the procedure. Reading this skill creates nothing and starts no work.
 
 ## Work model
 
-- **Wave**: a durable objective, memory and area of responsibility.
-- **Project**: a Wave's plan, including Tasks, KRs and targets.
+- **Wave**: a durable objective, memory and area of responsibility, with its planning: Tasks, KRs and targets.
 - **Task**: one repository-owned intended outcome with optional Wave membership, its checkout, conversations and a current PR and delivery history.
 - **Graph**: authored steps, some `interactive:` where a person takes part. A
   Task takes up one and stands at a step of it; a run executes it, with or
@@ -100,7 +99,7 @@ the directory manually.
 
 Keep routine progress in this conversation and local notes. Task descriptions
 hold the current problem, outcome and constraints; deliberate new direction
-belongs in Task comments. `lf task report` publishes agent progress with its
+belongs in the Task's thread. `lf task report` publishes agent progress with its
 `<!-- loopflow-progress:... -->` provenance; `lf task steer` is only for new
 direction.
 Selected operators read failure logs and discuss missing judgment in their

@@ -23,7 +23,7 @@ title/body only for an intentional override. Check the resulting PR's scope,
 claims and evidence limits. Do not duplicate its Git/GitHub mutations or launch
 another landing watcher.
 
-Bare land and `lf arm` return after recording intent. `lf pr reconcile` checks
+Bare land and `lf pr arm` return after recording intent. `lf pr reconcile` checks
 recorded landings once and repairs nothing. `--wait-and-fix` observes and
 repairs its own PR every 15 seconds until verified merge, closure, a concrete
 blocker or interruption, including with Desktop closed. An unchanged incident
@@ -46,5 +46,5 @@ Rerunning land retries a retained blocker without inventing an empty commit.
 For an already-merged Task PR it succeeds immediately and reports whether Task
 completion remains, preserving any finishing notes and edits.
 Preserve uncertainty about external effects. Reviewer-owned merge uses
-`lf submit`; report merge only from authoritative evidence, and completion only
+`lf pr submit`; report merge only from authoritative evidence, and completion only
 from Task status.

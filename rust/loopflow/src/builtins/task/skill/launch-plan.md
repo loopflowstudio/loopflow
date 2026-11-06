@@ -21,7 +21,7 @@ continue below.
 ## Orientation
 
 Read the supplied design or findings, repo guide, and any named Task's current
-state. Consult Wave chapter state only when the seed identifies it.
+state. Consult the Wave's plan only when the seed identifies it.
 
 Choose what is worth implementing before allocating work. Incident findings may
 justify prevention, more investigation, or no further work. Preserve unresolved
@@ -76,25 +76,25 @@ Technical Tasks can serve maintainers or operators without inventing a customer.
 Mark possible solutions as tentative. Keep architecture, implementation steps,
 and detailed proof in the design, linked and available to the worker.
 
-Keep the description current. Put dated progress, chapter allocation, queue
-changes, launch attempts, and verification updates in Task comments.
-A comment should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Chapter
-records still own application receipts. Proposals draft comments without posting.
+Keep the description current. Put dated progress, plan allocation, queue
+changes, launch attempts, and verification updates in Task reports (`lf task report`).
+A report should say what changed and what it means; link detailed receipts instead of pasting raw IDs, timestamps, or routine no-op logs. Planning
+records still own application receipts. Proposals draft reports without posting.
 Do not use a description update or worker steering as a substitute log channel.
 
-Comments may be collapsed by default. Keep current blockers, actual dependencies,
+The thread may be collapsed by default. Keep current blockers, actual dependencies,
 accepted scope, and unresolved contrary evidence summarized in the description
 when they affect the work. A queue position is not necessarily a dependency.
-When a comment changes the accepted scope, reconcile the description and retain
-the comment as history. Do not append dated amendments or require readers to
+When a steer changes the accepted scope, reconcile the description and retain
+the steer as history. Do not append dated amendments or require readers to
 reconstruct the current brief from the thread. Preserve decisions and evidence
 before removing superseded prose.
 
 For example, describe: “After an interrupted release, maintainers need to see
 whether anything shipped and safely continue unfinished work.” Acceptance can
 require that a retry never publishes twice and that failures remain visible.
-Put “Moved into the September chapter; scheduled after the installation repair”
-in a comment. Include that repair in the description only if it is a real blocker.
+Put “Moved into October's plan; scheduled after the installation repair”
+in a report. Include that repair in the description only if it is a real blocker.
 Give follow-up Tasks independently useful outcomes, rather than implementation layers.
 
 Link related work where you explain its relevance. In prose and PR bodies, use
@@ -104,7 +104,7 @@ Use known URLs and preserve cited decisions and evidence somewhere that survives
 In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
 
 For already designed work, select a Graph that continues that design. The
-user's explicit Graph selection governs; otherwise use the Wave chapter recommendation.
+user's explicit Graph selection governs; otherwise use the Wave's default graph.
 Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
@@ -153,7 +153,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Use the Graph the user selected and inspect its contents when explaining where it
-begins; otherwise use the Wave chapter recommendation. Continue the design already
+begins; otherwise use the Wave's default graph. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Graph, and observed launch result. Verify
 supplied context separately from the launch.

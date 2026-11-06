@@ -31,7 +31,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
+- Read Wave planning context only when the seed names the exact Wave, Task,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
 - Read the repo's agent doc (`AGENTS.md`) for conventions.
@@ -58,7 +58,7 @@ live decisions alone cannot fit, record the concrete conflict and remaining over
 
 2. **De-risk.** Before choosing implementation mechanisms, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   **Start with what's already flagged.** If the supplied design, wave `GOAL.md`, `MEMORY.md`, or current chapter KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+   **Start with what's already flagged.** If the supplied design, wave `GOAL.md`, `MEMORY.md`, or the Wave plan's KRs/metric targets call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
@@ -154,7 +154,7 @@ remaining work beside the decisions they inform.
 If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs:
 
 - **Intent** — design must serve the wave's north star, stated in GOAL.md.
-- **Evidence** — derive "Done when" from chapter KRs and user behavior. Use a
+- **Evidence** — derive "Done when" from the Wave plan's KRs and user behavior. Use a
   Wave-owned signal when the direction names one. Leave room for feature work
   to reveal a better metric proposal; a substantial new UI performance path is
   a strong reason to capture one for Wave sponsorship.

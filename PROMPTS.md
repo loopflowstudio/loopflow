@@ -295,38 +295,35 @@ Goals follow a consistent pattern:
 4. **Quality bar**: Standards for the output.
 5. **Anti-patterns**: Common failure modes to avoid. All goals should have these.
 
-### Wave/project/task ontology
+### Wave/task ontology
 
-Wave planning uses three nouns, and they differ by kind rather than size:
+Wave planning uses two nouns, and they differ by kind rather than size:
 
 - **Wave**: durable operating context. It owns memory, cadence, budget, chat,
-  and project selection.
-- **Project**: measured bet inside exactly one wave. It owns KRs and closure
-  criteria.
+  and its plan: a measured bet with KRs and closure criteria.
 - **Task**: concrete implementation, investigation, docs, or shipped change.
 
-Every project belongs to one wave. Projects do not contain projects, and they do
-not own their own memory or cadence. If a project seems to need subprojects,
-either split it into sibling projects, promote the operating context into a
-wave, or demote the pieces into tasks.
+A Wave's plan belongs to that Wave. A plan does not contain plans, and it does
+not own its own memory or cadence. If a plan seems to need sub-plans, either
+split the Wave into sibling Waves or demote the pieces into tasks.
 
-Good projects are either completable behavioral improvements or standing quality
+Good plans are either completable behavioral improvements or standing quality
 frontiers. Begin with the beneficiary and the experienced change, then name
 the system boundary. "Operators can steer and interrupt Wave work from CLI
-and Mac without switching mental models" is a project. "Maintainers can
-change Loopflow without rediscovering its architecture" is a project.
+and Mac without switching mental models" is a plan. "Maintainers can
+change Loopflow without rediscovering its architecture" is a plan.
 "Delete an obsolete API" is individual debt: file it as a task under a
-project.
+plan.
 
-Write project KRs as proof, not backlog. A KR states an observable end state:
+Write plan KRs as proof, not backlog. A KR states an observable end state:
 what would let a maintainer say the bet now holds. Do not mix task lists,
-implementation receipts, issue ids, or status into the KR line. The Project
-definition carries the user promise; each KR needs a credible causal link to
+implementation receipts, issue ids, or status into the KR line. The plan
+carries the user promise; each KR needs a credible causal link to
 that promise. Instrumentation that is easy to count but does not establish a
 better user, operator, maintainer, or agent experience is not a strong KR.
 
 ```markdown
-# Weak: task bundle pretending to be a project
+# Weak: task bundle pretending to be a plan
 # One system
 
 ## KRs
@@ -335,7 +332,7 @@ better user, operator, maintainer, or agent experience is not a strong KR.
 - Retire chord/member vocabulary.
 - Unify the operating prompt.
 
-# Strong: project frontier with proof-shaped KRs
+# Strong: a plan's frontier with proof-shaped KRs
 # Technical Architecture
 
 Maintainers can change Loopflow without first reverse-engineering competing
@@ -354,7 +351,7 @@ design.
 
 A wave's `GOAL.md` is a goal run in a loop. It defines the wave's operating
 context: why it exists, what it owns, what it refuses, and how it chooses useful
-work. Project KRs live with the project, not as a roadmap table in `GOAL.md`.
+work. Plan KRs live with the plan, not as a planning table in `GOAL.md`.
 The difference between a wave that compounds and one that produces rubber-stamp
 output comes down to five marks.
 
@@ -491,7 +488,7 @@ Give each artifact a distinct job:
 - **PR:** the benefit and actual change delivered by this increment. Start with a benefit-focused title and short summary, then minimal What changes, then Why it matters if needed. Keep automated test and lint evidence in Checks or CI. Finish with Try it when useful: a user walkthrough and its visible result. Tests never belong in that walkthrough.
 - **Status or report:** what changed, what needs attention, and the next decision or action supported by current evidence. Use readable titles and links; include execution identifiers only when needed to act.
 
-“Join current Project/KR/Task planning to native Sessions” describes machinery. “Find
+“Join current plan/KR/Task planning to native Sessions” describes machinery. “Find
 planned work and its running conversations in one place” describes the intended
 experience. Keep the technical choices in the design, where they can be evaluated.
 
@@ -516,7 +513,7 @@ second PR for the same Task; first drafts alone do not test whether the instruct
 resist entropy.
 
 
-## Task descriptions and comments
+## Task descriptions and reports
 
 A Task description is the current brief. Lead with the person's situation, the
 problem, and the improvement they should experience. Follow with observable
@@ -526,16 +523,16 @@ numbers and failure conditions. Technical detail earns its place when it explain
 the problem or a binding constraint. Architecture and implementation plans belong
 in the design.
 
-Task comments hold dated progress, planning changes, attempts, and verification
+Task reports (`lf task report`) hold dated progress, planning changes, attempts, and verification
 updates. Write what changed and what it means; link detailed evidence. Keep raw
-chapter identifiers, timestamps, and application receipts in their existing
-records. Routine no-op messages need no comment. Post only within the operation's
+plan identifiers, timestamps, and application receipts in their existing
+records. Routine no-op messages need no report. Post only within the operation's
 authorization; a proposal can draft an update without publishing it.
 
-Assume comments are collapsed. Current blockers, actual dependencies, accepted
+Assume the thread is collapsed. Current blockers, actual dependencies, accepted
 scope, and unresolved contrary evidence must still be clear in the description.
 Scheduling one Task after another does not by itself make it a technical dependency.
-When an update changes the accepted work, reconcile the brief and retain the comment
+When an update changes the accepted work, reconcile the brief and retain the report
 as history. Preserve evidence before removing superseded prose. Avoid dated
 amendments that turn the description into competing versions of the plan.
 
@@ -548,9 +545,9 @@ For example:
 > - Failed verification remains visible and prevents publication.
 
 That is a brief excerpt, not a complete replacement for an existing Task's
-acceptance. “Moved into the September chapter; scheduled after the installation
-repair” belongs in a comment. A real dependency on that repair also belongs in the
-current brief. Neither a chapter ID nor a statement that filing launches nothing
+acceptance. “Moved into October's plan; scheduled after the installation
+repair” belongs in a report. A real dependency on that repair also belongs in the
+current brief. Neither a plan ID nor a statement that filing launches nothing
 helps explain the requested improvement.
 
 ## Examples

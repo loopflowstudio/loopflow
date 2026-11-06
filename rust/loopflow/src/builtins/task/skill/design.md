@@ -21,7 +21,7 @@ Graph. Launching a draft does not approve it.
 ## Orientation
 
 - Read `scratch/` and the repo agent guide. Continue an existing design instead of re-deriving it.
-- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf wave status <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
+- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf wave status <wave>` only when its plan is material; never infer a Wave or repair planning access as a prerequisite.
 - Write the design to `scratch/<workspace-slug>.md`. Put unresolved assumptions in `scratch/questions.md`.
 
 ## Surface
@@ -69,7 +69,7 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-For existing or explicitly requested managed work, choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. Standalone designs need no Wave, Task or placement lookup. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Machine state out of the design.
+For existing or explicitly requested managed work, choose exactly one Wave by matching its objective and bounds. Its plan resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. Standalone designs need no Wave, Task or placement lookup. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Machine state out of the design.
 
 Tighten the artifact to:
 
@@ -96,8 +96,8 @@ For an additive series, describe the keystone fully and list the intended follow
 
 When filing or editing a Task, keep its description to the current problem,
 desired outcome, observable acceptance, and real constraints. Put dated planning
-and execution updates in Task comments, with links to detailed evidence.
-Comments may be collapsed: keep current blockers, dependencies, and accepted scope
+and execution updates in Task reports, with links to detailed evidence.
+The thread may be collapsed: keep current blockers, dependencies, and accepted scope
 visible in the description. Reconcile changed scope instead of appending amendments.
 
 ## Checks run unattended

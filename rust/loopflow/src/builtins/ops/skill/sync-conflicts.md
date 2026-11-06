@@ -10,7 +10,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
+- Read Wave planning context only when the seed names the exact Wave, Task,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
 - Read the repo's agent doc (`AGENTS.md`) for conventions.

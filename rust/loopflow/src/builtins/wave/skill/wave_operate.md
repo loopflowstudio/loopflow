@@ -7,7 +7,7 @@ Wave's operator for your own work: a started Task you own with no live Graph
 process has nobody else to take its next step. A pass is finished when every
 started Task you own has a disposition and every other Task is listed, not
 after a number of moves. It works the Wave's existing Tasks and leaves the
-plan, its key results and metric targets, chapter rotation, new Tasks and
+plan, its key results and metric targets, new Tasks and
 backlog to the person. No chat or schedule is required. Another conversation
 or scheduled pass may be operating this Wave at the same time; work it is
 driving is moving, and you leave it alone.
@@ -21,8 +21,8 @@ does not select memory maintenance.
 Resolve the exact Wave from the invocation's explicit selection or supplied
 bound Wave context. Do not guess from an arbitrary GOAL file. If selection is
 missing or contradictory, report the missing scope without operating another
-Wave. Read its objective and memory, current Project's Tasks, their outcomes and
-unresolved concerns. The Project is part of the Wave, not another operator.
+Wave. Read its objective and memory, its plan's Tasks, their outcomes and
+unresolved concerns. The plan is part of the Wave, not another operator.
 
 Start with `lf wave status <exact-wave> --json` and
 `lf wave show <exact-wave> --json`. Read relevant Task detail with
@@ -52,7 +52,7 @@ whether or not a Graph process is alive now. Compare its `person` with
   complete it from this Machine.
 - **Theirs:** another person owns it. List it with that person and Machine as
   “theirs · left alone”. Do not run, recover, complete, claim, move,
-  interrupt or comment on it, and do not judge its liveness: their Processes
+  interrupt or steer it, and do not judge its liveness: their Processes
   are not visible here, so idle-looking is not evidence.
 - **Unowned:** backlog. List it and leave it alone; starting it is the person's
   selection.
@@ -180,7 +180,7 @@ nothing needed action, say why briefly. Persist only changed decisions, durable 
 their existing owners. Report external posts only after confirming delivery;
 this skill does not automatically send the reply to a channel.
 
-When reporting more than one Task, use the status/roadmap reads above and render
+When reporting more than one Task, use the status and planning reads above and render
 operational rows as
 `[identifier · Task title](Work URL) — status; next action/owner · [PR #n](PR URL)`.
 `lf open --task <issue> --link --format markdown` prints that label with its

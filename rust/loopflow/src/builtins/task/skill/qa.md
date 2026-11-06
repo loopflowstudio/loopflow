@@ -11,7 +11,7 @@ the actual change, including unfinished work; do not require a branch or a repor
 from a particular preceding skill.
 
 Read planning context when the seed names the exact wave or Task, or supplies
-a concrete coordination question. Do not infer a Wave or repair PM access as a
+a concrete coordination question. Do not infer a Wave or repair planning access as a
 prerequisite to assessing the change.
 
 1. Inspect the affected paths and derive adversarial cases from their contract:

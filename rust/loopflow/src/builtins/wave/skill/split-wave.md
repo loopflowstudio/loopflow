@@ -16,7 +16,7 @@ Before starting, orient yourself in this branch:
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
 - If a `.lf/wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
-  PM snapshot, and live tasks (`lf wave status <name>`).
+  planning snapshot, and live tasks (`lf wave status <name>`).
 - Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -42,7 +42,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 
 1. Read the parent wave
    - Use the wave passed by argument, or ask which `.lf/wave/<name>/` to split
-   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf wave status <parent> --json`)
+   - Read `GOAL.md`, `MEMORY.md`, and the planning snapshot (`lf wave status <parent> --json`)
 
 2. Find split boundaries
    - Look for thematic clusters, dependency chains, or independent workstreams
@@ -60,23 +60,23 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - `MEMORY.md` — the decisions and context this child inherits
    - `metrics/*.md` — contracts allocated to that child
    - `lf wave planning connect <wave>/<child>` — link each child's Linear Initiative
-   - Add starts the first Project. Inspect each child's plan after connecting;
-     preserve existing Project identities and Planned/Completed history.
+   - Create starts the first plan. Inspect each child's plan after connecting;
+     preserve existing Linear Project identities and Planned/Completed history.
    - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the current
-     Project's complete content: `{"metric_targets":[],"krs":[]}`. Supply all KRs
+     plan's complete content: `{"metric_targets":[],"krs":[]}`. Supply all KRs
      and targets; keep the Wave's default graph. Future plan authoring needs a
-     Linear writer; `update-plan` cannot write a Planned Project.
-   - File new Tasks with `lf task create --wave <wave>/<child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
+     Linear writer; `update-plan` cannot write a Planned Linear Project.
+   - File new Tasks with `lf task create --wave <wave>/<child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in reports; keep current blockers and dependencies in the description even when the thread is collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning
-   - Starting a chapter is separate from splitting a Wave: each Wave's plan is
+   - Authoring a plan is separate from splitting a Wave: each Wave's plan is
      authored in place with `lf wave update-plan`, after the direction review
      gate; see start-chapter. Nothing moves Tasks between Waves on its own.
    - Move a Task to a child only with `lf task move <issue> --wave <wave>/<child>`,
      and only unstarted work: a started Task keeps its worktree, PR, Sessions
      and Graph where they are. Keep the parent available while its active work
-     finishes; do not delete its Projects.
+     finishes; do not delete its Linear Projects.
 
 6. Verify
    - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative

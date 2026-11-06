@@ -24,7 +24,7 @@ Put each instruction at the narrowest layer that exercises it:
 | Artifact | Use it for | Do not put here |
 | --- | --- | --- |
 | Skill | A repeatable task and its output contract | Repo-wide conventions or Wave portfolio policy |
-| Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Chapter KRs, live metric contracts, task lists, implementation steps |
+| Wave `GOAL.md` | Durable identity, bounds, cadence, and selection judgment | Plan KRs, live metric contracts, task lists, implementation steps |
 | Inline prompt | One concrete request | Reusable doctrine that deserves a skill |
 | Repo agent doc | Conventions every task in this repository must follow | One feature's design or temporary context |
 | Wave `MEMORY.md` | Curated decisions, lessons, and evidence limits | A second plan or a transcript |
@@ -100,9 +100,9 @@ keeps one command/result line, not an evidence ledger.
    understand the benefit and current problem before opening tools? Keep the
    Task's problem distinct from the design's solution. Trace competing rules
    through examples, handoffs, later edits, and mechanical rendering. For Task
-   authors, check the description with comments collapsed: the current problem,
+   authors, check the description with the thread collapsed: the current problem,
    desired outcome, acceptance, and real blockers must still make sense. Dated
-   planning/execution updates belong in comments; raw receipts belong
+   planning/execution updates belong in reports; raw receipts belong
    behind links. Test a later scope change: reconcile the brief instead of stacking
    amendments, preserving the decision history and unresolved contrary evidence.
    Apply this second-revision check to other artifacts too. Try the skill
@@ -159,7 +159,7 @@ The body of `.lf/wave/<name>/GOAL.md` is the prompt a Wave runs repeatedly. Make
 loop well:
 
 1. **Identity by contrast** — what this Wave owns and what a sibling owns.
-2. **Selection signals** — the evidence that changes chapter strategy or
+2. **Selection signals** — the evidence that changes the plan or
    strategy. Reference Wave-owned metrics when they exist; never copy them
    into the Wave body.
 3. **Concrete moves** — the kinds of useful action it may select now.
@@ -168,9 +168,9 @@ loop well:
    work.
 
 Frontmatter carries machine policy such as `agent`, `pm`, and `home`.
-Keep current chapter metric targets and proof-shaped KRs in the internal Project, edited with `lf update-plan`. Keep
-concrete implementation in Tasks. A Wave steers one current chapter; it does
-not contain a roadmap disguised as a prompt.
+Keep current metric targets and proof-shaped KRs in the Wave's plan, edited with `lf update-plan`. Keep
+concrete implementation in Tasks. A Wave steers one current plan; it does
+not contain a planning list disguised as a prompt.
 
 ## Parallel search
 

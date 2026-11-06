@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
+- Read Wave planning context only when the seed names the exact Wave, Task,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
 - Read the repo's agent doc (`AGENTS.md`) for conventions.
@@ -146,12 +146,12 @@ Are the items in a wave pulling in the same direction, or has the wave
 become a dumping ground?
 
 Gather:
-- Read the Wave's current chapter, KRs, and Tasks for the wave
+- Read the Wave's plan, KRs, and Tasks
 - Read the wave `GOAL.md` and `MEMORY.md`
-- Check whether the chapter outcomes and Tasks fit the Wave mandate
+- Check whether the plan's outcomes and Tasks fit the Wave mandate
 
 Interpret:
-- Chapter outcomes and Tasks should serve the Wave's stated objective. A task in the `pm` wave
+- Plan outcomes and Tasks should serve the Wave's stated objective. A task in the `pm` wave
   that's really about Loopflow UI belongs in `macos`.
 - Tasks at the same priority tier should be independent enough to work
   in parallel. If item 2a blocks item 2b, that's a sequencing issue the
@@ -198,7 +198,7 @@ Use this ID-first form in operational lists. In prose, use
 references when unambiguous.
 
 Fill the link from `task.identifier` and `reference.issue_url`, and the readable
-title from `task.name`. Take status from `runtime.status` or the roadmap
+title from `task.name`. Take status from `runtime.status` or the planning list's
 `section`, and next owner from `next_move.owner`. State the next action only
 when supported by current evidence; leave unknown state unknown. Include an
 workspace slug only when navigating that workspace is the job, using

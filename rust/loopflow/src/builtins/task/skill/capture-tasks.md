@@ -67,7 +67,7 @@ with its repository and owning Wave; keep the provider issue link separate.
 Run `lf open '<url>'` only when the person asks to open a Task now, and report
 its receipt; a printed link opens nothing.
 
-If the repository is inaccessible, ownership unresolved, or its Project unavailable,
+If the repository is inaccessible, ownership unresolved, or its Wave's planning unavailable,
 leave an explicit unfiled brief in the conversation. Report provider failures
 honestly. After an uncertain write, reconcile with `lf wave status <wave> --json`
 in that destination. Every explicit create makes a distinct Task, even with

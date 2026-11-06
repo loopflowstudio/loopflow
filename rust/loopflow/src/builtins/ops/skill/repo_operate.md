@@ -7,7 +7,7 @@ needed, keep your started Tasks moving through their Waves, and summarize
 current activity. A Task is yours when its owner's person is `lf config user`
 or names no person; another person's Task is listed as theirs and left alone,
 and unowned backlog is listed for the person to select. The pass works existing
-Tasks. It leaves plans, their key results and metric targets, chapter rotation,
+Tasks. It leaves plans, their key results and metric targets,
 new Tasks and backlog to the person; report gaps it finds instead of filing them.
 
 ## Clear old work state
@@ -107,7 +107,7 @@ for shared state; inspect PRs and branches where they explain a gap.
 Refresh relevant facts after actions and when an update is needed. Link Tasks
 and PRs so the participant can reach the work. Distinguish observed results
 from attempted actions. Keep unresolved upkeep in `scratch/open-work.md`;
-put routine progress in this conversation, not Task comments.
+put routine progress in this conversation, not Task reports.
 
 ## Drive work through Waves
 
@@ -178,12 +178,12 @@ When evidence invalidates an attempt on a Task you own, `lf task interrupt <issu
 stops its live execution and discuss the changed direction in the Task conversation.
 The stopped Graph stays as history; Task, worktree and PR identity are unchanged.
 
-## Diagnose execution and auth
+## Diagnose execution and accounts
 
-When work seems stuck, run `lf top` before guessing; redirected output gives one
+When work seems stuck, run `lf process top` before guessing; redirected output gives one
 frame. `lf process list --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
-Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
+Time alone never means dead. `lf process prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 

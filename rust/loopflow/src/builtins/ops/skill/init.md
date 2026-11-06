@@ -170,9 +170,9 @@ manager and the exact missing variable names. Never print credential values.
 Account connection is an external side effect. The user must choose it and
 complete the provider graph. Claim a new connection only after connect completes;
 cached status is retained evidence, not a fresh authorization check. Managed
-verification requires an accepted managed row from `auth status --json`.
+verification requires an accepted managed row from `lf account --json`.
 Direct skills can proceed with a local agent even
-when Linear is absent; do not block that path on PM setup.
+when Linear is absent; do not block that path on planning setup.
 
 ## 4. Make one durable path real
 
@@ -186,7 +186,7 @@ lf wave show <wave> --json
 lf wave status <wave>
 ```
 
-If PM is not bound and Linear is connected, offer the explicit binding command:
+If planning is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
 lf wave planning connect <wave>
@@ -195,7 +195,7 @@ lf wave planning connect <wave>
 The first Wave establishes the repository Team and defaults its key from the
 repository name; `--team-key <KEY>` is an explicit override. Later Waves must
 reuse that binding. Choosing the initial repository Team requires the user's
-choice. Do not invent another Team, Initiative, Project, or KR; an existing
+choice. Do not invent another Team, Initiative, Linear Project, or KR; an existing
 repository binding changes only through the repository-wide migration.
 
 ### New durable Wave
@@ -206,38 +206,38 @@ Ask for one outcome and a short name. Add it:
 lf wave create <name> --objective "<outcome>"
 ```
 
-This registers the Wave, starts its first chapter, and commits
+This registers the Wave, creates its first plan, and commits
 `.lf/wave/<name>/` on the main checkout. Then edit that `GOAL.md` there. Write
 the goal as a durable operating contract: objective, observable success,
-boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
-in the chapter plan. Curate durable decisions in `.lf/wave/<name>/MEMORY.md` through
+boundaries, and when to stop or escalate. Keep priorities, KRs and Tasks
+in the Wave's plan. Curate durable decisions in `.lf/wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the
 plan in the goal body.
 
 Then offer Linear binding as above. Connection creates or links the Initiative
-and preserves existing Projects; it does not provision an initial Project.
-Inspect available Linear status/content: one In Progress Project is the current
-plan, Planned Projects hold future plans, and Completed Projects retain history.
+and preserves existing Linear Projects; it does not provision an initial one.
+Inspect available Linear status/content: one In Progress Linear Project is the current
+plan, Planned ones hold future plans, and Completed ones retain history.
 A Task takes up the graph it names, else its Wave's default, the repository's `graph:`, or `code`.
 
-If no current Project exists, report that planning gap: `lf wave sync <wave>`
+If no current plan exists, report that planning gap: `lf wave sync <wave>`
 adopts an existing Linear Project, and `lf wave planning bind <wave> <Project
-UUID>` selects one explicitly. Starting a chapter needs accepted
+UUID>` selects one explicitly. A new plan needs accepted
 repository-wide direction; start-chapter authors each Wave's plan in place.
 Default graphs remain on the Wave or repository.
 
 Author future content in the Planned Linear Project through an available
-provider interface. For an existing current Project,
+provider interface. For an existing current plan,
 `lf update-plan --wave <wave> --plan <plan.json>` replaces its complete
 content, for example `{"metric_targets":[],"krs":[]}`.
-There is no future-plan writer or historical chapter selector in these commands.
-Missing access or competing current Projects stays an explicit next action;
-never invent a local chapter store or guess a plan from the newest name.
+There is no future-plan writer or historical plan selector in these commands.
+Missing access or competing current Linear Projects stays an explicit next action;
+never invent a local plan store or guess a plan from the newest name.
 
 ### Existing Linear Task
 
 Require its exact issue identifier. If Linear is connected and the Task belongs
-to the repository Team and one Wave-owned Project, the durable execution path is:
+to the repository Team and one Wave's Linear Project, the durable execution path is:
 
 ```bash
 lf task run <ISSUE-ID>
@@ -324,7 +324,7 @@ lf wave list --json
 For a selected Wave, also run `lf wave status <wave> --json` and
 `lf wave show <wave> --json`. After setting a Wave Machine, use
 `lf wave status <wave> --json`. For a selected Task, run
-`lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
+`lf task status <ISSUE-ID> --json`. Do not run `lf planning list` or
 doctor as routine setup: both can be large, and doctor can surface unrelated
 historical problems. Do not start work as a setup test.
 
@@ -338,7 +338,7 @@ Machine agents  Codex + Claude installed
 Repo policy  inherited defaults
 Accounts     GitHub + Linear connected
 Wave         designer placed on home_...
-Planning     Linear bound; 1 current chapter / 7 open Tasks
+Planning     Linear bound; 1 current plan / 7 open Tasks
 
 Next         lf --wave designer wave-operate
 Also         lf wave show designer | lf task run DES-123 | lf debug -c
@@ -346,7 +346,7 @@ Also         lf wave show designer | lf task run DES-123 | lf debug -c
 
 If something remains unavailable, say exactly which authority is missing and
 the command that would establish it. Never hide a missing account, Machine,
-Wave/PM binding, or agent behind "setup complete."
+Wave planning binding, or agent behind "setup complete."
 
 On macOS, offer `lf open` (the repository's conversation in Loopflow Desktop) as an optional interactive control surface after the
 selected path is proved. Do not launch it automatically.
@@ -356,5 +356,5 @@ selected path is proved. Do not launch it automatically.
 - Lead with the observed topology, not configuration trivia.
 - Ask one consequential question at a time.
 - Prove the chosen capability without enrolling the user in other features.
-- Expose Wave and Task; keep the chapter Project internal. Keep Machine, account, and skill distinct.
+- Expose Wave and Task; keep the Linear Project internal. Keep Machine, account, and skill distinct.
 - Stop when the chosen path is proved and the next command is obvious.

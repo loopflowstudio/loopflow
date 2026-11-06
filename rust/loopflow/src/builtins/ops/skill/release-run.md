@@ -24,7 +24,7 @@ patch notes retain their incremental baseline.
 Run exactly one command:
 
 ```bash
-lf release run <version>
+lf repository release run <version>
 ```
 
 That command is responsible for:
@@ -51,17 +51,17 @@ publication, deployment, and secret handling in the publisher.
 ## Regressions and stable
 
 ```bash
-lf release regress v0.15.3 "Sessions lose their name"  # file one against a release
-lf release issues v0.15.3                              # what it carries, and what each issue holds
-lf release promote --dry-run                           # what would move, or what holds it
-lf release promote                                     # move stable now, outside a run
+lf repository release regress v0.15.3 "Sessions lose their name"  # file one against a release
+lf repository release issues v0.15.3                              # what it carries, and what each issue holds
+lf repository release promote --dry-run                           # what would move, or what holds it
+lf repository release promote                                     # move stable now, outside a run
 ```
 
 A GitHub issue labelled `regressed-in:v<version>` is all a regression takes.
 
 ## Re-entry
 
-`lf release run` resumes an existing release PR or incomplete latest tag after
+`lf repository release run` resumes an existing release PR or incomplete latest tag after
 interruptions. An unpublished preparation commit does not consume a version.
 Correct it with another commit under the same version; do not bump the version
 to escape a failed build, late migration, or interrupted publication.

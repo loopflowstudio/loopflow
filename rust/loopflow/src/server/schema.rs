@@ -39,11 +39,15 @@ pub fn summary() -> String {
             .expect("an operation enum is a oneOf of its kinds")
             .len()
     };
+    let counted = |name: &str, one: &str, many: &str| match count(name) {
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    };
     format!(
-        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {} reads, {} writes, {} server operations. `--json` prints its JSON Schema.",
-        count("Read"),
-        count("Write"),
-        count("ServerOperation"),
+        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {}, {}, {}. `--json` prints its JSON Schema.",
+        counted("Read", "read", "reads"),
+        counted("Write", "write", "writes"),
+        counted("ServerOperation", "server operation", "server operations"),
     )
 }
 

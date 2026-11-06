@@ -10,7 +10,7 @@ Recover observable success, affected consumers and plausible near-misses. Assess
 the actual change, including unfinished work; do not require a branch or a report
 from a particular preceding skill.
 
-Read planning context when the seed names the exact wave or Task, or supplies
+Read planning context when the seed names the exact Wave or Task, or supplies
 a concrete coordination question. Do not infer a Wave or repair planning access as a
 prerequisite to assessing the change.
 

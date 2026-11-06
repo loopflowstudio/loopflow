@@ -2,13 +2,11 @@
 //! destination, and open the Work there.
 //!
 //! Hosts translate only documented caller context and open/focus operations.
-//! Rex and Herdr materialize native tools with passive conversation viewers;
-//! other terminal routes use `lf session resume`, whose attachment fences own
-//! reuse. Desktop resolves the same address through `--link --json`.
+//! Native workspace hosts launch ordinary tools and `lf resume` in the checkout.
+//! Resume owns conversation attachment and continuation. Desktop resolves the same address through `--link --json`.
 
 mod files;
 mod workspace;
-pub(crate) use workspace::ObserverReport;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -124,31 +122,6 @@ pub enum OpenStatus {
     Failed,
 }
 
-/// What a Conversation's observer last proved. Native receipts never set this.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ObserverState {
-    /// The execution owner acknowledged it, and it still runs.
-    Connected,
-    /// No live execution exists; the pane shows saved history.
-    History,
-    /// The observer stopped; only its lock's absence is known. Retryable.
-    Ended,
-    /// The observer reported an attachment error. Retryable.
-    Failed,
-    /// It may have attached, or may not have started; only inspection can tell.
-    Uncertain,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ConversationReadiness {
-    pub session: String,
-    pub state: ObserverState,
-    pub reason: Option<String>,
-    /// Views it again in another fresh tab; empty when that cannot help.
-    pub retry_argv: Vec<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OpenReceipt {
     pub label: String,
@@ -161,8 +134,6 @@ pub struct OpenReceipt {
     pub status: OpenStatus,
     pub reason: Option<String>,
     pub fallback_argv: Vec<String>,
-    /// Observers this command launched, separate from native create `status`.
-    pub conversations: Vec<ConversationReadiness>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -267,7 +238,6 @@ impl Resolved {
             status,
             reason,
             fallback_argv: self.fallback_argv(),
-            conversations: Vec::new(),
         }
     }
 

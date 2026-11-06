@@ -23,14 +23,16 @@ Outside one, or when
 opening a repository or Wave, `lf open` creates a new container named for the
 Wave or repository.
 
-Opening presents existing Work. It does not start a Task's Graph, create a provider
-conversation, submit a turn or take conversation input. A Shell tool creates a
-fresh shell; it does not copy jobs, shell variables or editor memory.
+A Conversation pane runs `lf resume <session>` in the Task checkout, or
+`lf resume --task <task>` if it has no conversation yet. This is the same command
+you run by hand: it moves the existing conversation here or starts one when
+needed. Opening does not start a Task's Graph or submit a turn. A Shell pane
+starts a fresh shell in the checkout.
 
 From a repository checkout, select its started, unfinished Tasks in one container.
 From a Task checkout, select that Task. Use `--wave` or `--task` explicitly to
 select another scope. Backlog Tasks appear only when
-explicitly selected; opening them starts no execution.
+explicitly selected.
 
 Inside Rex, resolve the current host/server and caller context, including when an
 agent invokes `lf open` through a tool shell. `--host` overrides automatic host
@@ -158,7 +160,7 @@ for it. Existing Wave conversation inclusion remains part of Wave opening.
 
 | Tool | Desktop | Terminal host |
 | --- | --- | --- |
-| Conversation | Terminal showing the LF conversation | Terminal observing that existing conversation |
+| Conversation | Terminal showing the LF conversation | `lf resume` in the Task checkout |
 | Shell | Terminal in the Task checkout | Fresh shell in the Task checkout |
 | Files | Native file view | Configured file browser or editor |
 | Changes | Native changes view | Git pager or diff tool |
@@ -169,8 +171,7 @@ lf task view LOO-498
 ```
 
 In the Task view, `n` and `p` select a step and `l` reads its log. Viewing starts
-no work. The builtin layout shows Task & workflow beside a shell when there is
-no conversation.
+no work. The builtin layout contains Conversation, Task & workflow, and Shell.
 
 For terminal file editing, use `LF_FILE_BROWSER` for a directory browser;
 otherwise `VISUAL`, then `EDITOR`, then `vi`. Resolve preferences on the Task's
@@ -193,11 +194,9 @@ started Tasks without taking focus, starting another provider or adding backlog
 Tasks. A single-Task launch does not follow sibling Tasks. Herdr and cmux launches
 do not follow yet.
 
-**Implementation choice, still open for review:** new Tasks arrive as normal Task
-tabs with their configured splits. There is no preview-and-expand step. Ordinary
-tools selected by the template start; another provider does not. The accepted
-repository/Wave → session, Task → tab, workspace → splits hierarchy is explicit;
-immediate full tool materialization is the stated interpretation of it.
+Automatic arrivals use the configured splits, with Task/workflow information in
+the Conversation slot. They do not run `resume` in the background or move input
+from another terminal. Run `lf open --task <task>` to open its conversation.
 
 The follower keeps its session and seen Tasks in memory, from its own command
 line, while it runs. Closing a Task tab stays respected during that live follower. The host owns
@@ -234,25 +233,17 @@ Directory reporting has isolated native evidence. Rex's actual app Split,
 Herdr/Desktop splits and the configured remote path still need demonstration.
 A displayed Task path is not evidence of the new shell's working directory.
 
-## View first; take input explicitly
+## Continue normally
 
-Conversation views observe live output or saved history. A live observer offers
-Ctrl+R after the existing execution owner acknowledges its attachment; that
-explicit action requests input on the same connection. Ctrl+] leaves the viewer.
-Typing before taking input shows a read-only hint. Those keystrokes are discarded,
-never queued for the conversation.
-Use `lf resume <session-id>` to continue a conversation explicitly.
+```bash
+lf resume <session-id>
+```
 
-Creation of a native pane does not establish readiness. Report whether each
-conversation connected, shows history, ended, failed, or remains uncertain.
-A failed attachment must preserve the existing provider, drafts and pending
-requests; it must not restart or replay them to make a new view appear ready.
-
-LF Session execution and input ownership remain LF state. Rex workspace identity
-and arrangement remain Rex state. Readiness belongs to one `lf open`: its records
-are removed once that command reports. To view a conversation again, the receipt
-offers another fresh launch (`lf open … --session <id>`); it never touches the
-earlier tab.
+Workspace opening runs this command in a native terminal. There is no separate
+read-only conversation mode, input shortcut, or workspace attachment protocol.
+Normal resume owns provider continuity and input transfer. The open receipt says
+which native tabs were created; it does not claim that the provider is ready.
+Errors from resume remain in that terminal.
 
 ## Failure and recovery
 
@@ -270,22 +261,11 @@ new shells; familiar pane IDs do not prove that programs survived. LF does not
 replay commands into retained native panes. A fresh launch reads the Task's
 current LF layout or config again.
 
-## Retained Task terminals protect the checkout
+## Cleanup ownership
 
-A retained Rex terminal for a Task Session must prevent Task cleanup regardless
-of focus. Only confirmed removal of the last relevant terminal can release its
-hold, subject to other holds and normal cleanup conditions. Unavailable host
-evidence is unknown, not absence. LF automatically closes only Desktop-owned
-shells; Rex shells remain Rex's responsibility.
-
-This integration remains unfinished, and nothing enforces it today. Live
-conversation viewers in Rex are attached viewers, so the shared Session lifetime
-owner already sees them. The cleanup consumer is LOO-717's `lf task presence`
-lease, which is not merged. Rex's own inventory lists blocks by identity, so a
-retained tab whose programs stopped can still be found by block id at cleanup
-time without an LF registry; that query is not written. Requested work, drafts and
-pending requests remain protected. Closing an unfinished Task view does not delete
-its checkout or branches.
+LF automatically closes only Desktop-owned shells. Rex owns its native terminals.
+Task cleanup and Session lifetime integration belong to LOO-717; opening does not
+write a host registry or lease. Closing a view is not a request to delete a Task.
 
 ## Delivery boundaries
 
@@ -295,8 +275,7 @@ Desktop retains its current saved-layout behavior. Isolated native tests cover R
 Herdr (fresh launches); cmux has fixture coverage only. tmux and plain-terminal
 routes still open the conversation alone.
 
-Before acceptance, demonstrate config templates, two fresh launches preserving
-independent native edits, actual native splits after automatic and manual entry,
-agent-tool host routing after viewer movement, passive arrivals, remote behavior,
-live conversation input transfer and retained-terminal cleanup protection. Prior
-registry-based reuse tests do not prove the revised fresh-launch contract.
+Configured interactive acceptance remains outstanding. Previous demos used a
+custom passive viewer and showed corrupted rendering; those results do not
+validate the normal-resume launch. Use a separate demonstration Task, leaving
+active work untouched.

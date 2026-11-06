@@ -36,39 +36,6 @@ impl Drop for PausedOwner {
     }
 }
 
-struct PlacedProvider {
-    owner: String,
-    session: String,
-    agent: String,
-    attachment: String,
-}
-
-impl PlacedProvider {
-    fn placement(&self, fixture: &Fixture) -> String {
-        fixture
-            .sql()
-            .query_row(
-                "SELECT terminal_id FROM processes WHERE id=?1",
-                [&self.owner],
-                |row| row.get(0),
-            )
-            .unwrap()
-    }
-
-    /// Transfer moves input, never the provider's own attachment.
-    fn assert_attachment_unchanged(&self, fixture: &Fixture) {
-        let token: String = fixture
-            .sql()
-            .query_row(
-                "SELECT attachment_token FROM processes WHERE id=?1",
-                [&self.agent],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(token, self.attachment);
-    }
-}
-
 impl Fixture {
     fn new() -> Self {
         Self {
@@ -234,42 +201,6 @@ impl Fixture {
     }
 
     /// A live two-line provider whose Session is placed at `rex:source`.
-    fn placed_provider(&self) -> PlacedProvider {
-        let owner = self.start(&[
-            "/bin/sh", "-c",
-            "stty -echo; read -r first; printf '%s' \"$first\" > \"$HOME/first\"; read -r second; printf '%s' \"$second\" > \"$HOME/second\"",
-        ]);
-        let session = self.session(&owner);
-        let agent = uuid::Uuid::new_v4().to_string();
-        let attachment = uuid::Uuid::new_v4().to_string();
-        let sql = self.sql();
-        sql.execute(
-            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
-                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state,
-                attached_lf_process_id,attachment_token)
-             SELECT ?1,'agent',trace_id,id,'fixture',repo,cwd,started_at,?2,'claude',1,'spawn_requested',id,?3
-             FROM processes WHERE id=?4",
-            rusqlite::params![agent, session, attachment, owner],
-        )
-        .unwrap();
-        sql.execute(
-            "UPDATE agent_sessions SET agent_process_id=?1 WHERE id=?2",
-            rusqlite::params![agent, session],
-        )
-        .unwrap();
-        sql.execute(
-            "UPDATE processes SET terminal_id='rex:source' WHERE id=?1",
-            [&owner],
-        )
-        .unwrap();
-        PlacedProvider {
-            owner,
-            session,
-            agent,
-            attachment,
-        }
-    }
-
     fn pause(&self, owner: &str) -> PausedOwner {
         let pid = self
             .sql()
@@ -713,47 +644,10 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     );
 }
 
-#[test]
-fn prepared_destination_preserves_source_input_until_explicit_transfer() {
-    let fixture = Fixture::new();
-    let provider = fixture.placed_provider();
-    let (owner, session) = (&provider.owner, &provider.session);
-    let mut source = fixture.viewer(owner, true);
-    source.input("source-");
-    // A lost preparation reply cannot grant input or revoke the source claim.
-    let mut uncertain = fixture.connect(owner);
-    uncertain.request(json!({"kind":"attach","control":false,"replace":false,
-        "rows":24,"cols":80,"session":session,"placement":"rex:uncertain"}));
-    drop(uncertain);
-    let mut destination = fixture.viewer(owner, false);
-    let destination_id = destination.id.clone();
-    assert!(destination.token.is_none());
-    source.input("retained\n");
-    assert_eq!(fixture.wait_file("first"), "source-retained");
-    assert_eq!(provider.placement(&fixture), "rex:source");
-    source.input("unfinished-");
-    // The prepared connection itself requests transfer; no new provider or viewer.
-    destination.request(json!({"kind":"attach","control":true,"replace":true,
-        "own":"take","rows":24,"cols":80,"session":session,"placement":"rex:destination"}));
-    let accepted = destination.until_reply();
-    assert_eq!(accepted["viewer"], destination_id);
-    destination.accept(&accepted);
-    assert!(destination.token.is_some());
-    assert_eq!(provider.placement(&fixture), "rex:destination");
-    provider.assert_attachment_unchanged(&fixture);
-    source.until_event("control");
-    source.input("stale\n");
-    destination.input("continued\n");
-    destination.finish();
-    assert_eq!(fixture.wait_file("second"), "unfinished-continued");
-}
-
-/// The composed handoff on a real Rex server and a real owner. A stalled owner
-/// leaves an unconfirmed observer; viewing again is another fresh launch that
-/// leaves the first untouched, and input moves only after acknowledgement.
+/// Workspace opening uses the same resume command as a person in a native tab.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
-fn rex_unconfirmed_observer_then_fresh_view_transfers_input_after_acknowledgement() {
+fn rex_workspace_resumes_the_existing_provider_in_the_task_worktree() {
     let fixture = Fixture::new();
     let root = tempfile::Builder::new()
         .prefix("rex498-")
@@ -769,103 +663,73 @@ fn rex_unconfirmed_observer_then_fresh_view_transfers_input_after_acknowledgemen
         "main",
         &fixture.repo.head_sha(),
     );
-    let provider = fixture.placed_provider();
-    let (owner, session) = (&provider.owner, &provider.session);
+    let provider = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'workspace-ready\r\n'
+read -r answer < /dev/tty
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+    );
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &provider, "workspace"));
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
     let bound = fixture
-        .command(&["session", "bind", session, "--task", "INF-123", "--json"])
+        .command(&["session", "bind", &session, "--task", "INF-123", "--json"])
         .output()
         .unwrap();
     assert!(bound.status.success(), "{bound:?}");
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
-    let open = |args: &[&str]| -> Value {
-        let output = fixture.command(args).env("PATH", &path).output().unwrap();
-        assert!(output.status.success(), "{output:?}");
-        serde_json::from_slice(&output.stdout).unwrap()
-    };
-    let args = [
-        "open",
-        "--task",
-        "INF-123",
-        "--host",
-        "rex",
-        "--server",
-        &rex.endpoint,
-        "--no-focus",
-        "--json",
-    ];
-
-    let mut source = fixture.viewer(owner, true);
-    source.input("source-");
-
-    // The tab is created while the owner cannot answer its observer.
-    let paused = fixture.pause(owner);
-    let created = open(&args);
-    assert_eq!(created["receipts"][0]["status"], "opening");
-    assert_ne!(
-        created["receipts"][0]["conversations"][0]["state"],
-        "connected"
-    );
-    let first = rex.call("session.list", json!({}))["sessions"][0]["session_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let retained = rex.block_ids(&first);
-    drop(paused);
-
-    // The source kept input through the uncertain preparation.
-    source.input("retained\n");
-    assert_eq!(fixture.wait_file("first"), "source-retained");
-    assert_eq!(provider.placement(&fixture), "rex:source");
+    let mut source = fixture.viewer(&owner, true);
     source.input("unfinished-");
-
-    // Viewing again is another fresh launch of the same conversation.
-    let again = open(&[
-        "open",
-        "--task",
-        "INF-123",
-        "--host",
-        "rex",
-        "--server",
-        &rex.endpoint,
-        "--session",
-        session,
-        "--no-focus",
-        "--json",
-    ]);
-    assert_ne!(
-        again["receipts"][0]["destination"],
-        created["receipts"][0]["destination"]
-    );
-    assert_eq!(
-        again["receipts"][0]["conversations"][0]["state"], "connected",
-        "{again}"
-    );
-    assert_eq!(
-        provider.placement(&fixture),
-        "rex:source",
-        "preparation took input"
-    );
-    assert_eq!(rex.block_ids(&first), retained, "the first tab was touched");
-    let second = rex.call("session.list", json!({}))["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|session| session["session_id"].as_str().unwrap().to_owned())
-        .find(|id| *id != first)
-        .expect("a second launch");
-    let prepared = rex.block_ids(&second).into_iter().next().unwrap();
-
-    // Ctrl+R on the prepared pane moves input; the provider never restarted.
-    rex.write(&second, &prepared, "\u{12}");
+    let path = format!("{}:{provider}", bin.display());
+    let opened = fixture
+        .command(&[
+            "open",
+            "--task",
+            "INF-123",
+            "--session",
+            &session,
+            "--host",
+            "rex",
+            "--server",
+            &rex.endpoint,
+            "--no-focus",
+            "--json",
+        ])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(opened.status.success(), "{opened:?}");
+    let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
+    let container = report["receipts"][0]["container"].as_str().unwrap();
+    let block = rex.block_ids(container).into_iter().next().unwrap();
+    source.until_event("control");
     let deadline = Instant::now() + Duration::from_secs(10);
-    while provider.placement(&fixture) == "rex:source" {
-        assert!(Instant::now() < deadline, "input did not move");
+    loop {
+        let pwd = rex.block_call(container, &block, "pwd");
+        if rex.screen(container, &block).contains("workspace-ready")
+            && pwd
+                .to_string()
+                .contains(fixture.repo.path().to_str().unwrap())
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "wrong workspace directory: {pwd}"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
-    source.until_event("control");
-    provider.assert_attachment_unchanged(&fixture);
-    rex.write(&second, &prepared, "continued\n");
-    assert_eq!(fixture.wait_file("second"), "unfinished-continued");
+    rex.write(container, &block, "continued\n");
+    assert_eq!(fixture.wait_file("answer"), "unfinished-continued");
+    assert_eq!(
+        fixture.launches(1).len(),
+        1,
+        "resume started another provider"
+    );
 }
 
 /// Someone in an ordinary Rex terminal elsewhere resumes a live Session by hand.

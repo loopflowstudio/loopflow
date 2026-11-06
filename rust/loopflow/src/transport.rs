@@ -983,8 +983,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             cols,
                             name,
                             moved,
-                            session,
-                            placement,
                         } => {
                             if wants_control
                                 && !replace
@@ -993,21 +991,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             {
                                 viewer.reply(answers, Reply::Busy);
                                 continue;
-                            }
-                            if wants_control {
-                                if let Some(session) = session {
-                                    let store = crate::journal::process_ledger()?;
-                                    anyhow::ensure!(viewer.attached, "Destination is not prepared");
-                                    anyhow::ensure!(
-                                        store.session_transport(&session)?.as_ref() == Some(&id),
-                                        "Session execution changed; source input was retained"
-                                    );
-                                    let attachment = store.session_attachment(&session)?
-                                        .context("Session attachment is unavailable; source input was retained")?;
-                                    store.record_session_terminal(
-                                        &session, &attachment, placement.as_deref(),
-                                    )?;
-                                }
                             }
                             attached = true;
                             viewer.size = dimensions(rows, cols);
@@ -1743,17 +1726,6 @@ impl ViewerTerminal {
         Ok(())
     }
 
-    fn discard_input(&self) -> io::Result<()> {
-        let state = self.state.lock().expect("viewer terminal lock poisoned");
-        if state.original.is_some() {
-            // SAFETY: stdin is the terminal whose attributes we retained above.
-            if unsafe { libc::tcflush(0, libc::TCIFLUSH) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-        Ok(())
-    }
-
     fn retire_directory_on_restore(&self) {
         self.state
             .lock()
@@ -1862,7 +1834,7 @@ fn attach_with_preview(
     crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, moved, terminal, None, &mut || {})
+    attach_with_terminal(id, moved, terminal)
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
@@ -1912,32 +1884,14 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, moved, terminal, None, &mut || {})
+    attach_with_terminal(id, moved, terminal)
 }
-
-/// Observe an existing execution; only an explicit action after acknowledgement
-/// requests input. This never starts an owner or resumes a provider.
-pub(crate) fn observe(
-    id: &LfProcessId,
-    session: &str,
-    acknowledged: &mut dyn FnMut(),
-) -> Result<()> {
-    attach_with_terminal(id, None, None, Some(session), acknowledged)
-}
-
-/// The owner went quiet before answering, so the request may or may not have landed.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub(crate) struct OutcomeUnknown(&'static str);
 
 fn attach_with_terminal(
     id: &LfProcessId,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
-    observe_session: Option<&str>,
-    acknowledged: &mut dyn FnMut(),
 ) -> Result<()> {
-    let take_control = observe_session.is_none();
     let mut preview = terminal.is_some();
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
@@ -1948,21 +1902,18 @@ fn attach_with_terminal(
     send(
         &mut socket,
         Request::Attach {
-            control: take_control,
-            replace: take_control,
-            own: take_control.then_some(Own::Take),
+            control: true,
+            replace: true,
+            own: Some(Own::Take),
             rows,
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved,
-            session: None,
-            placement: None,
         },
     )?;
     let mut decoder = Decoder::default();
     let mut scanner: Option<Scanner> = None;
     let mut controlled = false;
-    let mut input_hint_shown = false;
     let mut owned = false;
     let mut returning = None;
     let mut stdin_open = true;
@@ -1972,7 +1923,7 @@ fn attach_with_terminal(
         title.tick();
         anyhow::ensure!(
             acknowledgement_deadline.is_none_or(|deadline| Instant::now() < deadline),
-            OutcomeUnknown("Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed")
+            "Execution owner did not acknowledge attachment; outcome is unknown, no provider was restarted and no input was replayed"
         );
         let mut fds = [
             libc::pollfd {
@@ -2000,10 +1951,7 @@ fn attach_with_terminal(
         if fds[0].revents != 0 {
             let mut bytes = [0; 16384];
             let n = socket.read(&mut bytes)?;
-            anyhow::ensure!(
-                n != 0,
-                OutcomeUnknown("Execution owner disconnected; outcome is unknown")
-            );
+            anyhow::ensure!(n != 0, "Execution owner disconnected; outcome is unknown");
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 let pieces = match tag {
@@ -2019,7 +1967,6 @@ fn attach_with_terminal(
                                 ..
                             } => {
                                 acknowledgement_deadline = None;
-                                acknowledged();
                                 controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
                                 scanner = Some(Scanner::new(&nonce));
@@ -2032,11 +1979,6 @@ fn attach_with_terminal(
                                         terminal = Some(ViewerTerminal::enter()?);
                                     }
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
-                                    if !take_control {
-                                        // Keystrokes typed before either acknowledgement
-                                        // are not a transfer request or provider input.
-                                        terminal.as_ref().expect("terminal entered").discard_input()?;
-                                    }
                                 }
                             }
                             Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
@@ -2069,8 +2011,7 @@ fn attach_with_terminal(
                             if let Err(error) = std::env::set_current_dir(&cwd) {
                                 tracing::debug!(%error, "viewer cannot enter execution directory");
                             }
-                            // A retained observer has no shell to report after it.
-                            if let Some(terminal) = terminal.as_ref().filter(|_| take_control) {
+                            if let Some(terminal) = &terminal {
                                 terminal.retire_directory_on_restore();
                             }
                         }
@@ -2135,43 +2076,8 @@ fn attach_with_terminal(
                     eprintln!("\n{detach}");
                 }
                 return Ok(());
-            } else if !take_control
-                && !controlled
-                && terminal.is_some()
-                && io::stdin().is_terminal()
-                && acknowledgement_deadline.is_none()
-                && bytes[..n] == [0x12]
-            {
-                let (rows, cols) = size();
-                acknowledgement_deadline = Some(Instant::now() + ATTACH_TIMEOUT);
-                send(
-                    &mut socket,
-                    Request::Attach {
-                        control: true,
-                        replace: true,
-                        own: Some(Own::Take),
-                        rows,
-                        cols,
-                        name: tty_name(libc::STDIN_FILENO),
-                        moved: Some("Input moved to the prepared conversation view.".into()),
-                        session: observe_session.map(str::to_owned),
-                        placement: crate::session_record::current_terminal_id()
-                            .or_else(crate::lf::commands::open::host_placement),
-                    },
-                )?;
             } else if controlled {
                 send_frame(&mut socket, Tag::Input, &bytes[..n])?;
-            } else if !take_control
-                && terminal.is_some()
-                && acknowledgement_deadline.is_none()
-                && !input_hint_shown
-            {
-                write_output(
-                    &mut terminal,
-                    1,
-                    b"\r\nRead-only view. Ctrl+R moves input here; Ctrl+] leaves.\r\nTyped input was not sent.\r\n",
-                )?;
-                input_hint_shown = true;
             }
         }
         let current_size = size();

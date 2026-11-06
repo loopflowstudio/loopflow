@@ -120,8 +120,6 @@ fn input_store_fixture() {
                     cols: 80,
                     name: None,
                     moved: None,
-                    session: None,
-                    placement: None,
                 },
             };
             socket

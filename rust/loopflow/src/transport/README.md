@@ -217,8 +217,7 @@ the Session's selected directory on each later attachment. It reports that
 through the stream and tells each viewer to enter it with a `directory` event.
 Viewer and owner share a Machine, so both sources agree even when a person launched
 from elsewhere. A viewer that took over a caller's terminal sends an empty report
-when it leaves, returning the terminal to its shell. Observers keep theirs: a
-retained pane has no shell to report after it.
+when it leaves, returning the terminal to its shell.
 
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also

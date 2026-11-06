@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use super::{observer, tool_cwd, viewer_argv, Presentation, SqliteStore, ViewContent};
+use super::{tool_cwd, viewer_argv, Presentation, SqliteStore, ViewContent};
 use crate::transport::local_directory_report;
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
@@ -22,26 +22,9 @@ pub(super) enum Host<'a> {
 }
 
 impl Host<'_> {
-    /// A passive observer of an existing conversation. With `observer`, the
-    /// viewer reports its attachment for this command's readiness receipt.
-    pub(super) fn conversation(
-        self,
-        cwd: &Path,
-        session: &str,
-        observer: Option<&str>,
-    ) -> Result<Value> {
-        let mut words = vec!["session", "view", session];
-        if let Some(key) = observer {
-            words.extend(["--observer", key]);
-            observer::expect(key, session)?;
-        }
-        let mut block = self.block("Conversation", cwd, viewer_argv(cwd, &words)?);
-        if let Self::Rex(_) = self {
-            // Keep history and failed preparation visible. Observer exit never
-            // invites command replay.
-            block["block"]["options"]["exit"] = json!({"on_completion": false});
-        }
-        Ok(block)
+    /// Use the ordinary conversation command in the native terminal.
+    pub(super) fn conversation(self, cwd: &Path, words: &[&str]) -> Result<Value> {
+        Ok(self.block("Conversation", cwd, viewer_argv(cwd, words)?))
     }
 
     /// A tool pane. Rex's login wrapper stays in the foreground of a program
@@ -109,7 +92,7 @@ struct Tools<'a> {
     host: Host<'a>,
     content: &'a ViewContent,
     cwd: &'a Path,
-    observer: Option<&'a str>,
+    resume: bool,
 }
 
 /// The native layout for one Task, and how many fresh shells it starts.
@@ -126,7 +109,7 @@ pub(super) fn layout(
         host,
         content,
         cwd,
-        observer: presentation.observer,
+        resume: presentation.resume,
     };
     let Some(location) = &content.location else {
         return Ok((tools.task_view()?, 0));
@@ -176,8 +159,8 @@ pub(super) fn layout(
     let Some(source) = source else {
         let conversation = tools.conversation(None)?;
         let shell = tools.tool("shell", None, None)?;
-        // Without a conversation the main pane already shows Task & workflow.
-        let secondary = if content.primary_session.is_some() {
+        // Background arrivals show workflow in place of an interactive resume.
+        let secondary = if tools.resume {
             host.split(SplitAxis::Horizontal, 0.618, tools.task_view()?, shell)
         } else {
             shell
@@ -208,10 +191,14 @@ impl Tools<'_> {
     }
 
     fn conversation(&self, session: Option<&str>) -> Result<Value> {
-        match session.or(self.content.primary_session.as_deref()) {
-            Some(session) => self.host.conversation(self.cwd, session, self.observer),
-            None => self.task_view(),
+        if !self.resume {
+            return self.task_view();
         }
+        let words = match session.or(self.content.primary_session.as_deref()) {
+            Some(session) => vec!["resume", session],
+            None => vec!["resume", "--task", &self.content.work.id],
+        };
+        self.host.conversation(self.cwd, &words)
     }
 
     fn tool(
@@ -355,7 +342,7 @@ mod tests {
                 host,
                 content: &content,
                 cwd: Path::new("/repo/task"),
-                observer: None,
+                resume: true,
             };
             for (hidden, expected_shells) in [(saved.hidden.clone(), 0), (Default::default(), 1)] {
                 let mut shells = 0;
@@ -414,18 +401,28 @@ mod tests {
                     assert!(!reports(shell), "a shell's own cwd must follow cd");
                 }
                 let viewing = conversation["command"].as_array().unwrap();
-                if matches!(host, Host::Rex(..)) {
-                    assert_eq!(conversation["exit"]["on_completion"], false);
-                }
                 assert!(viewing
-                    .windows(3)
-                    .any(|args| args == ["session", "view", "session_primary"]));
+                    .windows(2)
+                    .any(|args| args == ["resume", "session_primary"]));
                 let editing = files["command"].as_array().unwrap();
                 assert!(editing
                     .windows(2)
                     .any(|args| args == ["--path", "src/lib.rs"]));
                 assert!(!secondary.to_string().contains("README.md"));
             }
+            // Without an existing Session, ordinary resume selects this Task.
+            let launch = tools.conversation(None).unwrap().to_string();
+            assert!(launch.contains("resume") && launch.contains("--task"));
+            // Background arrivals must not move input from an active terminal.
+            let background = Tools {
+                resume: false,
+                ..tools
+            };
+            let launch = background
+                .conversation(Some("session_primary"))
+                .unwrap()
+                .to_string();
+            assert!(launch.contains("Task & workflow") && !launch.contains("resume"));
         }
     }
 

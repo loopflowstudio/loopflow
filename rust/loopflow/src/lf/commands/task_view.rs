@@ -215,7 +215,7 @@ fn render(reading: &Value) -> String {
     if let Some(sessions) = reading["overview"]["sessions"].as_array() {
         for session in sessions {
             text.push_str(&format!(
-                "  {} · {}\n    lf session view {}\n",
+                "  {} · {}\n    lf resume {}\n",
                 word(session, "title"),
                 word(session, "id"),
                 word(session, "id")

@@ -25,9 +25,10 @@ process ancestry; opening never scans running apps, and failure in your host nev
 falls through to another. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one
 explicitly.
 
-Rex, Herdr and cmux show passive conversation views. tmux and terminal routes
-focus an existing conversation in that host or report it as `elsewhere`, with
-the `lf resume` command that moves input. Opening never steals input.
+Rex, Herdr and cmux start `lf resume` in each Conversation pane's Task checkout.
+Resume handles the existing conversation and moves its input normally. Automatic
+Task arrivals show workflow information without resuming a conversation. tmux and
+terminal routes focus an existing conversation or report it as `elsewhere`.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.

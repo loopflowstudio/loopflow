@@ -1189,10 +1189,7 @@ impl WaveCommand {
 impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::ObserveStatus { .. }
-            | Self::View { .. }
-            | Self::History { .. }
-            | Self::List { .. } => false,
+            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
@@ -1674,13 +1671,6 @@ pub enum SessionCommand {
         /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
         agent_process: Option<String>,
-    },
-    /// Observe a conversation without taking input or starting a provider
-    View {
-        id: String,
-        /// Report attachment to the workspace destination that launched this view
-        #[arg(long, hide = true)]
-        observer: Option<String>,
     },
     /// Read this conversation's native start, usage and completion receipts
     History {

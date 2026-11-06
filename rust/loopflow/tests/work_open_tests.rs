@@ -378,7 +378,7 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
             call.contains(r"'task' 'view'") && call.contains(r"'shell'"),
             "{call}"
         );
-        assert!(!call.contains("resume"), "{call}");
+        assert!(call.contains("resume"), "{call}");
         // cmux starts surfaces from its own environment; this private Home goes with it.
         assert!(call.contains("'LF_HOME="), "{call}");
     }
@@ -1157,23 +1157,16 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
     assert_eq!(created.lines().count(), 2, "{created}");
     for request in created.lines() {
-        assert!(!request.contains("resume"));
+        assert!(request.contains("resume"));
         assert_eq!(
             request.matches("Task & workflow").count(),
             1,
-            "A Task without a conversation needs one workflow pane, beside its shell"
+            "The builtin layout has one workflow pane beside resume and shell"
         );
     }
     // Opening neither searches for nor touches an earlier native workspace.
     assert!(!bin.path().join("session.list.requests").exists());
     assert!(!bin.path().join("session.view.requests").exists());
-    assert!(
-        !home.path().join("open/observers").exists()
-            || std::fs::read_dir(home.path().join("open/observers"))
-                .unwrap()
-                .next()
-                .is_none()
-    );
     assert_eq!(sessions(home.path()), 0);
 }
 
@@ -1348,7 +1341,7 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     let receipt = serde_json::json!({"receipts":[{
         "label":"INF-123 · Task","url":format!("{url}/task/INF-123"),"host":"rex",
         "destination":"window:remote","container":"session:remote","status":"opening",
-        "reason":"Created","fallback_argv":[],"conversations":[]}],"unknown":[]});
+        "reason":"Created","fallback_argv":[]}],"unknown":[]});
     let requests = host(bin.path(), "ssh", &receipt.to_string(), 0);
     let follow = |remote: Option<String>| {
         let mut args = vec![
@@ -1681,6 +1674,25 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
     assert_eq!(sessions(home.path()), 0);
 }
 
+// Arrangement tests exercise tools only; conversation execution has its own
+// isolated native test with a stand-in provider in transport_tests.rs.
+fn configure_native_tools(repo: &Path) {
+    std::fs::write(repo.join("lf.config.local.yaml"), r#"task_layout:
+  hidden: [conversation]
+  tree:
+    kind: split
+    axis: vertical
+    ratio: 0.6
+    first: {kind: pane, id: browser, content: {kind: browser, location: null, tabs: [], selected: null}}
+    second:
+      kind: split
+      axis: horizontal
+      ratio: 0.5
+      first: {kind: pane, id: conversation, content: {kind: session, session_id: null, location: null}}
+      second: {kind: pane, id: shell, content: {kind: shell, tabs: [], selected: null}}
+"#).unwrap();
+}
+
 /// Installed-host acceptance stays opt-in; CI and ordinary tests use bounded peers.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
@@ -1696,6 +1708,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     std::fs::create_dir(&home).unwrap();
     let _env = EnvGuard::with_lf_home(&[], &home);
     let registered = register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
+    configure_native_tools(repo.path());
     let bin = root.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     host(
@@ -1972,6 +1985,7 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], &home);
     register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
+    configure_native_tools(repo.path());
     let herdr = std::env::var_os("LOOPFLOW_TEST_HERDR")
         .expect("set LOOPFLOW_TEST_HERDR to the installed Herdr executable");
     let config = root.path().join("c");

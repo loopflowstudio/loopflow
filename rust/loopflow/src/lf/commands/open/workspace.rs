@@ -5,10 +5,8 @@
 mod cmux;
 mod herdr;
 mod layout;
-mod observer;
 
 use layout::{layout, Host};
-pub(crate) use observer::ObserverReport;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
@@ -18,10 +16,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use super::{
-    ConversationReadiness, ObserverState, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus,
-    Opening, Resolved,
-};
+use super::{OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved};
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::journal::OsProcess;
@@ -275,10 +270,7 @@ impl Rex {
             );
         }
         self.call("client.perform", json!({"client_id":candidates[0],"action":"session.select","args":{"session_id":container,"window_id":window}}))?;
-        Ok(
-            "Rex accepted display selection; conversation input remains with its current viewer"
-                .into(),
-        )
+        Ok("Rex accepted display selection".into())
     }
 }
 
@@ -333,13 +325,6 @@ impl Native {
             Self::Rex(rex) => Host::Rex(&rex.server),
             Self::Herdr(_) => Host::Herdr,
             Self::Cmux(_) => Host::Cmux,
-        }
-    }
-
-    fn server(&self) -> Option<&str> {
-        match self {
-            Self::Rex(rex) => Some(&rex.server),
-            _ => None,
         }
     }
 
@@ -484,8 +469,8 @@ impl Native {
 struct Presentation<'a> {
     session: Option<&'a str>,
     diff: bool,
-    /// The readiness key this tab's conversation observers report under.
-    observer: Option<&'a str>,
+    /// Background arrivals must not move input from an existing terminal.
+    resume: bool,
 }
 
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
@@ -529,9 +514,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
                     .map(|id| format!(" ({id})"))
                     .unwrap_or_default()
             );
-            for conversation in &receipt.conversations {
-                print_conversation(conversation);
-            }
         }
         super::print_unknown(&report.unknown);
     }
@@ -547,46 +529,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
         "Some workspace items could not be opened; successful native work was retained"
     );
     Ok(())
-}
-
-fn print_conversation(conversation: &ConversationReadiness) {
-    let state = match conversation.state {
-        ObserverState::Connected => "connected",
-        ObserverState::History => "history",
-        ObserverState::Ended => "ended",
-        ObserverState::Failed => "failed",
-        ObserverState::Uncertain => "uncertain",
-    };
-    println!(
-        "  Conversation {}: {state}{}",
-        conversation.session,
-        conversation
-            .reason
-            .as_ref()
-            .map(|reason| format!("; {reason}"))
-            .unwrap_or_default()
-    );
-    if !conversation.retry_argv.is_empty() {
-        println!("  To view it again: {}", conversation.retry_argv.join(" "));
-    }
-}
-
-/// Another fresh launch showing one conversation. It never touches the earlier tab.
-fn view_again_argv(url: &str, host: OpenHost, server: Option<&str>, session: &str) -> Vec<String> {
-    let mut argv = vec![
-        "lf".into(),
-        "open".into(),
-        url.into(),
-        "--host".into(),
-        host.label().to_lowercase(),
-        "--session".into(),
-        session.into(),
-    ];
-    if let Some(server) = server {
-        argv.extend(["--server".into(), server.into()]);
-    }
-    argv.push("--no-focus".into());
-    argv
 }
 
 fn open_machines(
@@ -655,20 +597,6 @@ fn open_machines(
             }
             match outcome {
                 Ok(mut report) => {
-                    // The peer's own command means nothing on this Machine.
-                    for conversation in report
-                        .receipts
-                        .iter_mut()
-                        .flat_map(|receipt| &mut receipt.conversations)
-                        .filter(|conversation| !conversation.retry_argv.is_empty())
-                    {
-                        conversation.retry_argv = view_again_argv(
-                            &target.url.to_string(),
-                            host,
-                            args.server.as_deref(),
-                            &conversation.session,
-                        );
-                    }
                     receipts.append(&mut report.receipts);
                     unknown.append(&mut report.unknown);
                 }
@@ -971,20 +899,18 @@ fn launch(
         }
     };
     let mut receipts = Vec::new();
-    let mut launched = Vec::new();
     if let SelectionExpression::Wave { wave } = &selected.expression {
         if let Some(session) =
             store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
         {
-            let key = uuid::Uuid::new_v4().to_string();
             let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
             receipt.label = "Wave conversation".into();
             let opened = native
                 .renderer()
-                .conversation(repo, session.id.as_str(), Some(&key))
+                .conversation(repo, &["resume", session.id.as_str()])
                 .and_then(|layout| native.add_tab(&mut container, "Conversation", repo, layout));
-            settle_receipt(&mut receipt, opened, &key, &mut launched);
-            receipts.push((receipt, key));
+            settle_receipt(&mut receipt, opened);
+            receipts.push(receipt);
         }
     }
     let mut templates = Templates {
@@ -999,7 +925,6 @@ fn launch(
             .task(&TaskId::parse(&content.work.id)?)?
             .context("Task is unavailable")?;
         seen.push(task.id.to_string());
-        let key = uuid::Uuid::new_v4().to_string();
         let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
         receipt.label = format!("{} · {}", task.identifier, task.title);
         receipt.url = crate::work::link::WorkUrl::new(
@@ -1014,14 +939,14 @@ fn launch(
                 content,
                 repo,
                 template.as_ref(),
-                // Arrivals start no observer and select no Session.
+                // Arrivals do not take input from an existing terminal.
                 if arriving {
                     Presentation::default()
                 } else {
                     Presentation {
                         session: target.session.as_deref(),
                         diff: args.diff || target.url.diff,
-                        observer: Some(&key),
+                        resume: true,
                     }
                 },
             )
@@ -1038,8 +963,8 @@ fn launch(
             ));
             tab
         });
-        settle_receipt(&mut receipt, opened, &key, &mut launched);
-        receipts.push((receipt, key));
+        settle_receipt(&mut receipt, opened);
+        receipts.push(receipt);
     }
     if let (Native::Rex(rex), Some(remotes)) = (native, follow) {
         let session = container.id.clone().expect("Rex containers are sessions");
@@ -1060,44 +985,18 @@ fn launch(
                 }
             },
         );
-        receipts.push((receipt, String::new()));
+        receipts.push(receipt);
     }
-    observer::settle(&launched);
-    Ok(receipts
-        .into_iter()
-        .map(|(mut receipt, key)| {
-            receipt.container = container.id.clone();
-            if !key.is_empty() {
-                receipt.conversations = observer::read(&key)
-                    .iter()
-                    .map(|observer| {
-                        observer.readiness(&view_again_argv(
-                            &receipt.url,
-                            host,
-                            native.server(),
-                            &observer.session,
-                        ))
-                    })
-                    .collect();
-                // Readiness belongs to this command; nothing outlives it.
-                observer::clear(&key);
-            }
-            receipt
-        })
-        .collect())
+    for receipt in &mut receipts {
+        receipt.container = container.id.clone();
+    }
+    Ok(receipts)
 }
 
 /// Record a tab's native result. A lost reply is reported, never retried.
-fn settle_receipt(
-    receipt: &mut OpenReceipt,
-    opened: Result<String>,
-    key: &str,
-    launched: &mut Vec<String>,
-) {
+fn settle_receipt(receipt: &mut OpenReceipt, opened: Result<String>) {
     match opened {
         Ok(tab) => {
-            observer::confirm(key);
-            launched.push(key.into());
             receipt.destination = Some(tab);
             if receipt.reason.is_none() {
                 receipt.reason = Some("Created".into());
@@ -1167,7 +1066,7 @@ fn start_follower(
 }
 
 fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
-    // Tools belong to this opening, including its observer protocol. Keep an
+    // Tools belong to this opening. Keep an
     // explicit private-Machine runtime, but never hand a dev build's real-Machine
     // panes to the installed release.
     let binary = if crate::store::custom_home_selected() {
@@ -1410,9 +1309,7 @@ fn arrive_remote(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        array, eligible, listening_endpoint, settle_remote, view_again_argv, Candidate, Placement,
-    };
+    use super::{array, eligible, listening_endpoint, settle_remote, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
     use crate::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
@@ -1425,9 +1322,9 @@ mod tests {
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         std::env::set_var("LF_BIN", "/old/installed/lf");
         let cwd = std::env::current_dir().unwrap();
-        let argv = super::viewer_argv(&cwd, &["session", "view", "existing"]).unwrap();
+        let argv = super::viewer_argv(&cwd, &["resume", "existing"]).unwrap();
         assert_eq!(argv[0], std::env::current_exe().unwrap().to_string_lossy());
-        assert_eq!(&argv[3..], &["session", "view", "existing"]);
+        assert_eq!(&argv[3..], &["resume", "existing"]);
     }
 
     #[test]
@@ -1500,7 +1397,6 @@ mod tests {
                     status,
                     reason: None,
                     fallback_argv: Vec::new(),
-                    conversations: Vec::new(),
                 })
                 .collect(),
             unknown: Vec::new(),
@@ -1559,23 +1455,5 @@ mod tests {
         assert!(array(json!({"windows":null}), "windows")
             .unwrap()
             .is_empty());
-    }
-
-    #[test]
-    fn viewing_again_is_another_fresh_launch_on_the_same_host() {
-        let argv = view_again_argv("loopflow://r/task/T-1", OpenHost::Herdr, None, "s");
-        assert_eq!(
-            argv,
-            [
-                "lf",
-                "open",
-                "loopflow://r/task/T-1",
-                "--host",
-                "herdr",
-                "--session",
-                "s",
-                "--no-focus"
-            ]
-        );
     }
 }

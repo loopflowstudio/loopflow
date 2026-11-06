@@ -1,3 +1,10 @@
+# Historical handoff — superseded viewer design
+
+The handoff below predates Jack Heart's November 5 instruction to use ordinary
+`lf resume` and remove the custom observer. Its passive viewer and input-transfer
+claims are obsolete. It is retained as evidence of what was sent, not current
+implementation direction. Current design: [rex-workspace.md](rex-workspace.md).
+
 # LOO-498 → LOO-717 handoff — November 5, 2026
 
 Jack Heart requested this handoff and asked to open LOO-717 in Rex. This conveys accepted direction and implementation evidence; it does not approve shipping, installation, shared-store migration, or launch of a new implementation Graph.

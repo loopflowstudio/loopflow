@@ -40,82 +40,51 @@ ol.q ol{list-style:lower-alpha;margin:.3rem 0}
 <body>
 <main>
 <header>
-<h1>One login per Machine, but routing is still chosen per launch</h1>
-<p>Task c0b373 · PR #1828 · concept review at demo · November 5, 2026</p>
-<p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>provider_account.rs</code> (<code>select_route</code>, <code>select_shared_account</code>, <code>route_rank</code>, <code>provider_route_account_ids</code>), <code>docs/subscriptions.md</code>, <code>docs/sessions.md</code></p>
+<h1>Every launch switches the login, so <code>lf account use</code> lasts one launch</h1>
+<p>Task c0b373 · PR #1828 · concept review after implement · November 6, 2026</p>
+<p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>provider_account.rs</code> (<code>route_rank</code>, <code>urgency</code>, <code>select_route</code>, <code>replacement_login</code>), <code>lf/commands/account.rs</code> (<code>use_account</code>, <code>switch_away</code>), <code>docs/subscriptions.md</code>, <code>docs/sessions.md</code>, <code>docs/ops.md</code></p>
 </header>
 
-<p class="lead"><strong>Decided (Jack Heart, November 6):</strong> switch at every launch (1b) to the account with the most quota to lose: remaining percent ÷ hours until reset. Keep repository and Wave account orders (2b). Remove <code>lf session move --account</code> (3a). Remove <code>lf account drain</code>; <code>lf account set … --routing explicit-only</code> also switches away from an active login. Not built yet. Still open: the overage rule.</p>
+<p class="lead"><strong>Built:</strong> Jack Heart's November 6 decisions are in the diff. Each launch takes the top-ranked login, whichever is active; <code>lf session move --account</code> and <code>lf account drain</code> are gone; <code>--routing explicit-only</code> on the active login switches away. <strong>Next for implement:</strong> say in the docs that a manual switch lasts until the next launch, and fix one stale ranking sentence.</p>
 
-<h2>What you want</h2>
-<p>“I want to be able to use multiple accounts in order to load balance across different Max accounts. I don't want to have to worry or think about which account I'm using.”</p>
-
-<h2>One afternoon, as built</h2>
-<p class="muted">Two Claude Max accounts. <code>jack@</code> is active at 60% of its weekly window, which resets in 5 days. <code>work@</code> is at 30%, and its weekly window resets in 3 hours.</p>
+<h2>One afternoon, as built now</h2>
+<p class="muted">Two Claude Max accounts. <code>jack@</code> is active at 60% of its weekly window, which resets in 5 days: 40% left over 120 hours scores 333. <code>work@</code> is at 30%, resetting in 3 hours: 70% over 3 hours scores 23 333.</p>
 <ul class="tl">
-<li><b>14:00</b> A Graph step launches. <code>select_shared_account</code> puts the active login first, and <code>jack@</code> has room, so it stays on <code>jack@</code>.</li>
-<li><b>14:00–17:00</b> Every launch and every open Session uses <code>jack@</code>.</li>
-<li><b>17:00</b> <code>work@</code> resets with <strong>70% of its week never used.</strong> Soonest reset never came into play, because <code>jack@</code> never filled up.</li>
-<li><b>Thursday</b> <code>jack@</code> fills up. Now soonest reset picks <code>work@</code>. The Claude login switches, and every open Session follows at its next request without a restart. That part works.</li>
+<li><b>14:00</b> A Graph step launches. <code>route_rank</code> puts <code>work@</code> first; the Machine's Claude login switches and every open Claude follows at its next message.</li>
+<li><b>14:05</b> You run <code>lf account claude use jack@</code>, wanting to stay on it.</li>
+<li><b>14:06</b> The next launch ranks <code>work@</code> ahead again and switches back. <strong>Nothing told you <code>use</code> would not stick.</strong></li>
+<li><b>17:00</b> <code>work@</code> resets having been used first. That was the point of the decision, and it works.</li>
 </ul>
-<p>Recovery works: a full account moves everyone over. Using the quota well doesn't: an account whose reset is near isn't used first unless the active one runs out before then.</p>
-
-<h3>The second way this goes wrong: scoped routes</h3>
-<pre><code>lf set account.claude jack@,work@
-lf --wave billing set account.claude work@</code></pre>
-<p>A <code>billing</code> step switches the Machine to <code>work@</code>. The next launch outside that Wave doesn't need to switch back, because the active login comes first while it has room. But if <code>work@</code> is only explicit-only, or isn't on the other route, it switches back. Two routes that disagree can switch the Machine back and forth, and every open Session switches with it. Per-repository and per-Wave orders made sense when each launch could have its own home. With isolation deleted, the account is shared by the whole Machine, so a scope can't own it.</p>
 
 <h2>Actions → concepts → APIs</h2>
-<div class="cols">
-<div class="col">
-<h3><span class="tag-is">built</span></h3>
 <table>
-<tr><th>You</th><th>API</th></tr>
-<tr><td>Order accounts</td><td><code>lf set account.claude …</code> for global, repository or Wave</td></tr>
-<tr><td>See the route</td><td><code>lf account route</code></td></tr>
-<tr><td>Switch now</td><td><code>lf account claude use work@</code></td></tr>
-<tr><td>Switch blocked Sessions</td><td><code>lf session move --blocked --account work@</code>, which moves <em>every</em> open Claude Session</td></tr>
-<tr><td>Stop using one</td><td><code>lf account claude drain jack@</code></td></tr>
-<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td></tr>
+<tr><th>You</th><th>API</th><th>Lasts</th></tr>
+<tr><td>Order accounts</td><td><code>lf set account.claude jack@,work@</code> (global, repository, Wave)</td><td>Until changed; breaks ties after plan and urgency</td></tr>
+<tr><td>See what's active and why</td><td><code>lf account</code>, <code>lf account route</code></td><td></td></tr>
+<tr><td>Switch now</td><td><code>lf account claude use work@</code></td><td><span class="tag-prop">to document</span> until the next launch ranks another login ahead</td></tr>
+<tr><td>Stay on one login</td><td><code>lf --account jack@ …</code> per launch, or <code>lf account set claude work@ --routing explicit-only</code></td><td>Per launch / until changed</td></tr>
+<tr><td>Stop using one</td><td><code>lf account set claude jack@ --routing explicit-only</code></td><td>Switches away now if active</td></tr>
+<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td><td>Per Session</td></tr>
 </table>
-<p class="muted">Concepts: account, route (scoped, per launch), active login, routing mode, Session selector, move, drain.</p>
-</div>
-<div class="col">
-<h3><span class="tag-prop">proposed</span></h3>
-<table>
-<tr><th>You</th><th>API</th></tr>
-<tr><td>Order accounts</td><td><code>lf set account.claude …</code> for global, repository or Wave</td></tr>
-<tr><td>See what's active and why</td><td><code>lf account</code></td></tr>
-<tr><td>Switch now</td><td><code>lf account claude use work@</code></td></tr>
-<tr><td>Stop using one</td><td><code>lf account set claude jack@ --routing explicit-only</code></td></tr>
-<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td></tr>
-</table>
-<p class="muted">Concepts: account, the Machine's login and when lf switches it, Session move (model or harness only).</p>
-</div>
-</div>
-<p><code>session move --account</code> goes away because <code>account use</code> already does the same thing. Its selector looked like it chose Sessions, but every Session follows the login anyway.</p>
+<p class="muted">Concepts: account, the Machine's one login per provider, the rank every launch applies (plan, then weekly quota left per hour until reset, then declared order), routing mode, Session move by agent.</p>
 
-<h2>When to switch: three rules</h2>
-<table>
-<tr><th></th><th>Rule</th><th>Unused quota</th><th>Switches</th></tr>
-<tr><td>a</td><td>Stay on the active login until it can't take a launch, then go to the soonest reset. <span class="tag-is">built</span></td><td>Lost when another account resets first</td><td>Fewest</td></tr>
-<tr><td>b</td><td>At every launch, go to the soonest-reset account that has room.</td><td>Least</td><td>Most; every open Session follows each one</td></tr>
-<tr><td>c</td><td>Stay on the active login, but switch early to an account that resets within a few hours with quota left. Switch back after it resets.</td><td>Little</td><td>About two per reset</td></tr>
-</table>
-<p class="muted">Unverified: Claude's prompt cache is probably kept per account. If it is, every switch makes open conversations re-send their context and spend more quota, which weighs against (b). Not checked; checking it would spend real quota.</p>
+<h2>Docs as they should read</h2>
+<p><span class="tag-is">docs/ops.md:314 today</span> “Routes try accounts in order; one at 95% of a usage window drops behind the rest.”</p>
+<p><span class="tag-prop">proposed</span> Every launch takes the account with the most weekly quota left per hour before its reset; route order breaks ties. <code>lf account codex use work@</code> switches now, until a later launch ranks another account ahead. To stay on one, name it with <code>--account</code> or set the others <code>explicit-only</code>.</p>
 
-<h2>Usage doc as proposed</h2>
-<pre><code>lf account connect claude jack@ --chrome-profile jack@
-lf account connect claude work@ --chrome-profile work@
-lf account                     # active login, room and resets per account</code></pre>
-<p>One Claude login per Machine at a time. lf switches the Machine when an account fills up <span class="tag-prop">and at each launch, to the account with the most quota to lose before its reset</span>. Open Sessions follow at their next message without a restart. <code>lf account claude use work@</code> switches now. <code>lf account set claude jack@ --routing explicit-only</code> stops using an account. <code>lf set account.claude jack@,work@</code> orders the accounts; repository and Wave orders still apply.</p>
+<h2>Not verified</h2>
+<p>A running Codex keeps its login in memory. If it refreshes and writes <code>~/.codex/auth.json</code> after the home switched to another account, the home flips back silently, and the other account's newer refresh token is lost if it rotated in between. Switching at every launch makes the window more frequent. Checking needs no paid quota: fake tokens and a throwaway <code>CODEX_HOME</code>.</p>
 
-<h2>Still open</h2>
+<h2>Questions</h2>
 <ol class="q">
-<li>Overage rule in #1828: should a rejected <code>seven_day_overage_included</code> stop counting as a limit while overage is allowed or in use?
-  <ol><li>Yes, build it</li><li>No, leave it for later</li></ol></li>
-<li>Codex login test with fake tokens and a throwaway <code>CODEX_HOME</code>: does a running Codex refresh write its old login back over <code>auth.json</code>?
-  <ol><li>Run it</li><li>Skip it</li></ol></li>
+<li>Should <code>lf account use</code> stay a one-launch switch?
+  <ol><li>Yes: document it (what implement does next)</li><li>No: make it hold until the active login fills up</li></ol></li>
+<li>Overage (questions 3): stop treating a rejected <code>seven_day_overage_included</code> as a limit while overage is allowed or in use?
+  <ol><li>Build it in #1828</li><li>Leave it for later</li></ol></li>
+<li>Codex refresh test above:
+  <ol><li>Run it before landing</li><li>Skip it</li></ol></li>
+<li>An unobserved fresh login ranks after a 99%-used observed one (questions 11):
+  <ol><li>Keep</li><li>Rank unobserved logins first, so their first launch observes them</li></ol></li>
 </ol>
 </main>
 </body>

@@ -83,7 +83,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.
 15. **Items 7–9 built (November 5).** Choices made headless, each reversible:
     - Replay keeps running in the recorded capture's profile (`AccountLogin::Replayed`): switching this Machine's shared login to another catalog's account would record a switch and move every open Session.
-    - `lf resume --account <email>` no longer stops a running agent; the account names the login a fresh launch switches to. Moving open Sessions is `lf session move --account`.
+    - `lf resume --account <email>` no longer stops a running agent; the account names the login a fresh launch switches to. Moving open Sessions was `lf session move --account` (deleted November 6; every launch now switches to the top login).
     - Rentals use the laptop-held rental login by default, with no per-rental "owned" option yet; an owned Machine is any non-rental and gets its own fresh login.
     - The laptop renews a rental's token when it is within 2 hours of expiry (tokens last ~8h); after any refresh it resends to every live rental, since whether a refresh cancels earlier tokens is unverified.
     - `provider_session_accounts.isolated` stays as "transcript still in an account home"; column removal is Task e1f359 with the long-lived token columns and `isolate:`.

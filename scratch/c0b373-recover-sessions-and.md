@@ -137,6 +137,13 @@ Still true from the first pass:
 - `limit_recovery::waiting_on_limit` names the step by label, so a skill repeated in a Graph restarts at its first occurrence.
 - Native Claude limits cool for the 15-minute default: `StopFailure` carries no reset time, and it was confirmed from Claude 2.1.318's schema, not a live limit. Codex terminal limits are seen only through the relay's stream.
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
-- Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, explicit-only switch-away) has not been shown on the configured path; no paid quota may be spent. Policy still open for Jack there: questions 3, 4, 11.
-- Open for Jack at demo: `scratch/questions.md` 3, 4, 16, 17, 18.
+- Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, explicit-only switch-away) has not been shown on the configured path; no paid quota may be spent.
+- Open for Jack at demo: `scratch/questions.md` 3, 4, 11, 16, 17, 18.
+- Unverified, sharper now that launches switch often: a running Codex keeps its own login in memory; if it refreshes and writes `auth.json` after the home switched to another account, the home silently flips back and the other account's rotated refresh token, if it rotated in between, is lost (`save_back` runs only at the next switch). Demo checks: after a switch, does a running Codex's refresh rewrite `~/.codex/auth.json`?
 Realign (Nov 6, after implement/compress and merging #1834): plan matched the code; Wave memory's c0b373 section now describes urgency routing and explicit-only switch-away (drain and `move --account` gone). #1834 adds no provider pins. No checks rerun: the only code since compress is the merge, which touches no c0b373 file.
+
+## Concept review (November 6, 2026, headless, after urgency routing)
+The concepts hold: one login per provider per Machine, the top-ranked login at every launch, explicit-only to keep a login out. What the accepted decisions imply, for implement:
+- **`lf account use` lasts until the next launch.** With switch-at-every-launch, the next launch moves the login back when another ranks ahead. Docs say so where `use` appears (`docs/subscriptions.md` "Switch the shared account", `docs/sessions.md`, `docs/ops.md`): to stay on one login, name it (`--account`) or set the others `explicit-only`.
+- **Stale ranking text.** `docs/ops.md:314` still says "Routes try accounts in order; one at 95% of a usage window drops behind the rest"; it becomes the urgency rule. The test comment at `provider_account.rs:3841` ("resets soonest") names the observed-before-unobserved rule instead.
+Open: none new; questions 3, 4, 11, 16, 17, 18 stay for demo.

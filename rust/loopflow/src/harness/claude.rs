@@ -420,6 +420,7 @@ impl Harness for ClaudeHarness {
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
             config.isolate,
+            config.cwd.as_deref(),
         )
         .await?;
         self.account_route = account_route;

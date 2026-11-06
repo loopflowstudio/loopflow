@@ -279,6 +279,8 @@ pub struct CodexObserver {
     pub(crate) thread: AgentSessionId,
     pub(crate) account: Option<ProviderAccountId>,
     pub(crate) isolate: Option<bool>,
+    /// Where the native client runs, which names its repository's route.
+    pub(crate) cwd: PathBuf,
     /// PID and birth of the native client this attachment opened.
     pub(crate) client: (u32, i64),
     /// The first turn, submitted once this observer can record it.
@@ -397,6 +399,7 @@ impl Recorder {
                 Some(account),
                 None,
                 observer.isolate,
+                Some(&observer.cwd),
             )
             .await
             .unwrap_or_else(|error| {
@@ -922,6 +925,7 @@ mod tests {
             thread: "native-thread".into(),
             account: None,
             isolate: None,
+            cwd: home.to_path_buf(),
             client: (
                 client,
                 crate::journal::process_started_at(client).unwrap().unwrap(),

@@ -498,6 +498,7 @@ fn run_native_session(
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
                 command.isolate,
+                Some(command.cwd.clone()),
             )
         })
         .transpose()
@@ -705,6 +706,7 @@ fn observe_client(
             thread: thread.clone(),
             account: account.clone(),
             isolate: command.isolate,
+            cwd: command.cwd.clone(),
             client: (client, born),
             input: command.input.clone(),
         },

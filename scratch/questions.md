@@ -516,5 +516,5 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   No served account write prompts: a connect with no remembered browser
   profile refuses and names `--chrome-profile`, as the CLI does without a
   terminal.
-- **Account routes read the process directory.** `provider_account::current_repo_id` uses `current_dir`, not the launch's repository, so a served launch (`pr.*`, or any `AgentConfig.cwd` elsewhere) routes by the server's directory. Fixtures now isolate it; the served path still needs the launch's directory.
+- **Account routes read the launch's directory.** Resolved: `resolve_provider_account_exact` takes the launch directory, so a served launch routes by its repository, not the server's. The `cfg!(test)` return is gone.
 - **`lf task show` on an unsaved selector now errors** (`task.get` answers `not_found`). It printed a null Task with planning evidence; that evidence is now only in text `lf task status`, and `lf task status --json` errors as it did.

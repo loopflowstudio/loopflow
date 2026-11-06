@@ -23,8 +23,7 @@ impl Cmux {
     fn run(&self, args: &[&str]) -> Result<String> {
         let mut command = Command::new(&self.cli);
         command.env("CMUX_QUIET", "1").args(args);
-        super::super::run_host(command, "cmux")
-            .map_err(|error| anyhow::anyhow!("{}", error.reason()))
+        super::run_host(command, "cmux").map_err(|error| anyhow::anyhow!("{}", error.reason()))
     }
 
     /// The group holding the caller's workspace now; `None` when it is ungrouped

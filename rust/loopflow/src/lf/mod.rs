@@ -2183,14 +2183,6 @@ until `lf ship`."
         checkout: std::path::PathBuf,
         #[arg(long)]
         path: Option<std::path::PathBuf>,
-        #[arg(long, default_value = "parent")]
-        base: String,
-        /// Compare to this resolved commit instead of the working tree
-        #[arg(long)]
-        head: Option<String>,
-        /// Delegate comparison display to the configured Git difftool
-        #[arg(long)]
-        difftool: bool,
     },
     /// Browse the Task brief, workflow and recorded runs without starting work
     View {
@@ -2216,6 +2208,9 @@ until `lf ship`."
         draft: bool,
         #[arg(long)]
         json: bool,
+        /// Open the comparison in Git's configured difftool (tracked files only)
+        #[arg(long, conflicts_with_all = ["files", "draft", "json"])]
+        difftool: bool,
     },
     /// List one directory in this Task's worktree
     Files {

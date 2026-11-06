@@ -1178,18 +1178,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             tool,
             checkout,
             path,
-            base,
-            head,
-            difftool,
-        } => loopflow::lf::commands::task_tool::run(
-            issue,
-            *tool,
-            checkout,
-            path.as_deref(),
-            base,
-            head.as_deref(),
-            *difftool,
-        ),
+        } => loopflow::lf::commands::task_tool::run(issue, *tool, checkout, path.as_deref()),
         TaskCommand::View { issue, once } => {
             loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
         }
@@ -1303,25 +1292,19 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             head,
             draft,
             json,
+            difftool,
             files: false,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
-            let snapshot = loopflow::ops::task::task_diff(
+            loopflow::lf::commands::task_diff::run(
                 issue,
                 path.as_deref(),
                 base,
                 head.as_deref(),
                 content.as_deref(),
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&snapshot)?);
-            } else {
-                print!("{}", snapshot.patch);
-                if snapshot.truncated {
-                    eprintln!("\n[diff truncated at 1 MB]");
-                }
-            }
-            Ok(())
+                *json,
+                *difftool,
+            )
         }
         TaskCommand::Files {
             issue,

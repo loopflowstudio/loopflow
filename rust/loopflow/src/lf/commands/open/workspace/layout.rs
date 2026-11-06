@@ -131,13 +131,9 @@ pub(super) fn layout(
                     SplitAxis::Vertical,
                     0.618,
                     conversation,
-                    tools.tool(
-                        "changes",
-                        None,
-                        Some(&ChangeComparison::WorkingTree {
-                            base: "parent".into(),
-                        }),
-                    )?,
+                    tools.changes(&ChangeComparison::WorkingTree {
+                        base: "parent".into(),
+                    })?,
                 )
             } else {
                 conversation
@@ -158,7 +154,7 @@ pub(super) fn layout(
     };
     let Some(source) = source else {
         let conversation = tools.conversation(None)?;
-        let shell = tools.tool("shell", None, None)?;
+        let shell = tools.tool("shell", None)?;
         // Background arrivals show workflow in place of an interactive resume.
         let secondary = if tools.resume {
             host.split(SplitAxis::Horizontal, 0.618, tools.task_view()?, shell)
@@ -201,12 +197,7 @@ impl Tools<'_> {
         self.host.conversation(self.cwd, &words)
     }
 
-    fn tool(
-        &self,
-        name: &str,
-        path: Option<&str>,
-        comparison: Option<&ChangeComparison>,
-    ) -> Result<Value> {
+    fn tool(&self, name: &str, path: Option<&str>) -> Result<Value> {
         let mut args = vec![
             "task",
             "tool",
@@ -218,18 +209,28 @@ impl Tools<'_> {
         if let Some(path) = path {
             args.extend(["--path", path]);
         }
-        if let Some(comparison) = comparison {
-            args.extend(["--base", comparison.base()]);
-            if let Some(head) = comparison.head() {
-                args.extend(["--head", head]);
-            }
-        }
         let argv = viewer_argv(self.cwd, &args)?;
         Ok(if name == "shell" {
             self.host.terminal(name, self.cwd, argv)
         } else {
             self.host.block(name, self.cwd, argv)
         })
+    }
+
+    fn changes(&self, comparison: &ChangeComparison) -> Result<Value> {
+        let mut args = vec![
+            "task",
+            "diff",
+            &self.content.work.id,
+            "--base",
+            comparison.base(),
+        ];
+        if let Some(head) = comparison.head() {
+            args.extend(["--head", head]);
+        }
+        Ok(self
+            .host
+            .block("Changes", self.cwd, viewer_argv(self.cwd, &args)?))
     }
 
     fn render_tree(
@@ -273,7 +274,7 @@ impl Tools<'_> {
                     );
                 }
                 *shells += 1;
-                self.tool("shell", None, None)?
+                self.tool("shell", None)?
             }
             PaneIntent::Browser {
                 location,
@@ -295,11 +296,9 @@ impl Tools<'_> {
                             .iter()
                             .find(|tab| Some(&tab.id) == selected.as_ref())
                             .map(|tab| tab.path.as_str());
-                        self.tool("files", path, None)?
+                        self.tool("files", path)?
                     }
-                    Some(BrowserTab::Changes { comparison, .. }) => {
-                        self.tool("changes", None, Some(comparison))?
-                    }
+                    Some(BrowserTab::Changes { comparison, .. }) => self.changes(comparison)?,
                     Some(BrowserTab::Url { url, .. }) => {
                         bail!("Web page {url} remains in the source host; no terminal renderer is configured")
                     }

@@ -17,7 +17,7 @@ impl Herdr {
     pub(super) fn local() -> Result<Self> {
         let socket = std::env::var("HERDR_SOCKET_PATH")
             .context("Herdr opening requires the current server's HERDR_SOCKET_PATH")?;
-        let viewed = match super::super::viewed_placement() {
+        let viewed = match super::viewed_placement() {
             Some((super::OpenHost::Herdr, workspace)) => Some(workspace),
             _ => None,
         };
@@ -33,7 +33,7 @@ impl Herdr {
 
     /// The workspace holding the caller's pane now, which follows pane moves.
     pub(super) fn here(&self) -> Result<Option<String>> {
-        if let Some((super::OpenHost::Herdr, workspace)) = super::super::viewed_placement() {
+        if let Some((super::OpenHost::Herdr, workspace)) = super::viewed_placement() {
             return Ok(Some(workspace));
         }
         let Some(pane) = &self.pane else {

@@ -50,3 +50,13 @@ unresolved. This feedback approves neither shipping nor demo cleanup.
 Jack Heart requested the PR against LOO-717. LOO-498 now selects LOO-717 / PR #1811 as its stack parent. Keep shell lifetime and retirement in that parent; review native opening and cwd additions in #1814 above it. The failed branch fresh-start demo remains unresolved.
 
 Stack validation against LOO-717 a1067c99: isolated Rex resume/cwd tests 2 passed; last-viewer/disconnect retention test 1 passed; formatting and all-targets clippy passed. No live demo was relaunched during stacking.
+
+Jack Heart requested sibling host adapters for Rex, cmux, Herdr and tmux, and one
+Task diff command. Changes panes invoke `lf task diff`; that command owns Git
+paging and `--difftool`. Remove `task tool … changes`; Files and Shell remain.
+
+Validation of the consolidation (November 6):
+- `cargo test -p loopflow --test integration task_diff_tests::`: 2 passed, including real Git difftool, pipe output and terminal paging.
+- `cargo test -p loopflow --lib lf::commands::open::`: 14 passed.
+- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 24 passed, 2 native-host opt-in tests ignored. The initial overlapping build/edits and Desktop launch timeout are superseded by this final-tree run.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. Gate/CI retain broader coverage; no new live demo or startup repair is claimed.

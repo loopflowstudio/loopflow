@@ -1253,7 +1253,7 @@ fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
     let request: Value = serde_json::from_str(created.trim()).unwrap();
     let split = &request["layout"]["split"];
     let words = |pane: &Value| pane["block"]["options"]["command"].to_string();
-    assert!(words(&split["before"]).contains("\"changes\""), "{request}");
+    assert!(words(&split["before"]).contains("\"diff\""), "{request}");
     assert!(words(&split["after"]).contains("\"shell\""), "{request}");
     assert!(
         !created.contains("Task & workflow"),

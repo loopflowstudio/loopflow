@@ -2,8 +2,6 @@
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
-mod cmux;
-mod herdr;
 mod layout;
 
 use layout::{layout, Host};
@@ -11,15 +9,16 @@ use layout::{layout, Host};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use super::{OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved};
+use super::{
+    cmux, herdr, rex::Rex, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening,
+    Resolved,
+};
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
-use crate::journal::OsProcess;
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState,
@@ -67,219 +66,6 @@ fn workspace_plan(
     let mut plan = store.plan_selection(repository, inventory)?;
     plan.selection = selected;
     Ok(plan)
-}
-
-// ---------------------------------------------------------------------------
-// Rex
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct RexLocation {
-    pub server: String,
-    pub session: String,
-    pub block: String,
-}
-
-impl RexLocation {
-    pub(super) fn current() -> Result<Self> {
-        let server = match std::env::var("REX_SERVER").ok() {
-            Some(server) => server,
-            None => caller_server()?.context(
-                "Rex caller server is unavailable from its process ancestry; select it with --server",
-            )?,
-        };
-        Self {
-            server,
-            session: std::env::var("REX_SESSION").context("Rex caller session is missing")?,
-            block: std::env::var("REX_BLOCK").context("Rex caller block is missing")?,
-        }
-        .resolve()
-    }
-
-    fn resolve(mut self) -> Result<Self> {
-        self.server = Rex::endpoint(Some(&self.server))?;
-        Ok(self)
-    }
-}
-
-/// Native Rex shells descend from the serving process, even through login and
-/// tool shells. Its explicit listener is destination evidence; a running-app or
-/// socket inventory is not. Current conversation placement is resolved first.
-fn caller_server() -> Result<Option<String>> {
-    let mut pid = std::process::id();
-    let mut seen = BTreeSet::new();
-    while pid > 1 && seen.insert(pid) {
-        let Some(process) = OsProcess::read(pid)? else {
-            break;
-        };
-        if OsProcess::executable(pid)
-            .is_some_and(|path| path.file_name().is_some_and(|name| name == "rex"))
-        {
-            let args = OsProcess::arguments(pid)?
-                .context("Rex caller server arguments are unavailable")?;
-            if args.windows(2).any(|pair| pair == ["server", "run"]) {
-                return Ok(listening_endpoint(&args));
-            }
-        }
-        pid = process.ppid;
-    }
-    Ok(None)
-}
-
-fn listening_endpoint(args: &[String]) -> Option<String> {
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        if arg == "--listen" {
-            return args.next().cloned();
-        }
-        if let Some(endpoint) = arg.strip_prefix("--listen=") {
-            return Some(endpoint.into());
-        }
-    }
-    None
-}
-
-#[derive(Clone)]
-struct Rex {
-    server: String,
-    caller: Option<RexLocation>,
-}
-
-impl Rex {
-    fn call(&self, method: &str, args: Value) -> Result<Value> {
-        let mut command = Command::new("rex");
-        command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
-        command.args(["api", "call", method, &serde_json::to_string(&args)?]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("Rex {method}: {}", error.reason()))?;
-        serde_json::from_str(&output).context("Rex reply is unreadable; outcome is unknown")
-    }
-
-    /// The current viewer's Rex, else the caller's terminal, else `--server`.
-    fn local(server: Option<&str>) -> Result<Self> {
-        let location = if server.is_some() {
-            None
-        } else {
-            match super::viewed_placement() {
-                Some((OpenHost::Rex, value)) => Some(
-                    serde_json::from_str::<RexLocation>(&value)
-                        .context("Current Rex viewer placement is unreadable")?
-                        .resolve()?,
-                ),
-                Some(_) => None,
-                None if super::in_rex() => {
-                    anyhow::ensure!(
-                        crate::journal::agent_caller().is_none(),
-                        "Current conversation viewer is unavailable; refusing stale Rex startup placement"
-                    );
-                    Some(RexLocation::current()?)
-                }
-                None => None,
-            }
-        };
-        let endpoint = match &location {
-            Some(location) => location.server.clone(),
-            None => Self::endpoint(server)?,
-        };
-        let rex = Self {
-            server: endpoint,
-            caller: location,
-        };
-        if let Some(location) = &rex.caller {
-            let windows = rex.windows(&location.session)?;
-            let caller_exists = windows
-                .iter()
-                .flat_map(|window| window["layers"].as_array().into_iter().flatten())
-                .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
-                .any(|block| block["block_id"] == location.block);
-            anyhow::ensure!(
-                caller_exists,
-                "The current Rex caller block is unavailable; nothing was opened"
-            );
-        }
-        Ok(rex)
-    }
-
-    fn endpoint(server: Option<&str>) -> Result<String> {
-        let mut command = Command::new("rex");
-        for name in ["REX_SERVER", "REX_SESSION", "REX_BLOCK"] {
-            command.env_remove(name);
-        }
-        if let Some(server) = server {
-            command.args(["-S", server]);
-        }
-        command.args(["--autostart=false", "--timeout", "2s", "whoami", "--json"]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("{}", error.reason()))?;
-        let who: Value = serde_json::from_str(&output)?;
-        let server = who["endpoint"]
-            .as_str()
-            .context("Rex did not identify its server")?;
-        // Unix peer authentication identifies this Machine's account. A remotely
-        // selected default is never accepted as the local Task execution host.
-        anyhow::ensure!(server.starts_with("unix://") && who["principal"]["transport"] == "unix", "Rex is connected to another Machine; run lf open on the Task's recorded Machine with its local Rex server");
-        Ok(server.into())
-    }
-
-    fn sessions(&self) -> Result<Vec<Value>> {
-        array(self.call("session.list", json!({}))?, "sessions")
-    }
-
-    fn windows(&self, container: &str) -> Result<Vec<Value>> {
-        let view = self.call("session.view", json!({"session_id":container}))?;
-        // Rex omits windows for an empty session. Its identity and revision
-        // distinguish a complete empty view from an incomplete reply.
-        if view.get("windows").is_none()
-            && view["session_id"] == container
-            && view["revision"].is_u64()
-        {
-            return Ok(Vec::new());
-        }
-        array(view, "windows")
-    }
-
-    fn focus(&self, container: &str, window: &str) -> Result<String> {
-        self.call(
-            "session.focus_window",
-            json!({"session_id":container,"window_id":window}),
-        )?;
-        let clients = array(self.call("client.list", json!({}))?, "clients")?;
-        let mut candidates = Vec::new();
-        for client in clients {
-            // The CLI performing client.list appears in its own reply and exits
-            // before the next request. It cannot display the workspace.
-            if client["info"]["kind"] == "cli" {
-                continue;
-            }
-            let Some(id) = client["client_id"].as_str() else {
-                continue;
-            };
-            let detail = self.call("client.inspect", json!({"client_id":id}))?;
-            if detail["actions"].as_array().is_some_and(|actions| {
-                actions
-                    .iter()
-                    .any(|action| action["name"] == "session.select")
-            }) {
-                candidates.push(id.to_string());
-            }
-        }
-        if candidates.len() != 1 {
-            return Ok(
-                "Materialized in Rex; app visibility is unconfirmed (no unique capable client)"
-                    .into(),
-            );
-        }
-        self.call("client.perform", json!({"client_id":candidates[0],"action":"session.select","args":{"session_id":container,"window_id":window}}))?;
-        Ok("Rex accepted display selection".into())
-    }
-}
-
-fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {
-    match value.as_object_mut().and_then(|object| object.remove(key)) {
-        Some(Value::Array(items)) => Ok(items),
-        Some(Value::Null) => Ok(Vec::new()),
-        _ => bail!("Host inventory omitted {key}; absence is unknown"),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -350,21 +136,10 @@ impl Native {
     fn create_container(&self, name: &str, cwd: &Path) -> Result<Container> {
         let name = label(name);
         match self {
-            Self::Rex(rex) => {
-                let created =
-                    rex.call("session.create", json!({"label":name,"initial_windows":[]}))?;
-                Ok(Container {
-                    id: Some(
-                        created["session_id"]
-                            .as_str()
-                            .context(
-                                "Rex create reply omitted session identity; outcome is unknown",
-                            )?
-                            .into(),
-                    ),
-                    spare_tab: None,
-                })
-            }
+            Self::Rex(rex) => Ok(Container {
+                id: Some(rex.create_session(&name)?),
+                spare_tab: None,
+            }),
             Self::Herdr(herdr) => {
                 let (workspace, tab) = herdr.create_workspace(&name, cwd)?;
                 Ok(Container {
@@ -394,14 +169,7 @@ impl Native {
                     .id
                     .as_deref()
                     .context("Rex session is unavailable")?;
-                let created = rex.call(
-                    "session.new_window",
-                    json!({"session_id":session,"window_label":name,"focus":false,"layout":layout}),
-                )?;
-                Ok(created["window_id"]
-                    .as_str()
-                    .context("Rex create reply omitted window identity; outcome is unknown")?
-                    .into())
+                rex.create_window(session, &name, layout)
             }
             Self::Herdr(herdr) => {
                 let tab = match container.spare_tab.take() {
@@ -1058,10 +826,10 @@ fn start_follower(
         words.extend(["--remote".into(), remote.clone()]);
     }
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
-    rex.call(
-        "session.new_window",
-        json!({"session_id":session,"window_label":"Workspace","focus":false,
-            "layout":Host::Rex(&rex.server).block("Workspace",repo,viewer_argv(repo,&words)?)}),
+    rex.create_window(
+        session,
+        "Workspace",
+        Host::Rex(&rex.server).block("Workspace", repo, viewer_argv(repo, &words)?),
     )?;
     Ok(())
 }
@@ -1310,12 +1078,11 @@ fn arrive_remote(
 
 #[cfg(test)]
 mod tests {
-    use super::{array, eligible, listening_endpoint, settle_remote, Candidate, Placement};
+    use super::{eligible, settle_remote, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
     use crate::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
     };
-    use serde_json::json;
 
     #[test]
     fn real_machine_tools_keep_the_build_that_opened_them() {
@@ -1326,34 +1093,6 @@ mod tests {
         let argv = super::viewer_argv(&cwd, &["resume", "existing"]).unwrap();
         assert_eq!(argv[0], std::env::current_exe().unwrap().to_string_lossy());
         assert_eq!(&argv[3..], &["resume", "existing"]);
-    }
-
-    #[test]
-    fn caller_listener_preserves_argument_boundaries() {
-        for args in [
-            vec![
-                "rex",
-                "server",
-                "run",
-                "--listen",
-                "unix:///Task servers/rex.sock",
-            ],
-            vec![
-                "rex",
-                "server",
-                "run",
-                "--listen=unix:///Task servers/rex.sock",
-            ],
-        ] {
-            assert_eq!(
-                listening_endpoint(&args.into_iter().map(str::to_owned).collect::<Vec<_>>()),
-                Some("unix:///Task servers/rex.sock".into())
-            );
-        }
-        assert_eq!(
-            listening_endpoint(&["--config".into(), "/rex.lua".into()]),
-            None
-        );
     }
 
     #[test]
@@ -1448,13 +1187,5 @@ mod tests {
         let parsed = Placement::parse(&["m1=s".into(), "m2=".into()]).unwrap();
         assert_eq!(parsed["m1"], Placement::Container("s".into()));
         assert_eq!(parsed["m2"], Placement::Uncertain);
-    }
-
-    #[test]
-    fn missing_inventory_is_not_an_empty_host() {
-        assert!(array(json!({}), "windows").is_err());
-        assert!(array(json!({"windows":null}), "windows")
-            .unwrap()
-            .is_empty());
     }
 }

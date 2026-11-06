@@ -131,12 +131,12 @@ Files uses `LF_FILE_BROWSER` for directories, then `VISUAL`, `EDITOR`, or `vi` f
 editing. Set these on the Machine where the Task runs. GUI editors may open their
 own windows.
 
-Changes uses Git's pager and diff settings. Working-tree patches include
-untracked files; `--difftool` covers tracked files. To launch a tool directly:
+Changes runs `lf task diff`, using Git's pager and diff settings. Working-tree
+patches include untracked files; `--difftool` covers tracked files. To launch a tool directly:
 
 ```bash
 lf task tool ENG-123 files --checkout /path/to/task
-lf task tool ENG-123 changes --checkout /path/to/task --base parent --difftool
+lf diff ENG-123 --base parent --difftool
 ```
 
 Use `--head <commit>` for a committed comparison. In Task/workflow, `n` and `p`

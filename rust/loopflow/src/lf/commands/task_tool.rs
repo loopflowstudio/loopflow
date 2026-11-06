@@ -1,28 +1,18 @@
 //! Native host tools run on the Task's recorded Machine; ordinary shells have no
-//! LF transport owner. Git remains responsible for editor, pager and difftool policy.
-use std::io::{IsTerminal, Write};
+//! LF transport owner. Files use the configured browser or editor.
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum Tool {
     Files,
-    Changes,
     Shell,
 }
 
-pub fn run(
-    issue: &str,
-    tool: Tool,
-    checkout: &Path,
-    path: Option<&Path>,
-    base: &str,
-    head: Option<&str>,
-    difftool: bool,
-) -> Result<()> {
+pub fn run(issue: &str, tool: Tool, checkout: &Path, path: Option<&Path>) -> Result<()> {
     let checkout = crate::ops::task::workspace::pinned_checkout(issue, checkout)?;
     let mut command = match tool {
         Tool::Shell => {
@@ -60,71 +50,9 @@ pub fn run(
             .unwrap_or_else(|| "vi".into());
             editor_command(&editor, &full)
         }
-        Tool::Changes => {
-            if !difftool {
-                let path = path
-                    .map(|path| path.to_str().context("Changes path is not UTF-8"))
-                    .transpose()?;
-                let diff = crate::ops::task::task_diff(issue, path, base, head, None)?;
-                if diff.truncated {
-                    eprintln!("Patch truncated at 1 MB, as in Desktop");
-                }
-                return page(&checkout.worktree, &diff.patch);
-            }
-            let changes = crate::ops::task::task_changes(issue, base, head)?;
-            let mut command = Command::new("git");
-            command.arg("difftool");
-            command.arg(&changes.base_commit);
-            if head.is_some() {
-                command.arg(&changes.head_commit);
-            }
-            command.arg("--");
-            if let Some(path) = path {
-                command.arg(path);
-            }
-            command
-        }
     };
     command.current_dir(&checkout.worktree);
     Err(command.exec()).context("start the selected workspace tool")
-}
-
-fn page(checkout: &Path, patch: &str) -> Result<()> {
-    if !std::io::stdout().is_terminal() {
-        std::io::stdout().write_all(patch.as_bytes())?;
-        return Ok(());
-    }
-    let pager = Command::new("git")
-        .current_dir(checkout)
-        .args(["var", "GIT_PAGER"])
-        .output()?;
-    anyhow::ensure!(pager.status.success(), "Git could not select its pager");
-    let pager = String::from_utf8(pager.stdout)?;
-    let mut command = Command::new("/bin/sh");
-    command
-        .current_dir(checkout)
-        .args(["-c", pager.trim()])
-        .stdin(Stdio::piped());
-    if std::env::var_os("LESS").is_none() {
-        command.env("LESS", "FRX");
-    }
-    let mut child = command.spawn().context("start Git's selected pager")?;
-    let written = child
-        .stdin
-        .take()
-        .context("Pager input is unavailable")?
-        .write_all(patch.as_bytes());
-    let status = child.wait()?;
-    if let Err(error) = written {
-        if error.kind() != std::io::ErrorKind::BrokenPipe {
-            return Err(error.into());
-        }
-    }
-    anyhow::ensure!(
-        status.success(),
-        "Git's selected pager exited with {status}"
-    );
-    Ok(())
 }
 
 fn editor_command(editor: &str, path: &Path) -> Command {

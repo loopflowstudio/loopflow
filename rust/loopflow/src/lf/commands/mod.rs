@@ -35,6 +35,7 @@ pub mod setting;
 pub mod ship;
 pub mod ssh;
 pub mod task_create;
+pub mod task_diff;
 pub mod task_row;
 pub mod task_tool;
 pub mod task_view;

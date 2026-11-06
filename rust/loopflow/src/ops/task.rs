@@ -304,7 +304,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
 }
 
 // File access reads recorded checkout location without reconciling PR or execution state.
-fn file_store() -> OpsResult<SqliteStore> {
+pub(crate) fn file_store() -> OpsResult<SqliteStore> {
     #[cfg(test)]
     let test_path = super::linear::LINEAR_TEST_CONTEXT
         .try_with(|context| context.path.clone())
@@ -325,7 +325,7 @@ fn file_store() -> OpsResult<SqliteStore> {
         .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
 }
 
-fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
+pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
     let task_id = store
         .resolve_task_id(issue, None)
         .map_err(task_error)?

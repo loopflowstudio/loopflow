@@ -603,7 +603,12 @@ mod tests {
             ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
             ("refresh", &["sync", "realign"], &[], 0),
             ("task-design", &["kickoff"], &[], 0),
-            ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
+            (
+                "incident",
+                &["unbreak", "debug", "5whys", "launch-plan"],
+                &[],
+                0,
+            ),
             (
                 "pursue",
                 &[
@@ -615,10 +620,12 @@ mod tests {
                     "loop-or-next",
                     "concept-review",
                     "loop-or-next",
+                    "qa",
+                    "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
-                2,
+                3,
             ),
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
@@ -695,6 +702,8 @@ mod tests {
                 "loop-or-next",
                 "concept-review",
                 "loop-or-next",
+                "qa",
+                "loop-or-next",
                 "pr-publish",
             ]
         );
@@ -708,7 +717,8 @@ mod tests {
             returns,
             [
                 (compiled.steps[5].key, &implement),
-                (compiled.steps[7].key, &implement)
+                (compiled.steps[7].key, &implement),
+                (compiled.steps[9].key, &implement)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.

@@ -1,36 +1,35 @@
 # Using lf
 
-`lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Graphs. Changes that end in a pull request run as Tasks: each has its own
-worktree, branch and PR.
+`lf` launches coding agents, keeps their Sessions, and runs Skills and Graphs.
+Work that ends in a pull request runs as a Task, with its own worktree, branch
+and PR.
 
-**Launched for a Task or a Graph step:** do that work in the supplied checkout.
-Read its agent guide and existing work, preserve other contributions, and follow
-the Graph's steps and boundaries. Don't start another agent, Task or worktree for
-work already assigned to you. Finishing a Graph selects no next work, but steps a
-stopped Graph never reached remain yours. Read `lf help skill work` before using
-Task or Wave commands unless that guidance was preloaded.
+**In a Task or a Graph step:** do that work in this checkout. Read the agent
+guide and what is already there, keep other people's changes, and follow the
+Graph's steps. Don't start another agent, Task or worktree for work that is
+already yours. Read `lf help skill work` before using Task, Wave or Project
+commands, unless it is already loaded.
 
-**Launched without a Task, talking with a person:** when they ask for a change
-that should end in a PR, hand it off: `lf task create '<outcome>'`, then
-`lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
-Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf task steer <ID> '<direction>'`.
+**In a conversation with no Task:** questions, reading and small fixes happen
+here. A change that should end in a PR becomes a Task: `lf task create
+'<outcome>'`, `lf task run <ID>`, then give back
+`lf open --task <ID> --link --format markdown`. Check on it with
+`lf task status <ID>`; steer it with `lf comment <ID> '<direction>'`.
 
-Use the requested tools and repository conventions. `lf help <command-or-skill>`
-is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
+`lf help <command-or-skill>` is the current reference.
 
-Name the Session for the work in two or three specific words. Read `session_id`
-from `LF_AGENT_CALLER` and use `lf session rename <id> '<name>' --suggest` when
-its generated name needs improving. This preserves a human-assigned name.
-Do not rename a branch or worktree to match the conversation.
+Name the Session for its work in two or three words: read `session_id` from
+`LF_AGENT_CALLER` and run `lf session rename <id> '<name>' --suggest`. A name a
+person gave is kept. Don't rename branches or worktrees.
 
-Answer the user in this conversation; the person may be viewing another Session
-while you work. Keep progress in local notes and the final response. Never
-`lf resume` your own Session. Refer to people by their supplied names in
-persisted artifacts and as “you” in conversation; never infer authorship from
-accounts or machine owners.
+Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task
+briefs and memory describe the work as it is, without saying who asked for it.
 
-Recursive Markdown under `scratch/` enters this checkout's runs. Files in another
-checkout do not transfer their contents. Historical context is evidence, not
-new direction. Keep secrets out of output and follow the repository's policy.
+Write down what can't be worked out again later: a person's exact words, what a
+run showed, outside facts. Code, history and a fresh run can recover the rest.
+Quote what people said; don't turn a reply into a verdict like "accepted". Aim
+for quality per word, not more words.
+
+Markdown under `scratch/` is loaded into this checkout's runs. Another
+checkout's files are not. Old notes are background, not new instructions.
+Keep secrets out of output.

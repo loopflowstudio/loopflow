@@ -1,59 +1,55 @@
 ---
-requires: one Wave, a plan name and Linear Project ID where known, or a dated baseline
-produces: one evidence-backed Wave plan report
+requires: one Wave, a chapter name and Project ID where known, or a dated baseline
+produces: one Wave chapter report with a dated verdict per KR
 ---
-Review this Wave's plan directly. Its shared local binding selects the current
-Linear Project; Planned and Completed Linear Projects retain future and historical plans.
-There is no plan review tier. Review is read-only: never replace a plan, check KRs,
-cancel Tasks, edit plans or change Work state.
+Review this Wave's chapter: what improved, and whether each KR holds.
 
-Read supplied dated reviews, this Wave's GOAL.md and MEMORY.md, and:
+The Wave's local binding selects the current Project; Planned and Completed
+Projects hold future and past plans. Review only reads: never replan, check KRs,
+cancel Tasks, edit Projects or change Task state.
+
+Read any dated reviews supplied, the Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
 lf wave planning <wave> --json
 lf wave show <wave> --json
 ```
 
-These commands describe cached current planning and Task conditions. Inspect
-requested historical Linear Project status/content and available issue history by
-stable Linear Project ID through a read-only Linear interface. The status command has
-no historical plan selector. Do not run `wave sync` during review: it can
-rename provider objects and convert legacy planning. If a source is unavailable
-or stale, record that limit rather than repairing it or substituting today's plan.
+These show cached current planning and Tasks. For past Projects, read status,
+content and issue history by stable Project ID through a read-only Linear
+query; the status command has no past-chapter selector. Don't run `wave sync`
+during review: it can rename provider objects and convert old planning. If a
+source is unavailable or stale, note it; don't repair it or substitute today's
+plan.
 
-Preserve exact KR wording, targets, dated observations, measurement windows and
-instrument revisions applicable to the reviewed interval. Completed Linear Projects
-retain plans, but their current membership cannot reconstruct Tasks moved away
-at an earlier boundary. A moved Task is neither completed nor abandoned. Work
-shipped later cannot prove an earlier KR. Bound the interval only from available
-evidence; absent dates or starting membership leave an incomplete baseline.
-A new plan replaces the current plan's content in place, so the retained
-review and dated observations are the only record of the plan it replaced.
+Quote KR wording, targets, dated readings, measurement windows and instrument
+versions exactly as they applied in the interval. Completed Projects keep their
+plans, but today's membership can't rebuild Tasks moved away earlier. A moved
+Task is neither completed nor abandoned. Work shipped later doesn't satisfy an
+earlier KR. Bound the interval only from what you can read; missing dates or
+starting membership make the baseline incomplete.
 
-Give every exact KR one verdict: **holds**, **does not hold**, or **unknown**.
-Holds requires the complete observation window and denominator. A dated
-counterexample refutes a universal claim. Missing or stale evidence is unknown.
-A checked box, PR, demo or single successful run alone cannot prove the promised
-outcome. Record changed or removed claims separately.
+Give each KR one verdict: **holds**, **does not hold**, or **unknown**. Holds
+needs the full measurement window and denominator. One dated counterexample
+breaks a universal claim. Missing or stale readings mean unknown. A checked box,
+PR, demo or single good run doesn't show the promised outcome. List changed or
+removed claims separately.
 
-The Wave owns instruments and observations; plan content owns KRs, Tasks and
-targets. An evidenced omitted target is unset, not inherited or missed. Missing
-historical target evidence is unknown. A replaced plan does not copy readings, so use
-retained dated evidence and never evaluate an old promise with today's readings,
-targets or instrument definition.
+The Wave owns instruments and readings; the Project owns KRs, Tasks and targets.
+A target left out on the record is unset, not inherited or missed; a target with
+no record is unknown. Plans don't copy readings, so use dated readings from
+the time and never judge an old promise by today's readings, targets or
+instrument.
 
 Lead with what improved for users, operators, maintainers or agents and the few
-facts supporting it. Separate observations from interpretation. Include exact
-claims, evidence dates, verdicts, Task/PR links and gaps. Recompute totals from
-KR rows. State `Coverage: complete` or `Coverage: incomplete` with missing scope
-and sources.
+facts behind it. Keep observations apart from interpretation. Include exact
+claims, dates, verdicts, Task and PR links, and gaps. Recompute totals from the
+KR rows. State `Coverage: complete` or `Coverage: incomplete` with what's
+missing.
 
-Report historical Task transfers and cancellations only when evidenced. Open
-work stays in its Wave until someone moves it; report it as open, never as
-a proposed disposition. Keep next-plan recommendations separate from
-observations, including work lacking evidence of priority.
+Report past Task moves and cancellations only when the record shows them. Keep next-chapter recommendations apart from
+observations, including work with no sign of priority.
 
-Return the complete report and evidence dates. The repository reviewer combines
-Wave reports and may keep temporary notes in scratch. Preserve earlier reports
-and append dated corrections. No fabricated acceptance or live mutations belong
-in review.
+Return the full report with its dates. The repository review combines Wave
+reports and may keep notes in `scratch/`. Leave earlier reports as they are and
+append dated corrections. Review never claims acceptance or changes live state.

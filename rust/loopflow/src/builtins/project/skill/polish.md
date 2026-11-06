@@ -4,64 +4,44 @@ produces: scratch/polish-priorities.md
 ---
 Survey your area's rough edges. What would make it feel more finished?
 
-## Orientation
-
-Before starting, orient yourself in this branch:
-
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read Wave planning context only when the seed names the exact Wave, Task,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Scope
-
-The included context defines your area of responsibility. Polish within that scope. If given `src/cli/`, focus on CLI polish—help text, error messages, user flows. Don't audit unrelated areas. Own your area's quality.
-
-## Goal
-
-Surface the polish work that matters most and make the case for it. Identify friction points worth fixing. Produce evidence—specific examples, not vague concerns—that makes prioritization clear.
+Read `scratch/` first. The included context is your area: given `src/cli/`,
+polish the CLI — help text, error messages, user flows — and leave everything
+else alone.
 
 ## Workflow
 
-1. Read README and user-facing docs. Note what's stale or misleading.
-2. Run CLI commands. Note confusing help text, unhelpful errors.
-3. Scan for inconsistencies: naming, patterns, structure.
-4. For each friction point, gather specific evidence:
-   - Where it occurs
-   - What a user would experience
-   - What the fix would involve
-5. Write `scratch/polish-priorities.md` with prioritized recommendations
+1. Read the README and user-facing docs. Note what's stale or misleading.
+2. Run the commands. Note confusing help text and unhelpful errors.
+3. Scan for inconsistencies in naming, patterns and structure.
+4. For each rough edge, write down where it happens, what someone using it
+   sees, and what the fix involves.
+5. Write `scratch/polish-priorities.md`, most important first.
 
-## What to document
+## What to look for
 
-**Stale documentation.** READMEs that describe old behavior.
+**Stale docs.** READMEs that describe old behavior.
 
-**Naming inconsistencies.** Same concept called different things in different places. Include specific examples.
+**Naming drift.** One concept with different names in different places. Quote them.
 
-**Error message gaps.** Errors that don't help users fix the problem. Quote the actual error, explain what's missing.
+**Unhelpful errors.** Errors that don't say how to fix the problem. Quote the
+error and say what's missing.
 
-**Rough user flows.** Paths that work but feel unfinished. Describe the experience, not just the code.
+**Rough flows.** Paths that work but feel unfinished. Describe what it's like to
+use, not just the code.
 
-**Documentation holes.** Features that exist but aren't explained. Note what a user would need to know.
+**Doc holes.** Features that exist but aren't explained. Say what someone would
+need to know.
 
 ## Output
-
-Write `scratch/polish-priorities.md`:
 
 ```markdown
 # Polish Priorities
 
 ## Priority 1: <name>
-**Evidence**:
+**Examples**:
 - <specific example 1>
 - <specific example 2>
-**Impact**: <what users experience>
+**Impact**: <what people run into>
 **Effort**: Low / Medium / High
 **Recommendation**: <why this should be next>
 
@@ -69,7 +49,9 @@ Write `scratch/polish-priorities.md`:
 ...
 
 ## Lower priority
-<Issues worth tracking but not urgent. Brief notes, not full write-ups.>
+<Worth tracking, not urgent. Brief notes.>
 ```
 
-The evidence section is the key. Specific examples make prioritization possible. "Error messages are bad" is not actionable. "Running `cmd foo` with no args shows 'Error: None' with no explanation" is.
+Specific examples make the list worth reading. "Error messages are bad" isn't
+actionable. "Running `cmd foo` with no args shows 'Error: None' with no
+explanation" is.

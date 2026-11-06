@@ -3,76 +3,50 @@ produces: synced branch (or no-op if up-to-date)
 ---
 Merge the target into this branch, resolving conflicts.
 
-## Orientation
+Read `scratch/` for this branch's design (`scratch/<branch>.md`) and open
+questions (`scratch/questions.md`), and `AGENTS.md` for conventions. Read Wave
+or Task context only when the seed names the exact wave, Task or Project.
 
-Before starting, orient yourself in this branch:
+## 1. Read the conflict
 
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read Wave planning context only when the seed names the exact Wave, Task,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Goal
-
-Resolve the merge already in this checkout. When a sync caller is waiting, it
-verifies and pushes after this agent exits.
-
-## Workflow
-
-### 1. Understand the conflict
 ```bash
 git status --short
 ```
-Read `<lf:sync-conflict>` for the pinned target and affected paths. The
-merge state already exists. Do not fetch, start another sync, delegate to a
-subagent, or run raw `git merge` lifecycle commands.
 
-For a merge started by a supervisor without a Loopflow owner, use
-`lf sync --continue --adopt` after resolving it (or `lf sync --abort --adopt`).
-A stopped Loopflow sync retains its target and is adopted by ordinary
-`--continue` or `--abort`. A live caller still requires its exact recovery identity.
+`<lf:sync-conflict>` names the pinned target and the affected paths. The merge
+is already in progress: don't fetch, start another sync, hand it to a
+subagent, or run raw `git merge` commands.
 
-### 2. Resolve and continue
+A merge started outside Loopflow continues with `lf sync --continue --adopt`
+(or `lf sync --abort --adopt`). A stopped Loopflow sync keeps its target and
+continues with plain `--continue` or `--abort`. A sync whose caller is still
+running needs that caller's recovery identity.
 
-If conflicts occur:
+## 2. Resolve and continue
 
 ```bash
-# See which files have conflicts
-git status
-
-# After resolving the current conflict
-lf sync --continue
+git status                # conflicted files
+lf sync --continue        # after resolving the current conflict
 ```
 
-**Conflict resolution strategy:**
+- **Files central to the branch:** keep the branch's changes, guided by the
+  conflict context and surrounding code.
+- **Files outside the branch's scope:** take main's version; the branch
+  probably touched them in passing.
+- **Both sides valid:** combine them by hand.
+- **Ambiguous or risky:** ask in an interactive conversation. Headless,
+  explain the conflict and stop; the Wave operator reads the logs.
 
-- **Files central to the branch's intent:** Preserve the branch's changes named by the conflict context and surrounding code.
-- **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
-- **Both versions are valid:** Combine manually if both changes make sense.
-- **Ambiguous or high-risk conflicts:** Ask in the current interactive conversation.
-  Headless work explains the unresolved conflict and stops for the Wave operator
-  to inspect its existing logs.
+`lf sync --continue` stages the resolved paths and checks this agent runs the
+sync. Loopflow remembers the resolution for identical later conflicts; rerere
+auto-staging stays off, so unrelated paths never get staged with it.
 
-`lf sync --continue` stages the resolved conflict paths and checks that this
-agent owns the operation. The merge resolves the combined branch changes in one
-round. Loopflow records the reviewed resolution for later identical conflicts;
-rerere auto-staging stays disabled, so unrelated paths are never staged with it.
+## 3. Check the result
 
-### 3. Verify the resolution
+After the sync completes, run the smallest test that exercises the combined
+behavior, once. Leave the full suite, static analysis and builds to gate and CI.
 
-Run the smallest behavioral test that exercises the reconciled behavior, once,
-after the sync completes. Do not expand into the whole project suite or
-unrelated static-analysis or build checks here. Gate and CI own that broader
-proof.
-
-Do not push. Exit after the focused proof; the waiting `lf sync` process owns
-Git postconditions and the single push.
+Don't push. Exit after that test; the waiting `lf sync` does the single push.
 
 ## Abort
 
@@ -81,5 +55,5 @@ lf sync --abort
 ```
 
 Then:
-- interactive: explain the failure and ask the present User how to proceed
+- interactive: explain the failure and ask how to proceed
 - headless: explain the exact blocker in ordinary output and stop

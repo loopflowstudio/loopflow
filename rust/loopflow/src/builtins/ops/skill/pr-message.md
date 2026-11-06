@@ -1,43 +1,40 @@
 Generate a PR title and body for the changes on this branch.
 
-Review the diff against the PR base. Do not ask questions; make context-backed
-assumptions where necessary.
+Read the diff against the PR base. Don't ask questions; assume from context.
 
-## Authorship
+## Writing it
 
-Write for someone returning after time away. Name the concrete improvement in the
-title. Open the body with one short paragraph of one or two sentences explaining
-what was difficult before
-and what this PR makes easier or newly possible for users, operators, or maintainers.
-They should understand the benefit without running a command or opening another document.
+Write for someone coming back after time away. The title names the concrete
+improvement. The body opens with one or two sentences: what was hard before,
+and what this PR makes easier or newly possible. A reader should get the
+benefit without running a command or opening another document.
 
-Keep the promise within what this PR delivers, even when the Task has a larger ambition.
-Use familiar product language and concrete verbs. An area prefix is useful only when
-it helps recognition. Preserve proper names and command spelling.
+Promise only what this PR delivers, even when the Task aims further. Use
+product language and concrete verbs. Add an area prefix only when it helps
+recognition. Keep proper names and command spelling exact.
 
-Follow with **What changes**: a short paragraph or a few bullets describing the
-meaningful change. Include implementation detail only when it helps review. Put **Why it
-matters** after that, and omit it if the summary already explains the consequence.
-Include material risks or limitations when needed. Preserve concrete accepted
-checks whose evidence comes after merge: the unverified outcome, environment or
-release prerequisite and expected evidence. Optional later Task creation can use
-this copy after scratch cleanup; suggestions for new scope stay labeled as suggestions. Keep automated test and lint
-results in **Checks** when useful, or link to CI. Finish with **Try it** when there
-is a useful walkthrough: describe a concrete user action and the visible result
-that demonstrates the benefit. Tests, test commands, and test results never belong
-in this section. Distinguish suggested steps from behavior actually observed;
-label simulations and remaining limits. Omit the walkthrough when it adds nothing.
+Then **What changes**: a short paragraph or a few bullets. Add implementation
+detail only when it helps review. **Why it matters** comes next, only if the
+opening doesn't already say it. Note real risks or limits. Keep checks that
+can only run after merge: what is still untried, the environment
+or release it needs, and what to look for. A later Task may be created from
+this text after `scratch/` is cleared; mark new-scope ideas as suggestions.
+Put test and lint results in **Checks**, or link CI. End with **Try it** when
+a walkthrough helps: a concrete action and the visible result. Tests never go
+in **Try it**. Say which steps were actually run and which are suggested.
 
-Use only the sections the change needs. A small change may need only a short summary
-and a useful walkthrough. Rewrite around the current diff when scope changes; remove superseded
-explanation instead of appending a diary. Loopflow supplies Task identity and merge
-consequences from durable state; do not invent or repeat those facts.
+Don't restate what the diff already says; a reader can open it. Spend the
+words on what it can't show: why it was built this way, quoted direction, what
+a run showed, outside facts. Use only the sections the
+change needs. When scope changes, rewrite around the
+current diff; no diary of revisions. Loopflow adds the Task ID and merge
+consequences itself; don't repeat them.
 
-Link related work where you explain its relevance. In prose and PR bodies, use
-`[Title · Task ID or PR number](known URL)` on first mention; shorten later references
-when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
-Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
-In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
+Link related work where you explain why it matters:
+`[Title · Task ID or PR number](known URL)` on first mention, shorter after.
+Say how it relates: builds on, supersedes, verified by. Only use URLs you
+know. Decisions you cite must stay readable after merge. In operational lists,
+ID first: `[Task ID or PR number · Title](known URL)`.
 
 ## Output format
 

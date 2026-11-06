@@ -903,7 +903,7 @@ struct WorkDestinationTests {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
-            if args.starts(with: ["task", "diff"]) {
+            if args.starts(with: ["task", "changes"]) {
                 if let comparisonBarrier { await comparisonBarrier.wait("comparison") }
                 if outcome == "comparison" { throw RegistryQueryError("Comparison unavailable") }
                 return changes

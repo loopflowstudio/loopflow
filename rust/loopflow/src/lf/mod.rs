@@ -652,6 +652,10 @@ pub enum Commands {
         #[arg(long, requires = "lifeline")]
         provider_pid: Option<u32>,
     },
+    /// Watch a Codex conversation beside its native client. Started by the
+    /// launcher, which sends the launch on stdin.
+    #[command(name = "__codex-observe", hide = true)]
+    CodexObserve,
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1120,7 +1124,9 @@ impl Commands {
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::Portfolio { cmd, .. } => cmd.is_some(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
+                false
+            }
             Self::Ship { .. }
             | Self::Open(_)
             | Self::Inline { .. }
@@ -3478,14 +3484,14 @@ mod tests {
     }
 
     #[test]
-    fn the_provider_hook_is_the_only_hidden_command_and_the_root_hides_no_flag() {
+    fn only_provider_side_commands_are_hidden_and_the_root_hides_no_flag() {
         let root = Cli::command();
         let hidden = root
             .get_subcommands()
             .filter(|command| command.is_hide_set())
             .map(|command| command.get_name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(hidden, ["__context-block"]);
+        assert_eq!(hidden, ["__context-block", "__codex-observe"]);
         fn internal(command: &clap::Command) -> Vec<String> {
             command
                 .get_subcommands()
@@ -3498,7 +3504,7 @@ mod tests {
                 })
                 .collect()
         }
-        assert_eq!(internal(&root), ["__context-block"]);
+        assert_eq!(internal(&root), ["__context-block", "__codex-observe"]);
         let hidden_flags = root
             .get_arguments()
             .filter(|arg| arg.is_hide_set())

@@ -108,26 +108,17 @@ disabled. It cannot report into existing panes.
 The rollout must contain exactly one conversation, two turns and two tool calls.
 It uses no account or login. This proves protocol launch composition; live account
 configuration and actual cmux tab tracking remain separate acceptance checks.
-On reconnect, the fixture types a Unicode draft, fails a stand-in cmux title
-refresh, resizes the PTY, edits and submits the draft. It checks the native model
-request and retained diagnostic file, and rejects raw Loopflow warnings in the
-terminal. Add `--transport-failure` for a separate case: a disposable Unix socket
+On reconnect, the fixture types a Unicode draft, resizes the PTY, edits and submits it.
+Add `--transport-failure` for a separate case: a disposable Unix socket
 proxy disconnects the renderer without a WebSocket close handshake while the
 draft is visible. The same PTY reconnects, accepts another edit, and submits the
 exact Unicode draft once. Native history must retain one conversation, two turns
 and two tools. `session_launch_contract` covers the warning output boundary with
 deterministic Claude, Codex and OpenCode stand-ins.
-
-Add `--startup-failure before-thread`, `after-thread`, or `first-turn` to drop
-only the disposable renderer's connection at native startup protocol boundaries.
-Each case checks the retained Session diagnostic's operation, direction and
-AgentProcess, reads it through `lf history show SESSION --events`, and rejects
-raw diagnostic output in the PTY. These probes use real Codex with a local model.
-`after-thread` withholds the frame carrying the new thread's ID: Codex then shows
-"Reconnect failed" and ignores `/exit`, so the probe leaves with Ctrl+C and checks
-that the printed `lf resume` continues the same thread without repeating its input.
-The other phases stop after diagnostic readback. Leaving stops Codex, so a first
-turn already accepted in that window ends interrupted and may lose its input.
+Add `--new-thread` to continue each case: the resumed TUI types `/new` and a
+prompt, the Session must select the new conversation with one `new` selection
+(Codex's ephemeral title thread must not move it) and record its answer, and a
+further `lf session resume` must reopen it.
 
 ## Released capture-history preservation
 

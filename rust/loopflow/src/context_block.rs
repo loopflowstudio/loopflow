@@ -230,8 +230,8 @@ impl ContextDelivery {
         Ok(())
     }
 
-    /// App-server hooks inherit the server environment, not thread shell policy.
-    /// Bind before the first turn so sibling threads never borrow launch context.
+    /// App-server hooks inherit the server environment, not thread shell policy,
+    /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
         let path = native_delivery_path(&self.home, session);
         let parent = path.parent().expect("context binding has a parent");
@@ -268,6 +268,18 @@ impl ContextDelivery {
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))
     }
+}
+
+/// A conversation the person starts on a Session's app-server is that Session's,
+/// so it takes the binding of the one it replaces. A Session launched without
+/// context has no binding to carry.
+pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow::Result<()> {
+    let bytes = match fs::read(native_delivery_path(home, from)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
 }
 
 pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {

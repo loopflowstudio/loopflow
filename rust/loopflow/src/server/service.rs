@@ -279,9 +279,19 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
     }))?;
     tokio::time::timeout(SEND, async {
         socket.write_u32(body.len() as u32).await?;
-        socket.write_all(&body).await
+        socket.write_all(&body).await?;
+        socket.shutdown().await
     })
     .await??;
+    // Read what the old client already sent before closing: Linux resets a
+    // Unix socket closed with unread input, and the client would lose the
+    // reply. A client that keeps writing is not waited for.
+    let mut rest = [0; 4096];
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        while socket.read(&mut rest).await? > 0 {}
+        std::io::Result::Ok(())
+    })
+    .await;
     Ok(())
 }
 

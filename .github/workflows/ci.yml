@@ -146,7 +146,13 @@ jobs:
     outputs:
       archive: ${{ steps.archive.outcome == 'success' }}
     steps:
+      # build.rs orders unmerged migrations after origin/main's; a shallow
+      # clone has no history and orders them by name instead.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - name: Fingerprint workspace build profiles

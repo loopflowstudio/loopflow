@@ -60,6 +60,9 @@ pub fn status() -> Result<Status> {
         .and_then(|()| socket.receive())
     {
         Ok(None) => Some(OLDER_PROTOCOL.into()),
+        // Linux resets a Unix socket closed with the probe's bytes unread,
+        // where macOS reports a clean close; both mean the same older server.
+        Err(error) if resets(&error) => Some(OLDER_PROTOCOL.into()),
         Ok(Some(ServerMessage::Status(answer))) => {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
@@ -89,6 +92,18 @@ pub fn status() -> Result<Status> {
     };
     status.ready = status.error.is_none();
     Ok(status)
+}
+
+fn resets(error: &anyhow::Error) -> bool {
+    error
+        .root_cause()
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| {
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            )
+        })
 }
 
 /// A revision-1 server reads `{"ty` as an absurd frame length and closes.

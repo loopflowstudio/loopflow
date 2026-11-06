@@ -535,8 +535,9 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
     let tasks = home.watch(&["task", "list"]);
     let status = home.watch(&["desktop", "task", "FIX-1"]);
     let listed = |body: &serde_json::Value, listed: bool| {
-        body.as_array()
-            .is_some_and(|rows| rows.iter().any(|row| row["identifier"] == "FIX-1") == listed)
+        body.as_array().is_some_and(|rows| {
+            rows.iter().any(|row| row["task"]["identifier"] == "FIX-1") == listed
+        })
     };
     tasks.body(Duration::from_secs(30), |body| listed(body, true));
     for (operation, completed, open) in [("complete", true, false), ("reopen", false, true)] {

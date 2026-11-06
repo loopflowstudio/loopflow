@@ -196,7 +196,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository Linear identity from Git origin: {error}. \
-             Configure an origin before running `lf wave connect`."
+             Configure an origin before running `lf wave planning connect`."
         ))
     })
 }
@@ -236,7 +236,7 @@ pub(crate) async fn resolve_context(
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
             ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
-             Run `lf wave connect {wave}` to connect its Linear Initiative."
+             Run `lf wave planning connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok((repository, initiative))
@@ -649,7 +649,7 @@ async fn connect_async(
                 ".lf/config.yaml".to_string(),
                 super::wave_lifecycle::authored_path(&wave),
             ],
-            &format!("lf wave connect: {wave} to Linear"),
+            &format!("lf wave planning connect: {wave} to Linear"),
         )
     } else {
         super::wave_lifecycle::AuthoredFiles::Unchanged
@@ -1882,7 +1882,7 @@ fn matching_initiative_id(
         [] => Ok(None),
         [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave planning connect`",
             many.iter()
                 .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
@@ -2476,7 +2476,7 @@ mod tests {
                         assert!(git(&["ls-files", ".lf/wave/ops"], &main).contains("GOAL.md"));
                         assert_eq!(git(&["status", "--porcelain"], &main), "");
                         let log = git(&["log", "--format=%s", "-3"], &main);
-                        assert!(log.contains("lf wave connect: ops to Linear"), "{log}");
+                        assert!(log.contains("lf wave planning connect: ops to Linear"), "{log}");
                         assert!(log.contains("lf wave add: ops"), "{log}");
                         assert_eq!(
                             read_initiative(&main, "ops").as_deref(),

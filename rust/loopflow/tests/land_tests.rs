@@ -545,24 +545,6 @@ fn final_preparation_keeps_published_history_and_merges_main_only_on_conflict() 
     }
 }
 
-/// A launch routes by the process directory: the checkout `lf land` runs in,
-/// never the developer's, whose private route belongs to their Machine.
-struct InDirectory(std::path::PathBuf);
-
-impl InDirectory {
-    fn enter(path: &std::path::Path) -> Self {
-        let previous = std::env::current_dir().unwrap();
-        std::env::set_current_dir(path).unwrap();
-        Self(previous)
-    }
-}
-
-impl Drop for InDirectory {
-    fn drop(&mut self) {
-        std::env::set_current_dir(&self.0).unwrap();
-    }
-}
-
 #[test]
 fn final_preparation_preserves_published_copy_only_for_the_same_head() {
     for (manual_merge, changed_head, body_override) in [
@@ -633,7 +615,7 @@ fi
             pr_body: body_override.map(str::to_string),
             agent: Some("codex".to_string()),
         };
-        let _directory = InDirectory::enter(repo.path());
+        let _directory = support::InDirectory::enter(repo.path());
         if manual_merge {
             submit(repo.path(), &options, &NullProgress).unwrap();
         } else {
@@ -1625,7 +1607,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    let _directory = InDirectory::enter(repo.path());
+    let _directory = support::InDirectory::enter(repo.path());
     land(
         repo.path(),
         &LandOptions {

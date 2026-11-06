@@ -10,13 +10,13 @@ Read its agent guide and existing work, preserve other contributions, and follow
 the Graph's steps and boundaries. Don't start another agent, Task or worktree for
 work already assigned to you. Finishing a Graph selects no next work, but steps a
 stopped Graph never reached remain yours. Read `lf help skill work` before using
-Task, Wave or Project commands unless that guidance was preloaded.
+Task or Wave commands unless that guidance was preloaded.
 
 **Launched without a Task, talking with a person:** when they ask for a change
 that should end in a PR, hand it off: `lf task create '<outcome>'`, then
 `lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
 Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf comment <ID> '<direction>'`.
+Tasks with `lf task status <ID>`; steer with `lf task steer <ID> '<direction>'`.
 
 Use the requested tools and repository conventions. `lf help <command-or-skill>`
 is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
@@ -68,7 +68,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
+- Read Wave planning context only when the seed names the exact Wave, Task,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
 - Read the repo's agent doc (`AGENTS.md`) for conventions.

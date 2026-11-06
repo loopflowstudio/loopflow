@@ -51,7 +51,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
             let summary = crate::work::wave::config::read_wave_summary(repo, &name)?;
             entries.push(Entry {
                 source: format!(".lf/wave/{name}/GOAL.md"),
-                invocation: format!("lf wave connect {name}"),
+                invocation: format!("lf wave planning connect {name}"),
                 name,
                 kind: "wave".to_string(),
                 description: if summary.is_empty() {

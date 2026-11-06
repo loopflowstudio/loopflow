@@ -919,7 +919,7 @@ impl LinearClient {
             ))),
             None => Err(LinearError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf wave connect --team-key {}` to claim it for {repository}",
+                 run `lf wave planning connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }

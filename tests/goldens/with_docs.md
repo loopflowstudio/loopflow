@@ -10,13 +10,13 @@ Read its agent guide and existing work, preserve other contributions, and follow
 the Graph's steps and boundaries. Don't start another agent, Task or worktree for
 work already assigned to you. Finishing a Graph selects no next work, but steps a
 stopped Graph never reached remain yours. Read `lf help skill work` before using
-Task, Wave or Project commands unless that guidance was preloaded.
+Task or Wave commands unless that guidance was preloaded.
 
 **Launched without a Task, talking with a person:** when they ask for a change
 that should end in a PR, hand it off: `lf task create '<outcome>'`, then
 `lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
 Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf comment <ID> '<direction>'`.
+Tasks with `lf task status <ID>`; steer with `lf task steer <ID> '<direction>'`.
 
 Use the requested tools and repository conventions. `lf help <command-or-skill>`
 is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
@@ -48,8 +48,7 @@ the procedure. Reading this skill creates nothing and starts no work.
 
 ## Work model
 
-- **Wave**: a durable objective, memory and area of responsibility.
-- **Project**: a Wave's plan, including Tasks, KRs and targets.
+- **Wave**: a durable objective, memory and area of responsibility, with its planning: Tasks, KRs and targets.
 - **Task**: one repository-owned intended outcome with optional Wave membership, its checkout, conversations and a current PR and delivery history.
 - **Graph**: authored steps, some `interactive:` where a person takes part. A
   Task takes up one and stands at a step of it; a run executes it, with or
@@ -138,8 +137,9 @@ the directory manually.
 
 Keep routine progress in this conversation and local notes. Task descriptions
 hold the current problem, outcome and constraints; deliberate new direction
-belongs in Task comments. Preserve `<!-- loopflow-progress:... -->` provenance
-for published agent progress; `lf comment --steer` is only for new direction.
+belongs in the Task's thread. `lf task report` publishes agent progress with its
+`<!-- loopflow-progress:... -->` provenance; `lf task steer` is only for new
+direction.
 Selected operators read failure logs and discuss missing judgment in their
 ongoing conversation. An open conversation does not schedule another turn;
 Graphs and installed schedules run independently.

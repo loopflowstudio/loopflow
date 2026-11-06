@@ -4,7 +4,7 @@ use loopflow_test_support::env_lock;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::prelude::*;
 use loopflow::id::WaveId;
@@ -215,6 +215,26 @@ pub fn register_codex_login(home: &Path, name: &str) {
             updated_at: now,
         })
         .unwrap();
+}
+
+/// A launch routes by the process directory: the checkout it runs in, never
+/// the developer's, whose private route belongs to their Machine.
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+pub struct InDirectory(PathBuf);
+
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+impl InDirectory {
+    pub fn enter(path: &Path) -> Self {
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(path).unwrap();
+        Self(previous)
+    }
+}
+
+impl Drop for InDirectory {
+    fn drop(&mut self) {
+        env::set_current_dir(&self.0).unwrap();
+    }
 }
 
 pub struct EnvGuard {

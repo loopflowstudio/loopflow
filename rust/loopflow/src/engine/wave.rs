@@ -56,7 +56,7 @@ pub fn planning_connect(
                 .ok_or_else(|| {
                     Error::new(
                         ErrorCode::Invalid,
-                        "cannot determine wave; run `lf wave connect <name>`",
+                        "cannot determine wave; run `lf wave planning connect <name>`",
                     )
                 })?,
         };

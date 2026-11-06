@@ -1749,7 +1749,7 @@ struct WorkDestinationTests {
         git.waitUntilExit()
         #expect(git.terminationStatus == 0)
         let query = RegistryQuery { args, cwd in
-            if args.contains("--path") { return after.path }
+            if args.suffix(2) == ["repository", "path"] { return after.path }
             if cwd == before.path.normalizedFilePath && FileManager.default.fileExists(atPath: after.path) {
                 return #"{"id":"unrelated","locators":["unrelated"]}"#
             }

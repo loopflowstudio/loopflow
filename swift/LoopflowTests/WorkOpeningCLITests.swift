@@ -81,7 +81,8 @@ struct WorkOpeningCLITests {
     private struct Fixture {
         let root: URL
         let lf: BuiltLf
-        var query: RegistryQuery { lf.query }
+        /// One query, so one private server: each `lf.query` starts its own.
+        let query: RegistryQuery
 
         init() throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("work-open-\(UUID().uuidString)")
@@ -89,6 +90,7 @@ struct WorkOpeningCLITests {
             let home = root.appendingPathComponent("home")
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
             lf = try BuiltLf(home: home)
+            query = lf.query
         }
 
         func remove() { try? FileManager.default.removeItem(at: root) }

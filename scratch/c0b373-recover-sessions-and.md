@@ -145,6 +145,9 @@ Built (Nov 6, implement), choices in `scratch/questions.md` 19–26:
 2. `provider_account::hold` (file per provider); `select_route` takes the held login when it has room, ends the hold when it is full.
 3. Clap: `AccountCommand::{Next, Use, Pause, Unpause, Connect, Disconnect, Set, RedeemReset}` with one `target`/`login` string (`Target::parse`, `profile::resolve_login`); `Route`, `--details`, `--routing`, `provider` positional and `profile::show_routes`/`find_provider_account`/`tightest_window` deleted. Table: `account_status::render_table` with `Refresh::Stale`; `next`: `profile::show_next` (`tests/fixtures/dto/account_next.json` replaces `auth_routes.json`). Exit codes via `CommandExit`. Docs: subscriptions, ops, sessions, config, init skill.
 
+## Demo answers, second pass (Jack Heart, November 6, 2026)
+- Resume naming another login (questions 16): "b. When the named login differs from the one the running Codex process uses, restart it on the new login, as before, and say so in terminal 1. I guess". Next implement: `lf resume --account <login>` on a Session whose running Codex process uses a different login ends that process, relaunches on the named login, and prints in the old terminal where the conversation went (restore the behavior of the deleted `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went`). Claude keeps attaching, since it follows the switched login. Not built.
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

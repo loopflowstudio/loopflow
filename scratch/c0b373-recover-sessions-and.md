@@ -139,4 +139,4 @@ Still true from the first pass:
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
 - Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, explicit-only switch-away) has not been shown on the configured path; no paid quota may be spent. Policy still open for Jack there: questions 3, 4, 11.
 - Open for Jack at demo: `scratch/questions.md` 3, 4, 16, 17, 18.
-- Proposed Wave memory edit (infrastructure MEMORY.md, the selector paragraph): "serves `session list` and `session move -a`; `account drain` and `session move --account` are gone; every launch takes the login with the most weekly quota left per hour until reset, and `--routing explicit-only` on the active login switches the Machine off it."
+Realign (Nov 6, after implement/compress and merging #1834): plan matched the code; Wave memory's c0b373 section now describes urgency routing and explicit-only switch-away (drain and `move --account` gone). #1834 adds no provider pins. No checks rerun: the only code since compress is the merge, which touches no c0b373 file.

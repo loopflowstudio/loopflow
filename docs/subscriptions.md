@@ -140,12 +140,12 @@ command's Process in its Machine; this can initialize an empty store, but create
 account, route or conversation. Local token metadata is cached evidence, not server acceptance;
 live status reports local server verification unavailable.
 
-`auth status` persists recognized managed subscription windows before
+`lf account` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
-check `resets_at` before treating a recorded percentage as current. `lf usage`
+check `resets_at` before treating a recorded percentage as current. `lf session usage`
 reports recorded provider token/cost usage separately.
 
 JSON contains `accounts` and optional `browser` details. Each row has `scope`

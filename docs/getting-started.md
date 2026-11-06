@@ -107,7 +107,7 @@ week. After a crash or reboot, use the same command to reopen its saved history.
 
 ```bash
 lf ship <ID>                     # the remaining steps, then merge; repairs failing CI until it lands
-lf ship <ID> --stop              # withdraw it; disarms the auto-merge it armed
+lf task hold <ID>                # withdraw it; disarms the auto-merge it armed
 ```
 
 `lf ship` stands in for you at each remaining interactive step and runs `deliver`: `gate`,

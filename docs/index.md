@@ -116,7 +116,7 @@ lf task run INF-123
 
 A Skill supplies instructions; a Graph composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Project holds the plan; the Wave names the graph its Tasks take up by default.
+and memory; its planning holds the Tasks, KRs and targets; the Wave names the graph its Tasks take up by default.
 
 Process records an actual lf command process. LfSession keeps the conversation,
 including headless work. A running Graph is one lf process and the step processes
@@ -136,7 +136,7 @@ Read in order; each page starts from what the one before it left you with.
 | Install it and take one piece of work to a pull request | [Get started](getting-started.md) |
 | Hand off many Tasks, steer them, and keep a longer objective moving | [Work](work.md) |
 | Come back to any conversation, after a crash or from another terminal | [Sessions](sessions.md) |
-| Land, repair CI, release, and run on other machines and logins | [Ops](ops.md) |
+| Land, repair CI, release, and run on other machines and logins | [PRs, checkouts, machines and accounts](ops.md) |
 | See Work in Desktop, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
 | Connect Desktop, check its server, and recover after an update | [Connect clients](server.md) |
 | See what agents did and what it cost | [Telemetry](telemetry.md) |

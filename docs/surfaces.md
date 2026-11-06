@@ -128,9 +128,9 @@ until stdin closes.
 ```bash
 lf wave show --all --watch --json         # every Wave's plan and Tasks
 lf task list --watch --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
+lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and thread
 lf session list --watch --json            # conversations, with which ones are available for you
-lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
+lf session history --since 7d --watch --json   # what Sessions did, tagged with their Task and Wave
 lf process list --watch --json                      # live lf call trees
 lf repository planning --watch --json         # planning sync; keeps it exchanged while it runs
 lf desktop view list --watch --json           # every plan a repository window shows
@@ -144,7 +144,7 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
 `lf planning list`) prints the same Task record the server sends:
 
 ```json
-{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", "project_id": "…", …},
+{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", …},
  "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
  "next_move": {"owner": "task", "reason": "…"},
  "condition": {"state": "clear", "reason": "…", …},
@@ -156,7 +156,7 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
 on. `lf task status <issue> --json` prints one
 Task as a row, each fact once, with its Sessions, Graph processes and
-comments.
+thread.
 
 A Session record:
 

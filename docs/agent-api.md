@@ -4,8 +4,8 @@
 is no SDK. The verbs are the same binary you use; every read surface takes
 `--json`; and every launched agent receives the
 launcher contract (`LOOPFLOW.md`) in its context. Work-associated launches also
-receive the `work` skill body. Read `lf help skill work` before using Task, Wave or
-Project APIs in an existing conversation. Choose the commands and Skills that
+receive the `work` skill body. Read `lf help skill work` before using Task or
+Wave APIs in an existing conversation. Choose the commands and Skills that
 fit the requested work. Work context does not select a Graph or authorize Wave
 memory maintenance; the selected Loopflow Graph owns that procedure.
 
@@ -21,8 +21,8 @@ covers connection recovery and the current local-only scope.
 ## Inspect instruction selection
 
 ```bash
-lf history show SESSION --instructions
-lf history show SESSION --instructions --json
+lf session history show SESSION --instructions
+lf session history show SESSION --instructions --json
 ```
 
 The retained input records why launcher guidance, Work guidance and selected
@@ -69,7 +69,7 @@ lf task wait INF-123 --until terminal                   # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its current Project owns Tasks, KRs and targets.
+memory; its planning holds Tasks, KRs and targets.
 A Task owns its checkout and its PR history, with one current PR. Every conversation and Graph attributed
 to it is equally its work; none is privileged.
 
@@ -117,7 +117,7 @@ lf --wave <wave> wave-operate "prioritize the parser"
 lf --wave <wave> wave-operate "recover the failed parser Graph"
 ```
 
-Save a Task comment locally; planning sync shares it, and Linear comments arrive as steers.
+A Task steer saves locally; planning sync shares it, and Linear comments arrive as steers.
 Each associated Session receives acquired steers independently, including
 conversations associated through the checkout or `--task`. Repository and Wave
 steers apply downward through the Work tree; direct Session steers apply only
@@ -134,17 +134,17 @@ explicit retry; retry saves another attempt without starting a turn.
 
 Keep routine agent progress in working notes and the Session response. `lf task report`
 from an agent Session marks its entry as progress, excluded from steers. Use
-`lf task steer` only to save a deliberate steer. Direct participant comments
+`lf task steer` only to save a deliberate steer. Tracker comments from people
 and `lf task steer` remain steers, even through the same account. Other
 integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.
 
-`lf interrupt INF-123` records a separate control request. An attached Task
+`lf task interrupt INF-123` records a separate control request. An attached Task
 command observes it and interrupts its provider turn; steer delivery retains
 its independent Session history.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
-tmux name. Project operations are ordinary finite conversations; they have no long-running
+tmux name. Wave operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. A Graph whose process died leaves its Processes
@@ -154,14 +154,14 @@ fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
 
-Automated Task commit, PR, and completion commands also re-check current PM
-ownership. If Linear moved the issue to another Project, the Task operation
-fails closed before a commit, push, publication, merge request, rotation, or
+Automated Task commit, PR, and completion commands also re-check current planning
+ownership. If Linear moved the issue to another Linear Project, the Task operation
+fails closed before a commit, push, publication, merge request, or
 completion; a person retains explicit authority to inspect and remediate the
 preserved Work.
 
-Guide Project and Wave operations through extra instructions to their operate
-skills. Edit their definition or goal when the guidance should persist.
+Guide Wave operations through extra instructions to their operate
+skills. Edit the Wave's goal when the guidance should persist.
 
 ## Memory
 
@@ -171,7 +171,7 @@ Work use keeps proposed changes in scratch. The file remains the source of
 truth; there is no separate memory CLI or server surface.
 
 Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
-after an incomplete operation, even after planning refresh or chapter replacement.
+after an incomplete operation, even after a planning refresh.
 Missing provider data does not confirm deletion.
 Deletion cancels unfinished placed work or cleans completed delivery before trashing
 the issue. Live or unresolved execution and dirty checkouts block it; a stopped
@@ -185,7 +185,7 @@ lands it:
 
 ```bash
 lf pr publish                          # make work visible mid-stream; the agent's default verb
-lf submit                              # done, a person clicks merge
+lf pr submit                           # done, a person clicks merge
 lf land                                 # watch CI, repair failures, and finish merged
 ```
 
@@ -200,24 +200,24 @@ Every read the conducting surfaces offer is `--json`:
 lf wave list --json                    # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf wave show --json                      # every Wave repeats that required portfolio envelope
-lf history --task INF-123 --json
-lf usage --project parser --json
-lf history list --task INF-123 --json
-lf usage --days 30 --json   # recorded provider usage, newest first
-lf usage --task INF-123 --json # the same evidence drilled to one Task
-lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
-lf usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
+lf session history --task INF-123 --json
+lf session usage --wave parser --json
+lf session history list --task INF-123 --json
+lf session usage --days 30 --json   # recorded provider usage, newest first
+lf session usage --task INF-123 --json # the same evidence drilled to one Task
+lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
+lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
 lf process list --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
 and `lf wave show` joins the current plan to that runtime truth.
-`lf history` is the ordered durable history; each item reuses `WorkRef` and
+`lf session history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
-to execute the same read remotely. The historical `lf history show` interface and `lf usage` read that Machine's evidence;
+to execute the same read remotely. The historical `lf session history show` interface and `lf session usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

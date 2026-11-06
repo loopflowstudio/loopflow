@@ -25,7 +25,7 @@ Use `agent` for a choice you want applied. Use `default_agent` for a fallback
 that lets another applicable `agent` choose differently. The examples below are
 separate setups; combine the pieces that fit your work.
 
-## Let a project choose its exceptions
+## Let a repository choose its exceptions
 
 Keep just a fallback in your personal global file:
 
@@ -44,9 +44,9 @@ skill:
 ```
 
 Design uses Claude; implementation and other steps fall back to Codex. This is
-useful when you want one everyday default while each project chooses exceptions.
+useful when you want one everyday default while each repository chooses exceptions.
 
-To insist on Codex for design across your projects, make a personal choice:
+To insist on Codex for design across your repositories, make a personal choice:
 
 ```bash
 lf set --global skill.design.agent codex
@@ -55,7 +55,7 @@ lf set --global skill.design.agent codex
 That personal choice wins over the repository's Claude choice. Change `agent` to
 `default_agent` if you want the repository's choice to win again.
 
-## Keep a preference just for this project or Wave
+## Keep a preference just for this repository or Wave
 
 ```bash
 lf set skill.design.agent claude
@@ -63,9 +63,9 @@ lf set skill.implement.agent codex
 lf --wave frontend set skill.implement.agent claude
 ```
 
-The first two commands save your project preferences in `lf.config.local.yaml`.
+The first two commands save your repository preferences in `lf.config.local.yaml`.
 The third makes implementation use Claude for the `frontend` Wave; the rest of
-the project still uses Codex. These private settings do not change the team's files.
+the repository still uses Codex. These private settings do not change the team's files.
 
 To set a shared Wave default instead:
 
@@ -211,13 +211,13 @@ account:
 
 Use your connected accounts' login emails, in preference order; an account with
 no login email is named by its ID. To use only your work Claude account in this
-project:
+repository:
 
 ```bash
 lf set account.claude '[work@example.com]'
 ```
 
-The project list replaces the global list. Accounts apply to a global, repository
+The repository list replaces the global list. Accounts apply to a global, repository
 or Wave scope; they are not selected per skill.
 
 Once a remote machine is registered, select its durable ID for new Tasks:
@@ -260,7 +260,7 @@ values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
 the same resolution used to prepare a launch.
 
 In Desktop Configuration, choose My global preferences, My project preferences or
-Shared project preferences. Select a project checkout and Wave for My Wave
+Shared project preferences. Select a repository checkout and Wave for My Wave
 preferences or Shared Wave preferences. Apply shows the destination file and when
 the change takes effect. Explain uses that same checkout, Wave and setting target;
 Unset removes only that declaration and shows what now applies. Changing the
@@ -541,15 +541,15 @@ release:
       completion: github-release
 ```
 
-`lf release run patch --target cli` selects changes from the exact
+`lf repository release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf check`
+`verify` runs during `lf repository release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf repository release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The

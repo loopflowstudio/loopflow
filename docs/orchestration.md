@@ -218,7 +218,7 @@ lf task run LOO-12 --pool lab --rent code         # a free lab machine, else ren
 The Task's Graph runs on a free machine from your `lab` pool, or on one rented
 from the `code` on-demand when none is free. When it ends, its Sessions and
 Processes are copied back here before a rented machine is given back. Adding
-machines, pools and on-demands is on [Ops](ops.md).
+machines, pools and on-demands is under [Machines](ops.md#machines).
 
 ## Goals
 

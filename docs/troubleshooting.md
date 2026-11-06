@@ -14,12 +14,12 @@ lf resume                       # return to this scope’s conversation
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
-| A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
+| A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
 | A stopped Graph | Its step Processes, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
-checkout, with the Task's comments and its open PR.
+checkout, with the Task's thread and its open PR.
 
 ## What went wrong
 
@@ -29,7 +29,7 @@ Read before you relaunch anything.
 lf doctor                                    # installation, store and process health
 lf task status <ID>                          # the Task's execution and the reason for it
 lf process show <GRAPH_ID>         # each step, its Process and how it exited
-lf history show <SESSION_ID> --final         # the agent's last word in that conversation
+lf session history show <SESSION_ID> --final # the agent's last word in that conversation
 lf process list                                        # what is running right now
 ```
 
@@ -43,7 +43,7 @@ liveness stays unknown; lf never guesses a process is dead.
 |---|---|
 | A question waiting for you | `lf resume --task <ID>` |
 | The run is going the wrong way | `lf task steer <ID> "address the latest feedback"` |
-| It must stop now | `lf interrupt <ID>` |
+| It must stop now | `lf task interrupt <ID>` |
 | It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
 
 ## Doctor reports a failure
@@ -92,7 +92,7 @@ exited.
 
 ```bash
 lf task status <ID> --json
-lf usage --days 0 --task <ID> --json        # every Session input the Task ever made
+lf session usage --days 0 --task <ID> --json   # every Session input the Task ever made
 lf session list --task <ID>
 ```
 
@@ -100,7 +100,7 @@ Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
 prove helper Sessions are idle, and a finished launcher does not prove its
 interactive Session closed: check Sessions separately.
 
-`lf interrupt <ID>` stops a running Graph: an agent step ends at once, an
+`lf task interrupt <ID>` stops a running Graph: an agent step ends at once, an
 operation finishes and nothing follows, and the run exits 130. With nothing
 live it records nothing and says so.
 
@@ -162,7 +162,7 @@ than one is installed, choose with `lf set --global default_agent claude` or pas
 
 ```bash
 lf --context qa --docs src/small/    # see what the input is made of, launch nothing
-lf usage --context --task <ID>       # each step's input by source, against its budget
+lf session usage --context --task <ID>   # each step's input by source, against its budget
 ```
 
 The provider loads `AGENTS.md` natively. lf adds `LOOPFLOW.md`, `scratch/` and
@@ -242,7 +242,7 @@ lf process prune --dry-run         # lists the ancestry it would release
 lf process prune                   # releases it; the Session can resume
 ```
 
-The release is kept as a Session fact in `lf history show <session>`.
+The release is kept as a Session fact in `lf session history show <session>`.
 
 ## A Wave isn't moving
 

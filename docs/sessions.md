@@ -76,7 +76,7 @@ Other conversations stay stopped until opened.
 |---|---|
 | interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
 | Task worktrees, branches, PRs | untouched |
-| comments and steers | saved; delivered at the agent's next boundary |
+| steers and reports | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
 `lf resume` takes Sessions. A Run (`-b`, a Graph step), running or finished, is
@@ -170,7 +170,7 @@ lf --only-account claude=personal@ -b task run LOO-12 # this login only, for eve
 A new launch tries the repository's account route, then your default route,
 then any eligible login with room. A resumed Session stays on the login it
 started with. A Graph carries its selection to every step; run a fresh Graph to
-choose again. Connecting logins and setting routes: [Ops](ops.md).
+choose again. Connecting logins and setting routes: [Accounts](ops.md#accounts).
 
 ## Reference
 
@@ -192,4 +192,4 @@ usage and completion receipts.
 
 Every flag: [`lf session`](lf-reference.md#lf-session).
 
-Next: [Ops](ops.md), landing what those conversations built.
+Next: [Pull requests](ops.md#pull-requests), landing what those conversations built.

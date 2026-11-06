@@ -60,3 +60,14 @@ Validation of the consolidation (November 6):
 - `cargo test -p loopflow --lib lf::commands::open::`: 14 passed.
 - `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 24 passed, 2 native-host opt-in tests ignored. The initial overlapping build/edits and Desktop launch timeout are superseded by this final-tree run.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. Gate/CI retain broader coverage; no new live demo or startup repair is claimed.
+
+Jack Heart identified remaining host-specific rendering in layout.rs. Move native
+wire formats, shell quoting and the Rex cwd wrapper into their adapters. Reuse
+the existing Native dispatch; remove the duplicate Host renderer enum. Shared
+layout code selects tools and splits only. Preserve launch behavior.
+
+Renderer extraction checks:
+- `cargo test -p loopflow --lib lf::commands::open::`: 15 passed.
+- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 23 passed, 2 native-host opt-in tests ignored; cmux caller-group lookup hit the unchanged two-second host deadline before rendering.
+- `cargo test -p loopflow --test integration work_open_tests::cmux_task_joins_the_group_its_caller_is_in_now -- --exact`: passed alone using the built CLI. No timeout or retry behavior changed.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. No live demo or fresh-conversation repair is claimed by this refactor.

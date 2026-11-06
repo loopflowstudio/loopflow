@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
+
+use crate::work::selection::SplitAxis;
 
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
@@ -89,6 +91,25 @@ impl Cmux {
     }
 }
 
+// Native layout rendering.
+pub(super) fn terminal(label: &str, cwd: &Path, argv: Vec<String>) -> Value {
+    // cmux types into a fresh shell. Enter the checkout and quote each argument.
+    json!({"pane":{"surfaces":[{"type":"terminal","name":label,
+        "command":format!("cd {} && {}", shell_quote(&cwd.to_string_lossy()),
+            argv.iter().map(|word| shell_quote(word)).collect::<Vec<_>>().join(" "))}]}})
+}
+
+pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
+    json!({
+        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
+        "split": ratio, "children": [before, after],
+    })
+}
+
+fn shell_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
 /// `cmux` on PATH, else the CLI inside the installed app.
 fn cli() -> Result<PathBuf> {
     std::env::var_os("PATH")
@@ -141,8 +162,9 @@ fn reference(output: &str, prefix: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_of, reference};
+    use super::{group_of, reference, split, terminal};
     use serde_json::json;
+    use std::path::Path;
 
     #[test]
     fn caller_joins_the_group_holding_its_workspace() {
@@ -171,5 +193,25 @@ mod tests {
             Some("0b9c1f5e-2a1c-4c55-9a77-4a0d4e3b6f10")
         );
         assert_eq!(reference("done", "workspace:"), None);
+    }
+    #[test]
+    fn cmux_surfaces_enter_the_checkout_with_quoted_argv() {
+        let pane = terminal(
+            "Files",
+            Path::new("/repo/it's"),
+            vec!["lf".into(), "task".into(), "a b".into()],
+        );
+        assert_eq!(
+            pane["pane"]["surfaces"][0]["command"],
+            r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
+        );
+        let split = split(
+            crate::work::selection::SplitAxis::Vertical,
+            0.6,
+            pane.clone(),
+            pane,
+        );
+        assert_eq!(split["direction"], "horizontal");
+        assert_eq!(split["children"].as_array().unwrap().len(), 2);
     }
 }

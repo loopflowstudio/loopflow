@@ -4,7 +4,7 @@
 //! handles live only in this command, or in a Rex follower while it runs.
 mod layout;
 
-use layout::{layout, Host};
+use layout::layout;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
@@ -14,14 +14,15 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::{
-    cmux, herdr, rex::Rex, OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening,
-    Resolved,
+    cmux, herdr,
+    rex::{self, Rex},
+    OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved,
 };
 use crate::durable::{RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
-    Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState,
+    Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
     TaskLayoutTemplate, ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 
@@ -106,11 +107,27 @@ impl Native {
         }
     }
 
-    fn renderer(&self) -> Host<'_> {
+    fn block(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
         match self {
-            Self::Rex(rex) => Host::Rex(&rex.server),
-            Self::Herdr(_) => Host::Herdr,
-            Self::Cmux(_) => Host::Cmux,
+            Self::Rex(rex) => rex.block(label, cwd, argv),
+            Self::Herdr(_) => herdr::terminal(label, cwd, argv),
+            Self::Cmux(_) => cmux::terminal(label, cwd, argv),
+        }
+    }
+
+    fn terminal(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
+        match self {
+            Self::Rex(rex) => rex.terminal(label, cwd, argv),
+            Self::Herdr(_) => herdr::terminal(label, cwd, argv),
+            Self::Cmux(_) => cmux::terminal(label, cwd, argv),
+        }
+    }
+
+    fn split(&self, axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
+        match self {
+            Self::Rex(_) => rex::split(axis, ratio, before, after),
+            Self::Herdr(_) => herdr::split(axis, ratio, before, after),
+            Self::Cmux(_) => cmux::split(axis, ratio, before, after),
         }
     }
 
@@ -199,14 +216,7 @@ impl Native {
         template: Option<&TaskLayoutTemplate>,
         presentation: Presentation<'_>,
     ) -> Result<(String, usize)> {
-        let (native_layout, shells) = layout(
-            store,
-            content,
-            repo,
-            template,
-            presentation,
-            self.renderer(),
-        )?;
+        let (native_layout, shells) = layout(store, content, repo, template, presentation, self)?;
         let tab = self.add_tab(
             container,
             &content.title,
@@ -674,9 +684,8 @@ fn launch(
         {
             let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
             receipt.label = "Wave conversation".into();
-            let opened = native
-                .renderer()
-                .conversation(repo, &["resume", session.id.as_str()])
+            let opened = viewer_argv(repo, &["resume", session.id.as_str()])
+                .map(|argv| native.block("Conversation", repo, argv))
                 .and_then(|layout| native.add_tab(&mut container, "Conversation", repo, layout));
             settle_receipt(&mut receipt, opened);
             receipts.push(receipt);
@@ -829,7 +838,7 @@ fn start_follower(
     rex.create_window(
         session,
         "Workspace",
-        Host::Rex(&rex.server).block("Workspace", repo, viewer_argv(repo, &words)?),
+        rex.block("Workspace", repo, viewer_argv(repo, &words)?),
     )?;
     Ok(())
 }

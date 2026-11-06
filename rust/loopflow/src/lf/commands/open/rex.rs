@@ -1,5 +1,6 @@
 //! Rex CLI adapter: resolve the caller, create native sessions and tabs, and focus them.
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -7,6 +8,8 @@ use serde_json::{json, Value};
 
 use super::OpenHost;
 use crate::journal::OsProcess;
+use crate::transport::local_directory_report;
+use crate::work::selection::SplitAxis;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct RexLocation {
@@ -81,6 +84,32 @@ pub(super) struct Rex {
 }
 
 impl Rex {
+    /// Rex's login wrapper hides a foreground tool's cwd. Report it so native
+    /// splits inherit the tool's checkout. Shells use `terminal` instead: their
+    /// process cwd follows `cd`, while a launch-time report would become stale.
+    pub(super) fn block(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
+        let argv = match local_directory_report(cwd) {
+            Some(report) => [
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"printf %s "$1"; shift; exec "$@""#.into(),
+                "lf-directory".into(),
+                report,
+            ]
+            .into_iter()
+            .chain(argv)
+            .collect(),
+            None => argv,
+        };
+        self.terminal(label, cwd, argv)
+    }
+
+    pub(super) fn terminal(&self, label: &str, cwd: &Path, mut argv: Vec<String>) -> Value {
+        // Rex omits its endpoint from native child environments.
+        argv.splice(0..0, ["env".into(), format!("REX_SERVER={}", self.server)]);
+        json!({"block":{"flavor":"com.superlogical.terminal.shell","label":label,"options":{"cwd":cwd,"shell":"none","command":argv}}})
+    }
+
     fn call(&self, method: &str, args: Value) -> Result<Value> {
         let mut command = Command::new("rex");
         command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
@@ -226,6 +255,13 @@ impl Rex {
         self.call("client.perform", json!({"client_id":candidates[0],"action":"session.select","args":{"session_id":container,"window_id":window}}))?;
         Ok("Rex accepted display selection".into())
     }
+}
+
+pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
+    json!({"split":{
+        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
+        "ratio": ratio, "before": before, "after": after,
+    }})
 }
 
 fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {

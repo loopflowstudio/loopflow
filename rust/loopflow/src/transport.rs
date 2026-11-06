@@ -1962,6 +1962,7 @@ fn attach_with_terminal(
     let mut decoder = Decoder::default();
     let mut scanner: Option<Scanner> = None;
     let mut controlled = false;
+    let mut input_hint_shown = false;
     let mut owned = false;
     let mut returning = None;
     let mut stdin_open = true;
@@ -2160,6 +2161,17 @@ fn attach_with_terminal(
                 )?;
             } else if controlled {
                 send_frame(&mut socket, Tag::Input, &bytes[..n])?;
+            } else if !take_control
+                && terminal.is_some()
+                && acknowledgement_deadline.is_none()
+                && !input_hint_shown
+            {
+                write_output(
+                    &mut terminal,
+                    1,
+                    b"\r\nRead-only view. Ctrl+R moves input here; Ctrl+] leaves.\r\nTyped input was not sent.\r\n",
+                )?;
+                input_hint_shown = true;
             }
         }
         let current_size = size();

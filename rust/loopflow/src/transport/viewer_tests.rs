@@ -425,12 +425,19 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
                 } else if case == "observe_take" || case == "observe_lost_transfer" {
                     &[0x12]
                 } else if case == "observe" {
-                    b"ignored input\x1d"
+                    b"ignored input"
                 } else {
                     &[0x1d]
                 })
                 .unwrap();
             inspected = true;
+        }
+        if case == "observe" && !answered && display.text().unwrap().contains("Read-only view.") {
+            let text = display.text().unwrap();
+            assert!(text.contains("Ctrl+R moves input here"));
+            assert!(text.contains("Typed input was not sent."));
+            master.write_all(&[0x1d]).unwrap();
+            answered = true;
         }
         if case == "observe_take"
             && !answered

@@ -239,6 +239,8 @@ A displayed Task path is not evidence of the new shell's working directory.
 Conversation views observe live output or saved history. A live observer offers
 Ctrl+R after the existing execution owner acknowledges its attachment; that
 explicit action requests input on the same connection. Ctrl+] leaves the viewer.
+Typing before taking input shows a read-only hint. Those keystrokes are discarded,
+never queued for the conversation.
 Use `lf resume <session-id>` to continue a conversation explicitly.
 
 Creation of a native pane does not establish readiness. Report whether each

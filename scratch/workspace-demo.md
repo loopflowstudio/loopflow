@@ -1,3 +1,115 @@
+# LOO-498 hands-on review — November 5, 2026
+
+Jack Heart invoked `$demo` after the opening repair and sync were published at
+`e9dcba147b`. Current design: [rex-workspace.md](rex-workspace.md). Interactive
+runbook: [demo.html](demo.html). No new implementation or shipping is selected.
+
+Fresh Rex inventory showed the earlier repaired tab retained only a shell, with
+block `block:01a1adc4-4bec-7046-8695-2e2d336b0e5d`. The operator preserved that
+arrangement. A new branch opening created a different Task tab, connected the same
+LF Session, and left the earlier tab/block present. This is real fresh-launch
+preservation evidence; no cause or author is inferred for the prior rearrangement.
+The new tab was renamed through Rex CLI to **LOO-498 · Demo** and a native screenshot
+confirmed it selected and displaying this ongoing conversation.
+
+## Review failure: pane appears frozen
+
+Jack Heart supplied a screenshot of the selected Conversation pane and reported:
+“everythime you launch a demo this pane freezes”. This supersedes treating the
+connected receipt as proof of a usable review. No successful interaction or
+review acceptance is established.
+
+Source inspection found that `session view` opens a passive observer. Ordinary
+keystrokes are discarded until an explicit Ctrl+R request transfers input; Ctrl+]
+leaves. The hint is printed before the terminal snapshot and can disappear from
+view. The runbook omitted this behavior. This explains ignored typing, but is a
+hypothesis about Jack's report, not proof that output or native controls are live.
+The conversation asks which freezes: typing, new output, or Rex controls.
+
+A fresh native inventory found the original Conversation block absent. The same
+demo tab now contains shell block `block:01a1ade8-92ba-7626-9e1d-79a772f4d43d`.
+No author or cause is inferred. Calls to inspect/capture the old block returned
+“block target not found”. No new panes, input transfer, cleanup, provider restart
+or Graph launch was performed during this diagnosis.
+
+Next action: distinguish ignored input from a stalled viewer, then repair and
+verify that specific experience. If passive input is the cause, a visible way to
+take input is needed; silently changing opening into automatic takeover is not
+an agreed design change. Keep demo roots intact and remain at feature → demo.
+
+## Read-only input feedback repair
+
+After Jack Heart acknowledged the diagnosis, the operator addressed the concrete
+silent-input behavior without selecting automatic takeover. The first ordinary
+input to an acknowledged passive terminal now displays:
+
+> Read-only view. Ctrl+R moves input here; Ctrl+] leaves.
+> Typed input was not sent.
+
+The message appears once per viewer, so a pasted draft cannot flood the screen
+with repeated hints. Input remains discarded until explicit transfer is
+acknowledged; no typed draft is queued for later delivery. The existing PTY
+regression now types into the observer and waits for visible feedback before
+leaving, while the owner fixture rejects any forwarded input. Documentation
+explains this behavior.
+
+Validation: `cargo test -p loopflow --lib transport::viewer_tests::passive_viewer` — 3 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+
+The first test run exposed a hint wrapping across 80 columns; the message now
+uses two short lines. This repairs a supported usability defect, not a verified
+cause of Jack's entire freeze report. No native demo was relaunched, no existing
+runtime was replaced, and the actual freeze category remains unconfirmed.
+
+## Earlier hands-on instructions (paused during diagnosis)
+
+1. Click Rex's Split Right in Conversation, then run `pwd -P` in the new shell.
+   Expect `/Users/jack/src/loopflow.loo-498-open-and-restore`.
+2. Run `cd /tmp` in that shell, split it again, and run `pwd -P` in the new shell.
+   Expect `/tmp`. Observe conversation readability while the panes resize.
+3. Optionally run the exact copied branch command from the runbook. Expect another
+   fresh Task tab reflecting the saved LF layout; this Rex arrangement stays intact.
+
+The Task's saved Desktop layout currently contains only Conversation. The shell in
+this review should come from Jack's native Split, not a manually substituted LF
+layout. The page explains this precedence. Known reflow artifacts remain visible
+as an unresolved finding. No acceptance or new design direction has been received
+for this review. The next action is Jack's observations in this conversation.
+
+## Fixed runtime and evidence
+
+This is the real Machine, not a synthetic or copied database.
+
+- Evidence root: `/Users/jack/.local/share/loopflow/demos/loo498-20261105-review/data`
+- Runtime root: `/Users/jack/.local/share/loopflow/demos/loo498-20261105-review/runtime`
+- LF_HOME: `/Users/jack/.lf`.
+- LF_BIN: runtime `lf`, copied from the merged checkout's built executable.
+- SHA-256: `49105efd858377f86b2595547b080824883f04885d450ab42770b380ae6381c3`.
+- Launcher script: runtime `launch.sh`.
+- Launcher tab: `window:01a1adc5-2830-7dea-aee2-67c7611a7ebb`; block
+  `block:01a1adc5-2819-73eb-9bf3-3a011dd0b94b`.
+- New demo tab: `window:01a1adc5-3ed3-7cec-b32d-f640c130b637`; Conversation block
+  `block:01a1adc5-3ed3-71b1-9b61-28bd1492312e`.
+- Rex session: `session:01a19d85-39a8-7aae-8c83-fa6adc2e1317`.
+- Existing LF Session: `310fb7b6015843e498316cd921a348b9`.
+- Receipt: `open.json`, observer `connected`; no new shells, display accepted.
+- Other files: `launcher.json`, `open.stderr` (empty), `view.json`, `conversation.txt`.
+- Native directory report names the Task checkout; wrapper owner PID 68823 was
+  observed. A historical PID is not future signal authority.
+
+The screenshot is in the computer-use tool result, not a saved image file. Earlier
+before/after Split screenshots and process evidence remain below. Browser tooling
+previously rejected local file URLs; the runbook is supplied as a local artifact
+link, without an alternate browser/server workaround or a claim that it was opened.
+
+Keep these and all earlier roots. No terminal input, takeover or cleanup was sent.
+Jack's future input/drafts are not settled. After explicit input settlement and
+fresh owner checks, close only these demo-owned tabs via `rex window close <id>`,
+confirm their owners exited, then remove only this runtime root. Retain the evidence
+root and real Machine history. Reopen the existing conversation through Rex CLI
+with installed `lf resume 310fb7b6015843e498316cd921a348b9` when needed.
+
+---
+
 # LOO-498 opening repair — November 5, 2026
 
 Jack Heart challenged stopping at the failed demo: “isnt that like literally what

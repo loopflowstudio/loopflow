@@ -114,13 +114,13 @@ Accepted (Jack Heart, November 6, 2026), supersedes the matching parts of items 
 - **Switch at every launch (1b, "prefer more aggressive balancing").** Each launch takes the top-ranked login with room for its model, whichever is active.
 - **Rank by use-it-or-lose-it ("account that resets soonest though should be balanced somewhat with remaining quota").** Remaining percent ÷ hours until reset on the launch's weekly window (model-scoped when it applies); the 5-hour window decides room only. Unscored logins rank after scored ones; plan first, declared order breaks ties.
 - **Keep repository and Wave account orders (2b).** Accepted cost: disagreeing scopes switch the Machine's login back and forth.
-- **Delete `lf session move --account` (3a) and `lf account <provider> drain`.** `lf account set <p> <login> --routing explicit-only` switches away when that login is active; `lf account use` is the manual switch.
+- **Delete `lf session move --account` (3a) and `lf account <provider> drain`.** Keeping a login out (now `lf account pause`) switches away when that login is active; `lf account use` is the manual switch.
 Unverified: whether a different account misses Claude's prompt cache for a moved conversation, making each switch cost quota.
 
 Built (Nov 6, implement): `route_rank`/`urgency`/`order_accounts_by_urgency`; the active-first reorder (`select_shared_account`, `active_candidate`) deleted; `SWITCH_SETTLE_SECS` 120 → 15 (questions 17); `MoveTarget`, `follow_login`, `switch_login`, `drain_account`, `AccountCommand::Drain` and `Write::SessionMove.account` deleted (Swift `sessionMove` too); `provider_account::replacement_login` backs explicit-only switch-away (questions 18); docs updated.
 
 ## Demo answer (Jack Heart, November 6, 2026)
-Ranking fix accepted: "ok i guess. or just poll if necessary?" A window past its reset, and a login with no observed weekly window, score as a full week (100% over 168 hours) instead of ranking last. Not built.
+Ranking fix accepted: "ok i guess. or just poll if necessary?" A window past its reset, and a login with no observed weekly window, score as a full week (100% over 168 hours) instead of ranking last. Built in the CLI pass (item 1 below).
 
 ## `lf account` CLI review (November 6, 2026; page `scratch/concept-review.html`)
 Jack Heart asked for the full account API review, aiming for an excellent CLI, with the website mock as the floor (one row per login, a bar, percent left), LOO-593's API shape (`account.*`, `lf account`, `ops` dissolves, `lf auth` retired) and comps: teamclaude, ccdaddy, claude-swap, claude-rotate, maxpool, codex-acct, Paseo, HumanLayer. The Reddit post could not be fetched.
@@ -157,14 +157,20 @@ Still true from the first pass:
 - Native Claude limits cool for the 15-minute default: `StopFailure` carries no reset time, and it was confirmed from Claude 2.1.318's schema, not a live limit. Codex terminal limits are seen only through the relay's stream.
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
 - Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, explicit-only switch-away) has not been shown on the configured path; no paid quota may be spent.
-- Open for Jack at demo: `scratch/questions.md` 3, 4, 11, 16, 17, 18.
+- Open for Jack at demo: `scratch/questions.md` 3, 4, 16–26; the mock as build target (answer 5); the Anthropic credentials policy.
 - Unverified, sharper now that launches switch often: a running Codex keeps its own login in memory; if it refreshes and writes `auth.json` after the home switched to another account, the home silently flips back and the other account's rotated refresh token, if it rotated in between, is lost (`save_back` runs only at the next switch). Demo checks: after a switch, does a running Codex's refresh rewrite `~/.codex/auth.json`?
 
 ## Concept review (November 6, 2026, headless, after urgency routing)
 The concepts hold: one login per provider per Machine, the top-ranked login at every launch, explicit-only to keep a login out. What the accepted decisions imply, for implement:
 - **`lf account use` lasts until the next launch.** With switch-at-every-launch, the next launch moves the login back when another ranks ahead. Docs say so where `use` appears (`docs/subscriptions.md` "Switch the shared account", `docs/sessions.md`, `docs/ops.md`): to stay on one login, name it (`--account`) or set the others `explicit-only`.
 - **Stale ranking text.** `docs/ops.md:314` still says "Routes try accounts in order; one at 95% of a usage window drops behind the rest"; it becomes the urgency rule. The test comment at `provider_account.rs:3841` ("resets soonest") names the observed-before-unobserved rule instead.
-Open: none new; questions 3, 4, 11, 16, 17, 18 stay for demo.
 Built (Nov 6): both items; the `use` part is superseded by the hold (3a below).
 
 Checks (Nov 6, after compress: logins resolve once per verb, `Target::parse_login`, one `tightest_weekly`): lib `provider_account:: lf::commands::account lf::commands::profile lf::tests::account` (93, 1 ignored) and integration `auth_tests:: cli_discovery:: documented_commands::` (47) pass as built binaries from an empty dir with isolated `HOME`; fmt, clippy clean. Gate: `served_reads` (needs a canonical `TMPDIR`), Swift in CI.
+Realign (Nov 6, after the CLI pass): `lf account set` now labels a paused login "paused", as the table does; `cargo test --lib lf::commands::account::` 34 pass.
+
+## Concept review (November 6, 2026, headless, after the CLI pass)
+The concepts hold: one login per provider per Machine, the top-ranked login at every launch unless a `use` hold names one, `pause` to keep a login out. No deleted spelling (`route`, `--details`, `--routing`, `drain`, `session move --account`) survives in docs or builtins. One correction for implement:
+- **Every lf refresh of the shared Claude login takes Claude's refresh lock.** Accepted item 1 locks `activate` so lf and a running Claude never refresh the same login at once. `poll_account` → `claude_credential_home` reads the native home for the active login, and `fresh_claude_token` refreshes and writes it back on expiry or a 401, unlocked (questions 26); cache-first `lf account` and the connect poll make that path routine. Hold `ClaudeRefreshLock` in `fresh_claude_token` around the refresh and write-back (for a profile home the lock is uncontended), which also covers `claude_identity` and rental renewal; `renew_claude_login` keeps its own hold without taking it twice.
+Open product choices stand for demo: the mock as build target (answer 5), the Anthropic credentials policy, `scratch/questions.md` 3, 4, 16–25.
+

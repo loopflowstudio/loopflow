@@ -1535,8 +1535,10 @@ fn parse_managed_provider(raw: &str) -> Result<Provider> {
 fn format_account(account: &ProviderAccount) -> String {
     let mut details = Vec::new();
     let routing_state = account.effective_routing_state(OffsetDateTime::now_utc().date());
-    if routing_state != RoutingState::Automatic {
-        details.push(routing_state.as_str().replace('_', "-"));
+    match routing_state {
+        RoutingState::Automatic => {}
+        RoutingState::ExplicitOnly => details.push("paused".to_string()),
+        RoutingState::Disabled => details.push("disabled".to_string()),
     }
     if account.credential_state != CredentialState::Connected {
         details.push(account.credential_state.as_str().to_string());
@@ -1769,7 +1771,7 @@ mod tests {
             updated_at: 1,
         };
 
-        assert!(format_account(&account).contains("explicit-only"));
+        assert!(format_account(&account).contains("paused"));
         assert!(!account.eligible_for_automatic_routing(today));
     }
 

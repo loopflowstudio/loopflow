@@ -1516,18 +1516,15 @@ pub(crate) async fn is_active_login(
         .is_some_and(|active| active == account.account_id))
 }
 
-/// The login to switch the shared home to when `account`, now out of
-/// automatic routing, is the active one: the route's top other login. `None`
-/// when `account` is not active or nothing else can take its work.
+/// The login to switch the shared home to when `account` leaves automatic
+/// routing: the route's top other login, `None` when nothing else can take
+/// its work.
 pub(crate) async fn replacement_login(
     store: &SharedStore,
     provider: Provider,
     account: &ProviderAccount,
     repo_id: Option<&CanonicalRepo>,
 ) -> Result<Option<ProviderAccount>, ProviderAccountError> {
-    if !is_active_login(store, provider, account).await? {
-        return Ok(None);
-    }
     Ok(inspect_provider_route(Some(store), repo_id, provider)
         .await?
         .unwrap_or_default()
@@ -3545,23 +3542,17 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn an_active_login_taken_out_of_routing_is_replaced_by_the_next() {
+    async fn a_login_taken_out_of_routing_is_replaced_by_the_next() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
         let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
-        let stored = |id: &'static str| {
-            let store = Arc::clone(&store);
-            async move {
-                store
-                    .get_provider_account("codex", &parse_account_id(id).unwrap())
-                    .await
-                    .unwrap()
-                    .unwrap()
-            }
-        };
-        let mut first = stored("first").await;
+        let mut first = store
+            .get_provider_account("codex", &parse_account_id("first").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
         first.routing_state = RoutingState::ExplicitOnly;
         store.upsert_provider_account(&first).await.unwrap();
 
@@ -3571,12 +3562,13 @@ mod account_first_tests {
             .expect("second takes the work");
         assert_eq!(next.account_id.as_str(), "second");
 
-        // A login that is not active has nothing to hand over.
-        assert!(activate(&store, Provider::Codex, "second", &native).await);
-        assert!(replacement_login(&store, Provider::Codex, &first, None)
+        assert!(is_active_login(&store, Provider::Codex, &first)
             .await
-            .unwrap()
-            .is_none());
+            .unwrap());
+        assert!(activate(&store, Provider::Codex, "second", &native).await);
+        assert!(!is_active_login(&store, Provider::Codex, &first)
+            .await
+            .unwrap());
     }
 
     #[allow(clippy::await_holding_lock)]

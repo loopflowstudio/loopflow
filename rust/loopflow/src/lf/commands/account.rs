@@ -1311,12 +1311,15 @@ async fn switch_away(
     provider: Provider,
     account: &ProviderAccount,
 ) -> Result<()> {
+    if !crate::provider_account::is_active_login(store, provider, account).await? {
+        return Ok(());
+    }
     let repo = crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?;
     match crate::provider_account::replacement_login(store, provider, account, repo.as_ref())
         .await?
     {
         Some(next) => use_account(provider.as_str(), account_login(&next)).await,
-        None if crate::provider_account::is_active_login(store, provider, account).await? => {
+        None => {
             println!(
                 "{} stays signed in as {}: no other login can take its work; `lf account {provider} use <email>` switches by hand",
                 provider.display_name(),
@@ -1324,7 +1327,6 @@ async fn switch_away(
             );
             Ok(())
         }
-        None => Ok(()),
     }
 }
 

@@ -124,6 +124,7 @@ Accepted (Jack Heart, November 6, 2026), supersedes the matching parts of items 
 Unverified: whether a different account misses Claude's prompt cache for a moved conversation, making each switch cost quota.
 
 Built (Nov 6, implement): `route_rank`/`urgency`/`order_accounts_by_urgency`; the active-first reorder (`select_shared_account`, `active_candidate`) deleted; `SWITCH_SETTLE_SECS` 120 → 15 (questions 17); `MoveTarget`, `follow_login`, `switch_login`, `drain_account`, `AccountCommand::Drain` and `Write::SessionMove.account` deleted (Swift `sessionMove` too); `provider_account::replacement_login` backs explicit-only switch-away (questions 18); docs updated. Checks: lib `provider_account::` (51), `lf::tests::`, `lf::commands::write::`, `lf::commands::account::`, `human_session::` run as the built binary from an empty dir with isolated `HOME`, and clippy, pass. Gate: `served_reads`, Swift (`DTOFixtureTests`, `RegistryQuery`), docs check.
+Compress (Nov 6): `switch_away` checks the active login once and `replacement_login` only picks the route's next login; lib `provider_account:: lf::commands::account::` (84) and clippy pass.
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).

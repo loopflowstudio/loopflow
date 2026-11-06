@@ -10,8 +10,8 @@ accepted the scheduled cleanup and generic shell-launch revisions below; those
 are implemented at `d14b32ada0`, with focused verification complete and the same
 review/publication boundary. Concept review found that viewer return must revoke
 queued shell closure before the next sweep; the repair below is committed at
-`6d42ec8ce`. Focused verification passed; broader gate and native
-demonstration follow. No new product decision is needed.
+`6d42ec8ce`. Publication checks and regression repairs are recorded below at
+`3c57ec3bf`; native demonstration follows publication. No new product decision is needed.
 
 ## Accepted follow-up — scheduled cleanup and shell launch
 
@@ -416,13 +416,31 @@ before product suites. Those broader suites remain unverified, not failed produc
 assertions. The full commands, counts, warnings and prior transport checks remain
 at that reference; they do not validate the follow-up by inheritance.
 
+### Publication checks — November 6, `3c57ec3bf`
+
+`lf sync` merged cleanly against `c8d7a7f4a8`. The affected-suite runner passed
+resource preflight this time. Its first aggregate result was **failed**, exposing
+two publication fixtures relying on ambient account/agent selection, one old
+transport diagnostic assertion, and three Swift assertions expecting the old
+shell/surface retention behavior. The four test files were repaired; no production
+code changed during publication. Publication fixtures now use their own account,
+agent and cwd. Swift checks require disconnected history and release on departure
+while retaining Session/layout/draft identity. Focused reruns passed.
+
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | binary(transport_tests) | test(ops::task::) | test(store::sqlite::task_retirement::) | test(store::sqlite::task_shells::) | test(store::migrations::) | test(lf::commands::install::published::) | test(lf::commands::ssh::) | test(machine_commands::) | test(land_tests::) | binary(lf)'` — architecture and 72 website tests passed; Rust 419/422 passed initially; full headless Swift run reported 687 tests with three stale assertions. Original log: `.lf/tmp/gate/run-89859/`. This aggregate run did not pass.
+- Network-isolated nextest boundary/repair selection — 75/77 passed, including startup, journal, Task Graph launch, Git cleanup, revision coverage and the corrected transport diagnostic; the two publication fixtures needed cwd isolation as well. Log: `/tmp/loo717-publish-boundaries.log`.
+- Network-isolated nextest `test(final_preparation_preserves_published_copy_only_for_the_same_head) | test(land_generates_copy_when_cached_pr_copy_is_stale)` — both passed after cwd isolation. Log: `/tmp/loo717-publish-copy-repair.log`. Across the original and focused runs, all 496 selected Rust checks passed; there was no fresh all-green aggregate rerun.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'SessionsPolishTests|WorkCLISubscriptionTests'` — seven tests passed, including both lifecycle arguments; app/FFI rebuilt. Log: `/tmp/loo717-publish-swift-repair.log`. Display diagnostics remain skipped.
+- `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` with built `LOOPFLOW_TEST_LF` — three passed, including twenty lifecycle cycles. Log: `/tmp/loo717-publish-ssh.log`.
+- `uv run python scripts/check_migrations.py`; `uv run python scripts/check_swift_multiplatform_boundaries.py`; `cargo fmt --all`; `cargo clippy --all-targets -- -D warnings`; `git diff --check` — passed.
+- `uv run python scripts/test_task_installation.py --repository-upgrade` — disposable Linux release build and populated 0.14.3 upgrade passed: Task/Session identity, history, edits, move and retry. Container removed. Log: `/tmp/loo717-publish-upgrade.log`.
+
+Tests ran with inherited `LF_*` cleared and stdin closed. Native compact-unwind
+and existing Swift/deployment-target build warnings remain. No live installation,
+scheduler registration, credential change or live-store migration occurred.
+
 Remaining work:
 
-- Gate: affected suites selected by `uv run python scripts/test.py --list`,
-  including transport, Task workspace/retirement, CLI/Session routing,
-  architecture, website and Swift. The prior gate preflight limitation remains
-  visible; focused checks are not a full gate. Real macOS loopback SSH uses the
-  ignored tests outside the nested network sandbox.
 - Review publication: update PR #1811 for the scheduled-sweep/generic-launch
   revision after the required checks. The prior `scratch/pr-review.html`
   walkthrough describes `a1067c99cc` and predates both November 6 replacements.

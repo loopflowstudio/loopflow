@@ -25,7 +25,9 @@ The authoritative contract contains the deletion list and verification cases.
 The follow-up is implemented at `d14b32ada0`; focused cleanup, installation,
 local/loopback-SSH shell and headless Desktop checks passed. Subsequent concept
 review found a cancellation gap described below, now repaired at `6d42ec8ce`.
-Focused verification passed; broader gate and publication precede demo review.
+Publication verification and test repairs passed across the original run and
+focused reruns at `3c57ec3bf`; the design records counts and the initially failed
+aggregate run. Publication precedes demo review.
 No ship, installation or live-store migration
 approval is implied.
 

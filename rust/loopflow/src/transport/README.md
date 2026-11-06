@@ -82,7 +82,7 @@ background or are lost, logged.
 
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
-are the person quitting, `lf resume` taking the conversation over, `lf monitor
+are the person quitting, `lf resume` taking the conversation over, `lf process
 rollover`, the detached limit, or an explicit end. Failed store judgments retry
 at the next poll. An owner held past its detached limit logs why: native input,
 a live turn, running Graph, headless Run or no open Session. Repeated unchanged
@@ -101,7 +101,7 @@ owner stays on its own and an answering one is attached, but `lf resume` ends a
 superseded one that does not answer. Once protected work settles, another resume
 moves it.
 
-`lf monitor rollover --dry-run` lists the same takeover choices across owners;
+`lf process rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
 Rollover names the same retention reasons. Resume, rollover and the detached

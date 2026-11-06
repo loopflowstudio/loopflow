@@ -198,7 +198,7 @@ part of what a phone or bot client is offered.
   (`repository path`) answers a JSON string. Every shared read is
   supported. Repository IDs resolve on the destination with `repository.path`;
   paths in local reads are destination paths. `desktop.view.get` returns the existing
-  WorkViewPlan, including the recorded primary Session; roadmap membership alone
+  WorkViewPlan, including the recorded primary Session; planning membership alone
   cannot select one. A missing primary stays absent. Resolve its owner with
   `session.owner` before attachment.
 - `subscribe {id, operation}` takes a read with a watch: `desktop.view.list`,

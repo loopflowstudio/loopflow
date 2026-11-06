@@ -1,10 +1,10 @@
 # Select and arrange Work
 
 ```sh
-lf desktop view 'wave:product state:open or state:available' --plan
-lf desktop query attention 'state:available'
-lf desktop view 'query:attention' --plan
-lf desktop query attention 'state:available or state:blocked' --revision 1
+lf desktop view show 'wave:product state:open or state:available'
+lf desktop dashboard query attention 'state:available'
+lf desktop view show 'query:attention'
+lf desktop dashboard query attention 'state:available or state:blocked' --revision 1
 ```
 
 Plans read current Work and saved intent without opening Desktop, allocating a
@@ -82,8 +82,8 @@ plans. Swift has no query evaluator. Desktop's live pane and window layouts stil
 belong to their existing native owners.
 
 ```sh
-lf desktop pin attention --revision 2
-lf desktop rename query:attention Available --revision 3
+lf desktop dashboard pin attention --revision 2
+lf desktop dashboard rename query:attention Available --revision 3
 lf desktop hide -p query:attention/task:task_33333333333333333333333333333333
 lf desktop move -p query:attention/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
 lf desktop move -p working-tasks/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
@@ -99,7 +99,7 @@ expressions. Repository and Wave defaults remain built in; Dashboard edits never
 replace them. Pane layout selectors use durable Work IDs (`repository`,
 `wave:ID`, `task:ID`).
 Pin/unpin and Dashboard rename require the current Dashboard revision. Task rename uses
-`task:ID` and the Task's revision, writing through the existing Task edit owner.
+`task:ID` and the Task's revision, writing through the Task update owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
 
 `hide`, `show`, `move` and `resize` aimed at a tile edit the shared record: a
@@ -125,7 +125,7 @@ identity; these are not liveness or launch authority. File tabs reference the
 Task/location/path draft owner. Duplicate tools, duplicate documents, missing
 selected tabs and non-Task tools fail before a saved-layout write changes state.
 
-Desktop consumes the same plans in native Dashboards and `desktop view --plan`.
+Desktop consumes the same plans in native Dashboards and `desktop view show`.
 `desktop view EXPRESSION` routes through the repository window; `desktop state`
 includes its selected view and actual geometry. Native Task workspaces own
 revision-checked pane/draft saves. Saved shell intent never authorizes a launch.

@@ -70,16 +70,16 @@ pub enum Operation {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
     /// Attach this connection to the Session's terminal: the server resolves
-    /// the Session's current owner Process, answers `{owner}`, and the
+    /// the Session's current owner LfProcess, answers `{owner_lf_process_id}`, and the
     /// connection then speaks the owner protocol. When that owner ends, the
     /// connection closes; attaching again by the same Session reaches its
-    /// next owner. With `owner`, the Session must still be owned by exactly
-    /// that Process, for a client that reconnects only to the owner it had.
+    /// next owner. With `owner_lf_process_id`, the Session must still be owned by
+    /// exactly that LfProcess, for a client that reconnects only to the owner it had.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
         session: crate::id::LfSessionId,
-        owner: Option<LfProcessId>,
+        owner_lf_process_id: Option<LfProcessId>,
     },
 }
 
@@ -87,7 +87,7 @@ pub enum ServerOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAttached {
-    pub owner: LfProcessId,
+    pub owner_lf_process_id: LfProcessId,
 }
 
 /// One message from the server.

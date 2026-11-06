@@ -36,7 +36,7 @@ struct SessionChromeProofTests {
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "planning" where args.dropFirst().first == "list": return #"{"generated_at":1,"waves":[]}"#
+            case "plan" where args.dropFirst().first == "list": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
             case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#

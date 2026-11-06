@@ -142,8 +142,8 @@ struct ConfigurationSettingsView: View {
 // This mirrors destination identity only; Rust derives paths and applicability.
 enum ConfigurationDestination: String, CaseIterable, Identifiable {
     case personalGlobal = "personal_global"
-    case personalRepository = "personal_repository"
-    case sharedRepository = "shared_repository"
+    case personalRepository = "personal_repo"
+    case sharedRepository = "shared_repo"
     case personalWave = "personal_wave"
     case sharedWave = "shared_wave"
 
@@ -161,7 +161,7 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
 
     func address(repository: String, wave: String) -> JSONValue {
         var value: [String: JSONValue] = ["kind": .string(rawValue)]
-        if self != .personalGlobal { value["repository"] = .string(repository) }
+        if self != .personalGlobal { value["repo"] = .string(repository) }
         if isWave { value["wave"] = .string(wave) }
         return .object(value)
     }

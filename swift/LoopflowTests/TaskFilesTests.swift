@@ -516,7 +516,7 @@ struct TaskFilesTests {
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "planning" where args.dropFirst().first == "list": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "ls": return "[]"
             case "session" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#

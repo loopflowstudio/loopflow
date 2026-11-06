@@ -320,7 +320,7 @@ pub fn attach(
     connection
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),
-            owner: owner.cloned(),
+            owner_lf_process_id: owner.cloned(),
         }))
         .map_err(|error| stalled(error, "open the owner bridge"))?;
     let stream = connection.socket.reader.into_inner();

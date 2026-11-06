@@ -16,7 +16,7 @@ struct WorkObservationTransportTests {
         let lf = try BuiltLf(home: Self.home, cwd: repo)
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
 
-        _ = try await lf.run(["config", "repository", "--json"])
+        _ = try await lf.run(["config", "repo", "--json"])
         let server = LocalServerFixture(lf)
         let printed = try await ServerClient.write(.graphCustomize(directory: repo.path, name: "code"), location: server.location())
         await server.stop()
@@ -29,7 +29,7 @@ struct WorkObservationTransportTests {
     func servedOverSocket() async throws {
         let lf = try BuiltLf(home: Self.home)
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
-        _ = try await lf.run(["config", "repository", "--json"])
+        _ = try await lf.run(["config", "repo", "--json"])
         let server = LocalServerFixture(lf)
         let watch = ServerClient.watch(.allPlans, location: server.location())
         var lines = watch.lines.makeAsyncIterator()
@@ -48,7 +48,7 @@ struct WorkObservationTransportTests {
     func unservedRead() async throws {
         let lf = try BuiltLf(home: Self.home)
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
-        _ = try await lf.run(["config", "repository", "--json"])
+        _ = try await lf.run(["config", "repo", "--json"])
         let server = LocalServerFixture(lf)
         let watch = ServerClient.watch(.machineId, location: server.location())
         do {

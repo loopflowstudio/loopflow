@@ -10,8 +10,8 @@
     ],
     "target": {
       "kind": "task",
-      "repository_path": "/src/loopflow",
-      "repository_id": "repo_22222222222222222222222222222222",
+      "repo_path": "/src/loopflow",
+      "repo_id": "repo_22222222222222222222222222222222",
       "task": "LOO-507",
       "task_id": "task_44444444444444444444444444444444",
       "wave": null,
@@ -41,8 +41,8 @@
     ],
     "target": {
       "kind": "wave",
-      "repository_path": "/src/loopflow",
-      "repository_id": "repo_22222222222222222222222222222222",
+      "repo_path": "/src/loopflow",
+      "repo_id": "repo_22222222222222222222222222222222",
       "task": null,
       "task_id": null,
       "wave": "product",

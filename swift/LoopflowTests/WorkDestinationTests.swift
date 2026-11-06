@@ -447,7 +447,7 @@ struct WorkDestinationTests {
         let taskID = task.runtime?.workId ?? task.id
         let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["config", "repository"]) {
+            if args.starts(with: ["config", "repo"]) {
                 return #"{"id":"repository","locators":["repository"]}"#
             }
             if args.starts(with: ["--machine", "peer", "--repo-id", "repository", "task", "location"]) {
@@ -531,7 +531,7 @@ struct WorkDestinationTests {
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
-            if args.starts(with: ["config", "repository"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
+            if args.starts(with: ["config", "repo"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
             guard args.starts(with: ["--machine", "peer", "--repo-id", "repository"]), cwd == nil else {
                 throw RegistryQueryError("Remote paths must never become local working directories")
             }

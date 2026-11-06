@@ -346,8 +346,8 @@ lf task status INF-124 --json      # the Task row, Sessions, Graph processes, co
 lf task show INF-124 --json     # the planning evidence below
 ```
 
-`lf task show` returns canonical `task` and `project` records, `planning_state`,
-`observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
+`lf task show` returns canonical `task` and `project` records, `plan_state`,
+`observed_at`, `plan_error`, `plan_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned
 Work; its concrete record remains retained internally. Status may acquire planning
@@ -365,7 +365,7 @@ read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
 Status preserves dated facts even after hard-stale or forced acquisition fails.
-`planning_state` distinguishes `available`, `unavailable` acquisition, `invalid`
+`plan_state` distinguishes `available`, `unavailable` acquisition, `invalid`
 evidence, confirmed `removed` planning, and an `absent` detail response. A null
 provider response observes absence for that acquisition; the stored record stays
 invalid until complete detail repairs it. This creates no deletion receipt.

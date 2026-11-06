@@ -335,7 +335,7 @@ struct RegistryQueryTests {
     "items": [
       {
         "task": {
-          "repository_id": "repo_00000000000040008000000000000001",
+          "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/tmp/repo-a",
           "project_id": "project-1",
           "wave_id": "goals",

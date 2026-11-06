@@ -47,6 +47,7 @@ pub enum Sync {
     Planned { plan: SyncPlan },
     /// The sync runs detached as `process`, with its output in `log`.
     Running {
+        #[serde(rename = "lf_process_id")]
         process: LfProcessId,
         run: String,
         log: PathBuf,

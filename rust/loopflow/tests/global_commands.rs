@@ -965,7 +965,7 @@ fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
         serde_json::from_str(&success(run(&["open", "--explain", "--json"]))).unwrap();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(plain["links"][0]["url"], format!("loopflow://{folder}"));
-    assert!(plain["links"][0]["target"]["repository_id"].is_null());
+    assert!(plain["links"][0]["target"]["repo_id"].is_null());
     let invalid = run(&["open", "--diff", "--explain", "--json"]);
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("--diff needs a Task"));
     assert!(success(run(&["open", "--explain"])).contains("Nothing was executed"));

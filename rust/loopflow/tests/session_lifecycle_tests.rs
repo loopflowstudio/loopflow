@@ -698,7 +698,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(history["plan_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"

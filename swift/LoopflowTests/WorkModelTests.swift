@@ -1050,8 +1050,8 @@ private struct WorkTestFixture {
         let activityArguments = ActivityArguments()
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "planning" where args.dropFirst().first == "list": return roadmapJSON
-            case "repository" where args.dropFirst().first == "planning": return #"{"destinations":[]}"#
+            case "plan" where args.dropFirst().first == "list": return roadmapJSON
+            case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
             case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
             case "session" where args.dropFirst().first == "history":

@@ -521,6 +521,7 @@ pub struct Task {
     /// Read projection from the Project join, validated against the Project on save.
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
+    #[serde(rename = "repo_id")]
     pub repository_id: crate::durable::RepositoryId,
     pub project_id: Option<ProjectId>,
     pub worktree: Option<PathBuf>,

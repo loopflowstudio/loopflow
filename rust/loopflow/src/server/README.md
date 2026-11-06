@@ -113,8 +113,8 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
-operation's value: what its CLI spelling prints with `--json`, `{owner}` for
-`session.attach`, and null once a subscription is confirmed.
+operation's value: what its CLI spelling prints with `--json`,
+`{owner_lf_process_id}` for `session.attach`, and null once a subscription is confirmed.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
 answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
@@ -131,7 +131,7 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
 | `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no watch | `{kind}` for a refused operation, else null |
-| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
+| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
 | `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
 | `outcome_unknown` | The operation may have run; inspect state before retrying | null |
@@ -218,7 +218,7 @@ part of what a phone or bot client is offered.
   lists the typed settings, `config.settings {directory, wave, skill, graph,
   step}` resolves them with their sources, and `config.get`, `config.set
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
-  a destination names an owner (`personal_global`, `shared_repository {repository}`,
+  a destination names an owner (`personal_global`, `shared_repo {repo}`,
   …), never a file plus a scope. `config.theme {path, value}` is Appearance's
   theme file. A failed or uncertain save is never replayed; setting values are
   omitted from request telemetry.
@@ -277,16 +277,20 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. IDs correlate
   diagnostics and are **not** durable deduplication receipts. No automatic
   resubmission.
-- `session.attach {session, owner}` takes a Session on a connection of its
-  own: hello, one attach request, its response `{owner}`, then the unchanged
-  binary owner protocol in `transport/README.md` and `transport/wire.rs`. The
-  server resolves the Session's current owner Process; resolution never starts
-  a provider. A Session with no running owner is `not_found {session}`; an
-  owner whose endpoint refuses is `not_found {owner}`: it ended. When the owner
-  ends, the bridge closes, and attaching again by the same Session reaches the
-  Session's next owner, as after `lf install`. A client that reconnects only to
-  the owner it had passes it as `owner`; a Session now owned by another
-  Process is then `not_found {owner, current}`. Desktop's relays do this. Each terminal has
+- `session.attach {session, owner_lf_process_id}` takes a Session on a
+  connection of its own: hello, one attach request, its response
+  `{owner_lf_process_id}`, then the unchanged binary owner protocol in
+  `transport/README.md` and `transport/wire.rs`. The owner is the LfProcess
+  holding the Session's terminal (`lf session serve`), never the provider's
+  AgentProcess beneath it. The server resolves the Session's current owner;
+  resolution never starts a provider. A Session with no running owner is
+  `not_found {session}`; an owner whose endpoint refuses is `not_found
+  {owner_lf_process_id}`: it ended. When the owner ends, the bridge closes, and
+  attaching again by the same Session reaches its next owner, as after `lf
+  install`. A client that reconnects only to the owner it had passes it as
+  `owner_lf_process_id`; a Session now owned by another LfProcess is then
+  `not_found {owner_lf_process_id, current_lf_process_id}`. Desktop's relays do
+  this. Each terminal has
   its own socket, so readings never wait behind terminal bytes and a control
   failure never closes a bridged terminal. The owner alone grants input/geometry,
   handles bounded output continuation and revokes stale control. No automatic

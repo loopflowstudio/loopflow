@@ -98,7 +98,7 @@ struct ServerProtocolTests {
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(renamed["title"] == .string("Served name"))
-        guard case .response(_, _, .object(let owned)) = try message("attached"), case .string(let process)? = owned["owner"] else {
+        guard case .response(_, _, .object(let owned)) = try message("attached"), case .string(let process)? = owned["owner_lf_process_id"] else {
             Issue.record("Missing owner"); return
         }
         #expect(process == trace)

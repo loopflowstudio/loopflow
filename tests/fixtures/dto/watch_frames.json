@@ -25,7 +25,7 @@
       "body": [
         {
           "dashboard_id": "picked",
-          "repository": "repo_11111111111111111111111111111111",
+          "repo": "repo_11111111111111111111111111111111",
           "saved_revision": 3,
           "selection": {
             "id": "root",
@@ -253,9 +253,9 @@
         "task": null,
         "project": null,
         "observed_at": null,
-        "planning_error": null,
-        "planning_stale": false,
-        "planning_state": "available",
+        "plan_error": null,
+        "plan_stale": false,
+        "plan_state": "available",
         "execution": null,
         "ownership": null,
         "overview": {

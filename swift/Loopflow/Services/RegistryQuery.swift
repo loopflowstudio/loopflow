@@ -931,7 +931,7 @@ public struct RegistryQuery: Sendable {
     /// Explicit workspace opening binds a plain repository to its local plan.
     /// Registration runs the complete CLI command.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
+        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repo", "--json"], cwd))
     }
 
     public func repositoryPath(id: String) async throws -> String {

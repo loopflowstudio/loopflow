@@ -37,10 +37,26 @@ pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
 #[non_exhaustive]
 pub enum Destination {
     PersonalGlobal {},
-    PersonalRepository { repository: PathBuf },
-    SharedRepository { repository: PathBuf },
-    PersonalWave { repository: PathBuf, wave: String },
-    SharedWave { repository: PathBuf, wave: String },
+    #[serde(rename = "personal_repo")]
+    PersonalRepository {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+    },
+    #[serde(rename = "shared_repo")]
+    SharedRepository {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+    },
+    PersonalWave {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+        wave: String,
+    },
+    SharedWave {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+        wave: String,
+    },
 }
 
 #[derive(Debug)]

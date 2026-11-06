@@ -414,7 +414,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(status).unwrap(), value);
-    for field in ["planning_stale", "graph_processes"] {
+    for field in ["plan_stale", "graph_processes"] {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(

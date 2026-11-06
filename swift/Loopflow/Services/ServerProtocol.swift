@@ -87,10 +87,10 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
-    /// The Session's terminal; with `owner`, only while that exact Process owns it.
+    /// The Session's terminal; with `owner`, only while that exact LfProcess owns it.
     case attach(session: String, owner: String?)
 
-    private enum Keys: String, CodingKey { case kind, owner, session }
+    private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id" }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
@@ -100,7 +100,7 @@ public enum ServerOperation: Encodable, Sendable {
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
-            try box.encode(owner, forKey: .owner)
+            try box.encode(owner, forKey: .ownerLfProcessID)
         }
     }
 }
@@ -149,7 +149,7 @@ public enum ConfigOperation: Encodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
-    /// What the request returned: a read's or write's value, or `{owner}` for
+    /// What the request returned: a read's or write's value, or `{owner_lf_process_id}` for
     /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
     case reading(id: String, frame: JSONValue)

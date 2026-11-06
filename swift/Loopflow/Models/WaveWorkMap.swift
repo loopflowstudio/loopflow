@@ -82,7 +82,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
+        case repositoryId = "repo_id", projectId = "project_id", waveId = "wave_id"
         case repo
         case id, identifier, name, description, rank, state, assignee, sync, acquisition
         case linearId = "linear_id"

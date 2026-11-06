@@ -209,7 +209,7 @@ and a `control` event to the connection that lost it.
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no
 public command. Session rows name that Process; viewer tokens remain in memory,
-and unresolved native input is recorded on the owner Process. A Claude conversation keeps one lf owner
+and unresolved native input is recorded on the owner LfProcess. A Claude conversation keeps one lf owner
 and one relay per terminal showing it. `lf resume` resolves the Session,
 then execs into `lf session attach OWNER`, which
 opens no store while relaying and parses no commands. It carries the original

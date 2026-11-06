@@ -114,6 +114,7 @@ impl<T> Evidence<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskSummary {
+    #[serde(rename = "repo_id")]
     pub repository_id: String,
     pub repo: String,
     pub project_id: Option<String>,

@@ -742,7 +742,7 @@ impl Read {
                     crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
                         not_found(
                             format!("repository plan {id} has no local checkout"),
-                            serde_json::json!({ "repository": id }),
+                            serde_json::json!({ "repo_id": id }),
                         )
                     })?;
                 Ok(repo.to_string().into())

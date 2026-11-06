@@ -68,12 +68,17 @@ pub enum TaskShip {
     /// Auto-Ship is approved and `process` ships the Task to `end`.
     Shipping {
         issue: String,
+        #[serde(rename = "lf_process_id")]
         process: LfProcessId,
         /// The ship's output once its launcher lets go; null under `-b`.
         log: Option<PathBuf>,
     },
     /// Another live process already ships it.
-    AlreadyShipping { issue: String, process: LfProcessId },
+    AlreadyShipping {
+        issue: String,
+        #[serde(rename = "lf_process_id")]
+        process: LfProcessId,
+    },
     /// The Task already stands at `end`.
     AtEnd { issue: String },
 }

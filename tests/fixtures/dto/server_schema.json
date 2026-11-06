@@ -1842,7 +1842,7 @@
         "pinned": {
           "type": "boolean"
         },
-        "repository": {
+        "repo": {
           "type": "string"
         },
         "revision": {
@@ -1865,7 +1865,7 @@
         }
       },
       "required": [
-        "repository",
+        "repo",
         "id",
         "revision",
         "name",
@@ -2086,16 +2086,16 @@
             }
           ]
         },
-        "planning_error": {
+        "plan_error": {
           "type": [
             "string",
             "null"
           ]
         },
-        "planning_stale": {
+        "plan_stale": {
           "type": "boolean"
         },
-        "planning_state": {
+        "plan_state": {
           "$ref": "#/$defs/PlanningState"
         },
         "project": {
@@ -2144,9 +2144,9 @@
         "task",
         "project",
         "observed_at",
-        "planning_error",
-        "planning_stale",
-        "planning_state",
+        "plan_error",
+        "plan_stale",
+        "plan_state",
         "execution",
         "ownership",
         "overview",
@@ -2191,16 +2191,16 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "const": "personal_repository",
+              "const": "personal_repo",
               "type": "string"
             },
-            "repository": {
+            "repo": {
               "type": "string"
             }
           },
           "required": [
             "kind",
-            "repository"
+            "repo"
           ],
           "type": "object"
         },
@@ -2208,16 +2208,16 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "const": "shared_repository",
+              "const": "shared_repo",
               "type": "string"
             },
-            "repository": {
+            "repo": {
               "type": "string"
             }
           },
           "required": [
             "kind",
-            "repository"
+            "repo"
           ],
           "type": "object"
         },
@@ -2228,7 +2228,7 @@
               "const": "personal_wave",
               "type": "string"
             },
-            "repository": {
+            "repo": {
               "type": "string"
             },
             "wave": {
@@ -2237,7 +2237,7 @@
           },
           "required": [
             "kind",
-            "repository",
+            "repo",
             "wave"
           ],
           "type": "object"
@@ -2249,7 +2249,7 @@
               "const": "shared_wave",
               "type": "string"
             },
-            "repository": {
+            "repo": {
               "type": "string"
             },
             "wave": {
@@ -2258,7 +2258,7 @@
           },
           "required": [
             "kind",
-            "repository",
+            "repo",
             "wave"
           ],
           "type": "object"
@@ -3505,6 +3505,9 @@
       "additionalProperties": false,
       "description": "What a detached operation set going: the `lf` Process that carries it.\n`process.get` reads how it is going; `log` is its output.",
       "properties": {
+        "lf_process_id": {
+          "$ref": "#/$defs/LfProcessId"
+        },
         "log": {
           "description": "Where its output goes, now that its launcher has let go.",
           "type": "string"
@@ -3513,9 +3516,6 @@
           "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
           "type": "string"
         },
-        "process": {
-          "$ref": "#/$defs/LfProcessId"
-        },
         "run": {
           "description": "What it set out to do, for messages: `sync onto origin/main`.",
           "type": "string"
@@ -3523,7 +3523,7 @@
       },
       "required": [
         "operation",
-        "process",
+        "lf_process_id",
         "run",
         "log"
       ],
@@ -3846,7 +3846,7 @@
           },
           "type": "array"
         },
-        "repository": {
+        "repo": {
           "type": "string"
         },
         "task_updates": {
@@ -3869,7 +3869,7 @@
         }
       },
       "required": [
-        "repository",
+        "repo",
         "waves",
         "team_id",
         "team_key",
@@ -8941,13 +8941,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Attach this connection to the Session's terminal: the server resolves\nthe Session's current owner Process, answers `{owner}`, and the\nconnection then speaks the owner protocol. When that owner ends, the\nconnection closes; attaching again by the same Session reaches its\nnext owner. With `owner`, the Session must still be owned by exactly\nthat Process, for a client that reconnects only to the owner it had.",
+          "description": "Attach this connection to the Session's terminal: the server resolves\nthe Session's current owner LfProcess, answers `{owner_lf_process_id}`, and the\nconnection then speaks the owner protocol. When that owner ends, the\nconnection closes; attaching again by the same Session reaches its\nnext owner. With `owner_lf_process_id`, the Session must still be owned by\nexactly that LfProcess, for a client that reconnects only to the owner it had.",
           "properties": {
             "kind": {
               "const": "session.attach",
               "type": "string"
             },
-            "owner": {
+            "owner_lf_process_id": {
               "anyOf": [
                 {
                   "$ref": "#/$defs/LfProcessId"
@@ -8964,7 +8964,7 @@
           "required": [
             "kind",
             "session",
-            "owner"
+            "owner_lf_process_id"
           ],
           "type": "object",
           "x-result": {
@@ -9010,12 +9010,12 @@
       "additionalProperties": false,
       "description": "What `session.attach` answers before the owner protocol begins.",
       "properties": {
-        "owner": {
+        "owner_lf_process_id": {
           "$ref": "#/$defs/LfProcessId"
         }
       },
       "required": [
-        "owner"
+        "owner_lf_process_id"
       ],
       "type": "object"
     },
@@ -10346,11 +10346,11 @@
           "additionalProperties": false,
           "description": "The sync runs detached as `process`, with its output in `log`.",
           "properties": {
+            "lf_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
             "log": {
               "type": "string"
-            },
-            "process": {
-              "$ref": "#/$defs/LfProcessId"
             },
             "run": {
               "type": "string"
@@ -10362,7 +10362,7 @@
           },
           "required": [
             "state",
-            "process",
+            "lf_process_id",
             "run",
             "log"
           ],
@@ -10533,7 +10533,7 @@
           "minimum": 0,
           "type": "integer"
         },
-        "repository_id": {
+        "repo_id": {
           "description": "Stable repository identity, independent of planning membership.",
           "type": "string"
         },
@@ -10592,7 +10592,7 @@
         "pm_snapshot_synced_at",
         "pm_writeback",
         "wave_id",
-        "repository_id",
+        "repo_id",
         "project_id",
         "worktree",
         "workspace_slug",
@@ -12425,15 +12425,15 @@
             "issue": {
               "type": "string"
             },
+            "lf_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
             "log": {
               "description": "The ship's output once its launcher lets go; null under `-b`.",
               "type": [
                 "string",
                 "null"
               ]
-            },
-            "process": {
-              "$ref": "#/$defs/LfProcessId"
             },
             "state": {
               "const": "shipping",
@@ -12443,7 +12443,7 @@
           "required": [
             "state",
             "issue",
-            "process",
+            "lf_process_id",
             "log"
           ],
           "type": "object"
@@ -12455,7 +12455,7 @@
             "issue": {
               "type": "string"
             },
-            "process": {
+            "lf_process_id": {
               "$ref": "#/$defs/LfProcessId"
             },
             "state": {
@@ -12466,7 +12466,7 @@
           "required": [
             "state",
             "issue",
-            "process"
+            "lf_process_id"
           ],
           "type": "object"
         },
@@ -12593,7 +12593,7 @@
             "null"
           ]
         },
-        "repository_id": {
+        "repo_id": {
           "type": "string"
         },
         "ship_approval": {
@@ -12669,7 +12669,7 @@
         "pm_writeback",
         "wave",
         "project_id",
-        "repository_id",
+        "repo_id",
         "status",
         "completion_pending",
         "execution",
@@ -12787,7 +12787,7 @@
         "repo": {
           "type": "string"
         },
-        "repository_id": {
+        "repo_id": {
           "type": "string"
         },
         "state": {
@@ -12807,7 +12807,7 @@
         }
       },
       "required": [
-        "repository_id",
+        "repo_id",
         "repo",
         "project_id",
         "wave_id",
@@ -13173,7 +13173,7 @@
         "projection": {
           "$ref": "#/$defs/ArrangementProjection"
         },
-        "repository": {
+        "repo": {
           "type": "string"
         },
         "resolution": {
@@ -13198,7 +13198,7 @@
         "name",
         "pinned",
         "dashboard_id",
-        "repository",
+        "repo",
         "selection",
         "saved_revision",
         "resolution",
@@ -13859,13 +13859,13 @@
         "kind": {
           "$ref": "#/$defs/WorkWorkspaceKind"
         },
-        "repository_id": {
+        "repo_id": {
           "type": [
             "string",
             "null"
           ]
         },
-        "repository_path": {
+        "repo_path": {
           "type": "string"
         },
         "session": {
@@ -13897,8 +13897,8 @@
       },
       "required": [
         "kind",
-        "repository_path",
-        "repository_id",
+        "repo_path",
+        "repo_id",
         "task",
         "task_id",
         "wave",

@@ -139,7 +139,7 @@ private actor DirectiveSource {
             roadmap = original.replacingOccurrences(of: oldJSON, with: newJSON)
             written = true
             return "product: updated task issue-review"
-        case "planning" where args.dropFirst().first == "list":
+        case "plan" where args.dropFirst().first == "list":
             if written && outcome == .unreadable { throw RegistryQueryError("Planning offline") }
             let result = roadmap
             if let gate = nextRead {

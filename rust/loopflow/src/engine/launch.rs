@@ -28,6 +28,7 @@ pub struct Launched {
     /// The operation the Process carries: `checkout.sync`, `pr.land`,
     /// `repo.release`, `graph.run`, `skill.run`.
     pub operation: String,
+    #[serde(rename = "lf_process_id")]
     pub process: LfProcessId,
     /// What it set out to do, for messages: `sync onto origin/main`.
     pub run: String,

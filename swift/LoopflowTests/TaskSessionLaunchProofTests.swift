@@ -113,7 +113,7 @@ struct TaskSessionLaunchProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "planning" where args.dropFirst().first == "list": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "graph": return "[]"
             case "session" where args.dropFirst().first == "list": return "[]"

@@ -29,7 +29,7 @@ struct LaunchJournalTests {
         #expect(launches[3]["part"] as? String == "planning")
 
         let reads = try lines(directory, "reads")
-        #expect(reads.map { $0["verb"] as? String } == ["task show", "planning list", nil, nil])
+        #expect(reads.map { $0["verb"] as? String } == ["task show", "plan list", nil, nil])
         #expect(reads.map { $0["ok"] as? Bool } == [true, false, false, false])
         #expect(!String(decoding: try Data(contentsOf: directory.appendingPathComponent("reads.ndjson")), as: UTF8.self).contains("LOO-1"))
     }

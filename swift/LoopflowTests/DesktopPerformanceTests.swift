@@ -1025,7 +1025,7 @@ struct DesktopPerformanceTests {
             await planning.count(args)
             switch args.first {
             case "machine" where args.dropFirst().first == "self": return "{\"id\":\"\(fixtureMachineId)\"}"
-            case "planning" where args.dropFirst().first == "list": return await planning.read()
+            case "plan" where args.dropFirst().first == "list": return await planning.read()
             case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#

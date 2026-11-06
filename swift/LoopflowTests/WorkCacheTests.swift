@@ -369,7 +369,7 @@ private actor Source {
             }
         }
         switch args.first {
-        case "planning" where args.dropFirst().first == "list": return roadmap
+        case "plan" where args.dropFirst().first == "list": return roadmap
         case "session" where args.dropFirst().first == "list": return sessions
         case "wave": return "[]"
         case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#

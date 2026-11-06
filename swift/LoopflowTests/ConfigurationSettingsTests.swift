@@ -28,7 +28,7 @@ struct ConfigurationSettingsTests {
         #expect(ConfigurationDestination.personalGlobal.address(repository: "/stale", wave: "stale")
             == .object(["kind": .string("personal_global")]))
         #expect(ConfigurationDestination.personalRepository.address(repository: "/project", wave: "stale")
-            == .object(["kind": .string("personal_repository"), "repository": .string("/project")]))
+            == .object(["kind": .string("personal_repo"), "repo": .string("/project")]))
     }
 }
 #endif

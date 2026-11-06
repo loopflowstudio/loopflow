@@ -165,6 +165,7 @@ pub struct TaskSnapshot {
     pub pm_writeback: crate::work::task::LinearWritebackState,
     pub wave: Option<String>,
     pub project_id: Option<String>,
+    #[serde(rename = "repo_id")]
     pub repository_id: String,
     /// Completion and abandonment are independent of the Task's Graph position.
     pub status: TaskState,
@@ -1786,8 +1787,11 @@ pub struct TaskStatus {
     pub task: Option<Task>,
     pub project: Option<crate::work::project::Project>,
     pub observed_at: Option<i64>,
+    #[serde(rename = "plan_error")]
     pub planning_error: Option<String>,
+    #[serde(rename = "plan_stale")]
     pub planning_stale: bool,
+    #[serde(rename = "plan_state")]
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<crate::durable::TaskOwnership>,

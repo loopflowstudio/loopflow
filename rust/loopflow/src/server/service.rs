@@ -357,7 +357,7 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                     continue;
                 }
                 let entry = match admission {
-                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner: exact })) => {
+                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact })) => {
                         let owner = match attached_owner(session, exact).await {
                             Ok(owner) => owner,
                             Err(refusal) => {
@@ -371,11 +371,11 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                 // A missing owner endpoint means the owner ended.
                                 send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound, format!(
                                     "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                                )).with(serde_json::json!({ "owner": owner })))).await?;
+                                )).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
                                 continue;
                             }
                         };
-                        let result = serde_json::to_value(SessionAttached { owner }).expect("an owner serializes");
+                        let result = serde_json::to_value(SessionAttached { owner_lf_process_id: owner }).expect("an owner serializes");
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
                         // The connection now speaks only the owner protocol; other
                         // answers on it are dropped with the task set.
@@ -457,7 +457,9 @@ async fn attached_owner(
                 session.as_str()
             ),
         )
-        .with(serde_json::json!({ "owner": exact, "current": current }))),
+        .with(
+            serde_json::json!({ "owner_lf_process_id": exact, "current_lf_process_id": current }),
+        )),
         _ => Ok(current),
     }
 }

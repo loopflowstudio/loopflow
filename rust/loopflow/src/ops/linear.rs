@@ -115,6 +115,7 @@ pub struct LinearReteamProjectMove {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinearReteamResult {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub waves: Vec<String>,
     pub team_id: String,

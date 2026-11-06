@@ -697,6 +697,7 @@ impl SlotLayout {
 /// A custom view with its own identity; members reference existing Work workspaces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Dashboard {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub id: DashboardId,
     pub revision: i64,
@@ -722,6 +723,7 @@ pub struct ViewPlan {
     pub name: Option<String>,
     pub pinned: bool,
     pub dashboard_id: Option<DashboardId>,
+    #[serde(rename = "repo")]
     pub repository: String,
     pub selection: Selection,
     pub saved_revision: Option<i64>,

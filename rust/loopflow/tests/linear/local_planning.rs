@@ -272,7 +272,7 @@ fn public_local_plan_matches_desktop() {
         .as_str()
         .unwrap()
         .to_string();
-    task["task"]["repository_id"] = serde_json::json!("repo_00000000000040008000000000000001");
+    task["task"]["repo_id"] = serde_json::json!("repo_00000000000040008000000000000001");
     task["task"]["repo"] = serde_json::json!("/repo");
     let proof = serde_json::json!({"task":task,"comments":comments});
     let canonical = serde_json::to_string(&proof)
@@ -678,7 +678,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     assert!(status["execution"]["issue_id"].is_null());
     assert!(status["execution"]["worktree"].is_null());
     assert!(status["execution"]["pr"].is_null());
-    assert!(status["planning_error"].is_null());
+    assert!(status["plan_error"].is_null());
     let wave = lf(
         repo.path(),
         home.path(),
@@ -804,7 +804,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["desktop", "task", other_id, "--json"],
     );
     assert_eq!(retained["execution"]["status"], "abandoned");
-    assert_eq!(retained["planning_state"], "removed");
+    assert_eq!(retained["plan_state"], "removed");
     assert_eq!(
         retained["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -915,7 +915,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
-    assert!(status["planning_error"].is_null());
+    assert!(status["plan_error"].is_null());
     let landing = command(Path::new(worktree), home.path(), &["--task", id, "land"])
         .output()
         .unwrap();
@@ -2390,7 +2390,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         assert_eq!(removed.linear_id, before.linear_id);
         assert_eq!(removed.revision, before.revision + 1);
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        assert_eq!(status["planning_state"], "removed");
+        assert_eq!(status["plan_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
         let reopened =
@@ -3089,7 +3089,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     ] {
         db.execute_batch(statement).unwrap();
         let status = read();
-        assert_eq!(status["planning_state"], state);
+        assert_eq!(status["plan_state"], state);
         assert_eq!(status["observed_at"], 17);
         assert_eq!(status["task"]["id"], id.as_str());
         assert_eq!(status["task"]["title"], "Saved locally");
@@ -3121,12 +3121,12 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     }
     // A pending membership save explains the difference without replacing content.
     db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
-    assert_eq!(read()["planning_state"], "available");
+    assert_eq!(read()["plan_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)
         .unwrap();
     let removed = read();
-    assert_eq!(removed["planning_state"], "removed");
+    assert_eq!(removed["plan_state"], "removed");
     assert_eq!(removed["observed_at"], 17);
     assert_eq!(removed["execution"]["work"], initial["execution"]["work"]);
     assert_eq!(
@@ -3298,7 +3298,7 @@ fn waveless_task_lifecycle() {
         ],
     );
     let id = created["id"].as_str().unwrap();
-    assert!(created["repository_id"].is_string());
+    assert!(created["repo_id"].is_string());
     assert!(created["project_id"].is_null());
     assert!(created["wave_id"].is_null());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -3581,7 +3581,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
                 String::from_utf8_lossy(&output.stderr)
             );
             let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(task["repository_id"], parent["repository_id"]);
+            assert_eq!(task["repo_id"], parent["repo_id"]);
             if flags.first() == Some(&"--wave") {
                 assert_eq!(task["wave_id"], parent["wave_id"]);
                 assert_eq!(task["project_id"], parent["project_id"]);

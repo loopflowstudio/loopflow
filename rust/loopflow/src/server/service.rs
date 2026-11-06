@@ -318,13 +318,22 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
         tokio::select! {
             incoming = lines.next() => {
                 let Some(line) = incoming else { return Ok(()) };
-                let message = match serde_json::from_str::<ClientMessage>(&line?) {
+                let line = line?;
+                let message = match serde_json::from_str::<ClientMessage>(&line) {
                     Ok(message) => message,
-                    Err(parse) => {
-                        // A null-id error is the connection's last message.
-                        send(&mut lines, &error(None, ErrorCode::Invalid, parse.to_string())).await?;
-                        return Ok(());
-                    }
+                    Err(parse) => match refused_operation(&line) {
+                        // A well-formed request this build cannot run fails alone,
+                        // so a newer client keeps its other requests and watches.
+                        Some((id, refusal)) => {
+                            send(&mut lines, &ServerMessage::error(Some(id), refusal)).await?;
+                            continue;
+                        }
+                        None => {
+                            // A null-id error is the connection's last message.
+                            send(&mut lines, &error(None, ErrorCode::Invalid, parse.to_string())).await?;
+                            return Ok(());
+                        }
+                    },
                 };
                 let (id, admission) = match message {
                     ClientMessage::Request { id, operation } => (id, Admission::Request(operation)),
@@ -419,6 +428,40 @@ enum Admission {
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
 /// closing either side releases the owner claim, and no service state can
 /// restore it on another connection.
+/// A `request` or `subscribe` whose envelope parses but whose operation this
+/// build does not accept: its id and why. An unknown kind is `invalid` with
+/// `data.kind`; a known kind names the argument it refused.
+fn refused_operation(line: &str) -> Option<(String, Error)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let kind_of = value.get("type")?.as_str()?;
+    if !matches!(kind_of, "request" | "subscribe") {
+        return None;
+    }
+    let id = value.get("id")?.as_str()?.to_owned();
+    if id.is_empty() || id.len() > 128 {
+        return None;
+    }
+    let operation = value.get("operation")?;
+    let kind = operation.get("kind")?.as_str()?.to_owned();
+    let refusals = [
+        serde_json::from_value::<crate::lf::commands::read::Read>(operation.clone()).err(),
+        serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).err(),
+        serde_json::from_value::<ServerOperation>(operation.clone()).err(),
+    ];
+    let known = refusals
+        .iter()
+        .flatten()
+        .find(|refusal| !refusal.to_string().starts_with("unknown variant"));
+    let refusal = match known {
+        Some(refusal) => Error::new(ErrorCode::Invalid, format!("{kind}: {refusal}")),
+        None => Error::new(
+            ErrorCode::Invalid,
+            format!("this server has no operation `{kind}`; update the selected installation"),
+        ),
+    };
+    Some((id, refusal.with(serde_json::json!({ "kind": kind }))))
+}
+
 async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     let parts = lines.into_parts();
     let mut socket = parts.io;
@@ -967,6 +1010,39 @@ mod tests {
         assert_eq!(id, None);
         assert_eq!(code, ErrorCode::Invalid);
         client.ended().await;
+    }
+
+    #[test]
+    fn an_unknown_operation_fails_alone_and_the_connection_stays() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+            .writer
+            .write_all(b"{\"type\":\"request\",\"id\":\"new\",\"operation\":{\"kind\":\"task.teleport\"}}\n")
+            .await
+            .unwrap();
+            let ServerMessage::Error { id, code, data, .. } = client.receive().await.unwrap()
+            else {
+                panic!("expected an error")
+            };
+            assert_eq!(id.as_deref(), Some("new"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert_eq!(data.unwrap()["kind"], "task.teleport");
+            client
+                .send(&ClientMessage::Request {
+                    id: "next".into(),
+                    operation: catalog(),
+                })
+                .await;
+            let ServerMessage::Response { id, .. } = client.receive().await.unwrap() else {
+                panic!("the connection should still answer")
+            };
+            assert_eq!(id, "next");
+        });
     }
 
     #[tokio::test]

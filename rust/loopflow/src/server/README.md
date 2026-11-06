@@ -120,13 +120,16 @@ answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
 (nothing ran; retry shortly) and after `invalid` for a malformed line or a
-repeated `hello`/`status`. `data` is structured detail or null. Clients branch
+repeated `hello`/`status`. A well-formed `request` or `subscribe` whose
+operation this build does not accept fails alone: `invalid` with its own `id`
+and `data.kind`, and the connection stays open, so a newer client loses only
+that request. `data` is structured detail or null. Clients branch
 on `code`; only `outcome_unknown` means the request may have taken effect:
 
 | `code` | Meaning | `data` |
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
-| `invalid` | Malformed message or refused arguments, such as subscribing to a read with no watch | null |
+| `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no watch | `{kind}` for a refused operation, else null |
 | `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
 | `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |

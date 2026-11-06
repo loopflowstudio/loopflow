@@ -535,6 +535,7 @@ Discovery (`lf server describe --json`). Decisions made headless; each is revers
 - **Serialize contract for requests.** One document, one contract: nullable
   request fields are `required`, as Desktop and the fixtures send them, though
   serde also accepts them absent. A generated client is stricter than the server.
+- **Result types.** `repository.planning`, `config.settings` rows and `pr.reviews` are typed; `pr.reviews` renamed its fields to `head`, `draft`, `decision`, `requested`, which changes `lf pr reviews --json`. Only `error.data` and watch frame bodies stay generic.
 - **`x-result` is declared, not derived.** The attribute sits beside each variant
   and calls `generator.subschema_for`, the parameter name of schemars' derive:
   a rename there is a compile error. `Write::run` and `Read::read` still return

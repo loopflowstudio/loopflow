@@ -3838,7 +3838,8 @@ mod inspection_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            // The strained account resets soonest, so it leads; cooling is held back.
+            // Strained has an observed weekly window and healthy has none, so strained
+            // leads; cooling is held back.
             assert_eq!(
                 inspected
                     .iter()

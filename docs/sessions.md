@@ -176,7 +176,8 @@ lf account claude use work@                  # switch the Machine's login; every
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
 Logins belong to the Machine, not to a Session: every open Session runs on the
-active one. Interactive Sessions only; nothing is written to your
+active one. A manual `use` lasts until the next launch re-ranks the logins; to
+stay on one, name it with `--account` or set the others `explicit-only`. Interactive Sessions only; nothing is written to your
 preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Reference

@@ -339,7 +339,8 @@ lf account set claude jack@ --routing automatic # route to it again
 `--blocked` and `--on` are the one Session selector; `list` previews what
 `move` acts on. A move never writes preferences. Taking the active login out
 of automatic routing switches the Machine to the route's next login, and every
-open Claude follows; `lf account <provider> use` switches by hand. In the
+open Claude follows; `lf account <provider> use` switches by hand until the
+next launch. In the
 Desktop, View → Move Blocked Sessions… runs the same move.
 
 ## Switch the shared account
@@ -356,6 +357,10 @@ lf account claude use work@               # the same for ~/.claude and plain cla
 It first saves the current login back to its
 stored account, so a token the provider refreshed while active is kept; a login
 Loopflow has never seen is kept as a new explicit-only account.
+
+A manual switch lasts until the next launch, which takes the top-ranked
+account again. To stay on one login, name it with `--account` or set the other
+logins `--routing explicit-only`.
 
 When Codex's native and stored copies name the same login but disagree, live
 status checks the native copy first. Only a definite authentication rejection

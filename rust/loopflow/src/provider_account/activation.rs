@@ -113,6 +113,7 @@ pub(crate) async fn observe_active_account(
     if let Some(active) = active(&accounts) {
         return Ok(Some(active));
     }
+    let _refresh = ClaudeRefreshLock::acquire(native)?;
     Ok(match save_back(store, provider, native, &accounts).await? {
         Kept::Profile(account_id) => Some(account_id),
         Kept::Unplaced(_) | Kept::Nothing => None,
@@ -175,6 +176,11 @@ pub(crate) async fn activate(
     if is_active() {
         return Ok(None);
     }
+    // Claude must not refresh the outgoing login between its save-back and
+    // the install, or the rotated refresh token is lost with the old copy.
+    let _refresh = (provider == Provider::Claude)
+        .then(|| ClaudeRefreshLock::acquire(native))
+        .transpose()?;
     if provider == Provider::Codex {
         require_file_credential_store(native)?;
         if same_login(provider, native, profile) {
@@ -217,6 +223,7 @@ pub(crate) fn renew_claude_login(
     let active = same_login(Provider::Claude, &native, profile);
     write_private(&profile.join(".credentials.json"), credential.as_bytes())?;
     if active {
+        let _refresh = ClaudeRefreshLock::acquire(&native)?;
         write_login(Provider::Claude, &native, credential.as_bytes())?;
     }
     Ok(())
@@ -285,6 +292,98 @@ fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccoun
         .map_err(filesystem)?;
     fs2::FileExt::lock_exclusive(&lock).map_err(filesystem)?;
     Ok(lock)
+}
+
+/// Claude's own lock around refreshing its login, as Claude 2.1.319 takes it
+/// through proper-lockfile: `mkdir <home>/.oauth_refresh.lock`, then the
+/// legacy `mkdir <realpath(home)>.lock`. A holder brings each directory's
+/// mtime forward every 5 s; one untouched for 60 s is stale and taken over.
+/// Claude retries a held lock, so holding it pauses a refresh instead of
+/// failing it.
+#[derive(Debug)]
+struct ClaudeRefreshLock {
+    directories: Vec<PathBuf>,
+    /// Dropping it stops the thread keeping the directories fresh.
+    _keep_fresh: Option<std::sync::mpsc::Sender<()>>,
+}
+
+const CLAUDE_LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(60);
+const CLAUDE_LOCK_TOUCH: std::time::Duration = std::time::Duration::from_secs(5);
+/// Long enough for a holder that died to go stale.
+const CLAUDE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(65);
+
+impl ClaudeRefreshLock {
+    fn acquire(home: &Path) -> Result<Self, ProviderAccountError> {
+        let mut lock = Self {
+            directories: Vec::new(),
+            _keep_fresh: None,
+        };
+        if !home.is_dir() {
+            // No Claude has run here, so none can be refreshing.
+            return Ok(lock);
+        }
+        let real = fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+        let mut legacy = real.into_os_string();
+        legacy.push(".lock");
+        for directory in [home.join(".oauth_refresh.lock"), PathBuf::from(legacy)] {
+            take_lock_directory(&directory)?;
+            lock.directories.push(directory);
+        }
+        let (sender, stop) = std::sync::mpsc::channel::<()>();
+        let directories = lock.directories.clone();
+        std::thread::spawn(move || {
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                stop.recv_timeout(CLAUDE_LOCK_TOUCH)
+            {
+                for directory in &directories {
+                    let _ = fs::File::open(directory)
+                        .and_then(|dir| dir.set_modified(std::time::SystemTime::now()));
+                }
+            }
+        });
+        lock._keep_fresh = Some(sender);
+        Ok(lock)
+    }
+}
+
+impl Drop for ClaudeRefreshLock {
+    fn drop(&mut self) {
+        for directory in self.directories.iter().rev() {
+            if let Err(error) = fs::remove_dir(directory) {
+                tracing::warn!(path = %directory.display(), "release Claude refresh lock: {error}");
+            }
+        }
+    }
+}
+
+fn take_lock_directory(directory: &Path) -> Result<(), ProviderAccountError> {
+    let started = std::time::SystemTime::now();
+    loop {
+        let error = match fs::create_dir(directory) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(ProviderAccountError::Filesystem(format!(
+                "lock {}: {error}",
+                directory.display()
+            )));
+        }
+        let touched = fs::metadata(directory).and_then(|meta| meta.modified());
+        let stale =
+            touched.is_ok_and(|touched| touched.elapsed().unwrap_or_default() > CLAUDE_LOCK_STALE);
+        if stale {
+            let _ = fs::remove_dir(directory);
+            continue;
+        }
+        if started.elapsed().unwrap_or_default() > CLAUDE_LOCK_WAIT {
+            return Err(ProviderAccountError::Runtime(format!(
+                "Claude has been refreshing its login for over a minute ({} is held); retry",
+                directory.display()
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// Codex reads `auth.json` only when its config keeps the login in a file.
@@ -503,5 +602,60 @@ mod credentials_marker_tests {
         let modified = fs::metadata(&marker).unwrap().modified().unwrap();
         assert!(modified > stale + Duration::from_secs(1_800));
         assert_eq!(fs::read_to_string(&marker).unwrap(), "{}");
+    }
+}
+
+#[cfg(test)]
+mod refresh_lock_tests {
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    use super::ClaudeRefreshLock;
+
+    fn legacy(home: &std::path::Path) -> std::path::PathBuf {
+        let mut path = fs::canonicalize(home).unwrap().into_os_string();
+        path.push(".lock");
+        path.into()
+    }
+
+    #[test]
+    fn a_switch_waits_for_claudes_refresh_and_leaves_no_lock_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(".claude");
+        fs::create_dir(&home).unwrap();
+        let claude = home.join(".oauth_refresh.lock");
+        fs::create_dir(&claude).unwrap();
+        let released = {
+            let claude = claude.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                fs::remove_dir(&claude).unwrap();
+                SystemTime::now()
+            })
+        };
+        let lock = ClaudeRefreshLock::acquire(&home).unwrap();
+        let acquired = SystemTime::now();
+        assert!(acquired >= released.join().unwrap());
+        assert!(claude.is_dir() && legacy(&home).is_dir());
+        drop(lock);
+        assert!(!claude.exists() && !legacy(&home).exists());
+    }
+
+    #[test]
+    fn a_lock_its_holder_stopped_touching_is_taken_over() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(".claude");
+        fs::create_dir(&home).unwrap();
+        let claude = home.join(".oauth_refresh.lock");
+        fs::create_dir(&claude).unwrap();
+        fs::File::open(&claude)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(120))
+            .unwrap();
+        let started = SystemTime::now();
+        let lock = ClaudeRefreshLock::acquire(&home).unwrap();
+        assert!(started.elapsed().unwrap() < Duration::from_secs(5));
+        drop(lock);
+        assert!(!claude.exists());
     }
 }

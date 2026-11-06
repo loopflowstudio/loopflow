@@ -875,7 +875,8 @@ Account registration uses domain commands. Ordered account preferences use the
 same file-backed settings as other declarations:
 
 ```bash
-lf account connect claude primary@example.com --chrome-profile primary@example.com
+lf account connect claude=primary@example.com --chrome-profile primary@example.com
+
 lf set account.claude primary@,engineering@
 lf --account primary@ implement
 ```

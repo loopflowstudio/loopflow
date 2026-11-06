@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "route"],
-            vec!["account", "route", "--help"],
+            vec!["help", "account", "next"],
+            vec!["account", "next", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -524,8 +524,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "rou"]),
-        ["lf", "ops", "account", "route"]
+        normalized(&["lf", "account", "nex"]),
+        ["lf", "ops", "account", "next"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),

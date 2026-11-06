@@ -327,15 +327,14 @@ impl Cli {
             cmd:
                 OpsCommand::Account {
                     cmd,
-                    provider,
+                    target,
                     cached,
-                    details,
                     json,
                 },
         }) = &self.command
         {
             if let Some(misuse) =
-                AccountCommand::misuse(cmd.as_ref(), *provider, *cached || *details || *json)
+                AccountCommand::misuse(cmd.as_ref(), target.is_some() || *cached || *json)
             {
                 return Err(clap::Error::raw(
                     clap::error::ErrorKind::ArgumentConflict,
@@ -709,19 +708,23 @@ pub enum OpsCommand {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Refresh account access and capacity, or manage logins and routing
+    /// Every login, its weekly room and what needs fixing; name a login or
+    /// provider for every window, source and browser choice
+    #[command(
+        after_help = "lf account                  # one row per login; stale rows refresh\n\
+                            lf account work@            # every window, its age and source\n\
+                            lf account next             # which login the next launch takes, and why"
+    )]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
-        /// Limit observations to one provider
-        provider: Option<crate::provider_auth::Provider>,
-        /// Inspect cached evidence without contacting providers
+        /// A login (`work@`, `claude=work@`) or a provider
+        #[arg(value_parser = parse_account_target)]
+        target: Option<String>,
+        /// Read cached evidence without contacting providers
         #[arg(long)]
         cached: bool,
-        /// Include credential sources, browser choices, and timestamps
-        #[arg(long)]
-        details: bool,
-        /// Emit the account overview as one JSON document
+        /// Emit the accounts as one JSON document
         #[arg(long)]
         json: bool,
     },
@@ -1297,17 +1300,19 @@ fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
     }
 }
 
-/// Bare `lf account` refreshes access and capacity unless it reads the cache.
+/// Bare `lf account` refreshes stale readings unless it reads the cache.
 fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
     match cmd {
         None => !cached,
-        Some(AccountCommand::Route { .. }) => false,
+        Some(AccountCommand::Next { .. }) => false,
         Some(
             AccountCommand::Disconnect { .. }
             | AccountCommand::Connect { .. }
             | AccountCommand::Set { .. }
             | AccountCommand::RedeemReset { .. }
-            | AccountCommand::Use { .. },
+            | AccountCommand::Use { .. }
+            | AccountCommand::Pause { .. }
+            | AccountCommand::Unpause { .. },
         ) => true,
     }
 }
@@ -1636,7 +1641,7 @@ pub enum SessionCommand {
     /// Move the selected open Sessions to another agent (-a harness[:model]);
     /// `lf session list` with the same flags previews them
     #[command(
-        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Session follows the active one, which `lf account <provider> use <email>` switches. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
+        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Session follows the active one, which `lf account use <login>` switches. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
     )]
     Move {
         #[command(flatten)]
@@ -2831,43 +2836,79 @@ pub enum MachineCredentialCommand {
     Renew,
 }
 
+/// A login is its email or an unambiguous prefix (`work@`); `claude=work@`
+/// names the provider when both have one.
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
-    /// Disconnect local credentials or one managed login
-    Disconnect {
-        provider: String,
-        email: Option<String>,
+    /// Which login each provider's next launch takes, and why. Exits 2 when
+    /// none can launch now, 3 when a login is needed
+    Next {
+        #[arg(long, conflicts_with = "default")]
+        repo: Option<String>,
+        /// Ignore repository and Wave orders
+        #[arg(long)]
+        default: bool,
+        #[arg(long)]
+        json: bool,
     },
-    /// Connect local credentials or a managed login using a remembered browser
+    /// Switch this Machine to a login and keep launches there until it fills
+    /// up; `auto` hands them back to routing. Exits 2 when the login has no
+    /// room, 3 when it needs a login
+    #[command(
+        after_help = "lf account use work@          # every launch takes work@ until it is full\n\
+                            lf account use auto           # back to the login with the most to spend\n\
+                            lf account use codex=auto     # one provider"
+    )]
+    Use {
+        #[arg(value_parser = parse_account_target)]
+        login: String,
+    },
+    /// Take a login out of rotation; when it is active, the Machine switches
+    /// off it now. It still launches when named with `--account`
+    Pause {
+        #[arg(value_parser = parse_account_target)]
+        login: String,
+    },
+    /// Put a paused login back in rotation
+    Unpause {
+        #[arg(value_parser = parse_account_target)]
+        login: String,
+    },
+    /// Add or renew a login (`claude=a@example.com`), or a service's local
+    /// credentials (`claude`, `linear`), through a remembered browser
     Connect {
-        provider: String,
-        email: Option<String>,
+        #[arg(value_parser = parse_account_target)]
+        target: String,
         #[arg(long, conflicts_with_all = ["import", "api_key"])]
         chrome_profile: Option<String>,
-        /// Adopt an existing Claude login
-        #[arg(long = "import", requires = "email", conflicts_with = "api_key")]
+        /// Adopt the ambient Claude login as this login
+        #[arg(long = "import", conflicts_with = "api_key")]
         import: bool,
         /// Read the provider's API key environment variable
-        #[arg(long, conflicts_with = "email")]
+        #[arg(long)]
         api_key: bool,
     },
-    /// Edit account configuration or remembered browser choices
+    /// Disconnect a login, or a service's local credentials
+    Disconnect {
+        #[arg(value_parser = parse_account_target)]
+        target: String,
+    },
+    /// Edit a login's plan, billing and expected email, or the browsers a
+    /// login or service connects through
     Set {
-        provider: String,
-        email: Option<String>,
-        #[arg(long, requires = "email")]
+        #[arg(value_parser = parse_account_target)]
+        target: String,
+        #[arg(long)]
         login_email: Option<String>,
-        #[arg(long, requires = "email")]
-        routing: Option<String>,
-        #[arg(long, requires = "email", conflicts_with = "clear_plan")]
+        #[arg(long, conflicts_with = "clear_plan")]
         plan: Option<String>,
-        #[arg(long, requires = "email")]
+        #[arg(long)]
         clear_plan: bool,
-        #[arg(long, requires = "email", conflicts_with = "clear_paid_through")]
+        #[arg(long, conflicts_with = "clear_paid_through")]
         paid_through: Option<String>,
-        #[arg(long, requires = "email")]
+        #[arg(long)]
         clear_paid_through: bool,
-        #[arg(long, requires = "email")]
+        #[arg(long)]
         clear_cooldown: bool,
         /// Replace the ordered browser choices (repeat for fallback profiles)
         #[arg(long, conflicts_with = "clear_chrome_profiles")]
@@ -2875,10 +2916,10 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_chrome_profiles: bool,
     },
-    /// Spend one banked Codex reset for this named login
+    /// Spend one banked Codex reset for this login
     RedeemReset {
-        provider: String,
-        email: String,
+        #[arg(value_parser = parse_account_target)]
+        login: String,
         /// Reuse this key when retrying the same redemption
         #[arg(long)]
         idempotency_key: Option<String>,
@@ -2888,40 +2929,29 @@ pub enum AccountCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Sign the provider's ordinary home in as a stored login:
-    /// `lf account <provider> use <email>`
-    #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
-    Use { email: String },
-    /// Explain configured and automatic account selection; `lf set
-    /// account.<provider>` replaces a route
-    Route {
-        #[arg(long, conflicts_with = "default")]
-        repo: Option<String>,
-        #[arg(long)]
-        default: bool,
-        #[arg(long)]
-        json: bool,
-    },
+}
+
+/// A provider, a login (`work@`, `a@example.com`, `claude=work@`) or `auto`:
+/// anything else is a mistyped verb, refused before anything runs.
+fn parse_account_target(raw: &str) -> Result<String, String> {
+    let named = raw.contains('@')
+        || raw.contains('=')
+        || raw == "auto"
+        || raw.parse::<crate::provider_auth::Provider>().is_ok();
+    if named {
+        Ok(raw.to_string())
+    } else {
+        Err(format!(
+            "'{raw}' is not a provider or a login; a login is its email or a prefix through @ (`work@`)"
+        ))
+    }
 }
 
 impl AccountCommand {
-    /// `use` is the one verb that takes its provider first; a provider or an
-    /// overview flag before any other verb belongs to bare `lf account`.
-    pub fn misuse(
-        cmd: Option<&Self>,
-        provider: Option<crate::provider_auth::Provider>,
-        overview_flags: bool,
-    ) -> Option<&'static str> {
-        match (cmd, provider) {
-            (Some(Self::Use { .. }), None) => {
-                Some("name the provider: lf account <provider> use <email>")
-            }
-            (Some(Self::Use { .. }), Some(_)) | (None, _) => None,
-            (Some(_), None) if !overview_flags => None,
-            (Some(_), _) => Some(
-                "the provider and --cached, --details and --json before a subcommand apply to `lf account` alone",
-            ),
-        }
+    /// A login or overview flag before a verb belongs to bare `lf account`.
+    pub fn misuse(cmd: Option<&Self>, overview: bool) -> Option<&'static str> {
+        (cmd.is_some() && overview)
+            .then_some("a login and --cached or --json before a verb apply to `lf account` alone")
     }
 }
 
@@ -3483,23 +3513,50 @@ mod tests {
     }
 
     #[test]
-    fn account_use_takes_its_provider_before_the_verb() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "ops",
-            "account",
-            "codex",
-            "use",
-            "jack@loopflow.studio",
-        ])
-        .unwrap();
+    fn account_verbs_come_first_and_a_login_alone_is_its_detail() {
+        let cli = Cli::try_parse_from(["lf", "ops", "account", "use", "codex=jack@"]).unwrap();
         assert!(
             matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
-            cmd: Some(AccountCommand::Use { email }),
-            provider: Some(crate::provider_auth::Provider::Codex),
+            cmd: Some(AccountCommand::Use { login }),
+            target: None,
             ..
-        } }) if email == "jack@loopflow.studio")
+        } }) if login == "codex=jack@")
         );
+        let cli = Cli::try_parse_from(["lf", "ops", "account", "jack@"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
+            cmd: None,
+            target: Some(target),
+            ..
+        } }) if target == "jack@")
+        );
+        for verb in ["next", "pause", "unpause"] {
+            let args: &[&str] = if verb == "next" {
+                &["lf", "ops", "account", "next"]
+            } else {
+                &["lf", "ops", "account", verb, "jack@"]
+            };
+            assert!(Cli::try_parse_from(args).is_ok(), "{verb}");
+        }
+        assert!(
+            Cli::try_parse_from(["lf", "ops", "account", "codex", "use", "jack@"])
+                .and_then(Cli::checked)
+                .is_err()
+        );
+        for old in [
+            vec!["lf", "ops", "account", "--details"],
+            vec![
+                "lf",
+                "ops",
+                "account",
+                "set",
+                "claude=a@",
+                "--routing",
+                "automatic",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(&old).is_err(), "{old:?}");
+        }
     }
 
     #[test]
@@ -3551,47 +3608,34 @@ mod tests {
         .unwrap();
         assert!(
             matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
-            cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
-        } }) if chrome_profile == ["Work", "Personal"])
-        );
-        assert!(
-            Cli::try_parse_from(["lf", "ops", "account", "set", "linear", "--clear-cooldown"])
-                .is_err()
+            cmd: Some(AccountCommand::Set { target, chrome_profile, .. }), ..
+        } }) if target == "linear" && chrome_profile == ["Work", "Personal"])
         );
     }
 
     #[test]
-    fn auth_connect_addresses_an_account_and_optional_bootstrap_venue() {
+    fn account_connect_names_a_login_or_a_service() {
         let cli = Cli::try_parse_from([
             "lf",
             "ops",
             "account",
             "connect",
-            "claude",
-            "operator@",
+            "claude=operator@",
             "--chrome-profile",
             "Profile 9",
         ])
         .expect("parse account connection");
-
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Ops { cmd: OpsCommand::Account {
                 cmd: Some(AccountCommand::Connect {
-                    provider,
-                    email: Some(email),
+                    target,
                     chrome_profile: Some(chrome_profile),
                     ..
                 }), ..
-            } }) if provider == "claude"
-                && email == "operator@"
-                && chrome_profile == "Profile 9"
+            } }) if target == "claude=operator@" && chrome_profile == "Profile 9"
         ));
-    }
-
-    #[test]
-    fn service_auth_accepts_a_remembered_chrome_profile() {
         let cli = Cli::try_parse_from([
             "lf",
             "ops",
@@ -3603,33 +3647,35 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account { cmd: Some(AccountCommand::Connect {
-            provider, email: None, chrome_profile: Some(profile), ..
-        }), .. } }) if provider == "linear" && profile == "Work")
+            matches!(cli.command, Some(Commands::Ops { cmd: OpsCommand::Account {
+            cmd: Some(AccountCommand::Connect { target, chrome_profile: Some(profile), .. }), ..
+        } }) if target == "linear" && profile == "Work")
         );
-    }
-
-    #[test]
-    fn auth_connect_sources_are_exclusive() {
+        // The old provider-then-login spelling is gone.
         assert!(Cli::try_parse_from([
             "lf",
             "ops",
             "account",
             "connect",
             "claude",
-            "a@example.com",
+            "a@example.com"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "lf",
+            "ops",
+            "account",
+            "connect",
+            "claude=a@example.com",
             "--import"
         ])
         .is_ok());
-        assert!(
-            Cli::try_parse_from(["lf", "ops", "account", "connect", "codex", "--api-key"]).is_ok()
-        );
         for flags in [
             vec!["--import", "--api-key"],
             vec!["--import", "--chrome-profile", "Work"],
         ] {
             assert!(Cli::try_parse_from(
-                ["lf", "ops", "account", "connect", "claude", "a@example.com"]
+                ["lf", "ops", "account", "connect", "claude=a@example.com"]
                     .into_iter()
                     .chain(flags)
             )
@@ -3638,44 +3684,35 @@ mod tests {
     }
 
     #[test]
-    fn auth_set_accepts_provider_specific_billing_and_routing_state() {
+    fn account_set_takes_a_login_and_its_billing() {
         let cli = Cli::try_parse_from([
             "lf",
             "ops",
             "account",
             "set",
-            "codex",
-            "loopflow-eng@",
+            "codex=loopflow-eng@",
             "--login-email",
             "engineering@example.com",
-            "--routing",
-            "automatic",
             "--plan",
             "max",
             "--paid-through",
             "2026-08-14",
         ])
         .expect("parse provider account lifecycle");
-
-        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Ops { cmd: OpsCommand::Account {
                 cmd: Some(AccountCommand::Set {
-                    provider,
-                    email: Some(email),
+                    target,
                     login_email: Some(login_email),
-                    routing: Some(routing),
                     plan: Some(plan),
                     paid_through: Some(paid_through),
                     clear_plan: false,
                     clear_paid_through: false,
                     ..
                 }), ..
-            } }) if provider == "codex"
-                && email == "loopflow-eng@"
+            } }) if target == "codex=loopflow-eng@"
                 && login_email == "engineering@example.com"
-                && routing == "automatic"
                 && plan == "max"
                 && paid_through == "2026-08-14"
         ));

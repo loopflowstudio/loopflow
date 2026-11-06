@@ -280,7 +280,7 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
         connected += 1;
     }
     if connected == 0 {
-        bail!("no Claude account to install; `lf account connect claude <email>` first");
+        bail!("no Claude account to install; `lf account connect claude=<email>` first");
     }
     Ok(())
 }

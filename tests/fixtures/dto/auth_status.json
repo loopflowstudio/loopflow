@@ -44,7 +44,9 @@
       "verified_windows": [
         "session"
       ],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": true,
+      "held": true
     },
     {
       "provider": "codex",
@@ -76,7 +78,9 @@
             "description": null
           }
         ]
-      }
+      },
+      "active": false,
+      "held": false
     },
     {
       "provider": "claude",
@@ -87,7 +91,7 @@
       "cached_credential_state": "missing",
       "verification": "not_checked",
       "diagnostic": null,
-      "recovery": "lf account connect claude missing@example.com",
+      "recovery": "lf account connect claude=missing@example.com",
       "observed_plan": null,
       "configured_plan": null,
       "routing": "automatic",
@@ -95,7 +99,9 @@
       "expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": false,
+      "held": false
     },
     {
       "provider": "claude",
@@ -106,7 +112,7 @@
       "cached_credential_state": "missing",
       "verification": "rejected",
       "diagnostic": "refresh grant rejected",
-      "recovery": "lf account connect claude rejected@example.com",
+      "recovery": "lf account connect claude=rejected@example.com",
       "observed_plan": null,
       "configured_plan": null,
       "routing": "automatic",
@@ -114,7 +120,9 @@
       "expires_at": null,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": false,
+      "held": false
     },
     {
       "provider": "claude",
@@ -146,7 +154,9 @@
         }
       ],
       "verified_windows": [],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": false,
+      "held": false
     },
     {
       "provider": "claude",
@@ -165,7 +175,9 @@
       "expires_at": 1790000000,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": false,
+      "held": false
     },
     {
       "provider": "codex",
@@ -184,7 +196,9 @@
       "expires_at": null,
       "windows": [],
       "verified_windows": [],
-      "reset_credits": null
+      "reset_credits": null,
+      "active": false,
+      "held": false
     }
   ],
   "browser": {

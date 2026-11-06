@@ -772,13 +772,10 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
     match cmd {
         OpsCommand::Account {
             cmd,
-            provider,
+            target,
             cached,
-            details,
             json,
-        } => {
-            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
-        }
+        } => loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *cached, *json),
         OpsCommand::Release { cmd } => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
         }

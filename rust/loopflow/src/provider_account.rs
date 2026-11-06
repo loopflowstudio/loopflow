@@ -2,6 +2,7 @@
 
 pub mod activation;
 pub(crate) mod codex_access;
+pub(crate) mod hold;
 pub(crate) mod identity;
 pub mod selection;
 
@@ -38,28 +39,6 @@ const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "OPENAI_API_KEY",
     "CODEX_HOME",
 ];
-
-/// The account's least room: its most-used window that has not yet reset.
-/// Ties break on window name so the reported evidence is stable however the
-/// rows arrive.
-pub(crate) fn tightest_window<'a>(
-    provider: &str,
-    account_id: &ProviderAccountId,
-    limits: &'a [AccountLimitRow],
-    model: Option<&str>,
-    now: i64,
-) -> Option<&'a AccountLimitRow> {
-    limits
-        .iter()
-        .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
-        .filter(|limit| limit_affects(limit.model.as_deref(), model))
-        .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
-        .max_by(|left, right| {
-            left.used_percent
-                .cmp(&right.used_percent)
-                .then_with(|| right.window.cmp(&left.window))
-        })
-}
 
 /// Whether a limit the provider scoped to `scope` holds back a launch of
 /// `model`. A limit on every model holds everything back; a scoped one holds
@@ -194,8 +173,7 @@ pub(crate) fn order_accounts_by_urgency(
 }
 
 /// How an account ranks for routing, lowest first: plan preference, then its
-/// urgency negated. An account with no observed weekly window has no urgency
-/// and ranks after every scored one.
+/// urgency negated.
 type RouteRank = (u8, i64);
 
 fn route_rank(
@@ -206,22 +184,27 @@ fn route_rank(
 ) -> RouteRank {
     (
         plan_preference(account),
-        urgency(account, limits, model, now).map_or(i64::MAX, |urgency| -urgency),
+        -urgency(account, limits, model, now),
     )
 }
+
+/// A whole week's quota still to spend: 100% over 168 hours.
+const FULL_WEEK_URGENCY: i64 = 100 * 3_600_000 / (168 * 3_600);
 
 /// Remaining percent of the launch's weekly window per hour until it resets,
 /// in thousandths: the rate the account must be used at to spend its quota
 /// before the reset. 70% left in 3 hours scores 23 333; 40% left in 5 days,
 /// 333. Only weekly windows score, model-scoped ones included when they
 /// affect `model`, and the tightest of them counts; the short window decides
-/// room alone, because percentages of different windows do not compare.
+/// room alone, because percentages of different windows do not compare. A
+/// window past its reset, or with no reset time, and an account with no
+/// weekly reading score a full week: its quota is all still there to spend.
 fn urgency(
     account: &ProviderAccount,
     limits: &[AccountLimitRow],
     model: Option<&str>,
     now: i64,
-) -> Option<i64> {
+) -> i64 {
     limits
         .iter()
         .filter(|limit| {
@@ -229,14 +212,48 @@ fn urgency(
         })
         .filter(|limit| is_weekly_window(&limit.window))
         .filter(|limit| limit_affects(limit.model.as_deref(), model))
-        .filter_map(|limit| {
-            let until_reset = limit.resets_at? - now;
-            (until_reset > 0).then(|| {
+        .map(|limit| match limit.resets_at.map(|reset| reset - now) {
+            Some(until_reset) if until_reset > 0 => {
                 let remaining = i64::from(100u8.saturating_sub(limit.used_percent));
                 remaining * 3_600_000 / until_reset
-            })
+            }
+            _ => FULL_WEEK_URGENCY,
         })
         .min()
+        .unwrap_or(FULL_WEEK_URGENCY)
+}
+
+/// The most-used weekly window on every model among `windows` that has not
+/// reset: the room `lf account` shows.
+pub(crate) fn tightest_weekly<'a>(
+    windows: impl IntoIterator<Item = &'a AccountLimitRow>,
+    now: i64,
+) -> Option<&'a AccountLimitRow> {
+    windows
+        .into_iter()
+        .filter(|limit| is_weekly_window(&limit.window) && limit.model.is_none())
+        .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
+        .max_by_key(|limit| limit.used_percent)
+}
+
+/// Percent left in an account's tightest weekly window, and when it resets.
+pub(crate) fn weekly_room(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    now: i64,
+) -> Option<(u8, i64)> {
+    let window = tightest_weekly(
+        limits.iter().filter(|limit| {
+            limit.provider == account.provider && limit.account_id == account.account_id
+        }),
+        now,
+    )?;
+    Some((
+        100u8.saturating_sub(window.used_percent),
+        window
+            .resets_at
+            .expect("tightest_weekly keeps windows with a reset"),
+    ))
 }
 
 /// Claude's `seven_day*` windows and Codex's `weekly`; everything else
@@ -1098,12 +1115,24 @@ async fn select_route(
             retry_at: None,
         });
     }
-    // The most urgent eligible account, whichever login is active: the shared
-    // login switches, and every open conversation follows, whenever another
-    // account ranks ahead.
-    let selection = store
-        .select_provider_account(provider, &eligible, model)
-        .await?;
+    // A login `lf account use` holds takes every launch it has room for.
+    let mut selection = None;
+    if let Some(held) = hold::held(provider).filter(|held| eligible.contains(held)) {
+        selection = store
+            .select_provider_account(provider, std::slice::from_ref(&held), model)
+            .await?;
+        if selection.is_none() {
+            hold::end_when_full(&store, provider, &held).await?;
+        }
+    }
+    // Else the most urgent eligible account, whichever login is active: the
+    // shared login switches, and every open conversation follows, whenever
+    // another account ranks ahead.
+    if selection.is_none() {
+        selection = store
+            .select_provider_account(provider, &eligible, model)
+            .await?;
+    }
     let Some(selection) = selection else {
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
@@ -1366,7 +1395,7 @@ fn push_candidate(order: &mut Vec<usize>, index: usize) {
     }
 }
 
-fn account_unavailable_reason(
+pub(crate) fn account_unavailable_reason(
     account: &ProviderAccount,
     limits: &[AccountLimitRow],
     model: Option<&str>,
@@ -2637,16 +2666,19 @@ mod account_first_tests {
                     .unwrap();
             }
         };
-        // Observed beats unobserved: 5% left in 3 hours still has quota to spend.
+        // 5% left in 3 hours must be spent faster than an unobserved full week.
         observe(&first, vec![window(95, Some(soon))]).await;
         assert_eq!(select().await, first.account_id);
 
-        // Already reset or never resetting: nothing to score, so declared
-        // order stands.
+        // Already reset or no reset time: a full week to spend, as the
+        // unobserved second has, so declared order stands.
         for window in [window(95, Some(now_unix() - 1)), window(95, None)] {
             observe(&first, vec![window]).await;
             assert_eq!(select().await, first.account_id);
         }
+        // An unobserved login's full week outranks 40% left over 5 days.
+        observe(&first, vec![window(60, Some(now_unix() + 5 * 86_400))]).await;
+        assert_eq!(select().await, second.account_id);
         // 70% left in 3 hours outranks 5% left in 3 hours, and 40% left in
         // 5 days; the short window only decides room.
         observe(&first, vec![window(95, Some(soon))]).await;
@@ -3353,6 +3385,56 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
+    async fn a_held_login_takes_launches_until_it_is_full() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let launch = || async {
+            let route = resolve_provider_account(Provider::Codex, None)
+                .await
+                .unwrap()
+                .unwrap();
+            route.launch_as(&mut Command::new("codex")).await.unwrap();
+            codex_login(&native)
+        };
+        // 90% left in 10 minutes outranks second's unobserved week...
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &parse_account_id("first").unwrap(),
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".to_string(),
+                    used_percent: 10,
+                    resets_at: Some(now_unix() + 600),
+                    plan: None,
+                    model: None,
+                    limited_until: None,
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
+        assert_eq!(launch().await, "first@example.com");
+        // ...but a hold on second keeps every launch there.
+        hold::hold(Provider::Codex, &parse_account_id("second").unwrap()).unwrap();
+        assert_eq!(launch().await, "second@example.com");
+        assert_eq!(launch().await, "second@example.com");
+
+        // Full: routing takes over and the hold is gone.
+        let mut second = store
+            .get_provider_account("codex", &parse_account_id("second").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        second.cooldown_until = Some(now_unix() + 3_600);
+        store.upsert_provider_account(&second).await.unwrap();
+        assert_eq!(launch().await, "first@example.com");
+        assert_eq!(hold::held(Provider::Codex), None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
     async fn shared_launch_stays_on_a_strained_account_until_another_has_more_to_spend() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
@@ -3380,7 +3462,7 @@ mod account_first_tests {
                     .unwrap();
             }
         };
-        // Nearly full, but observed: its last 1% outranks an unobserved account.
+        // Its last 1% in an hour outranks an unobserved account's full week.
         observe("first", 99, 3600).await;
         let route = resolve_provider_account(Provider::Codex, None)
             .await

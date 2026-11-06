@@ -303,20 +303,22 @@ Unpushed work refuses the give-back unless you pass `--force`.
 ## Accounts
 
 ```bash
-lf account                                         # access and capacity for every login
-lf account connect codex work@example.com --chrome-profile Work
+lf account                                         # one row per login: weekly room, what to fix
+lf account connect codex=work@example.com --chrome-profile Work
 lf set account.codex work@,personal@               # this repository: work first
-lf account codex use work@                         # sign ~/.codex in as work@, for lf and plain codex
+lf account next                                    # which login the next launch takes, and why
+lf account use work@                               # stay on work@ until it fills up; `use auto` undoes it
+lf account pause personal@                         # out of rotation
 ```
 
 Connect registers a login you already have. It runs the provider's sign-in in
 the Chrome profile you name and refuses a login that doesn't match the email.
 Every launch takes the eligible account on the largest plan with the most
 weekly quota left per hour until its window resets, switching the shared login
-when another account ranks ahead; route order breaks ties. `lf account codex
-use` lasts until the next launch: to stay on one login, name it with
-`--account` or set the others `explicit-only`. `lf account --cached` reads
-saved evidence without contacting providers.
+when another account ranks ahead; route order breaks ties. `lf account use`
+holds launches on one login until it fills up or `lf account use auto`.
+`lf account --cached` reads saved evidence without contacting providers.
+
 Unknown capacity stays unknown, never zero.
 
 For one launch, `--account codex=work@` prefers an account and keeps fallback;

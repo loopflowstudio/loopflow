@@ -82,10 +82,15 @@ reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
 Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
-holds, unknown viewers, cancellation, unconfirmed job cleanup and retry after
+holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and retry after
 partial Git deletion with disposable worktrees and a bare remote.
-`session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown`
-records a real owner's hold through leave, reconnect grace and SSH loss.
+`session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
+records a real owner's hold through leave, reconnect grace and connection loss.
+`viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under
+continuous output, with a healthy passive viewer and resumed stream. The SSH
+prepared-viewer case exercises the returned production launch command, healthy
+idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
+its process inventory rejects an additional remote PTY.
 
 `transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
 holds a SQLite writer while typing and returning to the viewer. Control stays

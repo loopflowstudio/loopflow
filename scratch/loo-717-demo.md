@@ -12,9 +12,11 @@ review. Published automated passes remain separate from rendered demonstration.
 
 The old candidate at `500425244c` retains unknown remote viewer loss indefinitely.
 Jack subsequently accepted bounded disconnect cleanup and explicit Quit release;
-that repair now passes focused Rust checks, real loopback SSH cycles, Clippy and
-the Swift build in the current checkout. The private copied app remains the old candidate. Rebuild the private
-candidate before demonstrating the revised contract. The old candidate does not include LOO-672's later automatic
+the prior repair at `a1067c99cc` passed focused Rust checks, loopback SSH,
+Clippy and the Swift build. Jack's November 6 revision replaces its extra SSH
+terminal with the shared viewer protocol; its checks are in the current design.
+The private copied app remains the old candidate and needs rebuilding before
+demonstrating this revision. It does not include LOO-672's later automatic
 conversation opening or LOO-498's layout launcher; native Rex can launch the demo
 viewer directly.
 

@@ -187,16 +187,22 @@ pub fn run(
         print!("{}", String::from_utf8(bytes)?);
         return Ok(());
     }
-    let preparation = match &cli.command {
+    let connection = match &cli.command {
         Some(crate::lf::Commands::Session {
             cmd:
                 crate::lf::SessionCommand::Resume { connection, .. }
                 | crate::lf::SessionCommand::New { connection, .. },
-        }) if connection.prepare && !preview => Some(connection),
+        }) if !preview => Some(connection),
         _ => None,
     };
-    if let Some(connection) = preparation {
-        if !connection.json {
+    if let Some(connection) = connection.filter(|connection| {
+        connection.prepare
+            || ((connection.json || cli.json) && !cli.batch && connection.message.is_none())
+    }) {
+        if !connection.prepare {
+            cmd.push("--prepare".into());
+        }
+        if !connection.json && !cli.json {
             cmd.push("--json".into());
         }
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
@@ -210,19 +216,48 @@ pub fn run(
         );
         if !record.open_argv.is_empty() {
             let script = build_preamble(
-                &remote_viewer_args(&record.open_argv),
-                &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
+                &record.open_argv,
+                &[
+                    (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+                    (crate::transport::STREAM_ENV, "1"),
+                ],
             );
-            let mut viewer = vec![
-                std::env::current_exe()?.to_string_lossy().into_owned(),
-                "session".into(),
-                "remote".into(),
-                "--".into(),
-            ];
-            viewer.extend(ssh_argv(&target.route, forward_agent, &script)?);
-            record.open_argv = viewer;
+            record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
         }
-        if connection.json {
+        if !connection.prepare {
+            anyhow::ensure!(
+                !record.open_argv.is_empty(),
+                "Session has no viewer launch command"
+            );
+            crate::transport::relay_over(&record.open_argv)?;
+            // Read the returned Session without repeating New/fork or starting
+            // another provider. JSON belongs after the terminal has returned.
+            let bytes = runtime.block_on(request(
+                &target,
+                &[
+                    "session".into(),
+                    "resume".into(),
+                    record.id.to_string(),
+                    "--prepare".into(),
+                    "--json".into(),
+                ],
+                None,
+            ))?;
+            print!("{}", String::from_utf8(bytes)?);
+            return Ok(());
+        }
+        if !record.open_argv.is_empty() {
+            record.open_argv.splice(
+                0..0,
+                [
+                    std::env::current_exe()?.to_string_lossy().into_owned(),
+                    "session".into(),
+                    "attach".into(),
+                    "--".into(),
+                ],
+            );
+        }
+        if connection.json || cli.json {
             println!("{}", serde_json::to_string(&record)?);
         } else {
             println!(
@@ -232,25 +267,28 @@ pub fn run(
         }
         return Ok(());
     }
-    let cmd = if std::io::stdin().is_terminal() {
-        remote_viewer_args(&cmd)
-    } else {
-        cmd
-    };
+    let viewer = connection.is_some_and(|connection| {
+        !connection.prepare && connection.message.is_none() && !cli.batch
+    }) || (!preview
+        && matches!(
+            &cli.command,
+            Some(crate::lf::Commands::Task {
+                cmd: crate::lf::TaskCommand::Shell {
+                    close: false,
+                    list: false,
+                    ..
+                },
+            })
+        ));
+    if viewer {
+        extra_env.push((crate::transport::STREAM_ENV, "1"));
+    }
     let preamble = build_preamble(&cmd, &extra_env);
-    run_ssh(&target.route, forward_agent, &preamble)
-}
-
-fn remote_viewer_args(command: &[String]) -> Vec<String> {
-    let mut argv = vec![
-        "lf".into(),
-        "session".into(),
-        "remote".into(),
-        "--serve".into(),
-        "--".into(),
-    ];
-    argv.extend_from_slice(command);
-    argv
+    if viewer {
+        crate::transport::relay_over(&ssh_argv(&target.route, forward_agent, &preamble)?)
+    } else {
+        run_ssh(&target.route, forward_agent, &preamble)
+    }
 }
 
 fn resident_args(
@@ -473,9 +511,13 @@ fn ssh_argv(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<V
 }
 
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let argv = ssh_argv(dest, forward_agent, preamble)?;
+    let mut argv = ssh_argv(dest, forward_agent, preamble)?;
     if std::io::stdin().is_terminal() {
-        return crate::transport::remote::client(&argv);
+        for arg in &mut argv {
+            if arg == "-T" {
+                *arg = "-t".into();
+            }
+        }
     }
     let status = Command::new(&argv[0])
         .args(&argv[1..])

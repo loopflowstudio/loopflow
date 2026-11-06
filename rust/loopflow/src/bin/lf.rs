@@ -1600,6 +1600,15 @@ fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // While relaying it opens no store or command tree: socket in, terminal out.
     let mut raw_args: Vec<String> = std::env::args().collect();
+    if raw_args
+        .get(1..4)
+        .is_some_and(|args| args == ["session", "attach", "--"])
+    {
+        journal::mark_effect_free_read();
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        return loopflow::transport::relay_over(&raw_args[4..]);
+    }
     if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
@@ -1886,7 +1895,7 @@ fn run() -> anyhow::Result<()> {
         )
         || matches!(
             &cli.command,
-            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. } | loopflow::lf::SessionCommand::Remote { .. })
+            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
         );
     if reads_work
         && !cli.context

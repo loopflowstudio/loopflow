@@ -324,8 +324,8 @@ final class GhosttySurfacePool {
     }
 
     /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
-    /// so the Session owner records a deliberate leave. Through SSH a hangup
-    /// alone cannot show that the viewer exited and keeps the Task checkout.
+    /// so the Session owner records a deliberate leave without waiting for
+    /// connection-loss detection across SSH.
     func release(_ id: TerminalIdentity) {
         guard let view = views.removeValue(forKey: id) else { return }
         guard view.detachRelay() else {

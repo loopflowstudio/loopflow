@@ -5,6 +5,37 @@ contract is [shell lifetimes](loo-717-shell-lifetimes.md). Task remains feature/
 shipping, installation, live-store migration and credentials changes are outside
 this request. No product question is open.
 
+## November 6 — one viewer protocol
+
+Jack Heart selected option 1 after reviewing alternatives: remove the added
+`lf session remote` terminal wrapper and extend the existing viewer protocol
+across SSH, with heartbeat expiry on that connection. A byte-forwarding bridge
+may remain; another PTY or heartbeat protocol may not. The current design contains
+the complete implementation and deletion contract. This changes transport,
+not the accepted cleanup timings, Session-only retention or Rex ownership.
+
+Implementation choice, November 6: the byte bridge keeps at most 4 MiB queued
+in each direction, disconnects a full queue like the owner does, and allows two
+seconds to drain after the owner closes. This bounds a stranded helper when SSH
+stops reading; it supplies no heartbeat and
+owns no Session retention deadline. Remote saved history uses the existing
+snapshot frame before attachment, with no input or retention claim. Command-pipe
+attachment allows sixty seconds for SSH setup and destination resolution; the
+existing five-second bound still applies to a local owner socket.
+The existing `Controlled` query supplies the ten-second liveness pulse on an
+attached connection; unattached control probes refresh no viewer. This keeps
+one protocol and adds no message an already-running owner cannot decode.
+
+The prior Claude Graph failed before edits on a credential-write error. The new
+implementation run uses Codex within the existing feature graph, starting at
+implement and returning to demo. No credential repair or account change is needed.
+
+The PR walkthrough also identified a separate source-derived finding: the
+retirement worker exits after a cleanup error; the existing retry test manually
+calls advance again and does not prove automatic retry. Keep this visible for
+review; the transport choice does not itself resolve it. `scratch/pr-review.html`
+is pinned to the prior published head `a1067c99cc`, not this replacement.
+
 ## November 5 corrections
 
 Jack clarified that only open LF viewers of Task Sessions retain the checkout.

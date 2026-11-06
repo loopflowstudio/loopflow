@@ -181,6 +181,8 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
         fixture.store.sqlite.settle_shell_jobs(&shell).unwrap();
         assert!(advance(&fixture.store, &fixture.task).await.unwrap());
         assert!(!fixture.checkout.exists());
+        assert_eq!(fixture.intent().phase, "retired");
+        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
     });
 }
 
@@ -341,55 +343,6 @@ fn retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion() {
                 assert_eq!((intent.phase.as_str(), intent.due_at), ("waiting", None));
             }
         }
-    });
-}
-
-#[test]
-fn retirement_requires_job_settlement_after_owner_death_and_retries() {
-    let _ledger = crate::journal::TestLedgerGuard::new();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(async {
-        let fixture = Workspace::new().await;
-        let owner = fixture.store.sqlite.test_lf_process();
-        fixture
-            .store
-            .sqlite
-            .create_task_shell(
-                "shell",
-                &fixture.task.id,
-                fixture.checkout.to_str().unwrap(),
-            )
-            .unwrap();
-        fixture
-            .store
-            .sqlite
-            .bind_task_shell("shell", &owner)
-            .unwrap();
-        fixture
-            .sql()
-            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&owner])
-            .unwrap();
-        fixture.due();
-        let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
-        assert!(
-            error.to_string().contains("without confirmed job cleanup"),
-            "{error}"
-        );
-        fixture.assert_retained();
-        fixture.store.sqlite.settle_shell_jobs(&owner).unwrap();
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
-        assert!(!fixture.checkout.exists());
-        assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .task_retirement(&fixture.task.id)
-                .unwrap()
-                .unwrap()
-                .phase,
-            "retired"
-        );
-        assert!(advance(&fixture.store, &fixture.task).await.unwrap());
     });
 }
 

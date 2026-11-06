@@ -95,9 +95,10 @@ resubmit its input.
 An owner that answers but then fails to attach leaves delivery unknown; that
 reconnection launches no other provider and replays no Graph. Finished Runs retain
 results in Session history.
-After connecting, attachment waits up to five seconds for acknowledgement. Timeout
+A local attachment waits up to five seconds for acknowledgement. Over command
+pipes it allows sixty seconds for SSH setup and destination Session resolution. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
-acknowledged, the attachment has no time limit.
+acknowledged, the attachment stays while its heartbeats reach the owner.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
@@ -148,11 +149,13 @@ A viewer's stream is the bytes of its snapshot, out and err frames in order. The
 viewer counts them; the owner spools the last 1 MiB per viewer.
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"ssh":false}
+{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","reconnect":"…","nonce":"…","token":"…","terminal":true,"grace_ms":60000,"owner":"…"}
 ```
 
-The stream then opens with the snapshot (pipes: the retained tail), a `resize`
+Before attachment, a destination may send a `snapshot` of retained history. It
+grants no input or retention claim; the live snapshot replaces it on attachment.
+The attached stream opens with the snapshot (pipes: the retained tail), a `resize`
 event, a `theme` event when one is known, an `owner` event, and live output.
 
 Events ride stream 1 as ``ESC _ lf1;<nonce>;<json> ESC \``, inserted only between
@@ -262,13 +265,16 @@ starts the absence clock immediately, independently of the sixty-second stream
 replay grace. A resumed viewer cancels cleanup. Ending an unviewed owner preserves
 that absence time, so its two-minute idle ending adds no new workspace grace.
 
-LF's remote viewer path frames its PTY input/output over SSH. The viewing Machine
-sends heartbeats every ten seconds, independent of typing and provider output;
-the remote relay ends after thirty seconds without them, including silent network
-failure with no EOF. The detached Session or shell execution stays on its owner.
-Window dimensions travel on the same connection. There is no host registry or
-second provider conversation. An ordinary external SSH connection uses its host's
-connection-loss detection; LF's bounded heartbeat applies to its own remote path.
+Local and remote viewers use this same protocol. SSH carries the frames through
+`lf session attach -- <ssh argv>`; the destination attachment forwards stdin/stdout
+to the owner's socket. The bridge creates no PTY, Session or heartbeat. Only the
+execution owner holds a PTY. The viewing endpoint sends the existing
+`{"id":1,"kind":"controlled"}` query every ten seconds on its attached connection,
+independent of input and output; after thirty seconds without
+one the owner releases that connection's retention and input claim. Silent network
+loss needs no EOF. Other connected viewers still hold. Attach/Resume restarts the
+heartbeat deadline, and the same stream carries input, resize, ownership and Leave.
+An ordinary external SSH connection uses its host's connection-loss detection; LF's bounded heartbeat applies to its own remote path.
 
 Desktop departure, window close and orderly Quit send Ctrl+] to release their
 relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
@@ -287,5 +293,6 @@ to the completion, checkout and branch; reopen or changed placement revokes it.
 An owner whose viewers release wakes waiting cleanup for its Tasks. Destination
 owners confirm shell job settlement before deletion. Eligible cleanup discards
 uncommitted files but preserves primary/persistent checkouts and changed
-committed refs. Failures record a pending reason and retry. Reopening a retired
+committed refs. Failures record a pending reason; another retirement run can retry.
+Reopening a retired
 Task never silently recreates a checkout.

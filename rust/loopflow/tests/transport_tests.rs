@@ -666,11 +666,8 @@ fn session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence() 
     resumed.request(json!({"kind":"leave"}));
     drop(resumed);
     wait_hold(&fixture, &owner, Some("absent"));
-    // An SSH viewer whose connection is lost may still be running elsewhere.
-    let remote = fixture.attach(
-        &owner,
-        json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80,"ssh":true}),
-    );
+    // A viewer whose connection is lost may still be running elsewhere.
+    let remote = fixture.viewer(&owner, false);
     wait_hold(&fixture, &owner, Some("viewed"));
     remote.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(remote);
@@ -1216,7 +1213,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         let output = wait_for_viewer(viewer, Duration::from_secs(8));
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("stopped reading"), "{error}");
+        assert!(error.contains("fell behind"), "{error}");
         assert!(!error.contains("os error"), "{error}");
         return;
     }
@@ -4460,21 +4457,26 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
 mod ssh_shells;
 
 #[test]
-fn remote_viewer_frames_preserve_input_output_and_exit_without_leaking_heartbeats() {
+fn viewer_stream_over_pipes_preserves_terminal_input_size_and_exit() {
     let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r line; stty size; printf 'received:<%s>\\n' \"$line\"; exit 7",
+    ]);
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
         .command(&[
             "session",
-            "remote",
+            "attach",
             "--",
+            "/usr/bin/env",
+            "LF_VIEWER_STREAM=1",
             env!("CARGO_BIN_EXE_lf"),
             "session",
-            "remote",
-            "--serve",
-            "--",
-            "/bin/sh",
-            "-c",
-            "stty -echo; read -r line; stty size; printf 'received:<%s>\\n' \"$line\"; exit 7",
+            "attach",
+            &owner,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -4484,56 +4486,123 @@ fn remote_viewer_frames_preserve_input_output_and_exit_without_leaking_heartbeat
     let mut input = child.stdin.take().unwrap();
     input.write_all(b"typed-value\n").unwrap();
     let output = child.wait_with_output().unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(7),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(7), "{output:?}");
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("received:<typed-value>"), "{text}");
     assert!(text.contains("24 80"), "initial terminal size: {text}");
-    assert!(!text.contains("rows") && !text.contains("cols"), "{text}");
 }
 
 #[test]
-fn remote_viewer_silent_connection_expires_while_input_is_still_open() {
+fn viewer_stream_heartbeat_expires_only_the_silent_viewer_while_output_continues() {
     let fixture = Fixture::new();
-    let pid_file = fixture.home.path().join("remote-viewer.pid");
-    let script = format!(
-        "echo $$ > '{}'; exec 0<&- 1>&- 2>&-; exec sleep 600",
-        pid_file.display()
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "while :; do printf 'tick\\n'; sleep 0.1; done",
+    ]);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut lost = fixture.viewer(&owner, true);
+    let mut passive = fixture.viewer(&owner, false);
+    let started = Instant::now();
+    let mut next_heartbeat = started;
+    // Keep reading the silent endpoint: only missing heartbeats can end it.
+    while lost.next().is_some() {
+        assert!(started.elapsed() < Duration::from_secs(35));
+        if Instant::now() >= next_heartbeat {
+            passive.request(json!({"kind":"controlled"}));
+            next_heartbeat = Instant::now() + Duration::from_secs(5);
+        }
+    }
+    assert!(started.elapsed() >= Duration::from_secs(29));
+    assert!(fixture.running(&owner));
+    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    // The expired controller cannot prevent a new connection claiming input.
+    let mut replacement = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":true,
+        "replace":false,"own":"take","rows":31,"cols":97}),
     );
+    assert!(replacement.token.is_some());
+    replacement.request(json!({"kind":"leave"}));
+    passive.request(json!({"kind":"leave"}));
+    wait_hold(&fixture, &owner, Some("absent"));
+    // Replay grace and the unchanged execution still permit a reconnect.
+    let mut resumed = fixture.connect(&owner);
+    resumed.request(json!({"kind":"resume","reconnect":lost.reconnect,
+        "received":lost.received,"control":true,"own":"take","rows":24,"cols":80}));
+    assert_eq!(resumed.until_reply()["kind"], "attached");
+    wait_hold(&fixture, &owner, Some("viewed"));
+    resumed.request(json!({"kind":"leave"}));
+    wait_hold(&fixture, &owner, Some("absent"));
+}
+
+#[test]
+fn viewer_stream_backpressure_releases_bridge_and_owner_keeps_draining() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "read -r start; head -c 16777216 /dev/zero"],
+    ));
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
-        .command(&[
-            "session", "remote", "--serve", "--", "/bin/sh", "-c", &script,
-        ])
+        .command(&["session", "attach", &owner])
+        .env("LF_VIEWER_STREAM", "1")
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
-    let heartbeat = br#"{"rows":24,"cols":80}"#;
-    input.write_all(&[0x11]).unwrap();
-    input
-        .write_all(&(heartbeat.len() as u32).to_be_bytes())
-        .unwrap();
-    input.write_all(heartbeat).unwrap();
-    // Keep the stream open: no EOF or TCP close can explain this release.
-    let output = child.wait_with_output().unwrap();
+    input.write_all(&frame(REQUEST, br#"{"id":1,"kind":"attach","control":true,"replace":false,"own":null,"rows":24,"cols":80}"#)).unwrap();
+    input.write_all(&frame(INPUT, b"go\n")).unwrap();
+    // Keep stdin open and leave stdout completely unread until the bridge exits.
+    // The owner must keep draining execution, then release this stalled viewer.
+    let output = wait_for_viewer(child, Duration::from_secs(15));
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("heartbeat expired"));
-    let pid: i32 = std::fs::read_to_string(pid_file)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    // SAFETY: signal zero only observes the disposable child named by its receipt.
+    let (tag, payload) = read_frame(&mut std::io::Cursor::new(&output.stdout)).unwrap();
+    assert_eq!(tag, REPLY);
     assert_eq!(
-        unsafe { libc::kill(pid, 0) },
-        -1,
-        "remote viewer survived expiry"
+        serde_json::from_slice::<Value>(&payload).unwrap()["kind"],
+        "attached"
     );
-    drop(input);
+    fixture.ends(&owner);
+}
+
+#[test]
+fn viewer_stream_waits_for_destination_resolution_before_attachment() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "read -r line; printf 'received:%s' \"$line\"",
+    ]);
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut child = fixture
+        .command(&[
+            "session",
+            "attach",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 6; exec \"$@\"",
+            "fixture",
+            "/usr/bin/env",
+            "LF_VIEWER_STREAM=1",
+            env!("CARGO_BIN_EXE_lf"),
+            "session",
+            "attach",
+            &owner,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"ready\n").unwrap();
+    let output = wait_for_viewer(child, Duration::from_secs(15));
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("received:ready"));
 }

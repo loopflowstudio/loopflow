@@ -109,7 +109,7 @@ pub fn task_shell(
             "Shell ended. Create a new shell explicitly; its commands will not be replayed"
         );
     }
-    crate::transport::relay(&owner, None)
+    crate::transport::attach(&owner, None, None)
 }
 
 fn shell_command(id: &str, initial: &[String]) -> Result<Vec<String>> {

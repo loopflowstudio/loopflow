@@ -302,6 +302,155 @@ fn served_session_adoption_matches_cli_without_new_execution() {
     }
 }
 
+/// A client that knows only what `lf server describe --json` prints, as a
+/// phone or a headless agent client would: raw JSON lines, no Rust types.
+/// Everything it sends and every line it receives match the description, and
+/// each answer matches its operation's declared result.
+#[test]
+fn a_client_built_from_the_description_alone_speaks_the_protocol() {
+    use std::io::Write as _;
+    use std::os::unix::net::UnixStream;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let schema: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["server", "describe", "--json"],
+        None,
+    ))
+    .unwrap();
+    let definition = |name: &str| {
+        let mut root = serde_json::json!({ "$ref": format!("#/$defs/{name}") });
+        root["$defs"] = schema["$defs"].clone();
+        jsonschema::draft202012::new(&root).unwrap()
+    };
+    let (client, server) = (definition("ClientMessage"), definition("ServerMessage"));
+    let declared = |kind: &str| {
+        let arm = ["Read", "Write", "ServerOperation"]
+            .iter()
+            .flat_map(|group| schema["$defs"][*group]["oneOf"].as_array().unwrap())
+            .find(|arm| arm["properties"]["kind"]["const"] == kind)
+            .unwrap_or_else(|| panic!("{kind} is not described"));
+        let mut result = arm["x-result"].clone();
+        result["$defs"] = schema["$defs"].clone();
+        jsonschema::draft202012::new(&result).unwrap()
+    };
+    let conforms = |validator: &jsonschema::Validator, value: &Value| {
+        let failed: Vec<_> = validator
+            .iter_errors(value)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(failed.is_empty(), "{value}: {failed:#?}");
+    };
+
+    let _server = Server::start(repo.path(), home.path());
+    let socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut lines = BufReader::new(socket.try_clone().unwrap()).lines();
+    let mut writer = socket;
+    // `described` is false only for the line that deliberately names an
+    // operation the description lacks.
+    let mut write = |message: Value, described: bool| {
+        if described {
+            conforms(&client, &message);
+        }
+        writeln!(writer, "{message}").unwrap();
+    };
+    let mut receive = || -> Option<Value> {
+        let line = lines.next()?.unwrap();
+        let message: Value = serde_json::from_str(&line).unwrap();
+        conforms(&server, &message);
+        Some(message)
+    };
+
+    let revision = schema["x-revision"].clone();
+    write(
+        serde_json::json!({"type": "hello", "revision": revision, "min_revision": revision,
+        "client": {"kind": "phone", "platform": "ios", "name": "described", "version": "0"}}),
+        true,
+    );
+    assert_eq!(receive().unwrap()["type"], "welcome");
+
+    write(
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}}),
+        true,
+    );
+    let answer = receive().unwrap();
+    assert_eq!(
+        (&answer["type"], &answer["id"]),
+        (&"response".into(), &"catalog".into())
+    );
+    conforms(&declared("config.catalog"), &answer["result"]);
+
+    write(
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}}),
+        true,
+    );
+    let mut subscribed = false;
+    let mut answered = false;
+    while !(subscribed && answered) {
+        let message = receive().unwrap();
+        assert_eq!(message["id"], "processes", "{message}");
+        match message["type"].as_str().unwrap() {
+            "response" => {
+                assert!(message["result"].is_null());
+                subscribed = true;
+                write(
+                    serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
+                    true,
+                );
+            }
+            "reading" => {
+                conforms(&declared("process.list"), &message["frame"]["body"]);
+                answered |= message["frame"]["answers"] == 1;
+            }
+            other => panic!("unexpected {other}: {message}"),
+        }
+    }
+    write(
+        serde_json::json!({"type": "cancel", "id": "processes"}),
+        true,
+    );
+
+    // An operation this server lacks fails alone; the connection keeps working.
+    write(
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}}),
+        false,
+    );
+    let refused = loop {
+        let message = receive().unwrap();
+        if message["id"] == "newer" {
+            break message;
+        }
+        assert_eq!(
+            message["id"], "processes",
+            "only the cancelled watch may still speak"
+        );
+    };
+    assert_eq!(
+        (&refused["type"], &refused["code"]),
+        (&"error".into(), &"invalid".into())
+    );
+    assert_eq!(refused["data"]["kind"], "task.teleport");
+    write(
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}}),
+        true,
+    );
+    let after = loop {
+        let message = receive().unwrap();
+        if message["id"] == "after" {
+            break message;
+        }
+    };
+    assert_eq!(after["type"], "response", "{after}");
+    conforms(&declared("process.list"), &after["result"]);
+}
+
 #[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;

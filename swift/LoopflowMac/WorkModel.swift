@@ -1728,7 +1728,7 @@ final class WorkModel {
         projectCommands[id] != nil
     }
 
-    /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    /// Add a Wave through `lf wave create`; the planning stream then delivers its row.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
     func addWave(name: String, objective: String? = nil, repo: String) async throws -> WaveAdded {

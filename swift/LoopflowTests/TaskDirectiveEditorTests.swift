@@ -127,7 +127,7 @@ private actor DirectiveSource {
         switch args.first {
         case "task":
             guard Array(args.prefix(3)) == ["task", "update", "issue-review"],
-                  args.count == 4, args[3].hasPrefix("--notes="), cwd == "/src/loopflow" else {
+                  args.count == 5, args[3].hasPrefix("--notes="), args[4] == "--json", cwd == "/src/loopflow" else {
                 throw RegistryQueryError("Wrong Task update target")
             }
             if outcome == .rejected { throw RegistryQueryError("Write rejected") }

@@ -77,7 +77,7 @@ struct RegistryQueryTests {
     @Test("Step history uses the exact process on the content Machine")
     func contentRoutedStepHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args == ["--machine", "peer", "--repository", "plan", "history", "show", "process-step"], cwd == nil else {
+            guard args == ["--machine", "peer", "--repository", "plan", "session", "history", "show", "process-step"], cwd == nil else {
                 throw RegistryQueryError("Wrong process history owner")
             }
             return "gate failed: exit 1"

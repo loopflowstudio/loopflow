@@ -16,7 +16,7 @@ struct ProjectActivationTests {
         let result = ActivationResult()
         let model = WorkModel(query: RegistryQuery { _, _ in
             if await result.offline { throw RegistryQueryError("offline") }
-            return waveAdded  // `lf wave add --json`
+            return waveAdded  // `lf wave create --json`
         })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
             workActivity: .loading, repos: [])
@@ -40,7 +40,7 @@ struct ProjectActivationTests {
                 await response.wait()
                 throw RegistryQueryError("a failed")
             }
-            return waveAdded  // `lf wave add --json`
+            return waveAdded  // `lf wave create --json`
         })
         let old = model.activateProject(id: "a", name: "a", repo: "/repo")
         await response.started()

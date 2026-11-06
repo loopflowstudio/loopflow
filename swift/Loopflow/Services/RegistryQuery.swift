@@ -364,7 +364,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
-        case .taskNotes(_, let issue, let notes): return ["task", "edit", issue, "--notes=\(notes)", "--json"]
+        case .taskNotes(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
         case .taskOwnership(_, let issue, let claimed): return ["task", claimed ? "claim" : "unassign", issue, "--json"]
         case .taskRun(_, let issue, let from, let agent, let approve):
             return (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
@@ -389,7 +389,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
             return Self.prepared(agent, ["session", "new", id], repo: nil)
-        case .waveAdd(_, let wave, let objective): return ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
+        case .waveAdd(_, let wave, let objective): return ["wave", "create", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
         case .wavePlanningBind(_, let wave, let project): return ["wave", "planning", "bind", wave, project, "--json"]
         case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
@@ -966,7 +966,7 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.planningRefresh(directory: cwd, wave: wave))
     }
 
-    /// `lf wave add`: registers the Wave, commits its files on the main checkout and
+    /// `lf wave create`: registers the Wave, commits its files on the main checkout and
     /// ensures its first Project. Adding an existing Wave changes nothing, so this
     /// is also the explicit opening/retry operation; periodic reads stay observational.
     /// The receipt's `summary` names anything left to finish.
@@ -1055,7 +1055,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func processHistory(id: String) async throws -> String {
-        try await run(["history", "show", id], nil)
+        try await run(["session", "history", "show", id], nil)
     }
 
     /// One store-driven reading keeps position, readiness and run history together.

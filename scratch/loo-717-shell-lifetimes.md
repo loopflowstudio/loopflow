@@ -226,3 +226,14 @@ Headless framed-transport tests do not establish a physical remote-Machine or
 native-host demonstration. Publication, merge and Task completion remain separate.
 
 Reconciliation check: `git diff --check` — passed; no runtime code changed or tests rerun. Broader gate and native demo remain assigned above.
+
+Publication checks, November 6 (`c7f1afa1d8`, after clean `lf sync`):
+
+- `uv run python scripts/check_architecture.py` and `git diff --check` — passed.
+- `scripts/test.py --reuse-passing` with the affected Rust filter — stopped twice at resource preflight, before product suites: uv-cache inventory exceeded its 15-second deadline. Direct `du -sk /Users/jack/.cache/uv` completed in 14.65 seconds; 144 GiB remained free. The retry still timed out. Broader gate, website and Swift checks remain deferred to gate/CI, not passed.
+- Focused `cargo nextest run -p loopflow --build-jobs 4 --test-threads 4` — 62 tests passed before four fixtures queued CLI builds because this direct invocation omitted `LOOPFLOW_TEST_LF`. Interrupted those four (no product assertion failed); eight had not started. The run as a whole did not pass.
+- `cargo build -p loopflow --bin lf --jobs 4`, then nextest with `LOOPFLOW_TEST_LF=$PWD/target/debug/lf` for the twelve remaining cases — passed (12). Combined with the first run, all 74 selected checks passed: transport library, retirement/store, Session holds, local shell cycles, shared-stream expiry/backpressure, preview restoration and remote launch/file routing. macOS linking reported the large `__eh_frame` compact-unwind warning.
+- `LOOPFLOW_TEST_LF=$PWD/target/debug/lf cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored --test-threads=1` — passed (3, 197.21 seconds), including prepared launch with no extra remote PTY, healthy idle heartbeat, resize/Leave, failure paths, and twenty remote lifecycle cycles with process/PTY/socket settlement. All fixture commands cleared inherited `LF_*`; no installed app, live-store migration or physical remote Machine was used.
+- `cargo fmt --all -- --check` and `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed; Clippy also checked `loopflow-ffi`.
+
+The 74-case nextest selection was `test(transport::) | test(viewer_stream_) | test(session_viewers_retain_) | test(desktop_shell_) | test(ops::task::retirement::) | test(store::sqlite::task_retirement::) | test(machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command) | test(machine_commands::remote_file_)`. The twelve-case continuation used `test(snapshot_preview_resume_) | test(viewer_stream_) | test(session_viewers_retain_) | test(desktop_shell_) | test(machine_commands::remote_session_open_returns_an_owner_pinned_terminal_command) | test(machine_commands::remote_file_)` against identical source.

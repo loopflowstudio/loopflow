@@ -143,13 +143,13 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `wave.planning` | `lf wave planning <wave>` | read |
 | `wave.create` | `lf wave create` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | CLI only, engine pending |
+| `wave.planning.bind`, `.connect`, `.reteam` | `lf wave planning bind`, `connect`, `reteam` | CLI handler; not served |
 | `planning.list` | `lf planning list` | read |
 | `repository.planning` | `lf repository planning` | read |
 | `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |
-| `repository.release`, `.ci` | `lf repository release`, `lf repository ci` | CLI only, engine pending |
+| `repository.release`, `.ci` | `lf repository release`, `lf repository ci` | CLI handler; not served |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
-| `graph.run` | none yet; `task.run` is its Task proxy | engine pending |
+| `graph.run` | `lf graph <name>`; `task.run` is its Task proxy | CLI handler; not served |
 | `process.get` | `lf process show <id>` | read |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `process.list` | `lf process list` | read |
@@ -158,18 +158,18 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
 | `config.theme` | none; Appearance's theme file | `engine::config` |
-| `pr.*` | `lf pr publish`, `open`, `submit`, `arm`, `land`, `abandon`, `reconcile`, `checks`, `reviews`, `request-review` | CLI only, engine pending |
-| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | CLI only, engine pending |
-| `account.*` | `lf account …` | CLI only, engine pending |
-| `skill.run`, `skill.list` | `lf <skill>`, `lf list` | CLI only, engine pending |
+| `pr.*` | `lf pr publish`, `open`, `submit`, `arm`, `land`, `abandon`, `reconcile`, `checks`, `reviews`, `request-review` | CLI handler; not served |
+| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | CLI handler; not served |
+| `account.*` | `lf account …` | CLI handler; not served |
+| `skill.run`, `skill.list` | `lf <skill>`, `lf list` | CLI handler; not served |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
 | `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 
-"Pending" names the canonical spelling the engine design assigns that this
-branch has not moved yet; `scratch/questions.md` records why.
+"CLI handler; not served" is an operation only the CLI dispatcher runs today;
+its kind fixes the name a served version keeps.
 
 The nouns are Loopflow's primitives (Wave, Task, Graph, Session, Process,
 Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for

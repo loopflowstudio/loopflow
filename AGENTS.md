@@ -269,9 +269,9 @@ Every lf invocation at a turn or tool boundary is best-effort: it records a gap
 in `logs/lf.log` instead of failing the turn, the tool or the quit. A recording
 gap is one type, `store::RecordingGap` (`note` once per changed failure,
 `recovered` once); hooks keep theirs in a marker file and write the gap into the
-Session history as a `store-gap` observation when the store answers again. The
-Codex relay is the one remaining in-path piece; it tolerates store loss, and its
-removal is a separate Task.
+Session history as a `store-gap` observation when the store answers again.
+Codex clients reach their private app-server directly; lf only observes beside
+them.
 
 **`*.rs`:**
 - Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.

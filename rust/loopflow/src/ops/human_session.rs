@@ -1172,6 +1172,15 @@ fn attaches(
     if !owner_running(store, owner)? {
         return Ok(false);
     }
+    // A quit owner finishing its exit records holds nothing to attach to; its
+    // records land before the conversation continues here.
+    if crate::transport::leaving(owner) {
+        let deadline = std::time::Instant::now() + crate::transport::SETTLE_LINGER;
+        while owner_running(store, owner)? && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        return Ok(false);
+    }
     let unknown = match store.owner_retention(owner)? {
         Some(OwnerRetention::NoOpenSession) => true,
         Some(_) => return Ok(true),

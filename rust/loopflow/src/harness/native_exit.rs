@@ -23,6 +23,8 @@ pub(crate) struct NativeExit {
     /// Names the provider and its launcher Process, which completes at exit.
     pub attachment: SessionAttachment,
     pub provider: String,
+    /// A client of a provider running beside it, not the provider itself.
+    pub client: bool,
     pub resuming: bool,
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
@@ -62,9 +64,9 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             false
         })
     };
-    let interrupted = owner
-        .as_ref()
-        .is_some_and(|owner| judged("the provider's exit record", record_exit(owner)));
+    let interrupted = owner.as_ref().is_some_and(|owner| {
+        !exit.client && judged("the provider's exit record", record_exit(owner))
+    });
     let lost = owner.as_ref().is_some_and(|owner| {
         judged(
             "this launch's Session attachment",
@@ -258,6 +260,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment,
                 provider: "codex".into(),
+                client: false,
                 resuming: false,
                 cwd: home.into(),
                 capture: Some(capture.hand_off()),
@@ -319,6 +322,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
                 provider: "claude".into(),
+                client: false,
                 resuming: true,
                 cwd: home.into(),
                 capture: Some(capture.hand_off()),

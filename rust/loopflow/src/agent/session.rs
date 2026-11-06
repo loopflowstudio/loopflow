@@ -29,34 +29,32 @@ pub(crate) struct SessionCommand {
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
-    pub(crate) remote: Option<NativeConnection>,
+    pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
-/// The local relay is the client transport; only upstream identifies the AgentProcess.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NativeConnection {
-    pub(crate) relay: PathBuf,
-    pub(crate) upstream: PathBuf,
-}
-
+/// The native client joins this running conversation at the provider's own
+/// endpoint. `input` is its first turn, for the observer to submit: a turn has
+/// no size limit where an argument does, and Codex replays pending approvals to
+/// a client that joins mid-turn.
 pub(crate) fn native_connection_command(
     cwd: PathBuf,
-    session_id: Option<&AgentSessionId>,
-    remote: NativeConnection,
+    session_id: &AgentSessionId,
+    remote: PathBuf,
+    input: Option<String>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> SessionCommand {
-    let mut args = vec![
+    let args = vec![
         "--remote".into(),
-        format!("unix://{}", remote.relay.display()),
+        format!("unix://{}", remote.display()),
+        "resume".into(),
+        "--".into(),
+        session_id.to_string(),
     ];
-    if let Some(id) = session_id {
-        args.extend(["resume".into(), "--".into(), id.to_string()]);
-    }
     SessionCommand {
         launch: None,
         isolate: None,
-        input: None,
+        input,
         program: "codex".into(),
         args,
         cwd,
@@ -440,13 +438,14 @@ mod tests {
                         .any(|arg| arg.contains("failIfUnavailable")));
                 }
                 if provider == "codex" {
-                    let params = build_codex_thread_start_params(command.launch.as_ref().unwrap());
+                    let params =
+                        build_codex_thread_start_params(command.launch.as_ref().unwrap(), false);
                     assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "never");
                 }
             }
             if provider == "codex" {
-                let params = build_codex_thread_start_params(&config);
+                let params = build_codex_thread_start_params(&config, true);
                 assert_eq!(params["sandbox"], "workspace-write");
                 assert_eq!(params["approvalPolicy"], "never");
             } else if provider == "claude" {
@@ -482,7 +481,7 @@ mod tests {
             isolate: None,
             agent: Some("claude:sonnet".into()),
             cwd: Some(cwd.path().into()),
-            chrome: true,
+            chrome: Some(true),
             max_turns: Some(7),
             output_schema: Some(serde_json::json!({"type":"object"})),
             ..Default::default()
@@ -504,6 +503,118 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--json-schema", r#"{"type":"object"}"#]));
             assert_eq!(command.args.contains(&"--resume".into()), token.is_some());
+        }
+    }
+
+    #[test]
+    fn unset_chrome_sends_no_flag_and_explicit_choices_send_theirs() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (chrome, expected) in [
+            (None, None),
+            (Some(true), Some("--chrome")),
+            (Some(false), Some("--no-chrome")),
+        ] {
+            let config = AgentConfig {
+                agent: Some("claude".into()),
+                cwd: Some(cwd.path().into()),
+                chrome,
+                ..Default::default()
+            };
+            for invocation in [
+                ProviderInvocation::Terminal { session_id: None },
+                ProviderInvocation::ClaudeStream { session_id: None },
+            ] {
+                let command = build_session_command(&config, invocation, None).unwrap();
+                let sent: Vec<_> = command
+                    .args
+                    .iter()
+                    .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+                    .map(String::as_str)
+                    .collect();
+                assert_eq!(sent, Vec::from_iter(expected));
+            }
+        }
+    }
+
+    /// Codex, OpenCode and Pi have no Chrome equivalent; the whole launch
+    /// (args, environment, Codex thread params) stays free of the setting.
+    #[test]
+    fn chrome_choice_reaches_no_harness_but_claude() {
+        let cwd = tempfile::tempdir().unwrap();
+        for harness in ["codex", "opencode", "pi"] {
+            let config = AgentConfig {
+                agent: Some(harness.into()),
+                cwd: Some(cwd.path().into()),
+                chrome: Some(true),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let launch = format!(
+                "{:?} {:?} {:?}",
+                command.args,
+                session_environment(&config, None).unwrap(),
+                build_codex_thread_start_params(&config, false)
+            );
+            assert!(
+                !launch.to_lowercase().contains("chrome"),
+                "{harness}: {launch}"
+            );
+        }
+    }
+
+    /// Pi has no permission bypass; `yolo` reaches it as nothing.
+    #[test]
+    fn yolo_sends_pi_nothing() {
+        let cwd = tempfile::tempdir().unwrap();
+        let launch = |skip_permissions| {
+            let config = AgentConfig {
+                agent: Some("pi".into()),
+                cwd: Some(cwd.path().into()),
+                skip_permissions,
+                ..Default::default()
+            };
+            build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap()
+            .args
+        };
+        assert_eq!(launch(true), launch(false));
+    }
+
+    #[test]
+    fn bare_harness_sends_no_model_and_a_pinned_one_sends_it() {
+        let cwd = tempfile::tempdir().unwrap();
+        for (agent, expected) in [
+            ("claude", None),
+            ("claude:opus", Some("opus")),
+            ("pi", None),
+            ("pi:openai/gpt-5", Some("openai/gpt-5")),
+        ] {
+            let config = AgentConfig {
+                agent: Some(agent.into()),
+                cwd: Some(cwd.path().into()),
+                ..Default::default()
+            };
+            let command = build_session_command(
+                &config,
+                ProviderInvocation::Terminal { session_id: None },
+                None,
+            )
+            .unwrap();
+            let model = command
+                .args
+                .iter()
+                .position(|arg| arg == "--model")
+                .map(|index| command.args[index + 1].as_str());
+            assert_eq!(model, expected, "{agent}");
         }
     }
 

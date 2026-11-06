@@ -997,7 +997,7 @@ mod tests {
         assert!(config.context.docs.is_empty());
         assert!(!config.context.diff_files);
         assert!(!config.context.diff);
-        assert!(!config.chrome);
+        assert_eq!(config.chrome, None);
         assert!(!config.pr);
         assert_eq!(config.land, "gh");
         assert!(config.context.exclude.is_empty());
@@ -1025,7 +1025,7 @@ chrome: true
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
         assert_eq!(config.agent().unwrap(), "codex:o3");
         assert!(config.yolo);
-        assert!(config.chrome);
+        assert_eq!(config.chrome, Some(true));
     }
 
     #[test]

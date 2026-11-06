@@ -161,3 +161,45 @@ with main c8d7a7f4a8; its AGENTS conflict kept main's prose reduction and this T
 isolated-host testing rule (864778108a, pushed). The demonstrated binary predates
 that documentation/skill-only merge. No Rust change or repeated build was needed.
 The runbook is `scratch/demo.html`; this review is failed, not accepted.
+
+
+## November 6 follow-up: ordinary Task conversation available
+
+Jack Heart supplied a screenshot of Task & workflow and said the demo was still
+not what he wanted: “some weird thing that isnt just a task session”. The operator
+opened one ordinary conversation pane for the same separate demo Task; LOO-498's
+running conversation and all earlier panes were left alone.
+
+A direct installed-LF resume first exposed the missing-history error: Claude had
+no conversation f5acc3d4-27ec-456b-b81c-b9e7eae3650f. Supported `session new
+--prepare` also refused because that transcript did not exist. Neither operation
+repaired it. The fresh conversation was therefore launched through the existing
+`lf --task 99543b skill task-session` command, explicitly instructed to greet Jack
+and wait. It used a copied installed CLI, not the branch workspace-opening path.
+This is proof of the requested ordinary conversation experience, not proof that
+the branch startup failure is repaired.
+
+Native capture and screenshot now show Claude's response “The Task conversation
+is open” and an ordinary input prompt. `lf session list` reports active/available.
+The native process cwd is `/Users/jack/src/loopflow.rex-native-demo`. No Graph ran.
+The new conversation was bound as this demo Task's primary so later resume selects
+it instead of the failed history. Jack's input/resize acceptance remains pending.
+
+- Rex tab: `window:01a1b1ad-2bba-7670-ae79-afeebb9e531e`, named
+  **99543b · Task conversation**; single block
+  `block:01a1b1ad-2b9f-74ce-be41-f9d7db51a41b`.
+- LF Session: `session_8ebcd369c5e9479fbfe989fea0f7b65d`.
+- Provider history: `3fff580e-c9f9-44b7-9439-34dd5f6ec09d` (Claude).
+- Observed owners: viewer 54390, terminal owner 62309, provider 62413;
+  recheck identities before any eventual teardown.
+- Same durable/runtime roots and real LF_HOME as the preceding attempt.
+  `runtime/native-lf` copies the installed build; `runtime/new-session.sh` launches
+  it. Evidence: new-session-launch.json, plain-sessions.json, plain-bind.json,
+  plain-capture.txt. Screenshot is in the conversation, not an exported file.
+- Failed resume retained tab: `window:01a1b1ac-4f1b-7a60-a5d9-c3f17ea66718`,
+  block `block:01a1b1ac-4f09-7109-b0b6-807eb556218a`, exited 1.
+- Reopen history through `lf resume session_8ebcd369c5e9479fbfe989fea0f7b65d`.
+  No draft settlement or teardown requested; keep all owners and roots intact.
+
+Next review: try ordinary input in the single conversation tab. Separately repair
+and verify branch fresh-conversation startup before claiming PR acceptance.

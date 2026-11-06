@@ -40,3 +40,5 @@ Jack Heart also requested that `docs/` read as user documentation. The workspace
 guide now starts with commands and describes behavior, configuration and recovery.
 Design acceptance dates, testing provenance, delivery status and internal Task
 ownership remain in scratch/PR evidence instead of the guide.
+
+Jack Heart rejected the November 6 demo showing only Task & workflow. The immediate demo must be one ordinary Task conversation in a Rex tab. A status tool is not a substitute for working agent input; do not present partial layout creation as that experience. This does not remove the previously requested optional Task/workflow tool.

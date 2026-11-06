@@ -138,6 +138,21 @@ Concept review (Nov 5, headless, at cc77d297af): nothing to change. The busy-Ses
 
 Open for Jack at demo, unchanged: `scratch/questions.md` 3, 4, 11, 16.
 
+## Concept review with Jack (November 5–6, 2026; page `scratch/concept-review.html`)
+Proposed, not accepted. Item 7 made the login a property of the Machine: each provider has one active login and every open Session follows it. Routing is still decided per launch (`select_route` with repo/Wave scope). Two consequences:
+1. **When the Machine switches.** As built, `select_shared_account` keeps the active login first and switches only when it cannot take the launch; soonest reset (item 6) picks only the *next* login. An account whose window resets with quota left over is not used first unless the active one fills before then. Options: (a) keep the active login until it is full (as built); (b) at each launch, switch to the soonest-reset login with room (switches more often, and every open Session follows each switch); (c) stay on the active login, but switch early to a login whose reset is close and which still has quota left.
+2. **Scoped routes conflict.** `lf --wave billing set account.codex work@` plus a global `personal@` route makes launches from the two scopes alternate the Machine's login, moving every open Session each time. Proposal: one route per provider per Machine (accounts, order, `explicit-only`), no repository/Wave scope.
+Smaller: `lf session move --account` does the same job as `lf account use` (everyone follows, so the selector selects nothing). Proposal: `session move` keeps only `-a`; `account use`/`drain` are the account moves.
+Unverified: whether a different account misses Claude's prompt cache for a moved conversation, which would make each switch cost quota.
+Accepted (Jack Heart, November 6, 2026): question 1b, "prefer more aggressive balancing". At every launch, switch the Machine to the soonest-reset login with room; the active login no longer comes first. Question 4 falls away. Not yet built.
+Accepted (Jack Heart, November 6, 2026), next implement direction, supersedes the matching parts of items 4 and 6:
+- **1b, switch at every launch.** `select_shared_account` and `resolve_selected_provider_account` stop putting the active login first; each launch goes to the highest-ranked login with room for its model (rank below). Revisit `SWITCH_SETTLE_SECS` in `record_native_limit`: it drops native limit reports for 120s after any switch, and switches are now frequent.
+- **Rank by use-it-or-lose-it, not reset alone (Jack Heart, November 6: "account that resets soonest though should be balanced somewhat with remaining quota").** `route_rank` scores each eligible login as remaining percent ÷ hours until reset, highest first: the rate it must burn to use its quota before it resets. Score the launch's weekly window (model-scoped when the launch's model has one); the 5-hour window only decides room, because percentages of different windows do not compare. A login with no observed window ranks after scored ones; plan preference stays first and declared order breaks ties. Example: 70% left in 3h scores 23.3; 5% left in 3h, 1.7; 40% left in 5 days, 0.33.
+- **2b, keep repository and Wave account orders.** Accepted cost: launches from scopes that disagree switch the Machine's login back and forth.
+- **3a, delete `lf session move --account`.** `session move` takes only `-a`. Remove `move_login`/`follow_login` paths that exist only for it, and the Desktop or doc mentions.
+- **Delete `lf account <provider> drain`.** `lf account set <provider> <login> --routing explicit-only` also switches away when that login is active, so it takes effect at once. `lf account use` is the manual switch.
+- Question 4 falls away.
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

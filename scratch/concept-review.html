@@ -3,70 +3,119 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>c0b373 concept review — busy moves after #1831</title>
+<title>c0b373 concept review</title>
 <style>
-  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fdfdfb; --muted:#666; --rule:#ddd; --prop:#0a6b3d; --cur:#8a4b00; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e4; --bg:#151515; --muted:#9a9a9a; --rule:#333; --prop:#5fd39a; --cur:#e0a35a; } }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Helvetica Neue", sans-serif; }
-  main { max-width:44rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
-  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
-  h1 { font-size:1.5rem; margin:0 0 .5rem; }
-  h2 { font-size:1.15rem; margin:2.5rem 0 .75rem; }
-  code, pre { font:.88em/1.5 ui-monospace, Menlo, monospace; }
-  pre { overflow-x:auto; padding:.9rem 1rem; border-left:3px solid var(--rule); margin:1rem 0; white-space:pre-wrap; }
-  .now { border-left-color:var(--cur); }
-  .next { border-left-color:var(--prop); }
-  .tag-now { color:var(--cur); font-weight:600; } .tag-next { color:var(--prop); font-weight:600; }
-  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.95rem; }
-  td, th { text-align:left; vertical-align:top; padding:.45rem .6rem .45rem 0; border-bottom:1px solid var(--rule); }
-  ol li { margin:.6rem 0; }
+:root{--bg:#fbfaf7;--fg:#1f1d1a;--muted:#6b665e;--rule:#e3dfd6;--code:#f1eee7;--new:#1d6b45;--newbg:#e7f3ec;--old:#8a3b2a;--oldbg:#f7e9e4;--accent:#7a4e00}
+@media (prefers-color-scheme:dark){:root{--bg:#181715;--fg:#ece8e1;--muted:#a19b90;--rule:#34312c;--code:#24221f;--new:#7fd1a4;--newbg:#17271f;--old:#e9a08d;--oldbg:#2c1b16;--accent:#e2b35a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:46rem;margin:0 auto;padding:2.5rem 16px 5rem}
+header p{margin:.15rem 0;color:var(--muted);font-size:.88rem}
+h1{font-size:1.55rem;line-height:1.25;margin:0 0 .6rem}
+h2{font-size:1.15rem;margin:2.6rem 0 .6rem}
+h3{font-size:1rem;margin:1.6rem 0 .4rem}
+code,pre{font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--code);padding:.05rem .3rem;border-radius:3px}
+pre{background:var(--code);padding:.8rem 1rem;border-radius:6px;overflow-x:auto;margin:.6rem 0}
+pre code{background:none;padding:0}
+.lead{font-size:1.08rem;border-left:3px solid var(--accent);padding-left:1rem;margin:1.6rem 0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:640px){.cols{grid-template-columns:1fr}}
+.col{border:1px solid var(--rule);border-radius:6px;padding:.4rem 1rem .8rem}
+.col h3{margin-top:.6rem}
+.is{color:var(--old)} .prop{color:var(--new)}
+.tag-is{background:var(--oldbg);color:var(--old);padding:0 .35rem;border-radius:3px;font-size:.85rem}
+.tag-prop{background:var(--newbg);color:var(--new);padding:0 .35rem;border-radius:3px;font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.93rem;margin:.6rem 0}
+th,td{text-align:left;vertical-align:top;padding:.45rem .5rem;border-bottom:1px solid var(--rule)}
+th{color:var(--muted);font-weight:600}
+.tl{list-style:none;padding:0;margin:.6rem 0}
+.tl li{padding:.35rem 0 .35rem 1rem;border-left:2px solid var(--rule)}
+.tl b{font-variant-numeric:tabular-nums}
+ol.q>li{margin:.9rem 0}
+ol.q ol{list-style:lower-alpha;margin:.3rem 0}
+.muted{color:var(--muted)}
 </style>
 </head>
 <body>
 <main>
 <header>
-  <h1>A busy Session moves after its turn — without its hook ending it</h1>
-  <p>Task c0b373 · concept-review (headless, after merging #1831) · November 5, 2026</p>
-  <p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/context.rs</code>, <code>ops/human_session/moves_bulk.rs</code>, <code>ops/human_session.rs</code>, <code>harness/agent_process.rs</code>, <code>store/sqlite.rs</code>, <code>context_block.rs</code></p>
+<h1>One login per Machine, but routing is still chosen per launch</h1>
+<p>Task c0b373 · PR #1828 · concept review at demo · November 5, 2026</p>
+<p>Built from <code>scratch/c0b373-recover-sessions-and.md</code>, <code>provider_account.rs</code> (<code>select_route</code>, <code>select_shared_account</code>, <code>route_rank</code>, <code>provider_route_account_ids</code>), <code>docs/subscriptions.md</code>, <code>docs/sessions.md</code></p>
 </header>
 
-<p><strong>No decision is needed here.</strong> The user-facing promise stays the same. Under it, the mechanism breaks the harness rule merged from main, and the accepted decisions already settle the fix. That fix goes back to implement.</p>
+<p class="lead"><strong>Decided (Jack Heart, November 6):</strong> switch at every launch (1b) to the account with the most quota to lose: remaining percent ÷ hours until reset. Keep repository and Wave account orders (2b). Remove <code>lf session move --account</code> (3a). Remove <code>lf account drain</code>; <code>lf account set … --routing explicit-only</code> also switches away from an active login. Not built yet. Still open: the overage rule.</p>
+
+<h2>What you want</h2>
+<p>“I want to be able to use multiple accounts in order to load balance across different Max accounts. I don't want to have to worry or think about which account I'm using.”</p>
+
+<h2>One afternoon, as built</h2>
+<p class="muted">Two Claude Max accounts. <code>jack@</code> is active at 60% of its weekly window, which resets in 5 days. <code>work@</code> is at 30%, and its weekly window resets in 3 hours.</p>
+<ul class="tl">
+<li><b>14:00</b> A Graph step launches. <code>select_shared_account</code> puts the active login first, and <code>jack@</code> has room, so it stays on <code>jack@</code>.</li>
+<li><b>14:00–17:00</b> Every launch and every open Session uses <code>jack@</code>.</li>
+<li><b>17:00</b> <code>work@</code> resets with <strong>70% of its week never used.</strong> Soonest reset never came into play, because <code>jack@</code> never filled up.</li>
+<li><b>Thursday</b> <code>jack@</code> fills up. Now soonest reset picks <code>work@</code>. The Claude login switches, and every open Session follows at its next request without a restart. That part works.</li>
+</ul>
+<p>Recovery works: a full account moves everyone over. Using the quota well doesn't: an account whose reset is near isn't used first unless the active one runs out before then.</p>
+
+<h3>The second way this goes wrong: scoped routes</h3>
+<pre><code>lf set account.claude jack@,work@
+lf --wave billing set account.claude work@</code></pre>
+<p>A <code>billing</code> step switches the Machine to <code>work@</code>. The next launch outside that Wave doesn't need to switch back, because the active login comes first while it has room. But if <code>work@</code> is only explicit-only, or isn't on the other route, it switches back. Two routes that disagree can switch the Machine back and forth, and every open Session switches with it. Per-repository and per-Wave orders made sense when each launch could have its own home. With isolation deleted, the account is shared by the whole Machine, so a scope can't own it.</p>
 
 <h2>Actions → concepts → APIs</h2>
+<div class="cols">
+<div class="col">
+<h3><span class="tag-is">built</span></h3>
 <table>
-  <tr><th>You do</th><th>Concept</th><th>API</th></tr>
-  <tr><td><code>lf session move --blocked -a claude:opus</code></td><td>Session selector, move target</td><td><code>moves_bulk::move_sessions</code></td></tr>
-  <tr><td>(idle Session)</td><td>new thread now, opens next time</td><td><code>new_thread(launch=false)</code></td></tr>
-  <tr><td>(busy Session)</td><td>pending move, applied after the turn</td><td><code>session_moves</code> row → Stop hook</td></tr>
+<tr><th>You</th><th>API</th></tr>
+<tr><td>Order accounts</td><td><code>lf set account.claude …</code> for global, repository or Wave</td></tr>
+<tr><td>See the route</td><td><code>lf account route</code></td></tr>
+<tr><td>Switch now</td><td><code>lf account claude use work@</code></td></tr>
+<tr><td>Switch blocked Sessions</td><td><code>lf session move --blocked --account work@</code>, which moves <em>every</em> open Claude Session</td></tr>
+<tr><td>Stop using one</td><td><code>lf account claude drain jack@</code></td></tr>
+<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td></tr>
 </table>
+<p class="muted">Concepts: account, route (scoped, per launch), active login, routing mode, Session selector, move, drain.</p>
+</div>
+<div class="col">
+<h3><span class="tag-prop">proposed</span></h3>
+<table>
+<tr><th>You</th><th>API</th></tr>
+<tr><td>Order accounts</td><td><code>lf set account.claude …</code> for global, repository or Wave</td></tr>
+<tr><td>See what's active and why</td><td><code>lf account</code></td></tr>
+<tr><td>Switch now</td><td><code>lf account claude use work@</code></td></tr>
+<tr><td>Stop using one</td><td><code>lf account set claude jack@ --routing explicit-only</code></td></tr>
+<tr><td>Change model</td><td><code>lf session move --blocked -a claude:opus</code></td></tr>
+</table>
+<p class="muted">Concepts: account, the Machine's login and when lf switches it, Session move (model or harness only).</p>
+</div>
+</div>
+<p><code>session move --account</code> goes away because <code>account use</code> already does the same thing. Its selector looked like it chose Sessions, but every Session follows the login anyway.</p>
 
-<h2>The mismatch</h2>
-<p><span class="tag-now">Now</span> — every Claude/Codex Stop hook (<code>timeout: 10</code>) runs:</p>
-<pre class="now">apply_pending_move_blocking(home, thread)
-  tokio::Runtime::new()                    // every Stop, move or not
-  open_store(...)                          // 15s busy wait, not open_for_hook's 1s
-  take_session_move(id)                    // row deleted here
-  new_thread(...)
-    stop_session_agent(...)                // SIGTERM, then SIGKILL, the agent running this hook
-    append_input(...)                      // never reached if the hook dies first</pre>
-<p>Failure: the host kills the hook, or its 10s timeout runs out, before <code>append_input</code>. The Session is stopped and has no continuation. The move you asked for is gone, and the only trace is a warning in <code>lf.log</code>.</p>
+<h2>When to switch: three rules</h2>
+<table>
+<tr><th></th><th>Rule</th><th>Unused quota</th><th>Switches</th></tr>
+<tr><td>a</td><td>Stay on the active login until it can't take a launch, then go to the soonest reset. <span class="tag-is">built</span></td><td>Lost when another account resets first</td><td>Fewest</td></tr>
+<tr><td>b</td><td>At every launch, go to the soonest-reset account that has room.</td><td>Least</td><td>Most; every open Session follows each one</td></tr>
+<tr><td>c</td><td>Stay on the active login, but switch early to an account that resets within a few hours with quota left. Switch back after it resets.</td><td>Little</td><td>About two per reset</td></tr>
+</table>
+<p class="muted">Unverified: Claude's prompt cache is probably kept per account. If it is, every switch makes open conversations re-send their context and spend more quota, which weighs against (b). Not checked; checking it would spend real quota.</p>
 
-<p><span class="tag-next">Proposed</span> — the hook only checks whether a move is pending; the applier runs outside the turn:</p>
-<pre class="next">Stop hook:  open_for_hook → pending move?  no → return
-                                           yes → spawn detached lf applier, return
-            store error → recording gap, turn continues
-Applier:    wait for the turn to end → new_thread (same path as idle)
-            → delete the session_moves row only after append_input succeeds</pre>
-<p>Recovery: if an apply fails or is killed, the row stays and the next Stop tries again. What carries over: the Session's identity, its history, and the "after their turn" promise in the docs. What changes: a hook never stops its own host.</p>
+<h2>Usage doc as proposed</h2>
+<pre><code>lf account connect claude jack@ --chrome-profile jack@
+lf account connect claude work@ --chrome-profile work@
+lf account                     # active login, room and resets per account</code></pre>
+<p>One Claude login per Machine at a time. lf switches the Machine when an account fills up <span class="tag-prop">and at each launch, to the account with the most quota to lose before its reset</span>. Open Sessions follow at their next message without a restart. <code>lf account claude use work@</code> switches now. <code>lf account set claude jack@ --routing explicit-only</code> stops using an account. <code>lf set account.claude jack@,work@</code> orders the accounts; repository and Wave orders still apply.</p>
 
-<p>Small addition: the drain line in <code>docs/subscriptions.md</code> also says how to undo it (<code>lf account set claude jack@ --routing automatic</code>).</p>
-
-<h2>Still Jack's at demo</h2>
-<ol>
-  <li>Questions 3: should <code>seven_day_overage_included</code> cool the whole account?</li>
-  <li>Questions 4: do waits need an upper bound?</li>
-  <li>Questions 11: should strained accounts that reset soonest be used first?</li>
-  <li>Questions 16: when a resume names another login behind an open terminal, it now attaches or waits. Is that acceptable?</li>
+<h2>Still open</h2>
+<ol class="q">
+<li>Overage rule in #1828: should a rejected <code>seven_day_overage_included</code> stop counting as a limit while overage is allowed or in use?
+  <ol><li>Yes, build it</li><li>No, leave it for later</li></ol></li>
+<li>Codex login test with fake tokens and a throwaway <code>CODEX_HOME</code>: does a running Codex refresh write its old login back over <code>auth.json</code>?
+  <ol><li>Run it</li><li>Skip it</li></ol></li>
 </ol>
 </main>
 </body>

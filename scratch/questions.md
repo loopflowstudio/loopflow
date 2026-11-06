@@ -188,19 +188,19 @@ Step 1 (task.* and the core loop). Decisions made headless; each is reversible.
   read the typed value back from a private report file the command writes once
   (`LF_LAUNCH_REPORT=<path>`, taken and cleared on startup of the command). That is a process launch, not an argv round
   trip: nothing parses stdout, and the CLI's `--json` print and the report are
-  one value (`engine::task::TaskRun`, `TaskShip`). Open: if Jack wants no
+  one value (`engine::task::TaskRun`, `TaskShip`). Open: with no
   carrier process at all, the run has to become a server-owned job, which the
   server README currently rules out ("creates no … Graphs").
 - **Harness when the request names none.** `task.run` with `agent: null`
   passes no `--agent`; each step resolves its harness as `lf task run` does
   (the step's/Wave's/repository's configured default, else the builtin).
-  Jack's rule that Tasks run on Claude is a setting on his repositories, not a
-  server default; a client that must pin it sends `agent: "claude"`.
+  Running Tasks on Claude is a repository setting, not a server default; a
+  client that must pin it sends `agent: "claude"`.
 - **Auto-Ship without `approve`.** `approve: false` is bare `lf task run`: it
   stops before the next interactive step, but a graph with none ahead reaches
   `end`, and reaching `end` approves Auto-Ship (the documented rule). A client
-  that must never approve should check `task.get`'s graph first, or Jack may
-  want `task.run` to refuse when no interactive step lies ahead.
+  that must never approve should check `task.get`'s graph first; open whether
+  `task.run` should refuse when no interactive step lies ahead.
 - **Placement.** The served `task.run` skips `--pool`/`--rent`/`--quote`
   placement; the carrier's ordinary dispatch still applies default placement.
 - **Remote Tasks.** `task.run`, `task.ship`, `task.hold`, `task.claim` and

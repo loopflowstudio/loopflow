@@ -1,71 +1,54 @@
 # Loopflow Style Guide
 
-This is the governing document of the loopflow codebase. Contributors and agents alike are expected to follow it.
+How we build Loopflow. Contributors and agents follow it.
 
 ## Quick Reference
-
-**Wave planning:**
-- Authored Wave goals, memory, and metrics live under `.lf/wave/<name>/`; top-level `wave/` is ordinary repository content.
-- Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
-- Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
-- Project = one Wave's Linear plan: status, Tasks, KRs and targets
-- A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
-- A Task's workflow is the graph it took up and the step it stands at; workflows are ordinary graph files, never a second definition kind. An `interactive:` step is where a person takes part: `lf graph` runs it in place, `lf task run` stops before it (the Task waits in its conversation) and the next run continues after it; `--from <step>` starts anywhere; `-i`/`-b` choose for every step of a launch
-- Task completion, graph position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the run
-- Task state = `unstarted · idle · active · moving · shipping · done · abandoned`, derived from checkout, graph position, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. Ownership is separate: `lf task claim` assigns, `lf task unassign` clears the owner and Linear assignee, and nothing (ship, CI repair, Wave operators) moves an unassigned Task. `lf ship` or any run into `end` approves Auto-Ship, which may land the PR; `lf ship --stop` withdraws it until the next `lf ship`, and a stopped Task's run waits at its landing step. `lf task run` launches; `-b` approves like `lf ship`
-- Started unfinished Tasks move with identity, worktree, PR, and invocation intact
-- Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
-- Current navigation is Wave → Task; chapter history retains each Wave's past plan
-- Definitions name the beneficiary and experienced improvement; KRs prove it
 
 **Python:**
 - Use `uv run` or activate `.venv` before any Python command
 - Prefix private functions with `_`
-- Return `None` for "not found"; raise exceptions for "shouldn't happen"
-- No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
+- Return `None` for "not found"; raise for "shouldn't happen"
+- No `Args:`/`Returns:` docstrings; if the types are clear, skip the docstring
 
 **Rust:**
-- Run `cargo fmt` and `cargo clippy` before committing
-- Return `Option<T>` for "not found"; return `Result<T, E>` for failures
-- Use `expect("reason")` over `unwrap()` outside tests
+- Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before committing; CI treats warnings as errors
+- Return `Option<T>` for "not found", `Result<T, E>` for failures
+- Use `expect("why this is safe")` over `unwrap()` outside tests
 - Derive `Debug` on all public types
 
 **Both:**
-- Mock side effects, but don't test mock wiring or reshape production code for tests
-- Design docs go under `scratch/`; `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits
-- Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
+- Mock side effects; don't test mock wiring or reshape production code for tests
+- Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
+- Headless runs make the call and keep moving; note genuinely open choices in `scratch/questions.md`
 
 **Secrets:**
-- Fetch every secret from Doppler — never hardcode a key, read it from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>` (injects the value as an env var; it never surfaces).
-- A raw value must never reach a terminal, log, or chat. `doppler secrets get NAME --plain` **prints the value** — so never run it bare: consume it inline in a command substitution (`curl -H "Authorization: Bearer $(doppler secrets get NAME --plain)"`) or redirect it (`> file`, or a clipboard pipe like `| pbcopy` on macOS / `| xclip` on Linux) — never to stdout.
-- Inspect with `doppler secrets --only-names`. Redirect writes: `doppler secrets set NAME > /dev/null` (the bare `set` echoes the whole config **with values**). Never `echo` a key.
-- If a value does leak into output, say so and flag it for rotation — don't quote it again.
+- Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.
+- A raw value never reaches a terminal, log or chat. `doppler secrets get NAME --plain` prints the value, so only use it inside a command substitution (`curl -H "Authorization: Bearer $(doppler secrets get NAME --plain)"`) or redirected (`> file`, `| pbcopy`).
+- Inspect with `doppler secrets --only-names`. Write with `doppler secrets set NAME > /dev/null`; bare `set` echoes the whole config with values. Never `echo` a key.
+- If a value leaks into output, say so and flag it for rotation. Don't quote it again.
 
 ## Voice
 
-Use people's names in persisted artifacts: Tasks, PRs, designs, memory,
-reports, and decision summaries. Write “Jack requested the prototype path.”
-In session conversation, use “you”: “You requested the prototype path.”
-Storing a transcript does not change its wording; a summary written from it
-uses names. Refer to other participants by name. Use known preferred names,
-never infer authorship from a machine owner or account. Ask when a necessary
-name is missing, or record that attribution is unresolved.
-
-Describe agents as available for people to do their work with. Name the work,
-the available interaction, and actual constraints. Never portray people as
-blockers or as owing agents attention. Availability is independent of a pending
-question, review or Task dependency. Preserve real authorization and failures.
-
-Write in language the user would use themselves. Never refer to a person as
-“the human.” Generic role labels belong in instructions where the role matters,
-not in place of known names in authored artifacts.
-
 The creator's flow is sacred. Every interaction either sustains it or breaks it.
 
-Name conversations for the requested work in two or three words, with the Task
-identifier first when known. Never use the title of these instructions, an
-operating guide or an operator role as the conversation name. This applies to
-fresh and resumed conversations, including direct native agent invocation.
+Write down what can't be recovered. The intelligence available later will be at
+least what's available now, so anything that can be worked out again from the
+code, the history or a fresh run can be worked out again. What can't be: a
+person's exact words, what a run showed at the time, facts from outside the
+repository. Capture those exactly. Plans
+still help people and agents think; optimize for quality per word, not the
+number of words.
+
+Docs, skills, PRs, Task briefs and memory describe the system and the work as
+they are. They don't say who asked for something, and they don't say "the
+user". Record what people said, word for word, not a verdict about it: "looks
+fine" stays "looks fine", never "the design was accepted". To get a real answer,
+ask a specific question rather than "is this plan good?". Exact quotes with
+names belong in `scratch/` and design notes, not in anything meant to last. Agents work for people; never write a person up as a
+blocker or as owing an agent attention.
+
+Name conversations for the work in two or three words, Task ID first when
+there is one.
 
 Say what's needed, shaped for where they are right now. Match their pace -
 terse when they're moving fast, detailed when they're exploring. When the
@@ -97,9 +80,13 @@ direction, go with them. If a tangent is where the insight is, follow it.
 
 Don't ask permission for reversible work. If the next step is editing
 files, sketching code, or running a local build, do it - checkpoint
-first if prior work needs preserving (see this file's "Checkpoint and
-proceed" section). "Do you want me to get started on..." breaks flow when the
-answer is obviously yes.
+first if prior work needs preserving. "Do you want me to get started on..."
+breaks flow when the answer is obviously yes.
+
+Words lose force when they repeat. Prefer the concrete word: the command, the
+file, what a person sees. Avoid governance filler like "evidence", "proof",
+"preserve", "explicit", "boundary", "durable" and "consequential" unless it is
+exactly the thing.
 
 Never say:
 - "That's not X, that's Y" - the sycophantic reframe ("That's not a config
@@ -112,99 +99,197 @@ Never say:
 - "I'd be happy to help!" / "I'm glad you asked!"
 - "Now, let's move on to..." / "With that said..."
 - "I'm just an AI, but..."
-- "Do you want me to get started on..." / "Should I begin..." / "Ready for me to..." - for reversible work, checkpoint and proceed
+- "Do you want me to get started on..." / "Should I begin..." / "Ready for me to..."
 
-## File-Type Guidelines
+# Goals
 
-When editing `*.py` files:
-- Put imports at the top, not inline
-- Use type hints on all public functions
-- One-line docstring if any; skip if the name and types are clear
+## Clarity
 
-When editing `*_test.py` or `test_*.py` files:
-- Keep tests short and focused on one behavior
-- Mock side effects (network, subprocess), but assert on results, not mock calls
-- Delete flaky tests rather than adding retries
+Design around data structures and public APIs. Aim for a 1:1 mapping between
+real-world concepts and their representation in code.
 
-When writing CLI code with Typer:
-- Prefer lowercase short flags (`-p`, `-c`), do not add uppercase aliases
-- Pass args through to underlying tools rather than re-implementing
-- Default to sensible behavior (e.g., whole repo as context)
+Write code that shows it works: if a feature exists, a test exercises it.
+Assume you won't finish everything you start, so make it easy to see what's
+done and what's broken.
 
-When editing builtin skills (`builtins/**`):
-- Skills must be self-contained: never reference repo-relative docs or files —
-  the skill runs in repos that don't have them. Inline the compressed guidance;
-  the long form lives in this repo's docs for readers.
-- Doctrine rides only where it's exercised: teach a rule in the skill that uses
-  it, not in every context (LOOPFLOW.md is paid for on every run, everywhere).
+## Simplicity
 
-When editing `README.md` files:
-- Examples first, explanation after—show `lf debug -c`, then say what it does
-- Action-focused tables: "What it does" not "What it is"
-- Terse prose around code blocks—the code speaks
-- One good example beats three similar ones
-- No preamble: "Assembles context" not "Loopflow assembles context for you"
-- Write for users, not maintainers
-- Update when adding or changing user-facing features
+Every line of code must earn its place. Readable code is not terse code; don't
+sacrifice clarity for brevity. Unused code, comments that restate the obvious
+and checks for impossible conditions are net-negative.
 
-When editing docs in `scratch/`:
-- Focus on what's left to build, not what's done
-- `lf realign` updates the existing plan, code, and relevant memory; keep unresolved findings with the work
-- `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits
+Start with minimal data structures and APIs. If the core is right, trimming
+the edges is easy.
 
-When changing the SQLite schema:
-- Keep one migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the one the branch already has
-- Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix it forward
-- Destructive change is staged (Jack Heart, 2026-10-27): a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses
-- Test the merged frontier against the finished migration, not the steps between
-- Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
-  triggers to advance their domain in `store_revisions` inside the write.
-- Runtime migration preflights recognize draft markers inside release batches and
-  retain external lock guards through commit or rollback. Upgrade fixtures start
-  before the whole release batch, not before a draft within it.
-- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
+A redesign deletes what it replaces. Earlier attempts usually left pieces
+behind: an unreachable branch, a hidden command, a second resolver. Find them
+first. If three building blocks exist for one job and none works, the change
+removes all three. It does not add a fourth.
 
-When editing harness, transport or hook code (`rust/loopflow/src/harness/**`, `transport*`):
-- lf is a session manager, context adder and hook interjector on top of a harness,
-  never a middleman that can break the conversation (Jack Heart, 2026-11-05). It is
-  never in the byte path between a person and their provider except as a pass-through
-  that keeps passing when lf's own state (the store, a hook, a lock) is unavailable.
-  Every lf invocation at a turn or tool boundary is best-effort: it records a gap in
-  `logs/lf.log` instead of failing the turn, the tool or the quit. A recording gap is
-  one type, `store::RecordingGap` (`note` once per changed failure, `recovered` once);
-  hooks keep theirs in a marker file and write the gap into the Session history as a
-  `store-gap` observation when the store answers again. Codex clients reach their
-  private app-server directly; lf only observes beside them.
+## Flexibility
 
-When editing `*.rs` files:
-- Run `cargo fmt` before committing; CI enforces it
-- Run `cargo clippy --all-targets -- -D warnings` locally; CI treats warnings as errors
-- Dead code must be deleted, not commented out (use git for history)
-- If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
-- Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
-- Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
-- Canonicalize Clap command aliases in shared navigation so help, remote routing and execution resolve the same owner.
-- `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
-- Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
-- Use `thiserror` for library error types callers need to match on
-- Long-lived deadlines (a Session's grace, a limit measured in minutes or hours) use
-  `SystemTime`: `Instant` stops while a Mac sleeps, so an `Instant` limit of 24h can
-  take days of wall time. `Instant` stays for short pauses and throttles.
-- Use `expect("why this is safe")` over `unwrap()` outside tests
-- Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
-- No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
-- Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct LfProcessId(String)` not `type LfProcessId = String`
-- Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
-- When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
-- Use `#[non_exhaustive]` on public enums that may grow
-- Never use `()` as an error type
-- SQLite read helpers that join statements use savepoints so they compose inside
-  the Work reader's pinned snapshot as well as standalone. Keep write transactions
-  at their existing command boundaries.
-- For public APIs, include `# Panics`/`# Errors`/`# Safety` doc sections where non-obvious
+Meet the caller where they are. When code breaks because it assumed a fixed
+context (running on `main`, an unowned worktree, an ambient home), accept the
+context and adapt. Don't add a guard, a verification, an allowlist or a
+precondition that refuses.
 
-When editing Rust tests:
+Refusing a context is usually what caused the failure: someone works around
+the refusal and corrupts state. Prefer dropping a precondition to adding one.
+If a fix reads as "extend the allowlist" or "verify identity", reframe it as a
+reduction. The best fix makes the system smaller.
+
+## Work model
+
+Waves hold durable objectives, memory, cadence and budget under
+`.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave's current
+plan is its In Progress Linear Project, which holds Tasks, KRs and targets;
+"Chapter" is just that Project's shared name. A Task belongs to a repository
+and optionally a Project.
+
+A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
+default, else repository `graph:`, else `code`) and stands at a step of it.
+Only `lf task run` and `lf ship` move that position. `interactive:` steps are
+where a person takes part. Task state (`unstarted · idle · active · moving ·
+shipping · done · abandoned`) is derived, not stored. A stopped Graph is
+history; nothing resumes it. Started Tasks keep their identity, worktree and PR
+across replanning, and unreviewed backlog stays until someone decides.
+
+The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,
+is in [Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/architecture-reference.md) indexes the rest.
+
+# Development Environment
+
+Use `uv` for Python. Never use pip directly.
+
+```bash
+uv run python scripts/test.py --list                     # suites this branch reaches
+cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
+uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+uv sync
+```
+
+`build.rs` downloads the pinned `libghostty-vt` archive once per target
+directory; offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding
+`libghostty-vt.a`. Run one cargo command at a time: concurrent builds wait on
+one target lock. CI runs the full matrix; locally, run it only to reproduce a
+CI failure. When work needs a tool the Machine lacks, install it (Homebrew on
+macOS) at Machine level and continue. Keep Machine-only tools out of config CI
+reads: sccache runs through `~/.cargo/config.toml`. `scripts/testing.md` holds
+the command list; module READMEs and `.github/CI.md` own their checks.
+
+# Code Organization
+
+Follow PEP8. Consistency with existing code matters more than any rule.
+
+Keep `__init__.py` files empty. Import from the real module
+(`from loopflow.models import WaveSnapshot`), not a package re-export.
+
+Keep information in one place: versions, configuration, docs. If something must
+appear twice, generate it or link the source.
+
+Put imports at the top. Declare dependencies in `pyproject.toml`. Prefer
+explicit imports over injected names.
+
+Keep one implementation. No `v2_`, `_old`, `_new` or `_backup`; git has the old
+version.
+
+Don't keep backwards compatibility unless required. Migrate everything to the
+new format. The exception is a file both the released `lf` and a branch build
+read, such as `.lf/config.yaml`: keep the released shape readable until the new
+one ships, mark the fallback with the Task that removes it, and file that Task
+in the same change.
+
+Group related code with header comments. Name actions verb-first
+(`load_config()`), prefix private functions with `_`, and name things after
+what they are (`Document`), not what they're for (`DocumentHelper`).
+
+Use `Optional[X]` only when a caller may omit the value:
+
+```python
+def find_prompt(name: str, repo_root: Optional[Path] = None) -> Path: ...  # good
+def get_user() -> Optional[User]: ...  # bad: None means "not found"
+```
+
+Errors are for users; exceptions are for programmers. Return an error the
+caller should handle (bad input, missing file, failed request); raise for a
+violated invariant. If you'd write an `assert`, raise instead.
+
+## DTOs
+
+Wire types (anything `lf --json` emits and Rust and Swift mirror) get no
+defaults. Every field is required or explicitly optional: no
+`#[serde(default)]`, no `Default` derive, no Swift init defaults, no `?? value`
+fallbacks. Defaults at different layers drift into silent disagreement.
+Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
+field goes into the fixture and each language's fixture test. UI state types
+that carry DTO values are not DTOs.
+
+# File-Type Guidelines
+
+**`*.py`:** imports at the top, type hints on public functions, one-line
+docstring or none.
+
+**`*_test.py` / `test_*.py`:** short tests, one behavior each; assert on
+results, not mock calls; delete flaky tests rather than adding retries.
+
+**Typer CLI code:** lowercase short flags only; pass args through to the
+underlying tool; default to sensible behavior (whole repo as context).
+
+**Builtin skills (`rust/loopflow/src/builtins/**`):** self-contained, since they
+run in repos without our docs. Teach a rule only in the skill that uses it;
+`LOOPFLOW.md` is paid for on every run. Builtins are a starting point people
+copy with `lf skill customize`, so keep them short and plain.
+
+**`README.md`:** examples first, explanation after; tables say what something
+does; one good example beats three; no preamble; write for users; update when
+user-facing behavior changes.
+
+**`scratch/`:** what's left to build, not what's done. `lf realign` updates the
+plan, code and memory and keeps open findings with the work.
+
+**SQLite schema:**
+- One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
+- Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
+- Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
+- Test the merged frontier against the finished migration, not the steps between.
+- Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write.
+- Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
+- Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
+
+**Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
+lf is a session manager, context adder and hook interjector on top of a
+harness, never a middleman that can break the conversation. It is never in the
+byte path between a person and their provider except as a pass-through that
+keeps passing when lf's own state (the store, a hook, a lock) is unavailable.
+Every lf invocation at a turn or tool boundary is best-effort: it records a gap
+in `logs/lf.log` instead of failing the turn, the tool or the quit. A recording
+gap is one type, `store::RecordingGap` (`note` once per changed failure,
+`recovered` once); hooks keep theirs in a marker file and write the gap into the
+Session history as a `store-gap` observation when the store answers again.
+Codex clients reach their private app-server directly; lf only observes beside
+them.
+
+**`*.rs`:**
+- Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.
+- Explicit imports in submodules, not `use super::*`.
+- Derive `Debug` on public types; add `Clone`, `PartialEq`, `Default` where sensible.
+- Canonicalize Clap aliases in shared navigation so help, remote routing and execution agree.
+- `lf help <path>` renders Clap's short help; text it must show goes in `after_help`.
+- Give nested global Clap flags a distinct argument `id` when a root flag shares their name, or their values leak into the root command.
+- Use `thiserror` for library errors callers match on. Never use `()` as an error type.
+- Long deadlines (minutes or hours) use `SystemTime`: `Instant` stops while a Mac sleeps. `Instant` is for short pauses and throttles.
+- Conversions: `as_` (cheap, borrowed), `to_` (allocates), `into_` (consumes). No `get_` prefix on getters.
+- Newtypes for domain concepts: `struct LfProcessId(String)`, not a type alias.
+- Every `unsafe` block gets a `// SAFETY:` comment. Keyword clashes use `r#type` or `type_`.
+- `#[non_exhaustive]` on public enums that may grow.
+- SQLite read helpers that join statements use savepoints so they work inside the Work reader's pinned snapshot and standalone. Write transactions stay at their command boundaries.
+- Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
+
+**Rust tests:**
 - External terminal-host tests use an isolated socket, configuration, state directory
   and process group. Check native identity and command replay separately: stable
   pane IDs do not prove that the same processes survived a host restart.
@@ -215,291 +300,45 @@ When editing Rust tests:
   can inherit. Interactive shells stay unreported, or a launch report outlives `cd`.
   Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
   `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
-- `unwrap()` is fine in tests
-- Use `#[test]` for unit tests in the same file
-- Integration tests go in `tests/` directory
-- Bare `task run` returns once the Graph registers; `lf -b task run` waits, but also runs interactive steps headless. A test that reads state a stopping run writes waits for that run to finish. `lf ship` and `-b` share one path. A change to when a command returns inventories its test callers too (`grep -rn '"task", "run"' rust/loopflow/tests/`).
+- `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
-- Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
+- Mock through closures or `#[cfg(test)]`, not factory traits.
+- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
-- From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin. In zsh that is `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`; an unquoted `$VAR` does not word-split, and a leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
-- Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
-- Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
-- `SqliteStore::open_ephemeral` applies the build's whole migration catalog; do not
-  replay a migration with `apply_migration_for_test`.
-- Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
-- Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
-- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`: a `--json` viewer on a pipe gets a pipe owner that dies with its stdin, so a retirement bug passes unseen. With `RUST_LOG` set, diagnostics go to stderr (`logs/transport.log` there), not `logs/lf.log`.
-- Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
-
-# Goals
-
-## Clarity
-
-Design around data structures and public APIs. Aim for a 1:1 mapping between real-world concepts and their representation in code.
-
-Write code that demonstrates its own correctness. If a feature exists, write a test that proves it works. Assume you won't finish everything you start—make it easy to see what's done and what's broken.
-
-## Simplicity
-
-Every line of code must earn its place. Readable code is not terse code; don't sacrifice clarity for brevity. But recognize that lines can be net-negative:
-
-* Unused code
-* Comments that restate the obvious
-* Checks for impossible conditions
-
-Start with minimal data structures and APIs. If the core is right, trimming excess at the edges is straightforward.
-
-A redesign deletes what it replaces. We have usually tried the idea before, and half-built versions remain: an unreachable branch, a hidden command, a second resolver. Find them before designing. If three building blocks exist for one job and none quite works, the change removes all three in the same diff. It does not add a fourth.
-
-## Flexibility
-
-Meet the caller where they are. When code breaks because it assumed a fixed context—running on `main`, an un-owned worktree, an ambient home—accept the context and adapt to it. Resolve the right thing automatically; don't add a guard, a verification, an allowlist, or a precondition that refuses.
-
-Rigidity is usually what caused the failure: refuse the context, and someone works around the refusal and corrupts state. Flexibility deletes the whole failure class. Every guard is one more thing to remember and one more thing that can drift across hand-mirrored layers.
-
-The instinct on a bug is often a new check. Invert it: can the system adapt instead? Prefer dropping a precondition to adding one. If a fix reads as "extend the allowlist," "verify identity," or "add scaffolding," reframe it as a reduction before shipping. The best fix makes the system smaller and gets in our own way less.
-
-## Wave Planning
-
-A Wave's objective, memory, cadence, budget and instruments survive planning
-boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
-Project. Linear Project status owns current/planned/completed history; there is
-no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default graph; repository `graph:`, then builtin `code`, are the defaults after it.
-
-A Task's work includes every Session, Graph and Process associated with
-its checkout, plus explicit binds. Rust owns this shared association for status,
-Desktop navigation, recovery and completion. Membership grants no process or
-Graph authority and never rewrites historical usage. Every Graph naming the Task
-is equally its work; a stopped Graph is history its caller inspects, never a
-position to resume. A Task with no graph takes up its Wave's default, then repository `graph:`,
-then `code`, on its first `lf task run`; one that named its own keeps it. Its graph and
-position are one `task_graphs` row that only `lf task run` (and `lf ship`, which is
-`-b task run` repeated) moves; other Graphs in the checkout never do. `lf graph` handles
-definitions and `--processes` inspects execution. Task projections expose the Task's
-graph, latest GraphProcessDetail, execution evidence and TaskRunControl separately;
-latest never grants primary authority. The graph is fixed when taken up. `lf task run`
-starts the run as a child Graph process, again when one fails, and that Graph writes
-where it left the Task: before the interactive step it stopped at, or at `end`. A run
-that stops leaves the Task on it, and the next `lf task run` starts that run again from
-where it began. `lf task move --wave/--no-wave` changes membership without transferring
-execution. No command approves or completes a step.
-Taskless execution uses the same Graph runner. A Graph is one lf process and the step
-Processes it starts; its id is the Graph process ID. The Graph process holds the cursor and
-return counts in memory and writes GraphProcess, append-only: the Graph's name and
-compiled graph at launch, then each step's Process, node and iteration counts.
-Every Graph process gets one; none is primary for a Task. A step is the plain command
-(`lf -b skill <name> [message]` or the operation's own) and neither reads nor
-writes it. Running, finished and results are read from Processes, never stored
-twice. GraphComposition describes resolved composition, which expands the graph; loop passes are node/iteration
-positions on step rows, not child Graphs.
-
-Repository rotation converges on an explicit target through fresh provider facts
-and stable Project identities. Partial status changes remain retryable; unrelated
-competing plans remain unresolved. Preserve active Task identity, worktree, PR
-and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
-Current navigation stays Wave → Task and Linear retains past Projects.
-
-LfProcess is one actual lf process that changes Work, including direct and agent-issued
-nested commands; reads, navigation and arrangement record none (`Commands::changes_work`).
-Its `id`, an `LfProcessId`, is durable Loopflow identity; `pid` is only the optional
-Unix PID and may collide across history. References are `<role>_lf_process_id`:
-`lf_process_id`, `parent_lf_process_id`. AgentProcess is the provider's OS process
-Loopflow started: one `processes` row of kind `agent`, with its parent LfProcess,
-the attached LfProcess and a fresh attachment token. It survives attachment handoff.
-LfSession is one Loopflow-owned durable conversation, interactive or headless; identity,
-name, feedback and native history survive takeover. Product text says
-Session for interactive and Run for headless work. AgentSession is the provider-owned
-conversation, represented by an opaque AgentSessionId used for resume, native
-turn keys and account attribution. An LfSession selects one AgentSession at a
-time; replacement preserves earlier selections in immutable history. It is not
-an OS process and has no separate table. Available is the one attention
-state, judged in Rust from owned provider streams and validated terminal reports. A step's result
-is how its process exited; a deciding or routing step also answers through the
-Session turn its Process captured. Agent outcomes and retries belong in Session
-history; mechanical results are step Process exits. A Session reaches its Graph
-through the step Process that captured its input. Do not replace Run with another
-generic attempt object.
-
-Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Explicit Session bind permanently assigns an unfinished interactive conversation,
-selects it as primary and immediately sets its cwd to the Task checkout, including
-for done/landed Tasks without reopening them. Repeating bind reselects the same
-conversation; closed Sessions and headless Runs cannot become primary. Prospective attribution preserves earlier usage owners; the history reader
-owns that single choice. Actual work
-reservation claims an unowned Task in the ownership log; logging an inspection Process does not. Every
-denormalization is removed or validated on writes. Causal ancestry grants neither
-process control nor Graph settlement. Attachment claims and provider identity
-are separate: a fresh claim token fences every attachment and release, including
-A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
-
-The full contract lives in
-[Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
-the [Architecture Reference](docs/architecture-reference.md) indexes the rest,
-including cutover status.
-
-# Development Environment
-
-Use `uv` for Python package management. Never use pip directly.
-
-```bash
-uv run python scripts/test.py --list                     # suites this branch reaches
-cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
-uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
-cargo fmt                                                # format
-cargo clippy --all-targets -- -D warnings                # lint after tests (warnings = errors)
-uv sync                                                  # install Python dependencies
-```
-
-`build.rs` downloads the pinned `libghostty-vt` archive for the build target once
-per target directory (`rust/loopflow/ghostty-vt.json`, `rust/loopflow/ghostty-vt-patches/README.md`);
-offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding `libghostty-vt.a`.
-Run one cargo command at a time: concurrent builds wait on one target lock.
-CI runs the full matrix; locally, run it only to reproduce a CI failure.
-When accepted work needs a developer tool the Machine lacks, install it
-(Homebrew on macOS) and configure it at Machine level, then continue; a
-missing tool is never a reason to defer. Keep Machine-only tools out of
-repository config CI also reads: sccache runs through `~/.cargo/config.toml`.
-`scripts/testing.md` holds the shared command list, and module READMEs
-(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`) and `.github/CI.md` own
-their boundary checks.
-
-# Code Organization
-
-Follow PEP8. Consistency with existing code matters more than any specific rule.
-
-Keep `__init__.py` files empty. They exist only to mark directories as packages. Don't use them for re-exports—import from the actual module (`from loopflow.models import WaveSnapshot`) rather than a package-level re-export. A docstring describing the package contents is fine.
-
-Keep information in one place. Version numbers, configuration, documentation—each piece of information should have a single source of truth. Don't duplicate versions in `__init__.py` and `pyproject.toml`. Don't copy FAQs into multiple READMEs. If something needs to appear in multiple places, generate it or reference the source.
-
-Put imports at the top of the file. Declare dependencies in `pyproject.toml` and assume they're available.
-
-Prefer explicit imports over magic. Don't inject names into module namespaces to save one import line—it breaks linters, IDE autocomplete, and confuses readers. If a module needs `Graph`, it should `from loopflow.lf.graphs import Graph`. Standard Python beats clever patterns that fight tooling.
-
-Keep one implementation. Avoid `v2_`, `_old`, `_new`, `_backup` prefixes and suffixes—look up old versions in git. If you're tempted to keep both old and new code around, delete the old version and commit. You can always get it back from git if needed.
-
-Don't maintain backwards compatibility unless explicitly required. If a config format or API changes, migrate everything to the new format—don't write code that handles both old and new. Backwards compatibility is for production databases and published APIs with external users, not internal config files. Unless the design doc specifies a migration path, assume we don't want compatibility shims.
-
-One exception: a file that the released lf and a branch build both read, such as `.lf/config.yaml`. Until the new shape is released and installed, the branch keeps the released shape readable, so the change doesn't break the released build in its own repository. Mark the fallback with the Task that removes it, and file that Task in the same change.
-
-Use header comments to group related code sections.
-
-## Naming
-
-Use verb-first names for action functions: `find_prompt()`, `load_config()`, `create_worktree()`.
-
-Prefix private functions with underscore: `_should_ignore()`, `_load_file()`.
-
-Name things after what they are, not what they're for: `Document`, `FileEdit`, `Target`—not `DocumentHelper`, `EditResult`, `OutputHandler`.
-
-## Type Hints
-
-Use `Optional[X]` only when a value is truly optional (caller can omit it):
-
-```python
-# Good: caller can omit repo_root
-def find_prompt(name: str, repo_root: Optional[Path] = None) -> Path: ...
-
-# Bad: None means "not found"—that's an error, not an option
-def get_user() -> Optional[User]: ...
-```
-
-## Error Handling
-
-Errors are for users; exceptions are for programmers.
-
-Return errors when the caller should handle them—invalid input, missing files, failed requests. Raise exceptions for bugs: violated invariants, impossible states, programming mistakes.
-
-```python
-# Error: caller decides what to do
-def find_config(path: Path) -> Optional[Config]:
-    if not path.exists():
-        return None
-    return load(path)
-
-# Exception: this shouldn't happen
-def get_target(name: str) -> Target:
-    if name not in TARGETS:
-        raise ValueError(f"Unknown target: {name}")
-    return TARGETS[name]
-```
-
-When in doubt: if you'd write an `assert`, raise an exception instead—it's easier for callers to catch.
-
-## DTOs
-
-Wire types — anything emitted by `lf --json` and mirrored in Rust and Swift — get no defaults. Every field is either required or explicitly Optional.
-
-- No `#[serde(default)]`, no `Default` derive, no `#[serde(default = "...")]` on DTOs.
-- No Swift init default parameters on DTO structs. No `?? value` fallbacks in JSON parsing — if the field can be absent, its type is `T?`.
-- No Rust `Option<T>` with `#[serde(default)]` masquerading as "empty is fine"; decide required-or-Optional and surface it in the type.
-
-Why: hand-maintained mirrors drift when defaults live at different layers. A field that quietly defaults to `true` in one language and `false` in another produces a silent split-brain. The rule kills the drift at the source — if every absent field is either a parse error or an explicit `nil`, the models stay in lockstep without ceremony.
-
-Round-trip fixture tests under `tests/fixtures/dto/` cover the wire shape. Adding a DTO field means adding it to the fixture and to each language's fixture test.
-
-UI state types that *carry* DTO values (e.g. Swift `SessionState`) aren't DTOs. Defaults there are a UX choice, not a drift bug.
+- From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
+- Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
+- Fixtures that change process environment share `loopflow_test_support::env_lock`.
+- `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
+- Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
+- Tests that redirect process-wide stdout/stderr run in isolated child processes.
+- Lifetime tests start a terminal owner with `Fixture::serve(true, …)`; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
+- Native library fixtures use `TestLedgerGuard` so invocation and capture share a store; pin blocking workers with `journal::with_test_ledger`.
 
 # Documentation
 
-The best documentation is simple code. Descriptive names, type hints, and clear APIs often suffice.
-
-The worst documentation is wrong documentation. If it can drift from the code, it will. Update docs when you change code—or delete them.
-
-Put documentation next to code. A few paragraphs at the top of a key file beats a separate doc that nobody maintains.
-
-Skip obvious docstrings:
+The best documentation is simple code. The worst is wrong documentation: update
+docs when you change code, or delete them. Keep docs next to the code; give
+each module a `README.md` for users and use inline comments for maintainers.
+Skip docstrings that restate the signature:
 
 ```python
-# Bad
-def open_warp(path: Path) -> None:
-    """
-    Open Warp terminal at the given path.
-
-    Args:
-        path: The path to open Warp at
-
-    Returns:
-        None
-    """
-    subprocess.run(["open", f"warp://action/new_window?path={path}"])
-
-# Good
 def open_warp(path: Path) -> None:
     """Open Warp terminal at path."""
-    subprocess.run(["open", f"warp://action/new_window?path={path}"])
 ```
 
-Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
+Start features with a design doc under `scratch/`; after implementation,
+`lf realign` reconciles plan, code and memory.
 
-Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits. The code and its README should speak for themselves.
+User docs use the shortest command that resolves (`lf land`, `lf wt create`);
+keep canonical paths in command references. `documented_commands` checks
+examples against Clap. `docs/lf-reference.md` commits only its preamble;
+`website/dev.py sync-docs` appends the command tree. Help text lives in Clap.
 
-## User-Facing Documentation
-
-Guides, examples, skills and agent instructions use the shortest uniquely
-resolving command, such as `lf land`, `lf wt create` or `lf pr publish`.
-Keep canonical owner paths in command references and help, where the tree is
-the point. Preserve established short names; do not expand `wt` to `worktree`.
-`documented_commands` checks example ambiguity against Clap; adding a competing
-command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` commits only its authored preamble; `website/dev.py sync-docs`
-appends the command tree from `lf help --all --json` (`LF_BIN` or `lf` on PATH).
-Help text lives in Clap, so a CLI change edits no reference file.
-
-User docs follow the same principles as prompts (see PROMPTS.md):
-
-**Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A skill is a markdown file containing instructions."
-
-**Examples carry the weight.** Code blocks are the primary content. Prose exists to connect them. If you can cut a paragraph and the examples still make sense, cut it.
-
-**Tables for reference, not education.** Tables work for quick lookup once you understand the concepts. Lead with examples that teach.
-
-**No throat-clearing.** Cut "In order to...", "You can use...", "This allows you to...". Just show it.
+Write docs the way the README reads: what you get, then the command.
 
 ```markdown
 # Bad
 In order to run a skill with clipboard content, you can use the -c flag.
-This allows you to paste an error and have the agent fix it.
 
 # Good
 lf debug -c    # paste an error, watch it fix
@@ -507,128 +346,64 @@ lf debug -c    # paste an error, watch it fix
 
 # Testing
 
-Test user behavior, not implementation details. A good test proves that something users care about actually works. Most tests don't meet that bar. Delete them.
+Test what people would notice, not implementation details. A test that wouldn't
+fail when the feature breaks isn't worth keeping. Use a mix of smoke tests,
+edge cases at real boundaries, and tests of what users expect.
 
-Aim for a mix:
-- **Smoke tests**: Does the system run without crashing?
-- **Edge case tests**: What happens at boundaries?
-- **Value tests**: Does this feature do what users expect?
+Mock network, databases, file systems (when testing logic), subprocesses and
+slow operations. Don't mock to check internal wiring: assert on results, not on
+calls. Elaborate mock setup means the code does too much, the test checks the
+wrong thing, or it should be an integration test.
 
-## Verification Cadence
+Never reshape production code for tests: no factory traits, interfaces,
+constructor overloads or parameters that exist only for tests. Use closures,
+`#[cfg(test)]` or test-only modules. For runtime dispatch, use an enum or a
+function pointer.
 
-- **Implement/compress:** build changed code and run its focused test. Skip
-  builds for prose-only edits; no change or still-applicable pass means no rerun.
-- **Realign:** reconcile the plan; test only a repair or a concrete uncertainty.
-- **Lint:** formatting and static analysis only.
-- **Rebase:** no tests when conflict-free; after conflicts, one focused test.
-- **Gate:** affected suites and automated acceptance checks once. Reuse only
-  identical tracked/untracked content and the identical command plan.
-- **CI/release:** the full machine-runnable matrix and deployment checks.
-- **Demo/review:** the real user experience and people's judgment.
+## When to run what
 
-Required checks run headless, without a display session, permission dialog or
-person. Use app builds and view/interaction tests for Desktop. An unavailable
-check goes to capable gate/CI or gets a headless equivalent; it never blocks
-an earlier Graph step. Actual build/test failures still need repair. Keep scratch
-check results to one line with command, result and any deferred owner.
-Do not rerun broader checks because another lifecycle phase began.
+- **implement / compress:** build the changed code and run its focused test. Skip builds for prose-only edits.
+- **realign:** reconcile the plan; test only a repair or a real doubt.
+- **lint:** formatting and static analysis.
+- **rebase:** no tests when conflict-free; one focused test after conflicts.
+- **gate:** affected suites and automated acceptance once, reusing results only for identical content and command plan.
+- **CI / release:** the full matrix and deployment checks.
+- **qa / demo / review:** the real product, as people use it.
+
+Required checks run headless, with no display, permission dialog or person.
+Desktop uses app builds and view tests. A check that can't run here goes to
+gate or CI; it never blocks an earlier step. Real failures still get fixed.
+Scratch keeps one line per check: command, result, and who runs it later.
 
 Headless Swift view tests inspect production leaf views directly when a parent
-requires `@Environment` Observation objects; ViewInspector cannot inject those
-objects. Keep existing leaf views internal for `@testable` access rather than
-adding test-only constructors or mounting a window.
-Keep mounted terminal frame checks in `.requiresDisplay` suites.
-
-## When to Mock
-
-Mock to isolate your code from things that shouldn't be part of unit tests:
-- **External systems**: Network calls, databases, file systems (when testing logic, not I/O)
-- **Side effects**: Sending emails, writing logs, spawning processes
-- **Slow operations**: Anything that would make tests take seconds instead of milliseconds
-
-Don't mock to verify internal wiring. If a test's assertions are just "did we call the mock with the right args?"—that's testing implementation, not behavior. The test will break when you refactor, even if the feature still works.
-
-```python
-# Bad: testing that we called the mock correctly
-def test_send_notification():
-    with patch("app.email.send") as mock_send:
-        notify_user(user)
-        mock_send.assert_called_once_with(user.email, ANY)
-
-# Good: mock the side effect, test the behavior
-def test_notify_user_returns_success():
-    with patch("app.email.send"):  # prevent actual email
-        result = notify_user(user)
-        assert result.success
-
-# Better: if possible, test without mocking
-def test_notification_message_format():
-    msg = build_notification(user)
-    assert user.name in msg.body
-```
-
-If a test requires elaborate mock setup, it's usually a sign that either:
-1. The code under test does too much (refactor it)
-2. You're testing implementation rather than behavior (test something else)
-3. This should be an integration test, not a unit test (move it)
-
-**Never reshape production code for tests.** If you're adding a factory trait, an interface, a constructor overload, or an extra parameter solely because tests need it, stop. The production code's shape should be dictated by production needs. Use closures, conditional compilation (`#[cfg(test)]`), or test-only modules — not abstractions that exist to satisfy test doubles.
-
-**No factory patterns.** Factory traits, abstract factories, and provider registries are almost always over-engineering. A function or a closure does the same job without the ceremony. If you need runtime dispatch, use an enum or a function pointer — not a trait with one method and one real implementation.
+needs `@Environment` Observation objects, which ViewInspector can't inject.
+Keep those views internal for `@testable` access. Mounted terminal frame checks
+stay in `.requiresDisplay` suites.
 
 # Review Ritual
 
-Run a Mitchell Hashimoto-style simulated code review for each unit of work before calling it done. Use the spirit, not cosplay: simple interfaces, boring operational behavior, clear ownership, docs that match the code, and no abstraction that exists only to feel flexible.
-
-Ask hard questions:
+Before calling a unit of work done, review it the way Mitchell Hashimoto would:
+simple interfaces, boring operations, clear ownership, docs that match the
+code, no abstraction that exists only to feel flexible.
 
 - Can this be explained in one screen?
-- Does the API map to the real thing, or to our implementation accident?
+- Does the API map to the real thing, or to an implementation accident?
 - What breaks at 2 a.m., and will the logs say why?
-- Is this dependency, config knob, or compatibility shim earning its keep?
+- Is this dependency, knob or shim earning its keep?
 - Would deleting code make the system more true?
 
-Record concrete findings in the PR notes or fix them immediately. Do not perform theater; the review earns its place only when it changes the work.
-
-# Pre-Commit Checklist
-
-Before committing, verify:
-
-**Python:**
-- [ ] No new `Args:`/`Returns:` docstrings on functions with clear types
-- [ ] No inline imports; all imports at top of file
-
-**Rust:**
-- [ ] `cargo fmt` passes
-- [ ] `cargo clippy --all-targets -- -D warnings` passes
-- [ ] Public types derive `Debug`
-- [ ] No `unwrap()` outside tests; use `expect("reason")`
-
-**Both:**
-- [ ] No `v2_`, `_old`, `_new`, `_backup` etc.; keep one implementation, use git for history
-- [ ] Mocks prevent side effects, not verify internal wiring
-- [ ] Tests assert on results, not mock calls
-- [ ] README changes don't duplicate source code
-- [ ] Existing READMEs updated if behavior changed
+Fix what you find, or note it in the PR. The review counts only when it changes
+the work.
 
 # Git
 
-Commit messages are documentation. Explain what changed and why, not line-by-line what you did:
+Commit messages explain what changed and why, in one sentence to one paragraph:
 
 ```
-# Bad
-Add open_warp function
-Add open_cursor function
-Update cli.py to call new functions
-Fix import statement
-
-# Good
 lf ide: create worktrees as siblings to main repo
 
 Run `lf ide feature-name` to create a worktree at ../feature-name
 and open Warp + Cursor. Reuses existing worktree if branch exists.
 ```
 
-Keep messages short—one sentence to one paragraph.
-
-Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a person or AI.
+No AI attribution footers. History reads the same whoever wrote it.

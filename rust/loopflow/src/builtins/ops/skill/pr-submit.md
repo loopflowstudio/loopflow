@@ -4,26 +4,26 @@ produces: a ready PR prepared for manual merge
 ---
 Prepare the current change for the reviewer's merge click.
 
-Inspect the intended outcome, diff, proof and repository delivery requirements.
-Preserve unrelated active contributions. Fix clear readiness gaps and retain
-useful design conclusions and accepted later checks in durable PR copy before
-scratch cleanup.
+Check the intended outcome, the diff, what was run and checked, and the
+repository's delivery requirements. Fix clear readiness gaps. Submitting
+clears files added under `scratch/`, so first move into the PR copy what the
+code can't tell a later reader: what people said that shaped it, word for
+word, what a run showed, and checks that can only run after merge. Leave unrelated work out.
 
-Run `lf pr submit`. It stages the change, syncs, clears committed scratch additions,
-creates or updates the PR and marks it ready, preserving reviewers and assignees. It consumes
-valid prepared copy or generates it through pr-message. Supply explicit copy
-only for an intentional override, then check the returned scope and proof claims.
+Run `lf pr submit`. It stages the change, syncs, clears added scratch files,
+creates or updates the PR and marks it ready, keeping reviewers and assignees.
+It uses prepared copy or writes it through pr-message; pass a title or body
+only to override on purpose, then read the PR's scope and claims.
 
-If the requested handoff names reviewers, use `lf pr request-review -r <login>`
-or `-r <org/team>` on the existing PR. Do not infer reviewers from assignees.
-Read `lf pr reviews` for requests and review submissions; inline discussion stays
-on the PR page. Publishing and submitting do not themselves request reviews.
+When reviewers are named, run `lf pr request-review -r <login>` or `-r
+<org/team>` on the PR. Don't infer reviewers from assignees. `lf pr reviews`
+shows requests and submitted reviews; inline discussion stays on the PR page.
+Publishing and submitting don't request reviews.
 
-For an associated Task, leave completion to its selected work procedure after
-verified merge. Recommend a follow-up Task for a distinct outcome; continued
-publication in the same Task is supported and retains earlier PR history. Taskless delivery creates no Task or follow-up filing obligation.
-Repair a reported conflict in this checkout using the existing sync operation,
-then retry. Preserve actual errors and uncertain external effects.
+A Task's own graph completes it after merge. Suggest a follow-up Task for a
+distinct outcome; more PRs from the same Task are fine. On a conflict, repair
+it in this checkout with `lf sync`, then retry. Report real errors, and say so
+when unsure whether an external step happened.
 
-Return the PR and any unresolved blocker. Stop at the manual-merge handoff;
-do not enable auto-merge, merge, or advance a Task's Graph on the reviewer's behalf.
+Return the PR and any blocker. Stop at the merge click: don't enable
+auto-merge, merge, or advance a Task's Graph.

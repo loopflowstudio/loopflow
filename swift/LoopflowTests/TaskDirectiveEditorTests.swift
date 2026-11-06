@@ -126,7 +126,7 @@ private actor DirectiveSource {
     func read(_ args: [String], cwd: String?) async throws -> String {
         switch args.first {
         case "task":
-            guard Array(args.prefix(3)) == ["task", "edit", "issue-review"],
+            guard Array(args.prefix(3)) == ["task", "update", "issue-review"],
                   args.count == 4, args[3].hasPrefix("--notes="), cwd == "/src/loopflow" else {
                 throw RegistryQueryError("Wrong Task update target")
             }
@@ -139,7 +139,7 @@ private actor DirectiveSource {
             roadmap = original.replacingOccurrences(of: oldJSON, with: newJSON)
             written = true
             return "product: updated task issue-review"
-        case "desktop" where args.dropFirst().first == "plan":
+        case "planning" where args.dropFirst().first == "list":
             if written && outcome == .unreadable { throw RegistryQueryError("Planning offline") }
             let result = roadmap
             if let gate = nextRead {
@@ -148,8 +148,8 @@ private actor DirectiveSource {
             }
             return result
         case "wave" where args.dropFirst().first == "list": return "[]"
-        case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
-        case "history": return #"{"truncated":false,"items":[]}"#
+        case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
+        case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("Unexpected directive proof operation")
         }
     }

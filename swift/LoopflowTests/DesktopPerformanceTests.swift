@@ -1024,19 +1024,20 @@ struct DesktopPerformanceTests {
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await planning.count(args)
             switch args.first {
-            case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
-            case "desktop" where args.dropFirst().first == "plan": return await planning.read()
+            case "machine" where args.dropFirst().first == "self": return "{\"id\":\"\(fixtureMachineId)\"}"
+            case "planning" where args.dropFirst().first == "list": return await planning.read()
             case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
-            case "usage": return args.contains("--context") ? contextJSON : historyJSON
-            case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
-            case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
-            case "task" where args.contains("--files"):
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "session" where args.dropFirst().first == "usage": return historyJSON
+            case "task" where args.dropFirst().first == "context": return contextJSON
+            case "task" where args.dropFirst().first == "show":
+                return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
+            case "task" where args.dropFirst().first == "changes":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
         }
@@ -1462,7 +1463,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session resume" || verb == "machine id"
+            if let fixture, verb == "session resume" || verb == "machine self"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }
@@ -1471,8 +1472,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.prefix(2) == ["desktop", "plan"], !args.contains("--task") {
-                let owned = try await fixture.read(["desktop", "plan", "--all", "--json"])
+            if args.prefix(2) == ["planning", "list"], !args.contains("--task") {
+                let owned = try await fixture.read(["planning", "list", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
@@ -1484,7 +1485,7 @@ actor SnapshotReads {
                 // The synthetic conversation remains explicitly discoverable after
                 // client exit. Copied entries and their paging cursor stay intact.
                 if let page = value as? [String: Any], !(page["next"] is NSNull) { return .success(output) }
-                let owned = try await fixture.read(["desktop", "sessions", "--all", "--history", "--json"])
+                let owned = try await fixture.read(["session", "list", "--all", "--history", "--json"])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any])
                 if var page = value as? [String: Any] {
                     if page["next"] is NSNull { page["entries"] = (try #require(page["entries"] as? [Any])) + extra }
@@ -1505,7 +1506,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard args.first == "history" || ["wave show", "wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["wave show", "wave list", "wave status", "session list", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

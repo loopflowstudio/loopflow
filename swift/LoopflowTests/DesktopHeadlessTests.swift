@@ -79,7 +79,7 @@ struct DesktopHeadlessTests {
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":[],"next":null}"# }
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -342,9 +342,9 @@ struct DesktopHeadlessTests {
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(
             run: { args, _ in
-                if args.prefix(2) == ["desktop", "plan"] { return String(decoding: planning, as: UTF8.self) }
+                if args.prefix(2) == ["planning", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.contains("ship") {
+                    || args.contains("ship") || args.prefix(2) == ["task", "hold"] {
                     await started.add(args)
                 }
                 return "{}"
@@ -427,8 +427,8 @@ struct DesktopHeadlessTests {
             try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
         try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
-        for _ in 0..<200 where await started.calls.last?.contains("--stop") != true { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["--task", shipping.task.identifier, "ship", "--stop", "--json"])
+        for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
 
         // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
         var undone = false

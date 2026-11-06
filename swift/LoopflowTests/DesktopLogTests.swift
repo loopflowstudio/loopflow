@@ -34,7 +34,7 @@ struct DesktopLogTests {
         log.begin()
         let journal = LaunchJournal(directory: url.deletingLastPathComponent())
         journal.begin(app: "9.9.9", preMainMs: 1)
-        journal.read(["desktop", "plan", "--all"], ms: 5, ok: true)
+        journal.read(["planning", "list", "--all"], ms: 5, ok: true)
         journal.read(["task", "diff", "task_87e0"], ms: 5, ok: false)
         journal.killed(["task", "diff", "task_87e0"])
         let sample = DesktopVitals.Sample(footprintMB: 412, peakMB: 600, fds: 61, threads: 40)
@@ -42,7 +42,7 @@ struct DesktopLogTests {
         #expect(journal.takeTally() == LaunchJournal.Tally())
 
         var storm = LaunchJournal.Tally()
-        storm.reads = ["task diff": 1000, "desktop plan": 3, "session list": 2, "monitor ps": 1]
+        storm.reads = ["task diff": 1000, "planning list": 3, "session list": 2, "process list": 1]
         storm.killed = ["task diff": DesktopVitals.stormKills + 1]
         DesktopVitals.beat(sample, storm, log: log)
         log.flush()
@@ -50,10 +50,10 @@ struct DesktopLogTests {
         let lines = String(decoding: try Data(contentsOf: url), as: UTF8.self).split(separator: "\n").map(String.init)
         #expect(lines.count == 2)
         #expect(lines[0].contains(
-            " INFO loopflow::desktop: vitals footprint_mb=412 peak_mb=600 fds=61 threads=40 reads=2 failed=1 killed=1 top=\"desktop plan×1,task diff×1\" pid="))
+            " INFO loopflow::desktop: vitals footprint_mb=412 peak_mb=600 fds=61 threads=40 reads=2 failed=1 killed=1 top=\"planning list×1,task diff×1\" pid="))
         #expect(!lines[0].contains("task_87e0"))
         #expect(lines[1].contains(" WARN loopflow::desktop: lf reads cancelled at storm rate "))
-        #expect(lines[1].contains("killed=101 top=\"task diff×1000,desktop plan×3,session list×2\""))
+        #expect(lines[1].contains("killed=101 top=\"task diff×1000,planning list×3,session list×2\""))
     }
 
     @Test("A sample of this process reads real vitals")

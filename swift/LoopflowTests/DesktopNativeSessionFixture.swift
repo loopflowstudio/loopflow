@@ -43,7 +43,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard args.first == "history" || ["wave show", "wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "graph list"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard ["wave show", "wave list", "machine self", "session list", "session history", "task status", "task files", "task file", "task diff", "graph list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -51,7 +51,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     func records() async throws -> [SessionRecord] {
         let output = try await Task.detached {
-            try capture([cli, "desktop", "sessions", "--all", "--history", "--json"])
+            try capture([cli, "session", "list", "--all", "--history", "--json"])
         }.value
         return try JSONDecoder().decode([SessionRecord].self, from: Data(output.utf8))
     }

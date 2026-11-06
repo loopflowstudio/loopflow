@@ -12,7 +12,7 @@ struct PortfolioServiceTests {
         let lf = try BuiltLf(home: home)
         // Installation prepares the Machine before Desktop connects. Reading
         // Portfolio initializes the fixture without choosing a portfolio mode.
-        _ = try await lf.run(["portfolio", "--json"])
+        _ = try await lf.run(["desktop", "portfolio", "--json"])
         let query = lf.query
         let service = PortfolioService(query: query)
         await service.refresh()
@@ -107,11 +107,11 @@ private actor PortfolioTransport {
     func run(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("Unavailable") }
         if args.contains("manual") { configured = true; mode = "manual"; paths = [] }
-        if args.count > 3, args[1] == "add" || args[1] == "import" {
-            configured = true; mode = "manual"; paths = [args[2]]
+        if args.count > 4, args[2] == "add" || args[2] == "import" {
+            configured = true; mode = "manual"; paths = [args[3]]
         }
-        if args.count > 3, args[1] == "folder" {
-            configured = true; mode = "folder"; root = args[2]; paths = []; readingError = "Folder unavailable"
+        if args.count > 4, args[2] == "folder" {
+            configured = true; mode = "folder"; root = args[3]; paths = []; readingError = "Folder unavailable"
         }
         let json: [String: Any] = ["configured": configured, "mode": mode, "root": root,
                                   "repos": paths.map { ["path": $0, "error": NSNull()] as [String: Any] },

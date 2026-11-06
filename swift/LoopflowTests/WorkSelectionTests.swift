@@ -8,7 +8,7 @@ struct WorkSelectionTests {
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
         let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
-            guard args == ["desktop", "view", "state:backlog", "--plan", "--json"], cwd == "/repo" else {
+            guard args == ["desktop", "view", "show", "state:backlog", "--json"], cwd == "/repo" else {
                 throw RegistryQueryError("Unexpected command while planning")
             }
             return text

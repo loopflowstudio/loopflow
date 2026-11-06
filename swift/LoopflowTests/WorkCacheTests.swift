@@ -369,10 +369,10 @@ private actor Source {
             }
         }
         switch args.first {
-        case "desktop" where args.dropFirst().first == "plan": return roadmap
-        case "desktop" where args.dropFirst().first == "sessions": return sessions
+        case "planning" where args.dropFirst().first == "list": return roadmap
+        case "session" where args.dropFirst().first == "list": return sessions
         case "wave": return "[]"
-        case "history": return #"{"truncated":false,"items":[]}"#
+        case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

@@ -9,8 +9,8 @@ revision. The replacement is implemented at `f86a9a3e6`, integrated with main at
 accepted the scheduled cleanup and generic shell-launch revisions below; those
 are implemented at `d14b32ada0`, with focused verification complete and the same
 review/publication boundary. Concept review found that viewer return must revoke
-queued shell closure before the next sweep; the repair below is implemented in
-the working tree. Focused verification passed; broader gate and native
+queued shell closure before the next sweep; the repair below is committed at
+`6d42ec8ce`. Focused verification passed; broader gate and native
 demonstration follow. No new product decision is needed.
 
 ## Accepted follow-up — scheduled cleanup and shell launch
@@ -251,8 +251,16 @@ behavior is not established by this branch's transport tests.
 
 ## Concept review — November 6, scheduled follow-up
 
-**Design refinement: returning viewing revokes queued cleanup independently of
-the sweep cadence.** No open product choice. This follows Jack Heart's accepted
+**Current outcome at `6d42ec8ce`: no further design change and no open product
+choice.** Source review follows completion/leave through queued closure, viewer
+return between sweeps, interrupted cleanup and reattachment. The repair below
+implements the required cancellation; the finite queue, shared SSH viewer stream
+and Desktop-supplied startup resources need no additional product concept.
+Existing usage docs describe Close/Undo and recovery consistently. Gate and native
+demonstration remain the next proof; this review reran no execution checks.
+
+The preceding design refinement required returning viewing to revoke queued
+cleanup independently of the sweep cadence. It follows Jack Heart's accepted
 “return cancels cleanup” contract; it changes neither retention nor timing policy.
 The OS scheduler decides when to attempt cleanup. A persisted `closing` phase
 cannot authorize a later effect after a Task Session viewer has returned.
@@ -279,7 +287,7 @@ reconciliation/`advance` before checking cancellation; they did not exercise the
 owner consuming a close between passes. This is a source-derived counterexample,
 not a newly run process demonstration.
 
-Repair contract (implemented in the working tree):
+Repair contract (implemented at `6d42ec8ce`):
 
 - Record renewed Session viewing and revoke that Task's pending retirement and
   retirement-generated shell closes together. Use current Session-to-Task
@@ -320,15 +328,12 @@ and cleanup cancellation. This replaces separate writes and retry tracks
 for the same observation, including on owner exit. Unchanged Process values do
 not advance store revisions; a failed transaction retries the whole observation.
 
-Focused checks (inherited `LF_*` cleared, disposable stores; November 6):
-
-- `cargo test -p loopflow --lib returning_viewers_revoke_closes_and_retry_without_a_sweep` — passed.
-- `cargo test -p loopflow --lib -- viewer_return_and_close_cancellation_commit_together automatic_shell_close_rechecks_task_viewing_before_consuming_stale_intent workspace_retirement_waits_for_final_work_drafts_and_pending_requests retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion` — three passed; rollback assertion initially failed on nullable `viewed`, corrected to `IS 1` and verified below.
-- `cargo test -p loopflow --lib viewer_return_and_close_cancellation_commit_together` — passed after fixture-assertion correction; both recorder paths roll back viewing and close cancellation together.
-- `cargo test -p loopflow --test transport_tests returning_task_viewer_cancels_shell_close_without_another_sweep` — passed, real shell/job survival and explicit Close, no intervening sweep.
-- `cargo fmt --all -- --check`; `git diff --check` — passed. Existing macOS compact-unwind linker warning remains; broader gate owns Clippy and affected suites.
-- `cargo test -p loopflow --lib -- task_retirement::tests transport::lifetime::tests ops::task::retirement::tests pending_requests_hold_the_owner_until_the_current_attachment_settles_them` — 21 passed after consolidating viewer recording; same macOS linker warning.
-- `cargo test -p loopflow --test transport_tests -- returning_task_viewer_cancels_shell_close_without_another_sweep session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence` — 2 passed after recorder consolidation; no intervening sweep, shell/job survival and explicit Close verified.
+Focused verification at `6d42ec8ce:scratch/loo-717-shell-lifetimes.md`, this
+section: 21 library and two real transport tests passed after recorder
+consolidation, with formatting clean. The initial nullable-`viewed` rollback
+assertion was corrected and passed; the macOS compact-unwind linker warning
+remains. These results cover the current code and are reused, not rerun for
+prose reconciliation. Broader gate owns Clippy and affected suites.
 
 ## Scheduled cleanup and generic launch — November 6 implementation
 
@@ -387,12 +392,17 @@ Git references to the superseded handoff and external-host design.
 
 ## Checks and remaining proof
 
-November 6 reconciliation found no bounded implementation mismatch; the later
-concept review above found that queued shell closure could outlive returning Session
-viewing until the next sweep. The working-tree repair covers that interleaving.
-The obsolete worker and Ghostty-coupled core launch symbols are absent. Earlier
-scheduled-sweep checks did not cover this interleaving; the concept-review
-regressions above do.
+November 6 reconciliation checked the committed repair at `6d42ec8ce`: one
+transaction records viewing and cancels automatic closes, and owners recheck
+Task viewing and retirement intent before consuming automatic closure. The
+no-sweep transport regression covers a passive viewer on another Session and
+brief return/leave; library checks cover ordinary shells, rollback and unreadable
+cleanup state. Explicit Close remains effective. The README's Undo promise is
+corrected. No further bounded implementation mismatch was found. The local
+`origin/main` remains `c8d7a7f4a8`; no newer upstream change is available in that
+reference. Product has no child memory directories in this checkout.
+
+Reconciliation check: `git diff --check`; `lf context` — passed; memory and scratch fit both size targets.
 
 The earlier publication record at
 `d14b32ada0:scratch/loo-717-shell-lifetimes.md`, **Publication checks**, applies to

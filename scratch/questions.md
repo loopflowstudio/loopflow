@@ -24,7 +24,7 @@ command blocks, LF availability and identity; reconnect never replays bootstrap.
 The authoritative contract contains the deletion list and verification cases.
 The follow-up is implemented at `d14b32ada0`; focused cleanup, installation,
 local/loopback-SSH shell and headless Desktop checks passed. Subsequent concept
-review found a cancellation gap described below, now repaired in the working tree.
+review found a cancellation gap described below, now repaired at `6d42ec8ce`.
 Focused verification passed; broader gate and publication precede demo review.
 No ship, installation or live-store migration
 approval is implied.
@@ -102,7 +102,7 @@ return and cancellation together and recheck current Task retention when an owne
 consumes automatic closure. Keep explicit Close, Session-only holds, ordinary
 conversation pass-through and the finite scheduled sweep. The working design
 contains the source counterexample and the required no-intervening-sweep test.
-The working-tree repair records return and cancellation atomically, including a
+The repair at `6d42ec8ce` records return and cancellation atomically, including a
 brief return/leave coalesced between recorder polls. One dated observation now
 records both the viewer flag and checkout hold, replacing separate writes/retries.
 Owners reuse the sweep's
@@ -110,7 +110,7 @@ viewer judgment before automatic closure; explicit Close remains effective.
 The old Desktop README promise that Undo keeps a closed shell running is corrected.
 Focused regressions passed, including real shell/job survival without an
 intervening sweep. The nullable fixture assertion found during rollback testing
-was corrected and passed. Commands/results are in the design; gate and native
+was corrected and passed. The design links the recorded commands/results; gate and native
 demo remain separate.
 
 Native Desktop and Rex demonstration remains at feature/demo. Framing tests are
@@ -132,5 +132,12 @@ integration, alongside Session-only retention and the single viewer protocol.
 No Product child memories exist in this checkout. Earlier
 credential failures and the proposed memory correction remain at
 `d5cab9ba60:scratch/questions.md`; they add no remaining implementation work.
-The current plan separates the follow-up's focused passes from the older
-publication checks, broader gate and native demonstration still owed.
+Source inspection confirms the committed cancellation repair and README correction;
+no further bounded mismatch was found. Existing focused passes remain applicable.
+The plan separates those passes from the older publication checks, broader gate
+and native demonstration still owed.
+
+Concept-review recheck at `6d42ec8ce`: no further design change or open product
+choice. The working design and `concept-review.html` now distinguish the repaired
+between-sweep cancellation from its historical counterexample. Gate and native
+demonstration remain unverified by this source-only review.

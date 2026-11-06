@@ -27,25 +27,25 @@
     LOO-717 · concept-review · November 6, 2026<br>
     Built from <a href="loo-717-shell-lifetimes.md">shell lifetimes</a>,
     <a href="questions.md">decisions</a>, <code>task_retirement.rs</code>,
-    <code>retirement.rs</code>, <code>sessions.rs</code>,
-    <code>transport/lifetime.rs</code> and <code>swift/README.md</code>.
+    <code>retirement.rs</code>, <code>workspace.rs</code>,
+    <code>transport/lifetime.rs</code>, <code>transport/stream.rs</code>
+    and <code>swift/README.md</code>. Source: <code>6d42ec8ce</code>.
   </header>
   <h1>Return cancels cleanup before the next sweep.</h1>
-  <p><strong>Design refinement; no open product choice.</strong> The accepted return
-    rule already requires this. The proposed repair changes when pending closure
-    loses permission, while keeping the one-minute Machine sweep.</p>
+  <p><strong>No further design change or open product choice.</strong> The accepted
+    return rule is implemented. Recording renewed viewing revokes queued closure
+    without waiting for the one-minute Machine sweep.</p>
 
-  <h2>The mismatch</h2>
+  <h2>The repaired mismatch</h2>
   <blockquote>
-    The sweep queues shell closure and exits. A Task Session viewer returns.
-    Before the next sweep, the shell owner can still consume the old request
-    and end its jobs. The checkout survives; the shell state is lost.
+    Before: the sweep queued shell closure and exited. A Task Session viewer
+    returned, but a shell owner could still consume the old request before the
+    next sweep. The checkout survived; the shell state was lost.
   </blockquote>
-  <p><strong>Current source:</strong> viewer recording updates only the Process.
-    Cancellation lives in retirement reconciliation. The shell owner's
-    <code>Ending::confirm</code> accepts <code>close_requested=2</code> when
-    <code>owner_retiring</code> still finds <code>closing</code>. Existing return
-    tests reconcile before checking the result.</p>
+  <p><strong>Now:</strong> one transaction records the Process's dated viewing and
+    cancels automatic closes. <code>Ending::confirm</code> uses current Task
+    retention and retirement intent before closing. A stored <code>closing</code>
+    phase alone cannot authorize the effect.</p>
 
   <h2>Actions → concepts → APIs</h2>
   <dl>
@@ -53,9 +53,9 @@
     <dd>After fifteen minutes absent, <code>task retire</code> queues owned closure.
       SQLite keeps progress and retry state; later passes finish interrupted work.</dd>
     <dt>Return → Session viewer → record and revoke together</dt>
-    <dd><strong>Proposed repair:</strong> recording renewed viewing also cancels that
-      Task's queued retirement closes. Passive viewers count. Owners recheck current
-      Task retention before consuming automatic closure.</dd>
+    <dd><code>record_owner_viewer_hold</code> records viewing and cancels that Task's
+      queued retirement closes together. Passive viewers count.
+      <code>owner_retiring</code> rechecks before automatic closure.</dd>
     <dt>Reconnect → same shell receipt → attach</dt>
     <dd>Local and SSH connections reattach without replaying startup. Desktop supplies
       integration resources only on creation. New Shell creates fresh execution.</dd>
@@ -66,19 +66,20 @@
     starts a new absence window. Explicit Close still ends the shell; Undo restores
     identity and history. Already-ended execution cannot be revived by cancellation.
     Ordinary shells grant no hold, and LF never closes Rex-owned shells.</p>
-  <p><strong>Proposed usage correction:</strong> “⇧⌘T restores the last closed tab's
+  <p><strong>Current Desktop usage:</strong> “⇧⌘T restores the last closed tab's
     identity and history. Close ends its shell and jobs; New Shell starts fresh
-    execution.” The old Desktop README sentence promises a still-running shell.</p>
+    execution.” No new host registry, terminal protocol or cleanup worker is needed.</p>
 
   <footer>
-    <strong>Next checks — no product question pending</strong>
+    <strong>Review outcome — no product question pending</strong>
     <ol>
-      <li>Queue closure, record a Session viewer's return, then let the shell owner
-        judge it without another sweep. Its shell and jobs must survive.</li>
-      <li>Cover passive viewing on another Session, brief return/leave, explicit
-        Close, and an ordinary shell viewer that supplies no hold.</li>
-      <li>After repair, run gate and native demo. This review inspected source;
-        it ran no process, native-host or physical remote-Machine checks.</li>
+      <li>The recorded focused regressions cover shell and job survival after a
+        passive viewer returns, including return/leave without another sweep.
+        This review inspected those paths; it did not rerun the checks.</li>
+      <li>Gate still owns affected suites. Native Desktop/Rex and physical
+        remote-Machine behavior remain unproved.</li>
+      <li>No implementation direction or product decision was added. The following
+        Graph step decides navigation; publication and demo remain separate.</li>
     </ol>
   </footer>
 </main>

@@ -290,14 +290,15 @@ or physical remote-Machine acceptance. Prior designs/limits:
 `d5cab9ba60:scratch/loo-717-shell-lifetimes.md`.
 
 Jack's November 6 follow-up replaces per-Task waiting workers with one minute-based
-OS sweep per Machine over the existing SQLite retirement queue. Each pass exits;
-held rows, interrupted cleanup and failures remain recoverable. Backoff is separate
-from absence; returning viewers revoke queued cleanup. Fifteen-minute eligibility
-normally reaches a sweep in 15–16 minutes while awake. Installation provisions
-cleanup separately from updating; development fixtures register no account job.
-The shared shell launcher is generic. Desktop supplies its maintained integration
-script and resource bytes to the destination only on creation; reattachment never
-replays startup. Rex retains its own shell integration and ownership.
+OS sweep per Machine over SQLite retirement rows; held rows, interrupted cleanup
+and failures remain recoverable. Backoff stays separate from absence. Fifteen-minute
+eligibility normally reaches a sweep in 15–16 minutes while awake. Cleanup and
+updating have separate installation jobs; fixtures register neither.
+Review found a queued close could outlive returning viewing between sweeps.
+Record return and close cancellation atomically; owners recheck current Task
+retention before consuming automatic closure. Explicit Close remains effective.
+The generic shell launcher accepts Desktop's integration script/resources only
+on creation; reattachment never replays startup. Rex owns its integration.
 
 ## Session and operate pairs (2026-10-05)
 

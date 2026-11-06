@@ -758,7 +758,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|task| task["id"] == fixture.task.id.as_str()));
+            .any(|task| task["task"]["id"] == fixture.task.id.as_str()));
         let list: serde_json::Value =
             serde_json::from_str(&run(&target, right.path(), &["wave", "list", "--json"])).unwrap();
         let wave = list

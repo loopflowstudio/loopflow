@@ -166,7 +166,7 @@ metrics and Session history; no process needs to be running.
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
 use the same binding, and `lf repository` covers repositories without Work.
-`lf repository --bind ID` explicitly associates even an established checkout.
+`lf config repository --bind ID` explicitly associates even an established checkout.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no

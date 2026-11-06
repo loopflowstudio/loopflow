@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
         let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
         let query = RegistryQuery(watchRead: { args, cwd in
-            guard args == ["--machine", "peer", "--repository", "plan", "desktop", "task", "task", "--json", "--watch"], cwd == nil else {
+            guard args == ["--machine", "peer", "--repository", "plan", "task", "show", "task", "--json", "--watch"], cwd == nil else {
                 throw RegistryQueryError("A peer run page must never use local execution")
             }
             let body = "{\"overview\":\(overview),\"graph_processes\":[\(detail)],\"comments\":{\"identifier\":\"task\",\"comments\":[],\"pending_sync\":[],\"conflicts\":{},\"refresh_error\":null},\"execution\":null,\"row\":null}"
@@ -448,7 +448,7 @@ struct RegistryQueryTests {
         let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
         let query = RegistryQuery { args, cwd in
             #expect(args == [
-                "history", "--since", "7d", "--limit", "50",
+                "session", "history", "--since", "7d", "--limit", "50",
                 "--wave", "product", "--project", "mac-surface-ux",
                 "--task", "W2-144", "--json",
             ])

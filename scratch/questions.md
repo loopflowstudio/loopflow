@@ -434,3 +434,8 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   the cached read). A new plan replaces the current Project's content in
   place, so a chapter's history is the retained review, not a completed
   Project. Authoring a Planned Project still needs a Linear writer.
+- **Bare `lf repository` stays the identity read.** Step 1 made `repository`
+  a subcommand owner, which turned the released `lf repository [--json]`
+  (the identity read `lf config repository` keeps for `--bind`/`--relocate`)
+  into Clap help. The owner now takes an optional subcommand: bare prints the
+  identity, `--json` the record; the edits stay under `config repository`.

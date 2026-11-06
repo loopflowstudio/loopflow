@@ -1779,9 +1779,12 @@ fn run() -> anyhow::Result<()> {
                     | Commands::Ship { .. }
                     | Commands::Wave { .. }
                     | Commands::Repository {
-                        cmd: loopflow::lf::RepositoryCommand::Release { .. }
-                            | loopflow::lf::RepositoryCommand::Ci { .. }
-                            | loopflow::lf::RepositoryCommand::Planning { .. }
+                        cmd: Some(
+                            loopflow::lf::RepositoryCommand::Release { .. }
+                                | loopflow::lf::RepositoryCommand::Ci { .. }
+                                | loopflow::lf::RepositoryCommand::Planning { .. }
+                        ),
+                        ..
                     }
                     | Commands::ContextBlock {
                         moment: ContextMoment::Start
@@ -2850,7 +2853,11 @@ fn execute_command(
             }
         }
         Some(Commands::Ops(cmd)) => dispatch_ops(cmd, cli, args),
-        Some(Commands::Repository { cmd }) => dispatch_repository(cmd, args),
+        Some(Commands::Repository { cmd: Some(cmd), .. }) => dispatch_repository(cmd, args),
+        // Bare `lf repository`: the identity read `lf config repository` keeps for its edits.
+        Some(Commands::Repository { cmd: None, json }) => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::work_route::identity(None, None, false, *json)
+        }),
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {

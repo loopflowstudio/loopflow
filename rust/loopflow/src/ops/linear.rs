@@ -1814,22 +1814,39 @@ fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool>
         team: Some(team_id.to_string()),
     })
     .map_err(|error| OpsError::Message(error.to_string()))?;
+    let config_error =
+        |error: anyhow::Error| OpsError::Message(format!("{}: {error:#}", path.display()));
+    let original = crate::config::files::read_text(&path).map_err(config_error)?;
+    let mut document: serde_yaml_ng::Value = if original.trim().is_empty() {
+        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
+    } else {
+        serde_yaml_ng::from_str(&original).map_err(|error| config_error(error.into()))?
+    };
+    if !document.is_mapping() {
+        return Err(OpsError::Message(format!(
+            "repository config {} must be a YAML mapping",
+            path.display()
+        )));
+    }
+    let previous = document.clone();
+    let written = crate::config::keys::canonicalize(
+        &mut document,
+        &["planning"],
+        crate::config::keys::Root::General,
+    );
+    crate::config::settings::insert(
+        &mut document,
+        &written.iter().map(String::as_str).collect::<Vec<_>>(),
+        planning,
+    );
+    if document == previous {
+        return Ok(false);
+    }
     std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
-    crate::config::files::update(&path, |document| {
-        let previous = document.clone();
-        let written = crate::config::keys::canonicalize(
-            document,
-            &["planning"],
-            crate::config::keys::Root::General,
-        );
-        crate::config::settings::insert(
-            document,
-            &written.iter().map(String::as_str).collect::<Vec<_>>(),
-            planning,
-        );
-        Ok(*document != previous)
-    })
-    .map_err(|error| OpsError::Message(format!("{}: {error:#}", path.display())))
+    // The committed file takes no lock file beside it; comments and order stay.
+    let text = crate::config::files::edited_text(&original, &document).map_err(config_error)?;
+    crate::config::files::atomic_write(&path, &text).map_err(config_error)?;
+    Ok(true)
 }
 
 /// A default team key (Task prefix) derived from the repository name: the first three

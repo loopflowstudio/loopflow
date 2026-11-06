@@ -272,7 +272,8 @@ impl Cli {
                 _ => false,
             },
             Some(Commands::Repository {
-                cmd: RepositoryCommand::Release { cmd },
+                cmd: Some(RepositoryCommand::Release { cmd }),
+                ..
             }) => matches!(
                 cmd,
                 ReleaseCommand::Run { .. }
@@ -536,11 +537,15 @@ pub enum Commands {
     },
     #[command(flatten)]
     Ops(OpsCommand),
-    /// This repository: where it exchanges planning, its releases, CI, people
-    /// and size, and its checkout on this Machine
+    /// This repository: its identity and checkout, where it exchanges planning,
+    /// its releases, CI, people and size
+    #[command(args_conflicts_with_subcommands = true)]
     Repository {
+        /// Print the identity as JSON
+        #[arg(long)]
+        json: bool,
         #[command(subcommand)]
-        cmd: RepositoryCommand,
+        cmd: Option<RepositoryCommand>,
     },
     /// Read and declare Loopflow settings
     Config {
@@ -1140,7 +1145,7 @@ impl Commands {
             Self::Process { cmd } => cmd.changes_work(),
             Self::Planning { cmd } => cmd.changes_work(),
             Self::Ops(cmd) => cmd.changes_work(),
-            Self::Repository { cmd } => cmd.changes_work(),
+            Self::Repository { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
@@ -3597,12 +3602,13 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Repository {
-                cmd: RepositoryCommand::Ci {
+                cmd: Some(RepositoryCommand::Ci {
                     since,
                     wave: Some(wave),
                     repo: Some(repo),
                     json: true,
-                },
+                }),
+                ..
             }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
         ));
     }

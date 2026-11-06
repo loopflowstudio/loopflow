@@ -13,7 +13,7 @@ use super::wire::{
     ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::Error;
-use crate::id::LfProcessId;
+use crate::id::{LfProcessId, LfSessionId};
 use crate::lf::commands::read::Read;
 
 /// How long the server has to answer `status`, `hello` or `attach`. A session's
@@ -289,7 +289,9 @@ fn answers(message: &ServerMessage, id: &str) -> bool {
     }
 }
 
-pub fn bridge(owner: &LfProcessId) -> Result<UnixStream> {
+/// The exact `owner` of `session` through the server: the bridge refuses
+/// once another Process owns the Session.
+pub fn bridge(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
     // Restored terminals can open before Desktop's first Work reading obtains
     // the helper. Setup delegates through the same selected installation.
     let setup = crate::installation::server::readiness_command()?.output()?;
@@ -298,21 +300,27 @@ pub fn bridge(owner: &LfProcessId) -> Result<UnixStream> {
         "Loopflow server unavailable: {}",
         String::from_utf8_lossy(&setup.stderr)
     );
-    bridge_existing(owner)
+    bridge_existing(session, owner)
 }
 
 /// Recovery never registers a service or changes installation policy.
-pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
-    attach(&super::socket_path()?, owner)
+pub(crate) fn bridge_existing(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
+    attach(&super::socket_path()?, session, Some(owner))
 }
 
-/// Hello, attach, `bridged`: the stream then speaks the owner protocol. Until
-/// then it reads one byte at a time, so no owner byte is left in a buffer.
-pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
+/// Hello, `session.attach`, its answer: the stream then speaks the owner
+/// protocol. Until then it reads one byte at a time, so no owner byte is
+/// left in a buffer. With `owner`, only that exact owner is attached.
+pub fn attach(
+    path: &Path,
+    session: &LfSessionId,
+    owner: Option<&LfProcessId>,
+) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, 1)?;
     connection
-        .request(Operation::Server(ServerOperation::Attach {
-            owner: owner.clone(),
+        .request(Operation::Server(ServerOperation::SessionAttach {
+            session: session.clone(),
+            owner: owner.cloned(),
         }))
         .map_err(|error| stalled(error, "open the owner bridge"))?;
     let stream = connection.socket.reader.into_inner();
@@ -397,7 +405,7 @@ mod tests {
     use std::time::Instant;
 
     use super::{attach, Connection, HANDSHAKE};
-    use crate::id::LfProcessId;
+    use crate::id::{LfProcessId, LfSessionId};
     use crate::server::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
@@ -460,7 +468,12 @@ mod tests {
     fn attach_gives_up_on_a_server_that_never_bridges() {
         let (_home, path) = silent_server(true);
         let started = Instant::now();
-        let error = attach(&path, &LfProcessId::new()).expect_err("attach stalled");
+        let error = attach(
+            &path,
+            &LfSessionId::from("session"),
+            Some(&LfProcessId::new()),
+        )
+        .expect_err("attach stalled");
         within_bound(started);
         assert_eq!(
             error.to_string(),

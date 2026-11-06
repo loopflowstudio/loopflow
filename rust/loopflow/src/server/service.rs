@@ -17,7 +17,7 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
-    ServerOperation, SessionOwner, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
+    ServerOperation, SessionAttached, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
     REVISION,
 };
 use crate::engine::{Error, ErrorCode};
@@ -357,7 +357,14 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                     continue;
                 }
                 let entry = match admission {
-                    Admission::Request(Operation::Server(ServerOperation::Attach { owner })) => {
+                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner: exact })) => {
+                        let owner = match attached_owner(session, exact).await {
+                            Ok(owner) => owner,
+                            Err(refusal) => {
+                                send(&mut lines, &ServerMessage::error(Some(id), refusal)).await?;
+                                continue;
+                            }
+                        };
                         let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
                             Ok(destination) => destination,
                             Err(failure) => {
@@ -368,7 +375,8 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                                 continue;
                             }
                         };
-                        send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result: serde_json::Value::Null }).await?;
+                        let result = serde_json::to_value(SessionAttached { owner }).expect("an owner serializes");
+                        send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
                         // The connection now speaks only the owner protocol; other
                         // answers on it are dropped with the task set.
                         return bridge(lines, destination).await;
@@ -411,6 +419,49 @@ enum Admission {
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
 /// closing either side releases the owner claim, and no service state can
 /// restore it on another connection.
+/// The owner `session.attach` reaches: the Session's current owner Process,
+/// which must be `exact` when the client names one. Resolution never starts a
+/// provider.
+async fn attached_owner(
+    session: crate::id::LfSessionId,
+    exact: Option<crate::id::LfProcessId>,
+) -> Result<crate::id::LfProcessId, Error> {
+    let current = tokio::task::spawn_blocking({
+        let session = session.clone();
+        move || -> Result<_> {
+            let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
+                Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                    .with(serde_json::json!({ "resource": "machine_registry" }))
+            })?;
+            Ok(registry.sqlite.session_transport(session.as_str())?)
+        }
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)?;
+    let Some(current) = current else {
+        return Err(Error::new(
+            ErrorCode::NotFound,
+            format!(
+                "Session {} has no running owner; nothing was started",
+                session.as_str()
+            ),
+        )
+        .with(serde_json::json!({ "session": session })));
+    };
+    match exact {
+        Some(exact) if exact != current => Err(Error::new(
+            ErrorCode::NotFound,
+            format!(
+                "owner {exact} no longer holds Session {}; its owner is now {current}",
+                session.as_str()
+            ),
+        )
+        .with(serde_json::json!({ "owner": exact, "current": current }))),
+        _ => Ok(current),
+    }
+}
+
 /// A `request` or `subscribe` whose envelope parses but whose operation this
 /// build does not accept: its id and why. An unknown kind is `invalid` with
 /// `data.kind`; a known kind names the argument it refused.
@@ -497,19 +548,6 @@ async fn operate(
     trace_id: &crate::id::TraceId,
 ) -> Result<serde_json::Value, Error> {
     match operation {
-        Operation::Server(ServerOperation::SessionOwner { session }) => {
-            let owner = tokio::task::spawn_blocking(move || -> Result<_> {
-                let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
-                    Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
-                        .with(serde_json::json!({ "resource": "machine_registry" }))
-                })?;
-                Ok(registry.sqlite.session_transport(session.as_str())?)
-            })
-            .await
-            .map_err(unavailable)?
-            .map_err(unavailable)?;
-            serde_json::to_value(SessionOwner { owner }).map_err(unavailable)
-        }
         Operation::Read(query) => {
             tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
                 .await
@@ -537,7 +575,7 @@ async fn operate(
             })
             .await
         }
-        Operation::Server(ServerOperation::Attach { .. }) => {
+        Operation::Server(ServerOperation::SessionAttach { .. }) => {
             unreachable!("the session dispatches attachment")
         }
     }

@@ -117,7 +117,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
-| `session.owner` | none | server |
+| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
@@ -138,7 +138,6 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `process.get` | `lf process show <id>` | read |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `process.list` | `lf process list` | read |
-| `process.attach` | none; the CLI reaches an owner's socket directly | server |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |

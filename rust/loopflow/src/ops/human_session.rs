@@ -866,6 +866,7 @@ pub(crate) async fn open(
                     )?;
                     crate::transport::attach(
                         &owner,
+                        Some(&session.id),
                         Some(moved),
                         json.then_some(session.id.as_str()),
                     )?;

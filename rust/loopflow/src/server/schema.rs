@@ -89,7 +89,7 @@ mod tests {
         "cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json";
 
     /// The `response` fixtures and the operation each answers. A new one must
-    /// name its operation here; `process.attach` and subscriptions answer null.
+    /// name its operation here; subscriptions answer null.
     const RESPONSES: &[(&str, &str)] = &[
         ("account", "account.disconnect"),
         ("account_redeemed", "account.redeem_reset"),
@@ -100,7 +100,7 @@ mod tests {
         ("checkout_sync_planned", "checkout.sync"),
         ("checkout_syncing", "checkout.sync"),
         ("launched", "repo.release"),
-        ("owner", "session.owner"),
+        ("attached", "session.attach"),
         ("pr_abandoned", "pr.abandon"),
         ("pr_checks_report", "pr.checks"),
         ("pr_delivery_check", "pr.reconcile"),
@@ -247,7 +247,7 @@ mod tests {
             assert!(operations.contains_key(&kind), "{kind}");
         }
         let names: BTreeSet<_> = operations.keys().map(String::as_str).collect();
-        assert!(names.is_superset(&BTreeSet::from(["task.create", "session.owner"])));
+        assert!(names.is_superset(&BTreeSet::from(["task.create", "session.attach"])));
     }
 
     #[test]

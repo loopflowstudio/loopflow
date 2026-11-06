@@ -8941,11 +8941,21 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "The owner Process of a Session's terminal, if one is recorded.",
+          "description": "Attach this connection to the Session's terminal: the server resolves\nthe Session's current owner Process, answers `{owner}`, and the\nconnection then speaks the owner protocol. When that owner ends, the\nconnection closes; attaching again by the same Session reaches its\nnext owner. With `owner`, the Session must still be owned by exactly\nthat Process, for a client that reconnects only to the owner it had.",
           "properties": {
             "kind": {
-              "const": "session.owner",
+              "const": "session.attach",
               "type": "string"
+            },
+            "owner": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfProcessId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
@@ -8953,32 +8963,12 @@
           },
           "required": [
             "kind",
-            "session"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/SessionOwner"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "Switch this connection to the existing owner protocol after `bridged`.",
-          "properties": {
-            "kind": {
-              "const": "process.attach",
-              "type": "string"
-            },
-            "owner": {
-              "$ref": "#/$defs/LfProcessId"
-            }
-          },
-          "required": [
-            "kind",
+            "session",
             "owner"
           ],
           "type": "object",
           "x-result": {
-            "type": "null"
+            "$ref": "#/$defs/SessionAttached"
           }
         }
       ]
@@ -9015,6 +9005,19 @@
         "move_here"
       ],
       "type": "string"
+    },
+    "SessionAttached": {
+      "additionalProperties": false,
+      "description": "What `session.attach` answers before the owner protocol begins.",
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/LfProcessId"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "type": "object"
     },
     "SessionAvailability": {
       "enum": [
@@ -9319,26 +9322,6 @@
         "harness",
         "model",
         "surface"
-      ],
-      "type": "object"
-    },
-    "SessionOwner": {
-      "additionalProperties": false,
-      "description": "What `session.owner` answers.",
-      "properties": {
-        "owner": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "owner"
       ],
       "type": "object"
     },

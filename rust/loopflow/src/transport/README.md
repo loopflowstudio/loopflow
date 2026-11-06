@@ -235,7 +235,7 @@ provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
 Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
-relay obtains an `attach` bridge from the local client API server before speaking
+relay passes `--session` and obtains a `session.attach` bridge for its exact owner from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.
 Ordinary CLI attachments keep their direct socket path. See
 [current server protocol](../server/README.md) for admission and framing.

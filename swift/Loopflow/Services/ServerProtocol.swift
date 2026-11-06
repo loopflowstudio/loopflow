@@ -84,25 +84,22 @@ public enum ServerClientMessage: Encodable, Sendable {
 /// What a request asks for, named by its `kind`: a dotted resource and verb.
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
-    case sessionOwner(session: String)
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
-    case attach(owner: String)
+    /// The Session's terminal; with `owner`, only while that exact Process owns it.
+    case attach(session: String, owner: String?)
 
     private enum Keys: String, CodingKey { case kind, owner, session }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
-        case .sessionOwner(let session):
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("session.owner", forKey: .kind)
-            try box.encode(session, forKey: .session)
         case .config(let operation): try operation.encode(to: encoder)
-        case .attach(let owner):
+        case .attach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("process.attach", forKey: .kind)
+            try box.encode("session.attach", forKey: .kind)
+            try box.encode(session, forKey: .session)
             try box.encode(owner, forKey: .owner)
         }
     }
@@ -152,8 +149,8 @@ public enum ConfigOperation: Encodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
-    /// What the request returned: a read's or write's value, `{owner}` for
-    /// `session.owner`, null once a subscription or attachment is confirmed.
+    /// What the request returned: a read's or write's value, or `{owner}` for
+    /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
     case reading(id: String, frame: JSONValue)
     /// The subscription's last reading was its answer (`task.wait` reached

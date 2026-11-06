@@ -109,7 +109,7 @@ fn snapshot_preview_fixture() {
             assert!(matches!(request.request, Request::Leave));
         }
     });
-    attach_with_terminal(&owner, None, preview).unwrap();
+    attach_with_terminal(&owner, None, None, preview).unwrap();
     peer.join().unwrap();
 }
 

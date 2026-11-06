@@ -33,7 +33,7 @@ use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::id::LfProcessId;
+use crate::id::{LfProcessId, LfSessionId};
 use input::PendingInput;
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
 
@@ -242,7 +242,8 @@ fn delegate(
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
         let preview = ViewerTerminal::preview(preview_session)?;
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach_with_preview(&owner, None, json_session, preview)?;
+        let session = preview_session.map(LfSessionId::from);
+        attach_with_preview(&owner, session.as_ref(), None, json_session, preview)?;
         Ok(true)
     }
 }
@@ -1760,14 +1761,16 @@ fn tty_name(fd: RawFd) -> Option<String> {
 /// Process receipt into the relay, which opens no store until it returns.
 pub(crate) fn attach(
     id: &LfProcessId,
+    session: Option<&LfSessionId>,
     moved: Option<String>,
     json_session: Option<&str>,
 ) -> Result<()> {
-    attach_with_preview(id, moved, json_session, None)
+    attach_with_preview(id, session, moved, json_session, None)
 }
 
 fn attach_with_preview(
     id: &LfProcessId,
+    session: Option<&LfSessionId>,
     moved: Option<String>,
     json_session: Option<&str>,
     terminal: Option<ViewerTerminal>,
@@ -1791,6 +1794,9 @@ fn attach_with_preview(
         );
     }
     command.args([RELAY_COMMAND[0], RELAY_COMMAND[1], id.as_str()]);
+    if let Some(session) = session {
+        command.args([RELAY_SESSION_FLAG, session.as_str()]);
+    }
     if let Some(moved) = &moved {
         command.args([RELAY_MOVED_FLAG, moved]);
     }
@@ -1800,17 +1806,28 @@ fn attach_with_preview(
     crate::journal::carry_across_exec(&mut command)?;
     let error = command.exec();
     tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
-    attach_with_terminal(id, moved, terminal)
+    attach_with_terminal(id, session, moved, terminal)
 }
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
 const RELAY_COMMAND: [&str; 2] = ["session", "attach"];
+const RELAY_SESSION_FLAG: &str = "--session";
 const RELAY_MOVED_FLAG: &str = "--moved";
 const RELAY_JSON_FLAG: &str = "--session-json";
 
-/// The owner and notice a relay invocation names: `lf session attach OWNER
-/// [--moved TEXT] [--session-json SESSION]`. Recognized before command parsing.
-pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Option<String>)> {
+/// What a relay invocation names: `lf session attach OWNER [--session SESSION]
+/// [--moved TEXT] [--session-json SESSION]`, the exact owner, the Session a
+/// server bridge attaches by, and the notice it prints. Recognized before
+/// command parsing.
+#[derive(Debug)]
+pub struct Relay {
+    pub owner: LfProcessId,
+    pub session: Option<LfSessionId>,
+    pub moved: Option<String>,
+    pub json_session: Option<String>,
+}
+
+pub fn relay_args(args: &[String]) -> Option<Relay> {
     let [_, command, subcommand, owner, rest @ ..] = args else {
         return None;
     };
@@ -1818,10 +1835,14 @@ pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Optio
         return None;
     }
     let owner = LfProcessId::parse(owner).ok()?;
+    let mut session = None;
     let mut moved = None;
     let mut json_session = None;
     for pair in rest.chunks(2) {
         match pair {
+            [flag, value] if flag == RELAY_SESSION_FLAG && session.is_none() => {
+                session = Some(LfSessionId::from(value.as_str()));
+            }
             [flag, value] if flag == RELAY_MOVED_FLAG && moved.is_none() => {
                 moved = Some(value.clone());
             }
@@ -1831,11 +1852,16 @@ pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Optio
             _ => return None,
         }
     }
-    Some((owner, moved, json_session))
+    Some(Relay {
+        owner,
+        session,
+        moved,
+        json_session,
+    })
 }
 
 /// Relay this terminal to the execution owner: socket in, terminal out.
-pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+pub fn relay(id: &LfProcessId, session: Option<&LfSessionId>, moved: Option<String>) -> Result<()> {
     let preview = std::env::var(RELAY_PREVIEW_ENV).ok();
     std::env::remove_var(RELAY_PREVIEW_ENV);
     let terminal = if let Some(screen) = preview {
@@ -1850,7 +1876,7 @@ pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, moved, terminal)
+    attach_with_terminal(id, session, moved, terminal)
 }
 
 /// A reconnect token, byte position and partial event scanner describe one
@@ -1914,20 +1940,25 @@ enum Recovery {
 
 fn attach_with_terminal(
     id: &LfProcessId,
+    session: Option<&LfSessionId>,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
 ) -> Result<()> {
     let server = std::env::var_os("LF_SERVER").is_some();
     let mut status = connection::Status::from_env();
+    // The server attaches by Session; only Desktop's Session panes bridge
+    // through it, and they always name theirs.
+    let bridged =
+        || session.context("A server-bridged terminal relay names its Session (`--session`)");
     let mut recovery = None;
     let mut socket = if let Some(status) = &mut status {
-        let Some((socket, recovered)) = status.connect(id, true)? else {
+        let Some((socket, recovered)) = status.connect(id, bridged()?, true)? else {
             return Ok(());
         };
         recovery = recovered.then_some(Recovery::Reconnect);
         socket
     } else if server {
-        crate::server::client::bridge(id)?
+        crate::server::client::bridge(bridged()?, id)?
     } else {
         UnixStream::connect(endpoint(id)?).context(
             "Execution owner is unavailable; no provider was restarted and no input was replayed",
@@ -1971,9 +2002,11 @@ fn attach_with_terminal(
             // Close the old bridge before asking the owner for its free claims.
             let _ = socket.shutdown(std::net::Shutdown::Both);
             let next = if let Some(status) = &mut status {
-                status.connect(id, false)?.map(|(socket, _)| socket)
+                status
+                    .connect(id, bridged()?, false)?
+                    .map(|(socket, _)| socket)
             } else {
-                reconnect_server(id, &mut terminal, &reason)?
+                reconnect_server(id, bridged()?, &mut terminal, &reason)?
             };
             let Some(next) = next else {
                 return Ok(());
@@ -2273,6 +2306,7 @@ fn attach_with_terminal(
 /// No Session preparation, provider command, or uncertain input is repeated.
 fn reconnect_server(
     id: &LfProcessId,
+    session: &LfSessionId,
     terminal: &mut Option<ViewerTerminal>,
     reason: &str,
 ) -> Result<Option<UnixStream>> {
@@ -2294,7 +2328,7 @@ fn reconnect_server(
         if !bytes[..n].contains(&0x12) {
             continue;
         }
-        match crate::server::client::bridge_existing(id) {
+        match crate::server::client::bridge_existing(session, id) {
             Ok(socket) => return Ok(Some(socket)),
             Err(error) if error.is::<crate::engine::Error>() => {
                 return Err(error);

@@ -1427,14 +1427,14 @@ fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // While relaying it opens no store or command tree: socket in, terminal out.
     let mut raw_args: Vec<String> = std::env::args().collect();
-    if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
+    if let Some(relay) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow::transport::relay(&owner, moved)?;
+        loopflow::transport::relay(&relay.owner, relay.session.as_ref(), relay.moved)?;
         // Only after relaying ends may the command reopen its store/runtime.
-        if let Some(session) = json_session {
+        if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());

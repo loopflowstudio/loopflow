@@ -69,21 +69,25 @@ pub enum Operation {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
-    /// The owner Process of a Session's terminal, if one is recorded.
-    #[serde(rename = "session.owner")]
-    #[schemars(extend("x-result" = generator.subschema_for::<SessionOwner>()))]
-    SessionOwner { session: crate::id::LfSessionId },
-    /// Switch this connection to the existing owner protocol after `bridged`.
-    #[serde(rename = "process.attach")]
-    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
-    Attach { owner: LfProcessId },
+    /// Attach this connection to the Session's terminal: the server resolves
+    /// the Session's current owner Process, answers `{owner}`, and the
+    /// connection then speaks the owner protocol. When that owner ends, the
+    /// connection closes; attaching again by the same Session reaches its
+    /// next owner. With `owner`, the Session must still be owned by exactly
+    /// that Process, for a client that reconnects only to the owner it had.
+    #[serde(rename = "session.attach")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
+    SessionAttach {
+        session: crate::id::LfSessionId,
+        owner: Option<LfProcessId>,
+    },
 }
 
-/// What `session.owner` answers.
+/// What `session.attach` answers before the owner protocol begins.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SessionOwner {
-    pub owner: Option<LfProcessId>,
+pub struct SessionAttached {
+    pub owner: LfProcessId,
 }
 
 /// One message from the server.
@@ -195,7 +199,6 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/checkpoint.json"),
             include_str!("../../../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),
-            include_str!("../../../../tests/fixtures/dto/server/session_owner.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
@@ -247,7 +250,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/welcome.json"),
             include_str!("../../../../tests/fixtures/dto/server/status.json"),
             include_str!("../../../../tests/fixtures/dto/server/response.json"),
-            include_str!("../../../../tests/fixtures/dto/server/owner.json"),
+            include_str!("../../../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),

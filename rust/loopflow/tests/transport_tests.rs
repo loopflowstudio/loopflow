@@ -292,6 +292,33 @@ read -r answer < /dev/tty
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+    /// The Session `owner` runs, binding a fixture Session to it when the
+    /// test started a bare owner: Desktop's panes always name one.
+    fn bound_session(&self, owner: &str) -> String {
+        let sql = self.sql();
+        if let Ok(session) = sql.query_row(
+            "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [owner],
+            |r| r.get(0),
+        ) {
+            return session;
+        }
+        let session = format!("session_{}", owner.replace('-', ""));
+        sql.execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,agent_process_id,transport_lf_process_id)
+             VALUES(?1,'fixture','generated',1,0,?2,?3,?4,?4)",
+            rusqlite::params![
+                session,
+                self.repo.path().to_str().unwrap(),
+                loopflow::repository::CanonicalRepo::discover(self.repo.path())
+                    .unwrap()
+                    .to_string(),
+                owner
+            ],
+        )
+        .unwrap();
+        session
+    }
     fn session_of_owner(&self, owner: &str) -> String {
         self.sql()
             .query_row(
@@ -4287,7 +4314,8 @@ impl<'a> ServerProof<'a> {
 
     fn relay_command(&self, owner: &str) -> (Command, PathBuf) {
         let status = self.fixture.home.path().join("connection.json");
-        let mut command = self.command(&["session", "attach", owner]);
+        let session = self.fixture.bound_session(owner);
+        let mut command = self.command(&["session", "attach", owner, "--session", &session]);
         command
             .env("LF_SERVER", "1")
             .env("LF_SERVER_STATUS", &status);
@@ -4368,9 +4396,11 @@ impl<'a> ServerProof<'a> {
     }
 
     fn viewer(&self, owner: &str) -> Viewer {
+        let session = self.fixture.bound_session(owner);
         let socket = loopflow::server::client::attach(
             &self.fixture.endpoint("machine"),
-            &serde_json::from_value(json!(owner)).unwrap(),
+            &session.as_str().into(),
+            Some(&serde_json::from_value(json!(owner)).unwrap()),
         )
         .unwrap();
         Viewer::new(socket).attach(
@@ -5002,7 +5032,13 @@ fn server_startup_cancels_its_pending_installer_when_pane_closes() {
     .unwrap();
     std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
     let owner = uuid::Uuid::new_v4().to_string();
-    let mut command = fixture.command(&["session", "attach", &owner]);
+    let mut command = fixture.command(&[
+        "session",
+        "attach",
+        &owner,
+        "--session",
+        "session_5e55105e000040008000000000000009",
+    ]);
     command
         .env("LF_BIN", &installer)
         .env("LF_SERVER", "1")
@@ -5031,7 +5067,13 @@ fn server_reconnect_cancels_when_native_pane_closes() {
     let directory = fixture.home.path().join("native-pane");
     std::fs::create_dir(&directory).unwrap();
     let status = directory.join("status.json");
-    let mut command = fixture.command(&["session", "attach", &owner]);
+    let mut command = fixture.command(&[
+        "session",
+        "attach",
+        &owner,
+        "--session",
+        &fixture.bound_session(&owner),
+    ]);
     command
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", &status);
@@ -5089,8 +5131,6 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let owner_pid = pid_of_process(&fixture, &owner);
     let session = fixture.session_of_owner(&owner);
     let first_instance = service.ready();
-    let resolved = service.request(json!({"kind":"session.owner","session":session}));
-    assert_eq!(resolved["owner"], owner);
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.

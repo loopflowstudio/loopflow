@@ -1464,7 +1464,8 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
     let launches = bin.path().join("session.new_window.requests");
     let created = std::fs::read_to_string(&launches).unwrap();
     let request: Value = serde_json::from_str(created.trim()).unwrap();
-    let command = request["layout"]["split"]["after"]["block"]["options"]["command"]
+    let command = request["layout"]["split"]["after"]["split"]["after"]["block"]["options"]
+        ["command"]
         .as_array()
         .unwrap();
     let args = command

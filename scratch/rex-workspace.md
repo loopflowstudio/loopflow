@@ -23,7 +23,7 @@ Use isolated fixtures for validation; future hands-on demos need separate work.
 - Actual working-directory reporting/inheritance for native splits and manually
   resumed conversations. No changes to normal resume's screen protocol.
 
-## Delete — do not maintain
+## Removed — do not reintroduce
 
 - `open/workspace/observer.rs`: launch keys, files, locks, readiness waits/retries.
 - `lf session view`, its hidden observer flag, ObserverState and readiness DTOs.

@@ -900,8 +900,9 @@ fn launch(
     };
     let mut receipts = Vec::new();
     if let SelectionExpression::Wave { wave } = &selected.expression {
-        if let Some(session) =
-            store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
+        if let Some(session) = store
+            .primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
+            .filter(|_| !arriving)
         {
             let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
             receipt.label = "Wave conversation".into();

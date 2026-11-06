@@ -74,3 +74,22 @@ Use isolated host/config/Machine fixtures to establish native tab creation,
 ordinary resume, provider/draft continuity and cwd. Keep generic resume screen
 logic unchanged. Update [demo.html](demo.html) last with the resulting evidence;
 no new live demo, installation, Graph launch or merge is selected here.
+
+## Simplification proof
+
+`441ed217fd` removed the observer path (916 net Rust lines); `8c77f061a4`
+synced current main without conflicts. Isolated Rex tests now prove ordinary
+workspace resume keeps the same provider and unfinished input, with the Task's
+working directory. The separate manual-resume cwd test also passes. No running
+user Task, native pane, installed binary or shared database was used for this
+validation. Layout/config/host behavior and the independent cwd repair remain.
+
+Checks: opening library 14 passed; normal-viewer library 8 passed; work_open
+integration 22 passed initially, its corrected three-pane shell selection test
+passed separately, and its unchanged tmux test passed standalone after an initial
+2-second host timeout; isolated native Rex 2 passed. No timeout relaxation or
+retry loop was added. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+
+The review page describes the simplified flow without asking Jack to reopen his
+active conversation. Hands-on acceptance is still outstanding and must use
+separate work. No Graph continuation, merge or teardown was selected.

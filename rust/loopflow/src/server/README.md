@@ -147,7 +147,8 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `planning.list` | `lf planning list` | read |
 | `repository.planning` | `lf repository planning` | read |
 | `repository.people`, `.tokens`, `.path` | `lf repository people`, `lf repository tokens`, `lf repository path` | read |
-| `repository.release`, `.ci` | `lf repository release`, `lf repository ci` | CLI handler; not served |
+| `repository.release` | `lf repository release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repository::release` |
+| `repository.ci` | `lf repository ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repository::ci` |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>`; `task.run` is its Task proxy | CLI handler; not served |
 | `process.get` | `lf process show <id>` | read |
@@ -159,7 +160,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
 | `config.theme` | none; Appearance's theme file | `engine::config` |
 | `pr.*` | `lf pr publish`, `open`, `submit`, `arm`, `land`, `abandon`, `reconcile`, `checks`, `reviews`, `request-review` | CLI handler; not served |
-| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | CLI handler; not served |
+| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
 | `account.*` | `lf account …` | CLI handler; not served |
 | `skill.run`, `skill.list` | `lf <skill>`, `lf list` | CLI handler; not served |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |

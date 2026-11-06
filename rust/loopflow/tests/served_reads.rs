@@ -437,6 +437,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::Tokens { .. }
         | Read::Retention
         | Read::Doctor
+        | Read::Ci { .. }
         | Read::TaskWait { .. } => (
             [
                 Read::MonitorPs,
@@ -569,6 +570,12 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::Retention,
                 Read::Doctor,
+                // An absolute window: a relative one is measured from each run's now.
+                Read::Ci {
+                    since: "2026-01-01T00:00:00Z".into(),
+                    wave: None,
+                    repo: None,
+                },
                 Read::TaskWait {
                     issue: "INF-123".into(),
                     until: loopflow::ops::task::TaskWaitUntil::Terminal,
@@ -723,6 +730,12 @@ fn server_operations_match_their_lf_commands() {
         | Write::WavePlanningConnect { .. }
         | Write::WavePlanningReteam { .. }
         | Write::GraphCustomize { .. }
+        // Releasing, committing, syncing and creating worktrees change the
+        // repository and its remote; their spellings are compared below.
+        | Write::RepositoryRelease { .. }
+        | Write::CheckoutCommit { .. }
+        | Write::CheckoutSync { .. }
+        | Write::CheckoutCreate { .. }
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
         | Write::DashboardPin { .. }
@@ -1645,6 +1658,86 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["graph", "customize", name, "--json"]),
         ),
+        Write::RepositoryRelease {
+            directory,
+            version,
+            target,
+        } => {
+            let mut spelled = words(&["repository", "release", "run"]);
+            spelled.extend(version.clone());
+            if let Some(target) = target {
+                spelled.extend(words(&["--target", target]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutCommit {
+            directory,
+            message,
+            push,
+            no_add,
+            paths,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.push("commit".into());
+            if let Some(message) = message {
+                spelled.extend(words(&["--message", message]));
+            }
+            if *push {
+                spelled.push("--push".into());
+            }
+            if *no_add {
+                spelled.push("--no-add".into());
+            }
+            spelled.extend(paths.iter().cloned());
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutSync {
+            directory,
+            onto,
+            preview,
+            manual,
+            continue_sync,
+            abort,
+            adopt,
+        } => {
+            let mut spelled = words(&["sync"]);
+            spelled.extend(onto.clone());
+            for (flag, on) in [
+                ("--plan", preview),
+                ("--manual", manual),
+                ("--continue", continue_sync),
+                ("--abort", abort),
+                ("--adopt", adopt),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutCreate {
+            directory,
+            name,
+            preview,
+            persistent,
+        } => {
+            let mut spelled = words(&["wt", "create", name]);
+            if *preview {
+                spelled.push("--plan".into());
+            }
+            if *persistent {
+                spelled.push("--persistent".into());
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
         Write::Portfolio { change } => {
             let mut spelled = words(&["desktop", "portfolio"]);
             match change {

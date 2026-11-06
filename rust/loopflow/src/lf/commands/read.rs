@@ -249,6 +249,14 @@ pub enum Read {
     /// `lf machine doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
     Doctor,
+    /// `lf repository ci --since <since> [--wave <wave>] [--repo <repo>]`:
+    /// how failed CI was detected, repaired and landed on this Machine.
+    #[serde(rename = "repository.ci")]
+    Ci {
+        since: String,
+        wave: Option<String>,
+        repo: Option<String>,
+    },
     /// `lf task wait <issue> --until <until> --timeout 0s --json`: the Task now
     /// and whether it reached `until`. Subscribed, it reads on each change and
     /// ends after the reading that reached it.
@@ -423,6 +431,17 @@ impl Read {
             }
             Self::Retention => words(&["session", "retention", "--json"]),
             Self::Doctor => words(&["machine", "doctor", "--json"]),
+            Self::Ci { since, wave, repo } => {
+                let mut argv = words(&["repository", "ci", "--since", since]);
+                if let Some(wave) = wave {
+                    argv.extend(words(&["--wave", wave]));
+                }
+                if let Some(repo) = repo {
+                    argv.extend(words(&["--repo", repo]));
+                }
+                argv.push("--json".into());
+                argv
+            }
             Self::TaskWait { issue, until } => {
                 let until = match until {
                     crate::ops::task::TaskWaitUntil::Open => "submitted",
@@ -623,6 +642,11 @@ impl Read {
                 },
             )?),
             Self::Doctor => value(&super::doctor::report()?),
+            Self::Ci { since, wave, repo } => value(&crate::engine::repository::ci(
+                since,
+                wave.as_deref(),
+                repo.as_deref(),
+            )?),
             Self::TaskWait { issue, until } => value(&crate::engine::task::waited(issue, *until)?),
         }
     }

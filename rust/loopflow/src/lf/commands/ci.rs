@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{anyhow, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::lf::commands::util::parse_since;
@@ -11,7 +11,8 @@ use crate::lf::output::truncate;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::open_existing_store;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CiReportDto {
     pub generated_at: String,
     pub since: String,
@@ -21,7 +22,8 @@ pub struct CiReportDto {
     pub incidents: Vec<CiIncidentDto>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CiSummaryDto {
     pub incidents: usize,
     pub pull_requests: usize,
@@ -39,7 +41,8 @@ pub struct CiSummaryDto {
     pub p95_merge_seconds: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CiIncidentDto {
     pub identity: String,
     pub repo: String,
@@ -74,6 +77,17 @@ pub struct CiIncidentDto {
 }
 
 pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> Result<()> {
+    let report = crate::engine::repository::ci(since, wave, repo)?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_report(&report);
+    }
+    Ok(())
+}
+
+/// The incidents recorded since `since`, as one report.
+pub(crate) fn report(since: &str, wave: Option<&str>, repo: Option<&str>) -> Result<CiReportDto> {
     let now = OffsetDateTime::now_utc();
     let since_at = parse_since(since, now)?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -86,13 +100,7 @@ pub fn run(since: &str, wave: Option<&str>, repo: Option<&str>, json: bool) -> R
             .await
             .map_err(|error| anyhow!("failed to read CI incidents: {error}"))
     })?;
-    let report = build_report(rows, since_at, now, wave, repo)?;
-    if json {
-        println!("{}", serde_json::to_string(&report)?);
-    } else {
-        print_report(&report);
-    }
-    Ok(())
+    build_report(rows, since_at, now, wave, repo)
 }
 
 fn build_report(

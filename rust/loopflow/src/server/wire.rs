@@ -197,6 +197,11 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/wave_planning_bind.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_planning_connect.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteam.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repository_ci.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repository_release.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -218,6 +223,12 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_planning_connected.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_planning_reteamed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repository_ci_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/launched.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_committed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_sync_planned.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_syncing.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_created.json"),
             include_str!("../../../../tests/fixtures/dto/server/ended.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();

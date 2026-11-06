@@ -463,3 +463,21 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   lost its post-save Linear refresh (above).
 - **BindPreview.** No separate operation or read exists; `session.bind
   {preview}` is the one path. Nothing to fold.
+- **`repository.release` serves `lf release run` only.** `check`, `bump`,
+  `tag`, `publish`, `promote`, `regress`, `status`, `issues` and `notes` are
+  the steps `release run` composes; each stays a CLI step with no served
+  form. The served run is detached (`engine::launch`) and its result is the
+  Process started; `release run` in the terminal keeps its foreground output.
+- **`checkout.sync` detaches only when it moves the branch.** `--plan`,
+  `--continue`, `--abort` and `--adopt` answer inline (`planned` or
+  `finished`); a sync that rebases or merges starts `lf sync … --json`
+  detached and answers `running` with the Process. Served sync is never
+  `--manual`-prompted: `Diagnostics` answers every confirm with no.
+- **`checkout.commit` without a message runs the agent inline.** The served
+  write waits for the commit message the agent writes, like `lf commit` does;
+  the result is the commit, not a Process. Detaching it was rejected: the
+  caller wants the commit, and an agent that writes one message is seconds,
+  not a run.
+- **`repository.ci` is a read with an absolute window.** `since` is passed
+  through as `lf repository ci --since` accepts it (`7d` or an instant); the
+  served comparison test uses an instant so two reads agree.

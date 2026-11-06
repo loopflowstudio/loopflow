@@ -67,6 +67,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
+    /// How failed CI was detected, repaired and landed on this Machine since
+    /// `since` (`7d`, `24h` or an RFC 3339 instant).
+    case ci(since: String, wave: String?, repo: String?)
     /// The Task now and whether it reached `until` (`submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
@@ -150,6 +153,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["session", "retention", "--json"]
         case .doctor:
             return ["machine", "doctor", "--json"]
+        case .ci(let since, let wave, let repo):
+            return ["repository", "ci", "--since", since] + Self.option("--wave", wave) + Self.option("--repo", repo) + ["--json"]
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         }
@@ -223,6 +228,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("repository.tokens", ["directory": directory, "days": days])
         case .retention: TaggedFields("session.retention")
         case .doctor: TaggedFields("machine.doctor")
+        case .ci(let since, let wave, let repo):
+            TaggedFields("repository.ci", ["since": since, "wave": wave, "repo": repo])
         case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
         }
     }
@@ -268,6 +275,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Without `apply`, the plan: nothing moves.
     case wavePlanningReteam(directory: String, apply: Bool)
     case graphCustomize(directory: String, name: String)
+    /// Started detached: the Process carrying the release.
+    case repositoryRelease(directory: String, version: String?, target: String?)
+    case checkoutCommit(directory: String, message: String?, push: Bool, noAdd: Bool, paths: [String], agent: String?)
+    /// The plan with `preview`, a finished `continueSync` or `abort`, or the
+    /// Process carrying a sync started detached.
+    case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
+                      adopt: Bool)
+    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
     /// Run from `/`, as the app's `lf` ran it.
     case portfolio(change: [String])
     case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
@@ -318,6 +333,16 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
         case .wavePlanningReteam(_, let apply): ["wave", "planning", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
         case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
+        case .repositoryRelease(_, let version, let target):
+            ["repository", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
+        case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
+            Self.option("--agent", agent) + ["commit"] + Self.option("--message", message) + (push ? ["--push"] : [])
+                + (noAdd ? ["--no-add"] : []) + paths + ["--json"]
+        case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
+            ["sync"] + [onto].compactMap { $0 } + (preview ? ["--plan"] : []) + (manual ? ["--manual"] : [])
+                + (continueSync ? ["--continue"] : []) + (abort ? ["--abort"] : []) + (adopt ? ["--adopt"] : []) + ["--json"]
+        case .checkoutCreate(_, let name, let preview, let persistent):
+            ["wt", "create", name] + (preview ? ["--plan"] : []) + (persistent ? ["--persistent"] : []) + ["--json"]
         case .portfolio(let change): ["desktop", "portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
             ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -429,6 +454,17 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.planning.reteam", ["directory": directory, "apply": apply])
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
+        case .repositoryRelease(let directory, let version, let target):
+            TaggedFields("repository.release", ["directory": directory, "version": version, "target": target])
+        case .checkoutCommit(let directory, let message, let push, let noAdd, let paths, let agent):
+            TaggedFields("checkout.commit", ["directory": directory, "message": message, "push": push, "no_add": noAdd,
+                                             "paths": paths, "agent": agent])
+        case .checkoutSync(let directory, let onto, let preview, let manual, let continueSync, let abort, let adopt):
+            TaggedFields("checkout.sync", ["directory": directory, "onto": onto, "preview": preview, "manual": manual,
+                                           "continue": continueSync, "abort": abort, "adopt": adopt])
+        case .checkoutCreate(let directory, let name, let preview, let persistent):
+            TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
+                                             "persistent": persistent])
         case .portfolio(let change):
             TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):

@@ -114,6 +114,13 @@ struct ServerProtocolTests {
             ("wave_planning_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
             ("wave_planning_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
+            ("repository_release", "release-1", .repositoryRelease(directory: "/repo", version: "minor", target: nil)),
+            ("checkout_commit", "commit-1", .checkoutCommit(directory: "/repo", message: "Serve the checkout namespace",
+                                                            push: false, noAdd: false, paths: [], agent: nil)),
+            ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
+                                                      continueSync: false, abort: false, adopt: false)),
+            ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
+                                                            persistent: false)),
         ]
         for (name, id, write) in writes {
             #expect(try encoded(.request(id: id, operation: .command(write))) == value(name), "\(name)")
@@ -145,6 +152,17 @@ struct ServerProtocolTests {
             Issue.record("Missing wave.planning.reteam result"); return
         }
         #expect(reteamed["applied"] == .bool(false))
+        guard case .response(_, _, .object(let launched)) = try message("launched") else {
+            Issue.record("Missing detached result"); return
+        }
+        #expect(launched["operation"] == .string("repository.release"))
+        guard case .response(_, _, .object(let planned)) = try message("checkout_sync_planned") else {
+            Issue.record("Missing checkout.sync plan"); return
+        }
+        #expect(planned["state"] == .string("planned"))
+        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)))
+        #expect(try encoded(ci) == value("repository_ci"))
+        #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repository", "ci", "--since", "7d", "--json"])
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {

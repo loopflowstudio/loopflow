@@ -644,6 +644,9 @@ pub enum OpsCommand {
         /// Commit only these paths, preserving other staged and unstaged edits
         #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
         paths: Vec<String>,
+        /// Print what the commit left
+        #[arg(long)]
+        json: bool,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
@@ -2027,6 +2030,9 @@ pub struct SyncArgs {
     pub adopt: bool,
     /// Branch to sync onto; naming the default branch detaches a stacked Task
     pub onto: Option<String>,
+    /// Print the plan, or what the sync did
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -3137,6 +3143,9 @@ pub enum ReleaseCommand {
         version: Option<String>,
         #[arg(short = 't', long = "target")]
         target: Option<String>,
+        /// Print the outcome
+        #[arg(long)]
+        json: bool,
     },
     /// Check if PRs have merged since the last tag
     Check {
@@ -3226,6 +3235,9 @@ pub enum WtCommand {
         /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
+        /// Print the worktree, or the placement with --plan
+        #[arg(long)]
+        json: bool,
     },
     /// Switch to a worktree by name, identity leaf, or full branch
     Switch {

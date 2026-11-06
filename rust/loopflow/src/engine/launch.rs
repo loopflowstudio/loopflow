@@ -11,12 +11,71 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{de::DeserializeOwned, Serialize};
+use anyhow::Context;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
+use crate::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
 static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// What a detached operation set going: the `lf` Process that carries it.
+/// `process.get` reads how it is going; `log` is its output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Launched {
+    /// The operation the Process carries: `checkout.sync`, `pr.land`,
+    /// `repository.release`, `graph.run`, `skill.run`.
+    pub operation: String,
+    pub process: LfProcessId,
+    /// What it set out to do, for messages: `sync onto origin/main`.
+    pub run: String,
+    /// Where its output goes, now that its launcher has let go.
+    pub log: PathBuf,
+}
+
+impl Launched {
+    pub fn render(&self) -> String {
+        format!(
+            "{} running as process {}\n  follow: lf process show {}\n  log:    {}",
+            self.run,
+            self.process,
+            self.process,
+            self.log.display()
+        )
+    }
+}
+
+/// Whether a launcher waits for this process's report.
+pub fn expected() -> bool {
+    REPORT.lock().expect("report path poisoned").is_some()
+}
+
+/// This process carries `operation` for the launcher that started it
+/// detached: report the Process, then let the launcher go and keep this
+/// process's output in a log of its own. None when no launcher waits: the
+/// command then runs in its terminal as it always has.
+pub(crate) fn carry(operation: &str, run: impl Into<String>) -> anyhow::Result<Option<Launched>> {
+    if !expected() {
+        return Ok(None);
+    }
+    let process = crate::journal::current_lf_process_id()
+        .context("a detached operation requires a registered Process")?;
+    let log = crate::lf::commands::graph::PendingLog::open(&format!(
+        "{}-{process}",
+        operation.replace('.', "-")
+    ))?;
+    let launched = Launched {
+        operation: operation.to_owned(),
+        process,
+        run: run.into(),
+        log: log.path.clone(),
+    };
+    report(Ok(&launched));
+    crate::lf::commands::graph::release_launcher(&log.file)?;
+    Ok(Some(launched))
+}
 
 /// Take the report path this process's launcher passed. The execution owner
 /// between them passes it on; this process's own children never inherit it.

@@ -180,6 +180,46 @@ pub enum Write {
     /// recording nothing.
     #[serde(rename = "graph.customize")]
     GraphCustomize { directory: PathBuf, name: String },
+    /// `lf repository release run [<version>] [-t <target>] --json`, started
+    /// detached: the Process carrying the release.
+    #[serde(rename = "repository.release")]
+    RepositoryRelease {
+        directory: PathBuf,
+        version: Option<String>,
+        target: Option<String>,
+    },
+    /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
+    #[serde(rename = "checkout.commit")]
+    CheckoutCommit {
+        directory: PathBuf,
+        message: Option<String>,
+        push: bool,
+        no_add: bool,
+        paths: Vec<String>,
+        agent: Option<String>,
+    },
+    /// `lf sync [<onto>] [--plan|--manual|--continue|--abort] [--adopt]
+    /// --json`: the plan, a finished continue or abort, or the Process
+    /// carrying a sync started detached.
+    #[serde(rename = "checkout.sync")]
+    CheckoutSync {
+        directory: PathBuf,
+        onto: Option<String>,
+        preview: bool,
+        manual: bool,
+        #[serde(rename = "continue")]
+        continue_sync: bool,
+        abort: bool,
+        adopt: bool,
+    },
+    /// `lf wt create <name> [--plan] [--persistent] --json`.
+    #[serde(rename = "checkout.create")]
+    CheckoutCreate {
+        directory: PathBuf,
+        name: String,
+        preview: bool,
+        persistent: bool,
+    },
     /// `lf desktop portfolio <change> --json`, run from `/`: which
     /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
@@ -439,6 +479,60 @@ impl Write {
                     &crate::repo::working_directory_in(directory)?,
                 )?,
             }),
+            Self::RepositoryRelease {
+                version, target, ..
+            } => value(&crate::engine::repository::release(
+                directory,
+                version.as_deref(),
+                target.as_deref(),
+            )?),
+            Self::CheckoutCommit {
+                message,
+                push,
+                no_add,
+                paths,
+                agent,
+                ..
+            } => value(&crate::engine::checkout::commit(
+                directory,
+                message.as_deref(),
+                *push,
+                *no_add,
+                paths,
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::CheckoutSync {
+                onto,
+                preview,
+                manual,
+                continue_sync,
+                abort,
+                adopt,
+                ..
+            } => value(&crate::engine::checkout::sync(
+                directory,
+                &crate::engine::checkout::SyncInput {
+                    onto: onto.as_deref(),
+                    preview: *preview,
+                    manual: *manual,
+                    continue_sync: *continue_sync,
+                    abort: *abort,
+                    adopt: *adopt,
+                },
+            )?),
+            Self::CheckoutCreate {
+                name,
+                preview,
+                persistent,
+                ..
+            } => value(&crate::engine::checkout::create(
+                directory,
+                name,
+                *preview,
+                *persistent,
+                &crate::engine::Diagnostics,
+            )?),
             Self::Portfolio { change } => value(&crate::portfolio::change(change, directory)?),
             Self::ConfigSet {
                 destination,
@@ -659,6 +753,10 @@ impl Write {
             | Self::WavePlanningConnect { directory, .. }
             | Self::WavePlanningReteam { directory, .. }
             | Self::GraphCustomize { directory, .. }
+            | Self::RepositoryRelease { directory, .. }
+            | Self::CheckoutCommit { directory, .. }
+            | Self::CheckoutSync { directory, .. }
+            | Self::CheckoutCreate { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
             | Self::DashboardUnpin { directory, .. }
@@ -705,6 +803,10 @@ mod tests {
             r#"{"kind":"wave.planning.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
             r#"{"kind":"wave.planning.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.planning.reteam","directory":"/r","apply":false}"#,
+            r#"{"kind":"repository.release","directory":"/r","version":"minor","target":null}"#,
+            r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
+            r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
+            r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
         ] {
             let write: Write = serde_json::from_str(json).unwrap();
             assert_eq!(

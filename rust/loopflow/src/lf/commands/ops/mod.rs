@@ -2,10 +2,9 @@ use crate::agent::{run_agent, ProcessConfig};
 use crate::config::{load_config_or_default, Config};
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
-    create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
-    main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeOwnership,
-    WorktreePruneReport, WorktreeSegment,
+    diff_shortstats, list_worktrees, list_worktrees_timed, main_repo_root, prune_worktrees,
+    sibling_worktree_name, sibling_worktree_name_with_main, PullRequestState, WorktreeOwnership,
+    WorktreePruneReport,
 };
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
@@ -19,12 +18,12 @@ use crate::ops::branch_prune::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
-    commit_workflow, continue_sync_after_authorization, continue_sync_for_resolution,
-    create_or_update_pr, current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync,
-    preview_release_notes, recover_sync, release_bump, release_check, release_issues,
-    release_notes, release_promote, release_publish, release_regress, release_run, release_status,
-    release_tag, submit, sync_class_name, sync_strategy_name, sync_with_plan, AbandonOptions,
-    CommitOptions, LandOptions, PrOptions, Progress, SyncOptions,
+    continue_sync_after_authorization, continue_sync_for_resolution, create_or_update_pr,
+    current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync, preview_release_notes,
+    recover_sync, release_bump, release_check, release_issues, release_notes, release_promote,
+    release_publish, release_regress, release_status, release_tag, submit, sync_class_name,
+    sync_strategy_name, sync_with_plan, AbandonOptions, LandOptions, PrOptions, Progress,
+    SyncOptions,
 };
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
@@ -131,9 +130,11 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
-        ReleaseCommand::Run { version, target } => {
-            release_run_cmd(version.as_deref(), target.as_deref(), &progress)
-        }
+        ReleaseCommand::Run {
+            version,
+            target,
+            json,
+        } => release_run_cmd(version.as_deref(), target.as_deref(), *json, &progress),
         ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
         ReleaseCommand::Notes {
             version,
@@ -212,36 +213,33 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_sync(
-    onto: Option<&str>,
-    plan_only: bool,
-    manual: bool,
-    continue_sync: bool,
-    abort: bool,
-    adopt: bool,
-) -> Result<()> {
+pub fn run_sync(input: &crate::engine::checkout::SyncInput<'_>, json: bool) -> Result<()> {
     let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
-    run_sync_in(
-        &repo_root,
+    let outcome = crate::engine::checkout::carry_sync(&repo_root, input, &CliProgress)?;
+    if json {
+        println!("{}", serde_json::to_string(&outcome)?);
+    } else {
+        println!("{}", outcome.render());
+    }
+    Ok(())
+}
+
+/// `lf sync` in `repo_root`. A sync that moves the branch first announces
+/// itself to the launcher that started it detached, if one did.
+pub(crate) fn run_sync_in(
+    repo_root: &Path,
+    input: &crate::engine::checkout::SyncInput<'_>,
+    progress: &impl Progress,
+) -> Result<crate::engine::checkout::Sync> {
+    use crate::engine::checkout::Sync;
+    let crate::engine::checkout::SyncInput {
         onto,
-        plan_only,
+        preview: plan_only,
         manual,
         continue_sync,
         abort,
         adopt,
-    )
-}
-
-pub(crate) fn run_sync_in(
-    repo_root: &Path,
-    onto: Option<&str>,
-    plan_only: bool,
-    manual: bool,
-    continue_sync: bool,
-    abort: bool,
-    adopt: bool,
-) -> Result<()> {
-    let progress = &CliProgress;
+    } = *input;
     if onto.is_some() && (continue_sync || abort) {
         return Err(anyhow!(
             "a sync target cannot be combined with --continue or --abort"
@@ -264,8 +262,9 @@ pub(crate) fn run_sync_in(
         } else {
             continue_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Sync complete; branch remains local.");
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: "Sync complete; branch remains local.".into(),
+        });
     }
     if abort {
         if adopt {
@@ -279,8 +278,15 @@ pub(crate) fn run_sync_in(
         } else {
             abort_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Sync aborted.");
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: "Sync aborted.".into(),
+        });
+    }
+    if !plan_only {
+        crate::engine::launch::carry(
+            "checkout.sync",
+            format!("sync onto {}", onto.unwrap_or("the branch it follows")),
+        )?;
     }
     let started = Instant::now();
     let default = get_default_branch(repo_root)?;
@@ -289,8 +295,9 @@ pub(crate) fn run_sync_in(
     if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
-            progress.status("Main is current; unpublished commits and edits remain local.");
-            return Ok(());
+            return Ok(Sync::Finished {
+                message: "Main is current; unpublished commits and edits remain local.".into(),
+            });
         }
     }
     // An explicit default branch detaches the child using its recorded fork;
@@ -325,8 +332,7 @@ pub(crate) fn run_sync_in(
     // runs is the one the metric records.
     let mut plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     if plan_only {
-        print_sync_plan(&plan);
-        return Ok(());
+        return Ok(Sync::Planned { plan });
     }
     // Checkpoint ordinary edits so their conflicts reach the merge resolver,
     // rather than surfacing during stash restoration after the resolver is gone.
@@ -374,7 +380,12 @@ pub(crate) fn run_sync_in(
         })?
     };
     if manual {
-        return Ok(());
+        return Ok(Sync::Finished {
+            message: format!(
+                "Synced onto {}; the sync and edits remain local.",
+                plan.base_ref
+            ),
+        });
     }
     record_ops_metric(
         repo_root,
@@ -393,7 +404,9 @@ pub(crate) fn run_sync_in(
             "exit_status": "ok",
         }),
     );
-    Ok(())
+    Ok(Sync::Finished {
+        message: format!("Synced onto {}.", plan.base_ref),
+    })
 }
 
 /// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
@@ -431,22 +444,6 @@ fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress
     )
     .map_err(|error| anyhow!("checkpoint saved; index refresh failed: {error}"))?;
     Ok(true)
-}
-
-fn print_sync_plan(plan: &crate::ops::SyncPlan) {
-    println!("branch: {}", plan.branch);
-    println!("base: {}", plan.base_ref);
-    if let Some(fork_base) = &plan.fork_base {
-        println!("fork_base: {fork_base}");
-    }
-    println!("class: {}", sync_class_name(&plan.class));
-    println!("strategy: {}", sync_strategy_name(&plan.strategy));
-    println!("unique_commits: {}", plan.unique_commits);
-    println!("changed_files: {}", plan.changed_files.len());
-    println!(
-        "protected: {}",
-        matches!(plan.class, crate::ops::SyncClass::Protected)
-    );
 }
 
 /// Hand a conflicted sync to exactly one recovery agent under the owning
@@ -731,23 +728,21 @@ pub fn run_commit(
     no_add: bool,
     paths: &[String],
     agent_override: Option<&str>,
+    json: bool,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    if !paths.is_empty() {
-        return Ok(crate::ops::commit_selected(&repo_root, paths, message)?);
-    }
-    let _ = commit_workflow(
+    let committed = crate::engine::checkout::commit(
         &repo_root,
-        &CommitOptions {
-            add: !no_add,
-            push,
-            message: message.map(str::to_string),
-            agent: agent_override.map(str::to_string),
-            ..CommitOptions::for_task("commit")
-        },
+        message,
+        push,
+        no_add,
+        paths,
+        agent_override,
         &CliProgress,
-        &|_| {},
     )?;
+    if json {
+        println!("{}", serde_json::to_string(&committed)?);
+    }
     Ok(())
 }
 
@@ -986,11 +981,17 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 fn release_run_cmd(
     version_input: Option<&str>,
     target_name: Option<&str>,
+    json: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let input = version_input.unwrap_or("patch");
-    match release_run(&repo_root, input, target_name, progress)? {
+    let outcome =
+        crate::engine::repository::carry_release(&repo_root, version_input, target_name, progress)?;
+    if json {
+        println!("{}", serde_json::to_string(&outcome)?);
+        return Ok(());
+    }
+    match outcome {
         crate::ops::ReleaseRunOutcome::NoChanges {
             target, latest_tag, ..
         } => {
@@ -1200,18 +1201,22 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
             name,
             plan,
             persistent,
+            json,
         } => {
-            if *persistent && !*plan {
-                let repo = find_repo_root()?;
-                let workspace = crate::git::worktrees::ensure_agent_worktree(
-                    &repo,
-                    WorktreeSegment::parse(name)?,
-                )?;
-                println!("Persistent workspace: {}", workspace.path.display());
-                Ok(())
-            } else {
-                wt_create(name, *plan)
+            let repo_root = find_repo_root()?;
+            let checkout = crate::engine::checkout::create(
+                &repo_root,
+                name,
+                *plan,
+                *persistent,
+                &CliProgress,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string(&checkout)?);
+                return Ok(());
             }
+            print_checkout(name, *persistent, &checkout)?;
+            Ok(())
         }
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { json, sync } => wt_list(*json, *sync),
@@ -1244,69 +1249,46 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(name: &str, dry_run: bool) -> Result<()> {
-    let started = Instant::now();
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let segment = WorktreeSegment::parse(name)?;
-
-    let mut placement = plan_placement(&main_repo, segment.clone())?;
-    if !dry_run && placement.strategy != PlacementStrategy::UseExistingWorktree {
-        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
-        placement = plan_placement(&main_repo, segment)?;
-    }
-
-    if dry_run {
-        print_placement_plan(&placement);
+fn print_checkout(
+    name: &str,
+    persistent: bool,
+    checkout: &crate::engine::checkout::Checkout,
+) -> Result<()> {
+    use crate::git::worktrees::PlacementStrategy;
+    if !checkout.created {
+        println!("branch: {}", checkout.branch);
+        if let Some(base) = &checkout.base {
+            println!("base: {base}");
+        }
+        println!("worktree: {}", checkout.path.display());
+        if let Some(strategy) = &checkout.strategy {
+            println!(
+                "strategy: {}",
+                serde_json::to_value(strategy)?.as_str().unwrap_or_default()
+            );
+        }
         return Ok(());
     }
-
-    let result = create_from_placement_plan(&main_repo, &placement)?;
-    record_ops_metric(
-        &repo_root,
-        serde_json::json!({
-            "op": "wt.create",
-            "branch": placement.branch,
-            "base_ref": placement.base_ref,
-            "strategy": placement_strategy_name(&placement.strategy),
-            "duration_ms": started.elapsed().as_millis(),
-            "exit_status": "ok",
-        }),
-    );
-
-    if placement.strategy == PlacementStrategy::UseExistingWorktree {
-        println!("Using existing worktree: {}", result.path.display());
+    if persistent {
+        println!("Persistent workspace: {}", checkout.path.display());
+        return Ok(());
+    }
+    if checkout.strategy == Some(PlacementStrategy::UseExistingWorktree) {
+        println!("Using existing worktree: {}", checkout.path.display());
     } else {
-        println!("Created worktree: {}", result.path.display());
+        println!("Created worktree: {}", checkout.path.display());
     }
-    if result.branch != name {
-        println!("Branch: {}", result.branch);
+    if checkout.branch != name {
+        println!("Branch: {}", checkout.branch);
     }
-    if let Some(base_branch) = result.base_branch {
-        println!("Base: {base_branch}");
+    if let Some(base) = &checkout.base {
+        println!("Base: {base}");
     }
-
-    if !write_shell_directive(&format!("cd {}", result.path.display()))? {
-        println!("cd {}", result.path.display());
+    if !write_shell_directive(&format!("cd {}", checkout.path.display()))? {
+        println!("cd {}", checkout.path.display());
         println!("Tip: source scripts/dev-lf to apply auto-cd in this shell");
     }
-
     Ok(())
-}
-
-fn print_placement_plan(plan: &crate::git::worktrees::PlacementPlan) {
-    println!("branch: {}", plan.branch);
-    println!("base: {}", plan.base_ref);
-    println!("worktree: {}", plan.worktree_path.display());
-    println!("strategy: {}", placement_strategy_name(&plan.strategy));
-}
-
-fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
-    match strategy {
-        PlacementStrategy::Create => "create",
-        PlacementStrategy::CheckoutExisting => "checkout_existing",
-        PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
-    }
 }
 
 /// Local ops telemetry lives under the git-ignored `.lf/tmp/` tree so read-only

@@ -821,6 +821,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
             push,
             no_add,
             paths,
+            json,
         } => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),
@@ -828,18 +829,22 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
                 *no_add,
                 paths,
                 cli.agent.as_deref(),
+                *json,
             )
         }),
         OpsCommand::Sync(sync) => {
             let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
             with_runtime(&repo, args, || {
                 loopflow::lf::commands::ops::run_sync(
-                    sync.onto.as_deref(),
-                    sync.plan,
-                    sync.manual,
-                    sync.continue_sync,
-                    sync.abort,
-                    sync.adopt,
+                    &loopflow::engine::checkout::SyncInput {
+                        onto: sync.onto.as_deref(),
+                        preview: sync.plan,
+                        manual: sync.manual,
+                        continue_sync: sync.continue_sync,
+                        abort: sync.abort,
+                        adopt: sync.adopt,
+                    },
+                    sync.json,
                 )
             })
         }
@@ -2339,13 +2344,29 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if execution && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
     }
-    // Only the run or ship a launcher started reports; an execution owner
-    // in between passes the handoff on untouched.
+    // Only the operation a launcher started reports; an execution owner in
+    // between passes the handoff on untouched.
     if matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         }) | Some(Commands::Ship { .. })
+            | Some(Commands::Ops(OpsCommand::Sync(_)))
+            | Some(Commands::Ops(OpsCommand::Pr {
+                cmd: Some(loopflow::lf::PrCommand::Land { .. })
+            }))
+            | Some(Commands::Repository {
+                cmd: Some(loopflow::lf::RepositoryCommand::Release {
+                    cmd: loopflow::lf::ReleaseCommand::Run { .. }
+                }),
+                ..
+            })
+            | Some(Commands::Skill {
+                cmd: SkillCommand::External(_)
+            })
+            | Some(Commands::Graph {
+                cmd: GraphCommand::External(_)
+            })
     ) {
         loopflow::engine::launch::expect();
     }

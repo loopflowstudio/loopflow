@@ -113,11 +113,13 @@ pub(crate) async fn observe_active_account(
     if let Some(active) = active(&accounts) {
         return Ok(Some(active));
     }
-    let _refresh = ClaudeRefreshLock::acquire(native)?;
-    Ok(match save_back(store, provider, native, &accounts).await? {
-        Kept::Profile(account_id) => Some(account_id),
-        Kept::Unplaced(_) | Kept::Nothing => None,
-    })
+    let refresh = ClaudeRefreshLock::acquire(native)?;
+    Ok(
+        match save_back(store, provider, native, &accounts, Some(&refresh)).await? {
+            Kept::Profile(account_id) => Some(account_id),
+            Kept::Unplaced(_) | Kept::Nothing => None,
+        },
+    )
 }
 
 /// Claude's active home keeps its most recent refresh. Codex resolves access
@@ -178,7 +180,7 @@ pub(crate) async fn activate(
     }
     // Claude must not refresh the outgoing login between its save-back and
     // the install, or the rotated refresh token is lost with the old copy.
-    let _refresh = (provider == Provider::Claude)
+    let refresh = (provider == Provider::Claude)
         .then(|| ClaudeRefreshLock::acquire(native))
         .transpose()?;
     if provider == Provider::Codex {
@@ -188,7 +190,7 @@ pub(crate) async fn activate(
             return Ok(Some(lock));
         }
     }
-    match save_back(store, provider, native, &accounts).await? {
+    match save_back(store, provider, native, &accounts, refresh.as_ref()).await? {
         // The native login was this account's all along, rotated since it was stored.
         Kept::Profile(owner) if owner == *account_id => return Ok(None),
         Kept::Profile(_) | Kept::Nothing => {}
@@ -301,7 +303,7 @@ fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccoun
 /// Claude retries a held lock, so holding it pauses a refresh instead of
 /// failing it.
 #[derive(Debug)]
-struct ClaudeRefreshLock {
+pub(crate) struct ClaudeRefreshLock {
     directories: Vec<PathBuf>,
     /// Dropping it stops the thread keeping the directories fresh.
     _keep_fresh: Option<std::sync::mpsc::Sender<()>>,
@@ -313,7 +315,9 @@ const CLAUDE_LOCK_TOUCH: std::time::Duration = std::time::Duration::from_secs(5)
 const CLAUDE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(65);
 
 impl ClaudeRefreshLock {
-    fn acquire(home: &Path) -> Result<Self, ProviderAccountError> {
+    /// # Errors
+    /// The lock stayed held and fresh for over a minute.
+    pub(crate) fn acquire(home: &Path) -> Result<Self, ProviderAccountError> {
         let mut lock = Self {
             directories: Vec::new(),
             _keep_fresh: None,
@@ -436,9 +440,15 @@ fn keep_aside(provider: Provider, credential: &[u8]) -> Result<(), ProviderAccou
 /// Who the native login belongs to. Codex's names its person; Claude's is
 /// opaque, so its provider is asked, which refreshes an expired login in
 /// place as Claude itself would.
-async fn native_identity(provider: Provider, native: &Path) -> Option<AccountIdentity> {
+async fn native_identity(
+    provider: Provider,
+    native: &Path,
+    refresh: Option<&ClaudeRefreshLock>,
+) -> Option<AccountIdentity> {
     match provider {
-        Provider::Claude => crate::subscription::claude_identity(native).await.ok(),
+        Provider::Claude => crate::subscription::claude_identity(native, refresh)
+            .await
+            .ok(),
         _ => codex_identity_from_home(native),
     }
 }
@@ -450,6 +460,7 @@ async fn save_back(
     provider: Provider,
     native: &Path,
     accounts: &[ProviderAccount],
+    refresh: Option<&ClaudeRefreshLock>,
 ) -> Result<Kept, ProviderAccountError> {
     if read_login(provider, native).is_none() {
         return Ok(Kept::Nothing);
@@ -457,7 +468,7 @@ async fn save_back(
     let offline = active_account(provider, native, accounts);
     let identity = match offline {
         Some(_) if provider == Provider::Claude => None,
-        _ => native_identity(provider, native).await,
+        _ => native_identity(provider, native, refresh).await,
     };
     // Read after identifying: a refresh there replaces the login.
     let Some(credential) = read_login(provider, native) else {

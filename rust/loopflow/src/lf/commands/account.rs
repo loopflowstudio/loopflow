@@ -1125,7 +1125,10 @@ pub(super) async fn verify_managed_identity(
 )> {
     let (identity, plan) = match provider {
         Provider::Codex => crate::provider_auth::verify_codex_identity(home).await?,
-        Provider::Claude => (crate::subscription::claude_identity(home).await?, None),
+        Provider::Claude => (
+            crate::subscription::claude_identity(home, None).await?,
+            None,
+        ),
         _ => return Err(anyhow!("unsupported managed provider")),
     };
     // A different browser login can try the next saved profile; other failures stop connect.
@@ -1428,7 +1431,7 @@ async fn set_account_lifecycle(
                         .ok_or_else(|| anyhow!("cannot read credential identity; reconnect before changing the login email"))?.email)
                 }
                 Provider::Claude if home.join(".credentials.json").exists() => {
-                    Some(crate::subscription::claude_identity(home).await?.email)
+                    Some(crate::subscription::claude_identity(home, None).await?.email)
                 }
                 _ => None,
             };

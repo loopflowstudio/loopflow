@@ -96,7 +96,7 @@ pub(crate) async fn validate_observed_identity(
             .as_deref()
             .filter(|home| claude_login(home).is_some())
         {
-            let observed = crate::subscription::claude_identity(home).await?;
+            let observed = crate::subscription::claude_identity(home, None).await?;
             other.observed_email = Some(observed.email);
             other.observed_subject = Some(observed.subject);
             other.observed_credential_digest = observed.credential_digest;
@@ -201,7 +201,7 @@ pub(crate) async fn check_current_identity(
             let home = account.home.as_deref().ok_or_else(|| {
                 SubscriptionError::NeedsLogin("account has no credential home".into())
             })?;
-            crate::subscription::claude_identity(home).await?
+            crate::subscription::claude_identity(home, None).await?
         }
     };
     validate_observed_identity(account, &identity, accounts).await?;

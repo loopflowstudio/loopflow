@@ -171,9 +171,10 @@ impl Cli {
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
             let parsed = crate::config::settings::parse_value(key, text)?;
+            let typed = crate::config::keys::typed_key(key);
             crate::config::settings::insert(
                 &mut value,
-                &key.split('.').collect::<Vec<_>>(),
+                &typed.split('.').collect::<Vec<_>>(),
                 parsed,
             );
         }

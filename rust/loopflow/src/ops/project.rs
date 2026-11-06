@@ -259,7 +259,7 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-/// The graph a scope's new Tasks take up, resolved through your `lf set graph`,
+/// The graph a scope's new Tasks take up, resolved through your `lf set wave.graph`,
 /// the Wave's and the repository's `graph:`, then `code`.
 /// The repository scope has no Wave.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

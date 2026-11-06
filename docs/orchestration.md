@@ -198,13 +198,13 @@ and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`
 
 ```bash
 lf graph customize feature                # copies the builtin to .lf/graphs/feature.yaml
-lf --wave product set graph feature       # or only for you, without committing
+lf --wave product set wave.graph feature  # or only for you, without committing
 ```
 
 Commit those files; teammates run your definition once they have your commit.
 
 A Task takes up its Graph on its first `lf task run`: the one you name, then
-your `lf set graph` for its Wave and then its repository, then its Wave's
+your `lf set wave.graph` for its Wave and then its repository, then its Wave's
 `graph:`, then the repository's in `.lf/config.yaml`, then builtin `code`. It keeps
 that Graph as it was; later edits apply to Tasks that take it up afterwards.
 

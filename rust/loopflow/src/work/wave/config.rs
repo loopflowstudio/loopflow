@@ -151,12 +151,18 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
 }
 
 fn parse_mapping(path: &Path, content: &str) -> Result<Mapping, WaveConfigError> {
-    serde_yaml_ng::from_str::<Option<Mapping>>(content)
+    let mapping = serde_yaml_ng::from_str::<Option<Mapping>>(content)
         .map(Option::unwrap_or_default)
         .map_err(|source| WaveConfigError::Parse {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+    let mut document = Value::Mapping(mapping);
+    crate::config::keys::fold(&mut document);
+    match document {
+        Value::Mapping(mapping) => Ok(mapping),
+        _ => unreachable!("folding keeps a mapping"),
+    }
 }
 
 /// One-line Wave objective for status, PM, and API projections.

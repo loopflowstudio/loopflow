@@ -618,7 +618,7 @@ impl TaskRunSelection {
     }
 }
 
-/// The graph a Task takes up when it names none: your `lf set graph`, then its
+/// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
     let repo = repository_for_task(store, task)?;

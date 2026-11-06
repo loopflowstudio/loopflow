@@ -294,9 +294,15 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
                 println!("\n{}\n", definition.category.title());
                 previous_category = Some(definition.category);
             }
+            let shorthands = definition.shorthands();
             println!(
-                "{}: {}{}",
-                definition.key,
+                "{}{}: {}{}",
+                definition.canonical_key(),
+                if shorthands.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", shorthands.join(", "))
+                },
                 definition.description,
                 if definition.lifecycle == crate::config::catalog::Lifecycle::Inactive {
                     " (inactive)"

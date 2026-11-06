@@ -16,6 +16,8 @@ pub fn catalog() -> Vec<&'static crate::config::catalog::Definition> {
 }
 
 /// `config.get`: the declaration of `key` at `destination`, null when none.
+/// Every `key` here is a canonical path or one of its shorthands
+/// (`config::keys`); the declaration reports the canonical one.
 pub fn get(destination: &Destination, key: &str) -> Result<Declaration> {
     declaration(destination, key, None, false)
 }
@@ -43,6 +45,7 @@ pub struct Explanation {
 /// `config.explain`: how `key` resolves at the scope `destination` names.
 pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
     let destination = destination.resolve()?;
+    let key = &crate::config::keys::typed_key(key);
     crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
     let parts: Vec<_> = key.split('.').collect();
     let preference = crate::config::settings::preference_parts(&parts)?;
@@ -80,7 +83,14 @@ pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
 /// `config.theme`: the theme file Appearance owns at `path`, set to `value`
 /// when one is given, read otherwise.
 pub fn theme(path: &Path, value: Option<&str>) -> Result<Declaration> {
-    file_value(path, &["theme"], "theme", value, false)
+    file_value(
+        path,
+        &["theme"],
+        "theme",
+        value,
+        false,
+        crate::config::keys::Root::General,
+    )
 }
 
 /// `config.settings`: the effective settings at `directory` for a Wave, a
@@ -113,9 +123,10 @@ fn declaration(
 ) -> Result<Declaration> {
     anyhow::ensure!(!(value.is_some() && unset), "choose a value or unset");
     let destination = destination.resolve()?;
+    let key = &crate::config::keys::typed_key(key);
     crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
     if let ("graph", Some(value), Some(repository)) =
-        (key, value, destination.repository.as_deref())
+        (key.as_str(), value, destination.repository.as_deref())
     {
         let parsed = crate::config::settings::parse_value(key, value)?;
         if let Some(name) = parsed.as_str() {
@@ -125,21 +136,30 @@ fn declaration(
     }
     let mut parts: Vec<_> = destination.prefix.iter().map(String::as_str).collect();
     parts.extend(key.split('.'));
-    file_value(&destination.path, &parts, key, value, unset)
+    let root = match destination.scope {
+        crate::config::settings::SettingScope::Wave if destination.prefix.is_empty() => {
+            crate::config::keys::Root::Wave
+        }
+        _ => crate::config::keys::Root::General,
+    };
+    file_value(&destination.path, &parts, key, value, unset, root)
 }
 
+/// `parts` is the typed path; the file holds it at its canonical spelling,
+/// which the declaration reports as `key`.
 fn file_value(
     path: &Path,
     parts: &[&str],
     key: &str,
     value: Option<&str>,
     unset: bool,
+    root: crate::config::keys::Root,
 ) -> Result<Declaration> {
     let parsed = value
         .map(|value| crate::config::settings::parse_value(key, value))
         .transpose()?;
     if parsed.is_some() || unset {
-        crate::config::files::edit(path, parts, parsed)?;
+        crate::config::files::edit(path, parts, parsed, root)?;
     }
     let document = crate::config::files::read(path)?;
     let value = parts
@@ -149,7 +169,7 @@ fn file_value(
         .unwrap_or(Value::Null);
     Ok(Declaration {
         path: path.to_owned(),
-        key: parts.join("."),
+        key: crate::config::keys::canonical(parts, root).join("."),
         value,
         lifecycle: crate::config::catalog::definition(
             &crate::config::settings::preference_path(key)?.join("."),

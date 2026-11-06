@@ -74,11 +74,13 @@ impl Category {
     }
 }
 
-#[derive(Debug, Serialize)]
+/// One typed setting. `key` is its typed path, the layout `Config` and the
+/// files resolve; the wire and `lf config catalog` show its canonical key on
+/// its primitive and the shorthands `config::keys` accepts for it.
+#[derive(Debug)]
 pub struct Definition {
     pub key: &'static str,
     pub category: Category,
-    #[serde(serialize_with = "serialize_schema")]
     pub schema: fn() -> schemars::Schema,
     pub default: &'static str,
     pub applicability: Applicability,
@@ -88,7 +90,33 @@ pub struct Definition {
     pub description: &'static str,
 }
 
+impl Serialize for Definition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut row = serializer.serialize_struct("Definition", 10)?;
+        row.serialize_field("key", &self.canonical_key())?;
+        row.serialize_field("shorthands", &self.shorthands())?;
+        row.serialize_field("category", &self.category)?;
+        row.serialize_field("schema", &(self.schema)())?;
+        row.serialize_field("default", self.default)?;
+        row.serialize_field("applicability", &self.applicability)?;
+        row.serialize_field("combination", &self.combination)?;
+        row.serialize_field("portability", &self.portability)?;
+        row.serialize_field("lifecycle", &self.lifecycle)?;
+        row.serialize_field("description", self.description)?;
+        row.end()
+    }
+}
+
 impl Definition {
+    pub fn canonical_key(&self) -> String {
+        super::keys::canonical_key(self.key)
+    }
+
+    pub fn shorthands(&self) -> Vec<String> {
+        super::keys::shorthands(self.key)
+    }
+
     pub fn applies(&self, layer: ConfigSource, scope: SettingScope, targeted: bool) -> bool {
         (!targeted || self.applicability == Applicability::Launch)
             && match self.applicability {
@@ -105,13 +133,6 @@ impl Definition {
         let schema = (self.schema)().to_value();
         schema_path(&schema, &schema, &path[self.key.split('.').count()..])
     }
-}
-
-fn serialize_schema<S: serde::Serializer>(
-    schema: &fn() -> schemars::Schema,
-    serializer: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    schema().serialize(serializer)
 }
 
 fn schema_path(root: &serde_json::Value, node: &serde_json::Value, path: &[&str]) -> bool {
@@ -226,7 +247,9 @@ definitions! {
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 
+/// The definition owning `key`, in any spelling `config::keys` accepts.
 pub fn definition(key: &str) -> Option<&'static Definition> {
+    let key = &super::keys::typed_key(key);
     DEFINITIONS
         .iter()
         .chain(CONTEXT_DEFINITIONS)

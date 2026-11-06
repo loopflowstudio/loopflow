@@ -17,6 +17,7 @@ use crate::error::LoadError;
 pub mod catalog;
 mod definitions;
 pub mod files;
+pub mod keys;
 pub mod migrate;
 pub(crate) mod observation;
 pub(crate) mod placement;
@@ -519,32 +520,9 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
         LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
-    fold_linear_team(&mut value);
+    keys::fold(&mut value);
     normalize_context(&mut value);
     Ok(Some(value))
-}
-
-/// Released lf reads the Linear Team from `linear.team`, so a repository
-/// keeps that block while either build may run in it. Read it as Linear
-/// planning's team; an explicit `planning.team` wins. LOO-560 removes this
-/// once a release with `planning.team` is installed.
-fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
-    let Some(mapping) = value.as_mapping_mut() else {
-        return;
-    };
-    let Some(linear) = mapping.remove("linear") else {
-        return;
-    };
-    let Some(team) = linear.get("team").cloned() else {
-        return;
-    };
-    if let Some(planning) = mapping.get_mut("planning").and_then(|p| p.as_mapping_mut()) {
-        if planning.get("provider").and_then(|p| p.as_str()) == Some("linear")
-            && !planning.contains_key("team")
-        {
-            planning.insert("team".into(), team);
-        }
-    }
 }
 
 /// Temporary reader for preferences shared with the released flat format.

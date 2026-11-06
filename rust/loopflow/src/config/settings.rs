@@ -110,6 +110,7 @@ pub fn validate_scope(
     layer: ConfigSource,
     scope: SettingScope,
 ) -> Result<(), LoadError> {
+    let key = &super::keys::typed_key(key);
     let preference = preference_path(key)?;
     let definition = super::catalog::definition(&preference.join(".")).expect("validated key");
     if !definition.applies(layer, scope, preference.len() != key.split('.').count()) {
@@ -118,10 +119,12 @@ pub fn validate_scope(
     Ok(())
 }
 
-/// Return the preference path after its optional skill/occurrence selector.
-pub fn preference_path(key: &str) -> Result<Vec<&str>, LoadError> {
-    let parts: Vec<_> = key.split('.').collect();
-    preference_parts(&parts).map(<[_]>::to_vec)
+/// Return the preference path after its optional skill/occurrence selector;
+/// `key` may use any spelling `config::keys` accepts.
+pub fn preference_path(key: &str) -> Result<Vec<String>, LoadError> {
+    let typed = super::keys::typed_key(key);
+    let parts: Vec<_> = typed.split('.').collect();
+    preference_parts(&parts).map(|path| path.iter().map(|part| (*part).to_owned()).collect())
 }
 
 pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b str], LoadError> {
@@ -153,6 +156,7 @@ pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b 
 /// CLI and file values use the same YAML types as configuration files.
 pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     let path = preference_path(key)?;
+    let path: Vec<&str> = path.iter().map(String::as_str).collect();
     let value: Value = serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
     validate_value(&path, &value)?;
     Ok(value)
@@ -352,7 +356,7 @@ pub(crate) fn validate_preferences(
         };
         if key == "skill_agents" {
             return Err(invalid(format!(
-                "{key} is retired; use skills.<name>.agent or agent"
+                "{key} is retired; use skill.<name>.agent or agent"
             )));
         }
         if !targeted && (key == "skills" || key == "graphs") {

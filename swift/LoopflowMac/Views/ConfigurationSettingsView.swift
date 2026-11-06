@@ -41,7 +41,7 @@ struct ConfigurationSettingsView: View {
                     }
                 }
             }
-            if let definition = catalogue.filter({ key == $0.key || key.hasPrefix($0.key + ".") }).max(by: { $0.key.count < $1.key.count }) {
+            if let definition = catalogue.filter({ definition in ([definition.key] + definition.shorthands).contains { key == $0 || key.hasPrefix($0 + ".") } }).max(by: { $0.key.count < $1.key.count }) {
                 Text(definition.description).font(.callout)
                 Text("\(definition.applicability) · \(definition.combination) · \(definition.portability)")
                     .font(.caption).foregroundStyle(.secondary)
@@ -174,7 +174,9 @@ struct ConfigurationExplanation: Decodable {
 }
 
 struct ConfigurationDefinition: Decodable {
+    /// The canonical key on its primitive; `shorthands` are the other spellings lf accepts.
     let key: String
+    let shorthands: [String]
     let category: String
     let schema: JSONValue
     let `default`: String

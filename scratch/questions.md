@@ -381,3 +381,35 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   `lf task show <issue> --json`. The alias maps a bare `task comment <issue>`
   to `task report <issue>`, which errors on the missing message and names
   the read in the usage text.
+
+### Step 3b — config keys (decision 5)
+
+- **Canonical keys, typed layout.** `config/keys.rs` maps every spelling to
+  the typed layout `Config` keeps (`planning`, `skills`, `graph`, `waves`)
+  and back: `repository.planning.*` ↔ `planning.*`, `skill.<n>.*` ↔
+  `skills.<n>.*`, `wave.graph` ↔ `graph`, `wave.<id>.*` ↔ `waves.<id>.*`,
+  and the released `linear.team` → `planning.team` (only with provider
+  `linear` and no team, as `fold_linear_team` did; that function and its
+  LOO-560 note are gone, the shorthand rule covers the read). Readers fold
+  files (`load_yaml_file`, `files::read`, Wave `config.yaml` and GOAL
+  frontmatter); `config.set` relocates the edited key's group to the
+  canonical spelling and leaves other groups' text alone. The catalogue
+  serializes `key` canonical plus `shorthands`.
+- **Shorthand means the typed path, not any suffix.** The design says "a
+  unique trailing path"; the implemented shorthands are the typed layout
+  (`planning.team`, `graph`, `skills.x.agent`) and `linear.team`. A bare
+  `team` or `provider` is not accepted: the catalogue's keys are groups, so
+  suffix uniqueness would have to be computed over schema leaves for little
+  gain.
+- **`graphs.<name>.steps.<id>` keeps its spelling.** Decision 5 names no
+  primitive for Graph-step occurrences; `graph.<name>.step.<id>` would collide
+  with the `graph` key. Left typed.
+- **Canonical writes and the released reader.** A shared file written by
+  `lf set --shared` now spells `repository:`/`skill:`/`wave:`; the released
+  lf's `deny_unknown_fields` rejects those in `.lf/config.yaml` and Wave
+  `config.yaml`. The brief chose canonical writers; nothing in this
+  repository's files was rewritten. A Wave's own `config.yaml` keeps `graph`
+  bare (the file is the primitive), so `lf --wave x set --shared graph`
+  stays readable by the released build. Account selection stays
+  `account.<provider>` at every scope (`wave.<id>.account` under a Wave);
+  `repository.account` was not introduced.

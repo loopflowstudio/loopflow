@@ -167,8 +167,8 @@ pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` before creating or mutating work."
+            ".lf/config.yaml has no `repository.planning.team`. \
+             Run `lf wave planning connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -1059,8 +1059,8 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` to establish the migration target."
+            ".lf/config.yaml has no `repository.planning.team`. \
+             Run `lf wave planning connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -1522,7 +1522,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `planning.team`; run `lf wave connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no `repository.planning.team`; run `lf wave planning connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1805,48 +1805,30 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
+/// Declare `repository.planning` as Linear with `team_id`, at its canonical
+/// spelling; other keys keep their text and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
-    let mut root = match std::fs::read_to_string(&path) {
-        Ok(content) if !content.trim().is_empty() => {
-            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content).map_err(|error| {
-                OpsError::Message(format!(
-                    "invalid repository config {}: {error}",
-                    path.display()
-                ))
-            })?
-        }
-        Ok(_) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let previous = root.clone();
-    let root_map = root.as_mapping_mut().ok_or_else(|| {
-        OpsError::Message(format!(
-            "repository config {} must be a YAML mapping",
-            path.display()
-        ))
-    })?;
-    root_map.insert(
-        "planning".into(),
-        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
-            team: Some(team_id.to_string()),
-        })
-        .map_err(|error| OpsError::Message(error.to_string()))?,
-    );
-    if root == previous {
-        return Ok(false);
-    }
+    let planning = serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+        team: Some(team_id.to_string()),
+    })
+    .map_err(|error| OpsError::Message(error.to_string()))?;
     std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
-    std::fs::write(
-        &path,
-        serde_yaml_ng::to_string(&root).map_err(|error| {
-            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
-        })?,
-    )?;
-    Ok(true)
+    crate::config::files::update(&path, |document| {
+        let previous = document.clone();
+        let written = crate::config::keys::canonicalize(
+            document,
+            &["planning"],
+            crate::config::keys::Root::General,
+        );
+        crate::config::settings::insert(
+            document,
+            &written.iter().map(String::as_str).collect::<Vec<_>>(),
+            planning,
+        );
+        Ok(*document != previous)
+    })
+    .map_err(|error| OpsError::Message(format!("{}: {error:#}", path.display())))
 }
 
 /// A default team key (Task prefix) derived from the repository name: the first three

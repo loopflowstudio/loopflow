@@ -1213,7 +1213,8 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         let output = wait_for_viewer(viewer, Duration::from_secs(8));
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("fell behind"), "{error}");
+        assert!(error.contains("stopped reading requests"), "{error}");
+        assert!(error.contains("later input was not delivered"), "{error}");
         assert!(!error.contains("os error"), "{error}");
         return;
     }

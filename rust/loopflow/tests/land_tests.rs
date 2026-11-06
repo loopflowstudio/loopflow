@@ -605,6 +605,8 @@ fi
             &[("gh", script.as_str()), ("codex", provider.as_str())],
             Some(home.path()),
         );
+        fs::create_dir_all(home.path().join(".lf")).unwrap();
+        support::managed_codex_account(&home.path().join(".lf"));
         let options = LandOptions {
             strict: true,
             local: false,
@@ -615,11 +617,15 @@ fi
             pr_body: body_override.map(str::to_string),
             agent: Some("codex".to_string()),
         };
-        if manual_merge {
-            submit(repo.path(), &options, &NullProgress).unwrap();
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(repo.path()).unwrap();
+        let result = if manual_merge {
+            submit(repo.path(), &options, &NullProgress)
         } else {
-            land(repo.path(), &options, &NullProgress).unwrap();
-        }
+            land(repo.path(), &options, &NullProgress)
+        };
+        std::env::set_current_dir(previous).unwrap();
+        result.unwrap();
         assert_eq!(
             fs::read_to_string(title_path).unwrap(),
             if changed_head {
@@ -1577,6 +1583,8 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         ],
         Some(home.path()),
     );
+    fs::create_dir_all(home.path().join(".lf")).unwrap();
+    support::managed_codex_account(&home.path().join(".lf"));
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -1606,7 +1614,9 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    land(
+    let previous = std::env::current_dir().unwrap();
+    std::env::set_current_dir(repo.path()).unwrap();
+    let result = land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -1616,11 +1626,12 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
-            agent: None,
+            agent: Some("codex".to_string()),
         },
         &NullProgress,
-    )
-    .expect("land with stale cached copy should regenerate");
+    );
+    std::env::set_current_dir(previous).unwrap();
+    result.expect("land with stale cached copy should regenerate");
 }
 
 #[test]

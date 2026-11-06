@@ -112,6 +112,9 @@ struct WorkCLISubscriptionTests {
 
         model.select(.wave(id: wave.wave.id))
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
+        #if canImport(GhosttyKit)
+        #expect(registry.surfaces.programStatus(for: surfaceID) == nil)
+        #endif
         // A closed Task left the plan; an edit made while it is not shown
         // reaches it when it is shown again, without restoring the old selection.
         _ = try await fixture.run(["task", "edit", id, "--title", "Updated after navigation"])
@@ -130,7 +133,7 @@ struct WorkCLISubscriptionTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
         #if canImport(GhosttyKit)
-        #expect(registry.surfaces.view(for: surfaceID) === surface)
+        #expect(registry.surfaces.view(for: surfaceID) !== surface)
         #endif
         #expect(files.document("notes.txt") === draft)
         #expect(draft.editor.string == "unsaved Task draft")

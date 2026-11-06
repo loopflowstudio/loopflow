@@ -3,85 +3,154 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-593 · Direct writes and execution owners</title>
+<title>LOO-593 concept review: attach by Session</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf9f5;--ink:#202824;--muted:#58635c;--line:#c9d0c8;--accent:#195e4d;--panel:#edf1eb}
-@media(prefers-color-scheme:dark){:root{--bg:#17201c;--ink:#eef2e9;--muted:#b4c0b7;--line:#42534a;--accent:#93d9bd;--panel:#24342b}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.6 system-ui,sans-serif}main{max-width:840px;margin:auto;padding:44px 24px 72px}header{margin-bottom:30px}.meta,.note{color:var(--muted);font-size:14px}h1{font:clamp(32px,6vw,48px)/1.15 Georgia,serif;letter-spacing:-.02em}h2{font:27px/1.3 Georgia,serif;margin-top:36px}p{margin:14px 0}a{color:var(--accent);text-underline-offset:3px}code{font:.86em ui-monospace,monospace;overflow-wrap:anywhere}pre{padding:18px;background:var(--panel);white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px}table{border-collapse:collapse;width:100%;font-size:15px}td,th{padding:12px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500}.decision{border-left:3px solid var(--accent);padding-left:18px}li{margin:12px 0}ol{padding-left:24px}blockquote{margin:18px 0;padding:4px 20px;background:var(--panel)}@media(max-width:560px){main{padding:24px 16px 48px}table{font-size:13px}td,th{padding:10px 4px}pre{padding:12px;font-size:13px}}
+  :root { color-scheme: light dark; --fg: #1c1c1c; --bg: #fbfbf9; --mute: #6b6b66; --line: #ddd9cf; --prop: #8a4b00; --propbg: #fff4e3; --code: #f0ede4; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8e6df; --bg: #161614; --mute: #9a988f; --line: #33322e; --prop: #f0b36a; --propbg: #2a2016; --code: #22211d; } }
+  html { background: var(--bg); color: var(--fg); font: 17px/1.55 Georgia, "Iowan Old Style", serif; }
+  body { max-width: 44rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+  header { color: var(--mute); font-size: 0.9rem; border-bottom: 1px solid var(--line); padding-bottom: 1rem; margin-bottom: 2.5rem; }
+  header b { color: var(--fg); font-weight: 600; }
+  h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 1rem; font-weight: 600; }
+  h2 { font-size: 1.15rem; margin: 3rem 0 0.75rem; font-weight: 600; }
+  p { margin: 0 0 1rem; }
+  code, pre { font: 0.86em/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+  code { background: var(--code); padding: 0.05em 0.3em; border-radius: 3px; }
+  pre { background: var(--code); padding: 0.9rem 1rem; border-radius: 6px; overflow-x: auto; margin: 0 0 1.25rem; }
+  pre code { background: none; padding: 0; }
+  .lead { font-size: 1.15rem; }
+  .proposed { border-left: 3px solid var(--prop); background: var(--propbg); padding: 0.75rem 1rem; margin: 0 0 1.25rem; }
+  .proposed::before { content: "proposed"; display: block; color: var(--prop); font: 600 0.75rem/1 system-ui, sans-serif; letter-spacing: 0.02em; margin-bottom: 0.5rem; }
+  .today::before { content: "today"; display: block; color: var(--mute); font: 600 0.75rem/1 system-ui, sans-serif; letter-spacing: 0.02em; margin-bottom: 0.5rem; }
+  .today { border-left: 3px solid var(--line); padding: 0.75rem 1rem; margin: 0 0 1.25rem; }
+  .flow { display: grid; grid-template-columns: 1fr; gap: 0.6rem 1rem; margin: 0 0 1.5rem; }
+  .flow > div { display: grid; grid-template-columns: 7.5rem 1fr; gap: 0 1rem; align-items: baseline; }
+  .flow .k { color: var(--mute); font: 600 0.78rem/1.6 system-ui, sans-serif; }
+  .mark { color: var(--prop); font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 1.5rem; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 0.45rem 0.6rem 0.45rem 0; border-bottom: 1px solid var(--line); }
+  th { color: var(--mute); font: 600 0.78rem/1.6 system-ui, sans-serif; }
+  ol.q { padding-left: 1.4rem; } ol.q li { margin-bottom: 1rem; } ol.q ol { list-style: lower-alpha; padding-left: 1.4rem; margin-top: 0.35rem; }
+  .path { color: var(--mute); font-size: 0.85rem; margin-top: 3rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
 </style>
 </head>
-<body><main>
+<body>
 <header>
-<p class="meta">LOO-593 · Concept review · November 4, 2026 · Source at <code>30b4394a57</code><br>
-Built from <a href="mobile-backend.md">working design</a>, <a href="server-write-direction.md">Jack Heart’s direct-write direction</a>,
-<a href="../docs/dev/server.md">server architecture</a>, <a href="../swift/README.md">Swift guide</a>,
-<a href="../rust/loopflow/src/server/service.rs">server dispatcher</a>,
-<a href="../rust/loopflow/src/lf/commands/mutation.rs">shared mutations</a>,
-<a href="../rust/loopflow/src/journal/request.rs">request tracing</a>,
-<a href="../swift/LoopflowMac/Services/ServerClient.swift">native client</a>,
-<a href="../swift/Loopflow/Services/RegistryQuery.swift">native operations</a>,
-<a href="../swift/LoopflowMac/Views/ConfigurationSettingsView.swift">configuration view</a> and
-<a href="../rust/loopflow/src/transport/connection.rs">connection recovery</a>.</p>
-<h1>A write request does not own execution.</h1>
-<p class="decision"><strong>No new product decision or design change is needed.</strong>
-Jack Heart selected shared direct writes with request-scoped telemetry. The implementation and corrected guides now agree. Adoption and settings retain that boundary after integration; the remaining obligation is proof on the merged build.</p>
-<p><strong>Accepted and implemented:</strong> a request runs the shared mutation path; actual execution keeps its existing owners. This review proposes no new interaction, wire shape or persistence model.</p>
+  <b>LOO-593</b> · concept review · November 5, 2026<br>
+  Built from <code>rust/loopflow/src/server/README.md</code>, <code>server/wire.rs</code>, <code>swift/Loopflow/Services/ServerProtocol.swift</code>, <code>scratch/api-engine.md</code>, <code>scratch/mobile-backend.md</code>, <code>scratch/namespace-survey.md</code>, the LOO-718 steer.
 </header>
 
-<h2>Actions → concepts → APIs</h2>
+<h1>The phone attaches to a Process. The product promises a Session.</h1>
+
+<p class="lead">You said the phone's interaction is "an actual terminal on the actual Claude Code session". On the wire, the terminal is reached through an owner Process ID, which ends on <code>lf install</code>, retirement or takeover, and the contract says the client must notice and look the owner up again. The decision needed: does the API attach by Session, with the server resolving the owner, or stay keyed on the exact Process?</p>
+
+<h2>One interaction, with recovery</h2>
+
+<p>Open the app. The Tasks you are working on are listed. Tap LOO-593. Its Session's terminal fills the screen; you answer the question Claude is waiting on. You put the phone down. On the Mac, <code>lf install</code> replaces the executable; the Session's owner is replaced with it, the conversation keeps its draft and history. You pick the phone up.</p>
+
+<div class="today">
+<div class="flow">
+  <div><span class="k">you</span><span>open the app, tap LOO-593</span></div>
+  <div><span class="k">client</span><span><code>task.list</code> → <code>task.get {issue}</code> → its primary Session id</span></div>
+  <div><span class="k">client</span><span><code>session.owner {session}</code> → <code>{owner}</code> (null if no transport)</span></div>
+  <div><span class="k">client</span><span><code>process.attach {owner}</code> on a connection of its own, then the owner byte protocol</span></div>
+  <div><span class="k">you</span><span>type; the bytes go to the owner, the owner to Claude</span></div>
+  <div><span class="k">Mac</span><span>owner ends (install, retirement, takeover)</span></div>
+  <div><span class="k">client</span><span>bridge drops; <code>process.attach</code> again answers <code>not_found {owner}</code></span></div>
+  <div><span class="k">client</span><span>must run <code>session.owner</code> again, then attach again; the README says "no automatic owner replacement; Desktop reconnects the exact owner"</span></div>
+</div>
+</div>
+
+<div class="proposed">
+<div class="flow">
+  <div><span class="k">you</span><span>open the app, tap LOO-593</span></div>
+  <div><span class="k">client</span><span><code>task.list</code> → <code>task.get {issue}</code> → its primary Session id</span></div>
+  <div><span class="k">client</span><span><span class="mark"><code>session.attach {session}</code></span>: the server resolves the Session's current owner, answers a ticket and <code>{owner}</code>; the terminal connection presents the ticket, then the unchanged owner byte protocol</span></div>
+  <div><span class="k">you</span><span>type; same bytes, same owner, lf off the byte path once resolved</span></div>
+  <div><span class="k">Mac</span><span>owner ends</span></div>
+  <div><span class="k">client</span><span>bridge ends with <span class="mark"><code>ended {reason: "owner_ended"}</code></span>; the client re-attaches with the same Session id and the server resolves the new owner. No re-bridge in place, no input replay.</span></div>
+</div>
+</div>
+
+<h2>Concepts the person meets</h2>
+
 <table>
-<thead><tr><th>Action</th><th>Concept</th><th>Accepted authority</th></tr></thead>
-<tbody>
-<tr><td>Rename or save in Desktop</td><td>Work mutation</td><td><code>command {change}</code> → shared Rust dispatcher → existing Work store</td></tr>
-<tr><td>Make this conversation a Task</td><td>Work association</td><td><code>task_from_session</code> / <code>session_bind</code> → shared creation/binding → same Session; no provider launch</td></tr>
-<tr><td>Change a setting</td><td>File declaration</td><td><code>configuration</code> → existing <code>config::api</code> file owner; no Work registry required</td></tr>
-<tr><td>Start a Task and open its conversation</td><td>Execution</td><td><code>task create --run --json</code> → existing Session / Graph owners</td></tr>
-<tr><td>Reconnect a terminal</td><td>Client access</td><td><code>attach {owner}</code> → the exact recorded owner; passive recovery preserves newer claims</td></tr>
-<tr><td>Run on another computer</td><td>Machine destination</td><td><code>lf --machine …</code> → existing routing</td></tr>
-<tr><td>Update Loopflow</td><td>Installation</td><td><code>lf install</code> → selected artifacts and server registration</td></tr>
-<tr><td>Arrange windows or panes</td><td>Desktop presentation</td><td><code>lf desktop</code> → app-owned automation</td></tr>
-</tbody>
+<tr><th>Concept</th><th>What it is to you</th><th>Today on the wire</th><th>Proposed</th></tr>
+<tr><td>Task</td><td>the thing you pick</td><td><code>task.list</code>, <code>task.get</code></td><td>unchanged</td></tr>
+<tr><td>Session</td><td>the conversation you type into; keeps its identity across resume, takeover and upgrade</td><td>a field on the Task; <code>session.owner</code> to find its transport</td><td><span class="mark">the handle you attach to</span>; owner is a field of <code>session.get</code></td></tr>
+<tr><td>Process</td><td>machinery: the owner that is holding the PTY right now</td><td><span class="mark">the handle you attach to</span> (<code>process.attach {owner}</code>)</td><td>operations view only: <code>process.list</code>, <code>process.get</code>, <code>process.top</code></td></tr>
 </table>
 
-<h2>The consequential mismatch is resolved</h2>
-<p><strong>Before — superseded implementation and guidance:</strong></p>
-<pre><code>Desktop write → server → CLI child → mutation
-                         └ Process attributed to each write</code></pre>
-<p><strong>After — accepted, implemented and documented:</strong></p>
-<pre><code>Desktop Write → server request ─┐
-CLI command ───────────────────┴→ shared mutation dispatcher → Work
+<h2>APIs that change</h2>
 
-server request → trace + diagnostics + effects in logs/lf.log
-CLI execution → actual Process + existing Session / Graph owners
-terminal connection → bridge to the exact existing owner</code></pre>
-<p>The dispatcher owns routing, selection, defaults, effects and formatting. Each caller supplies a directory and input/output/error streams. A served request uses a scoped worker without changing global cwd, environment or standard streams. It creates no Process row and inherits no launcher Session or Task attribution. The server adds no scheduler or second Work store.</p>
-<p><code>Write</code> remains the existing wire carrier. Reusing its CLI spelling to parse shared options starts no CLI child. A response trace correlates diagnostics; neither that trace nor the request ID is a durable receipt authorizing replay.</p>
-<p>Binding selects the Task’s primary conversation and recorded directory. It preserves live attachment and historical attribution; a changed record does not move the running provider. Configuration remains file-backed and available before Work can open. These existing authorities make a second executor, request Process and server-owned execution lifecycle unnecessary.</p>
+<table>
+<tr><th>Today</th><th>Proposed</th><th>Why</th></tr>
+<tr><td><code>process.attach {owner}</code> (server's own, ticketed in LOO-718)</td><td><span class="mark"><code>session.attach {session}</code></span>, same ticket shape, response carries <code>{owner, ticket}</code></td><td>the client names what it means; exactness is still visible to a client that wants it</td></tr>
+<tr><td><code>session.owner {session}</code></td><td>folded into <code>session.get</code> as <code>owner: Option</code></td><td>one read per noun; nothing to call before attaching</td></tr>
+<tr><td>bridge drop, then <code>not_found {owner}</code> on retry</td><td><code>ended {id, reason}</code> on the terminal connection; re-attach by Session</td><td>recovery is one step the client already knows</td></tr>
+</table>
 
-<h2>The interaction stays simple</h2>
-<blockquote><p>Open Desktop. Rename the conversation or save an edit. If the reply is lost, inspect the current state before making another deliberate edit. During terminal recovery, keep reading the last screen; wait for acknowledgement before typing. Use Move here only to request control.</p></blockquote>
-<p><strong>Existing guidance, unchanged:</strong> <a href="../docs/server.md">Connect clients</a>, the architecture and Swift guides now describe this boundary. Use <code>lf server status</code> to inspect access and <code>lf install</code> to update. No new setup command or recovery skill is needed. The <a href="../rust/loopflow/src/server/README.md">protocol README</a> owns direct dispatch and wire details.</p>
+<p>Everything below the ticket stays as it is: the owner byte protocol in <code>transport/README.md</code>, claims fencing every attachment, geometry and input owned by the owner, bounded output continuation. The server resolves once and then copies bytes; it never sits between the person and the provider after that.</p>
 
-<h2>Rename, lose the connection, continue editing</h2>
-<ol>
-<li><strong>Normal path.</strong> Save a Session name. The server runs the shared mutation and returns output, errors, exit status and trace. The native pane reflects the saved name; no provider restarts.</li>
-<li><strong>Lost reply.</strong> The write may have committed before the connection disappeared. Cancel releases the client’s wait; it does not roll back an admitted mutation. Refresh authoritative state before another deliberate edit. Never automatically resend.</li>
-<li><strong>Server replacement.</strong> The draft, provider history and unfinished Graph must survive actual supervisor cleanup. Native status shows “Reconnecting…” outside terminal bytes. Input pauses; selection, copy, Find and scrolling stay available.</li>
-<li><strong>Recovery.</strong> Reconnect the exact owner and wait for acknowledgement. Refresh Work subscriptions. Discard uncertain input. Retry changes connectivity; Move here deliberately requests control. Recovery neither repeats setup nor overrides disabled background items.</li>
+<h2>Why this is the consequential one</h2>
+
+<p>Identity. The style guide says a Session's identity, name and history survive takeover and that attachment claims are separate from provider identity. An owner Process is the opposite: by design it ends on upgrade, which is the November 4 incident, and on retirement. Keying the phone's only interaction on the transient half means every client reimplements the same lookup loop, and a client that caches an owner id has a stale handle after every <code>lf install</code>.</p>
+
+<p>It also decides the shape of a design you have not approved yet. If the agent runs in the pane with no owner or relay (<code>scratch/agent-in-terminal.md</code> on <code>jack-heart/icons</code>), there is no owner Process to attach to, and <code>process.attach</code> has nothing to name. <code>session.attach</code> survives that change unchanged.</p>
+
+<h2>Counterexamples kept</h2>
+
+<p><b>Handoff A → B → A.</b> A viewer attached to owner A is ended when B takes over; it is never silently moved, and no uncertain input is replayed. The fresh claim token still fences every attachment.</p>
+
+<p><b>Desktop's exact reconnect.</b> Desktop keeps the <code>{owner}</code> it was answered and can tell when a re-attach resolved to a different one. Exactness becomes something a client checks, not something the API forces on every client.</p>
+
+<p><b>lf off the byte path.</b> No in-place re-bridge when the owner changes mid-stream. That would put lf back between the keyboard and the provider; instead the bridge ends with a reason.</p>
+
+<h2>Draft of the usage doc</h2>
+
+<div class="proposed">
+<pre><code>Attach a terminal to a Session
+
+  session.attach {session}
+
+The server resolves the Session's current owner and answers a single-use
+ticket with the owner it chose. Open a connection of its own, present the
+ticket, then speak the owner byte protocol. When the owner ends, the
+connection ends with a reason; attach again with the same Session id and
+the server resolves the replacement. The server never replays input and
+never re-bridges a live terminal.</code></pre>
+</div>
+
+<h2>Questions</h2>
+
+<ol class="q">
+  <li>Attach by Session?
+    <ol>
+      <li><code>session.attach {session}</code> replaces <code>process.attach {owner}</code>; <code>session.owner</code> folds into <code>session.get</code>.</li>
+      <li>Both: <code>session.attach</code> for clients, <code>process.attach</code> kept for Desktop's exact reconnect.</li>
+      <li>No: stay keyed on the exact Process; clients own the lookup loop.</li>
+    </ol>
+  </li>
+  <li>When the owner ends under a live terminal:
+    <ol>
+      <li>the bridge ends with a reason and the client re-attaches by Session (server resolves the new owner).</li>
+      <li>the server re-bridges in place and the client sees only a pause.</li>
+    </ol>
+  </li>
+  <li>Where it lands:
+    <ol>
+      <li>LOO-718, which is building the ticketed attach now.</li>
+      <li>#1813, with 718 rebased onto it.</li>
+    </ol>
+  </li>
+  <li>The same shape for reads (survey C1): one read per noun?
+    <ol>
+      <li><code>lf task show</code> is the one Task read (<code>task.get</code>) and <code>task status</code> goes; likewise one <code>wave show</code>.</li>
+      <li>keep <code>task status</code> and <code>wave status</code> as separate reads.</li>
+    </ol>
+  </li>
 </ol>
-<p class="decision"><strong>Counterexamples to preserve:</strong> a rename commits, its reply is lost, and replay overwrites a later edit; or takeover succeeds, its acknowledgement is lost, and recovery steals control from a newer viewer. Both violate the accepted contract. Unknown outcomes and one-shot control transfer are necessary distinctions.</p>
-<p>For adoption, a lost reply likewise requires inspecting the conversation’s association before another deliberate action. Neither a transport Retry nor a changed Task directory authorizes starting a replacement provider. A recovery path that did so would invalidate this review’s conclusion.</p>
 
-<h2>Source review is not final acceptance</h2>
-<p>The <a href="direct-write-demo.md">native demo</a> and <a href="server-performance/results.md">matched measurements</a> retain their build-specific limits. Rename latency improved in that workload; read tail and the single restart observation worsened. No general speed or memory claim follows.</p>
-<p>This source review ran no runtime tests or rendered demo. Final merged-build checks and the composed installed-helper replacement proof remain: acknowledge recovery, edit and submit the same retained draft, and observe subsequent Graph progress. A live PID alone is insufficient. New fixtures must separate durable demo history from disposable runtimes and retain teardown evidence. Linux supervisor replacement, full packaging and combined LOO-718 mobile acceptance retain their separate evidence requirements.</p>
-<p>GUI-less distribution, before-login hosting, removal during active work and phone takeover remain outside this local correction. Publication and interactive demo are authorized; merge, Auto-Ship and Task completion are not. This review does not change Graph navigation.</p>
-
-<h2>Questions for the next proof</h2>
-<p class="note">Verification questions, not pending requests for approval or new product decisions.</p>
-<ol>
-<li>On the final merged build, do edits, adoption and settings preserve CLI effects, scoped diagnostics and unknown outcomes without fabricated Processes or replay?</li>
-<li>Do the native and packaging checks preserve local copy, Find and scrolling while input is paused, and keep newer viewers’ input and geometry claims?</li>
-<li>After replacement of the installed helper under the real supervisor, does the same owner accept the retained draft and continue its turn while the unfinished Graph progresses?</li>
-</ol>
-</main></body></html>
+<p class="path">scratch/concept-review.html</p>
+</body>
+</html>

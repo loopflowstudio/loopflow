@@ -252,3 +252,39 @@ the API noun open. These supersede the alignment table above where they differ.
 The API nouns are therefore: Wave, Task, Graph, Session, Process, Machine,
 Repository, Work, PR, Checkout, Skill, Account, Config, Desktop, Planning
 (cross-Wave only).
+
+## Concept review — November 5, 2026
+
+Unresolved. Nothing below is accepted; the accepted model above stands.
+
+**The mismatch.** The phone's whole interaction is "a terminal on the actual
+Claude Code Session" (decision above: no asks reading, no answer write). The
+wire attaches to a Process: `session.owner {session}` → `{owner}` →
+`process.attach {owner}` on its own connection, and the contract says "no
+automatic owner replacement; Desktop reconnects the exact owner". A Session is
+the durable identity (it survives takeover, resume, `lf install`); an owner
+Process is machinery that ends on upgrade or retirement. So the client must
+learn a concept the product never shows it, and recovery is the client's loop
+(`not_found {owner}` → `session.owner` again → attach again).
+
+**Proposal.** `session.attach {session}` is the one attach: the server resolves
+the Session's current owner, answers the ticket (LOO-718's shape), and the
+terminal connection carries the unchanged owner byte protocol. The response
+carries `{owner}` so a client that wants exactness can see it changed. When the
+owner ends, the bridge ends with a reason and the client re-attaches by the same
+Session id; the server never re-bridges mid-stream (lf stays off the byte path
+after resolution). `process.attach` is deleted; `session.owner` folds into
+`session.get` as a field. `process.*` stays the operations view
+(`list`, `get`, `top`).
+
+**Counterexamples kept.** A→B→A handoff: attachment claims still fence every
+attachment; a viewer on the old owner is ended, never moved, and no raw input is
+replayed. Desktop's exact reconnect: it keeps the `{owner}` it was answered and
+compares. Agent-in-terminal (undecided, `scratch/agent-in-terminal.md` on
+`jack-heart/icons`): if owners disappear, a Session-keyed attach survives and an
+owner-keyed one does not.
+
+**Open product choices.** Attach by Session or by Process; what the client sees
+when the owner ends (ended-with-reason versus in-place re-bridge); whether this
+goes to LOO-718 (ticketed attach in flight there) or onto #1813; and survey C1:
+whether `task show` becomes the one Task read and `task status` goes.

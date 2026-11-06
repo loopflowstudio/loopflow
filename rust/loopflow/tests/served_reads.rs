@@ -438,6 +438,11 @@ fn server_operations_match_their_lf_commands() {
         | Read::Retention
         | Read::Doctor
         | Read::Ci { .. }
+        | Read::AccountList { .. }
+        | Read::AccountRoute { .. }
+        | Read::SkillList { .. }
+        | Read::PrChecks { .. }
+        | Read::PrReviews { .. }
         | Read::TaskWait { .. } => (
             [
                 Read::MonitorPs,
@@ -579,6 +584,10 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskWait {
                     issue: "INF-123".into(),
                     until: loopflow::ops::task::TaskWaitUntil::Terminal,
+                },
+                Read::SkillList {
+                    directory: repo.path().to_owned(),
+                    path: vec!["graph".into()],
                 },
             ],
             [
@@ -736,6 +745,22 @@ fn server_operations_match_their_lf_commands() {
         | Write::CheckoutCommit { .. }
         | Write::CheckoutSync { .. }
         | Write::CheckoutCreate { .. }
+        | Write::AccountDisconnect { .. }
+        | Write::AccountConnect { .. }
+        | Write::AccountSet { .. }
+        | Write::AccountToken { .. }
+        | Write::AccountRedeemReset { .. }
+        | Write::AccountUse { .. }
+        | Write::GraphRun { .. }
+        | Write::SkillRun { .. }
+        | Write::PrPublish { .. }
+        | Write::PrOpen { .. }
+        | Write::PrSubmit { .. }
+        | Write::PrArm { .. }
+        | Write::PrLand { .. }
+        | Write::PrAbandon { .. }
+        | Write::PrReconcile { .. }
+        | Write::PrRequestReview { .. }
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
         | Write::DashboardPin { .. }
@@ -1718,6 +1743,291 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 if *on {
                     spelled.push(flag.into());
                 }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::AccountDisconnect { provider, email } => {
+            let mut spelled = words(&["account", "disconnect", provider]);
+            spelled.extend(email.clone());
+            ("/".into(), spelled)
+        }
+        Write::AccountConnect {
+            provider,
+            email,
+            chrome_profile,
+            import,
+            api_key,
+        } => {
+            let mut spelled = words(&["account", "connect", provider]);
+            spelled.extend(email.clone());
+            if let Some(profile) = chrome_profile {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            for (flag, on) in [("--import", import), ("--api-key", api_key)] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountSet {
+            provider,
+            email,
+            login_email,
+            routing,
+            plan,
+            clear_plan,
+            paid_through,
+            clear_paid_through,
+            clear_cooldown,
+            chrome_profiles,
+            clear_chrome_profiles,
+        } => {
+            let mut spelled = words(&["account", "set", provider]);
+            spelled.extend(email.clone());
+            for (flag, value) in [
+                ("--login-email", login_email),
+                ("--routing", routing),
+                ("--plan", plan),
+                ("--paid-through", paid_through),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            for (flag, on) in [
+                ("--clear-plan", clear_plan),
+                ("--clear-paid-through", clear_paid_through),
+                ("--clear-cooldown", clear_cooldown),
+                ("--clear-chrome-profiles", clear_chrome_profiles),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for profile in chrome_profiles {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountToken {
+            provider,
+            email,
+            file,
+            chrome_profile,
+        } => {
+            let mut spelled = words(&["account", "token", provider, email]);
+            if let Some(file) = file {
+                spelled.extend(words(&["--file", &path(file)]));
+            }
+            if let Some(profile) = chrome_profile {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountRedeemReset {
+            provider,
+            email,
+            idempotency_key,
+            credit_id,
+        } => {
+            let mut spelled = words(&["account", "redeem-reset", provider, email]);
+            for (flag, value) in [
+                ("--idempotency-key", idempotency_key),
+                ("--credit-id", credit_id),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            ("/".into(), spelled)
+        }
+        Write::AccountUse { provider, email } => {
+            ("/".into(), words(&["account", provider, "use", email]))
+        }
+        Write::GraphRun {
+            directory,
+            name,
+            message,
+            agent,
+        }
+        | Write::SkillRun {
+            directory,
+            name,
+            message,
+            agent,
+        } => {
+            let noun = if matches!(write, Write::GraphRun { .. }) {
+                "graph"
+            } else {
+                "skill"
+            };
+            let mut spelled = words(&["--batch"]);
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&[noun, name]));
+            spelled.extend(message.clone());
+            (path(directory), spelled)
+        }
+        Write::PrPublish {
+            directory,
+            title,
+            body,
+            agent,
+        }
+        | Write::PrOpen {
+            directory,
+            title,
+            body,
+            agent,
+        } => {
+            let verb = if matches!(write, Write::PrOpen { .. }) {
+                "open"
+            } else {
+                "publish"
+            };
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", verb]));
+            for (flag, value) in [("--title", title), ("--body", body)] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrSubmit {
+            directory,
+            strict,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "submit"]));
+            if *strict {
+                spelled.push("--strict".into());
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrArm {
+            directory,
+            strict,
+            local,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "arm"]));
+            for (flag, on) in [("--strict", strict), ("--local", local)] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrLand {
+            directory,
+            wait_and_fix,
+            strict,
+            local,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "land"]));
+            for (flag, on) in [
+                ("--wait-and-fix", wait_and_fix),
+                ("--strict", strict),
+                ("--local", local),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrAbandon {
+            directory,
+            branch,
+            force,
+        } => {
+            let mut spelled = words(&["pr", "abandon"]);
+            spelled.extend(branch.clone());
+            if *force {
+                spelled.push("--force".into());
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrReconcile { directory } => {
+            (path(directory), words(&["pr", "reconcile", "--json"]))
+        }
+        Write::PrRequestReview {
+            directory,
+            pr,
+            reviewers,
+        } => {
+            let mut spelled = words(&["pr", "request-review"]);
+            spelled.extend(pr.clone());
+            for reviewer in reviewers {
+                spelled.extend(words(&["-r", reviewer]));
             }
             spelled.push("--json".into());
             (path(directory), spelled)

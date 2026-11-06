@@ -481,3 +481,43 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
 - **`repository.ci` is a read with an absolute window.** `since` is passed
   through as `lf repository ci --since` accepts it (`7d` or an instant); the
   served comparison test uses an instant so two reads agree.
+- **`pr.land` is the one detached PR verb.** `publish`, `open`, `submit`,
+  `arm`, `abandon`, `reconcile` and `request_review` answer inline: each is
+  a few provider calls. `land` syncs first (which may launch an agent) and
+  with `wait_and_fix` stays until the merge is verified, so it starts `lf pr
+  land … --json` detached and answers with the Process. `pr.arm` and
+  `lf pr land` share one body (`engine::pr::land_in`); `lf pr arm` is that
+  body without the wait.
+- **Served `pr.open` opens no review surface.** The CLI presents the PR after
+  printing it; a served caller has its own surface, so the engine's `open`
+  only pushes and creates the draft. `pr.checks --watch` stays CLI-only:
+  `gh` streams it to the terminal, and the served read reports once.
+- **`gh` exit statuses ride in `Error.data.exit`.** `pr.checks` maps 0/1/8 to
+  `passing`/`failing`/`pending` and keeps `gh`'s stdout as `report`; any other
+  status, and every `pr.reviews` or `pr.request_review` failure, is an
+  `unavailable` error whose `data.exit` the CLI adapter exits with, so
+  `lf pr request-review` still exits 4 on a forbidden reviewer.
+- **`task.run` keeps its Task spelling; `graph.run` is the taskless run.**
+  Both start detached through `engine::launch::start` and answer with the
+  Process; `graph.run` and `skill.run` spell `lf -b graph|skill <name>` so a
+  served run is headless and its kind is explicit. `-b` here never approves
+  Auto-Ship: that approval is `task.run {approve}` and `task.ship` only.
+  Nothing in `task.run` duplicated `graph.run`, so nothing was deleted.
+- **`task.ship` and `task.hold` are not `pr.*` proxies.** `lf ship` is
+  `-b task run` with the Auto-Ship approval and `task hold` withdraws it;
+  neither lands a PR directly. `pr.land` serves `lf pr land`. The proxies the
+  brief named were not found in the code and no duplicated logic remained to
+  delete.
+- **Account writes still print.** `engine::account` wraps the existing
+  handlers, which print their outcome lines; served, those lines land in the
+  serving process's stdout. Threading `Progress` through `account.rs` is a
+  follow-up; the served results are typed (`Account`, `Redemption`) and the
+  reads (`AccountReport`, `Vec<RouteReport>`) are the CLI's `--json` shapes.
+  No served account write prompts: a connect with no remembered browser
+  profile refuses and names `--chrome-profile`, as the CLI does without a
+  terminal.
+- **Found while checking slice 2:** `land_tests::land_generates_copy_when_cached_pr_copy_is_stale`
+  and `final_preparation_preserves_published_copy_only_for_the_same_head`
+  fail on this Machine before and after the change ("account reference
+  manabot-eng has no resident login"): in-process `ops::land` reads the real
+  account route. Not this Task's.

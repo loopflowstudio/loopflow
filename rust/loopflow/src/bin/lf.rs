@@ -469,6 +469,7 @@ fn execute_target(
             });
             let cli = &selected;
             with_runtime(&repo_root, args, || {
+                loopflow::engine::skill::carry(name)?;
                 with_skill_runtime(&repo_root, name, || {
                     let shared = binding.is_some()
                         || loopflow::lf::commands::run::implicit_binding(cli)?.is_some();
@@ -508,6 +509,7 @@ fn execute_target(
             let graph = composed.into_graph();
             let repo_root = loopflow::repo::working_directory()?;
             with_runtime(&repo_root, args, || {
+                loopflow::engine::graph::carry(&graph.name)?;
                 loopflow::lf::commands::graph::run(&graph, message, cli, &repo_root, binding)
             })
         }

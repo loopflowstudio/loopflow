@@ -134,7 +134,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `repository.release` | `lf repository release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repository::release` |
 | `repository.ci` | `lf repository ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repository::ci` |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
-| `graph.run` | `lf graph <name>`; `task.run` is its Task proxy | CLI handler; not served |
+| `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `process.get` | `lf process show <id>` | read |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `process.list` | `lf process list` | read |
@@ -143,10 +143,14 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
 | `config.theme` | none; Appearance's theme file | `engine::config` |
-| `pr.*` | `lf pr publish`, `open`, `submit`, `arm`, `land`, `abandon`, `reconcile`, `checks`, `reviews`, `request-review` | CLI handler; not served |
+| `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
+| `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
+| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--watch`), `reviews` |
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
-| `account.*` | `lf account …` | CLI handler; not served |
-| `skill.run`, `skill.list` | `lf <skill>`, `lf list` | CLI handler; not served |
+| `account.list`, `.route` | `lf account [<provider>]`, `lf account route` | read; `engine::account::list`, `route` |
+| `account.connect`, `.disconnect`, `.set`, `.token`, `.use`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `token`, `lf account <provider> use`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `token`, `activate`, `redeem_reset` (none prompts) |
+| `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
+| `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
 | `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |

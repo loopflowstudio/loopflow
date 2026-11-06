@@ -70,6 +70,16 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// How failed CI was detected, repaired and landed on this Machine since
     /// `since` (`7d`, `24h` or an RFC 3339 instant).
     case ci(since: String, wave: String?, repo: String?)
+    /// Every login's state on this Machine; `cached` skips the providers.
+    case accountList(provider: String?, cached: Bool, details: Bool)
+    /// How the repository selects an account for each provider.
+    case accountRoute(directory: String, repo: String?, default: Bool)
+    /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
+    case skillList(directory: String, path: [String])
+    /// The branch's check report as the provider prints it, with its state.
+    case prChecks(directory: String, required: Bool)
+    /// Requested reviews and review submissions, each with its commit.
+    case prReviews(directory: String, pr: String?)
     /// The Task now and whether it reached `until` (`submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
@@ -154,7 +164,18 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .doctor:
             return ["machine", "doctor", "--json"]
         case .ci(let since, let wave, let repo):
-            return ["repository", "ci", "--since", since] + Self.option("--wave", wave) + Self.option("--repo", repo) + ["--json"]
+            return ["repository", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
+        case .accountList(let provider, let cached, let details):
+            return ["account"] + argument(nil, provider) + (cached ? ["--cached"] : []) + (details ? ["--details"] : [])
+                + ["--json"]
+        case .accountRoute(_, let repo, let `default`):
+            return ["account", "route"] + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
+        case .skillList(_, let path):
+            return ["list"] + path + ["--json"]
+        case .prChecks(_, let required):
+            return ["pr", "checks"] + (required ? ["--required"] : []) + ["--json"]
+        case .prReviews(_, let pr):
+            return ["pr", "reviews"] + argument(nil, pr) + ["--json"]
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         }
@@ -230,6 +251,14 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .doctor: TaggedFields("machine.doctor")
         case .ci(let since, let wave, let repo):
             TaggedFields("repository.ci", ["since": since, "wave": wave, "repo": repo])
+        case .accountList(let provider, let cached, let details):
+            TaggedFields("account.list", ["provider": provider, "cached": cached, "details": details])
+        case .accountRoute(let directory, let repo, let `default`):
+            TaggedFields("account.route", ["directory": directory, "repo": repo, "default": `default`])
+        case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
+        case .prChecks(let directory, let required):
+            TaggedFields("pr.checks", ["directory": directory, "required": required])
+        case .prReviews(let directory, let pr): TaggedFields("pr.reviews", ["directory": directory, "pr": pr])
         case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
         }
     }
@@ -283,6 +312,34 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
     case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
+    /// Run from `/`: the Machine's logins, not a repository's.
+    case accountDisconnect(provider: String, email: String?)
+    /// Served, no browser profile is chosen interactively.
+    case accountConnect(provider: String, email: String?, chromeProfile: String?, import: Bool, apiKey: Bool)
+    case accountSet(provider: String, email: String?, loginEmail: String?, routing: String?, plan: String?,
+                    clearPlan: Bool, paidThrough: String?, clearPaidThrough: Bool, clearCooldown: Bool,
+                    chromeProfiles: [String], clearChromeProfiles: Bool)
+    /// `file` is a path on the Machine; the token never travels in the request.
+    case accountToken(provider: String, email: String, file: String?, chromeProfile: String?)
+    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, creditId: String?)
+    case accountUse(provider: String, email: String)
+    /// Started detached and headless; the result is the Process carrying the run.
+    case graphRun(directory: String, name: String, message: String?, agent: String?)
+    /// Started detached and headless; the result is the Process carrying the run.
+    case skillRun(directory: String, name: String, message: String?, agent: String?)
+    case prPublish(directory: String, title: String?, body: String?, agent: String?)
+    /// Served, no review surface opens.
+    case prOpen(directory: String, title: String?, body: String?, agent: String?)
+    case prSubmit(directory: String, strict: Bool, worktree: String?, message: String?, title: String?, body: String?,
+                  agent: String?)
+    case prArm(directory: String, strict: Bool, local: Bool, worktree: String?, message: String?, title: String?,
+               body: String?, agent: String?)
+    /// Started detached; the result is the Process carrying the landing.
+    case prLand(directory: String, waitAndFix: Bool, strict: Bool, local: Bool, worktree: String?, message: String?,
+                title: String?, body: String?, agent: String?)
+    case prAbandon(directory: String, branch: String?, force: Bool)
+    case prReconcile(directory: String)
+    case prRequestReview(directory: String, pr: String?, reviewers: [String])
     /// Run from `/`, as the app's `lf` ran it.
     case portfolio(change: [String])
     case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
@@ -296,67 +353,77 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
-        case .taskFromSession(_, let id, let title): ["task", "create", "--session", id, "--title", title, "--json"]
-        case .taskComplete(_, let issue): ["task", "complete", issue, "--json"]
-        case .taskReopen(_, let issue): ["task", "reopen", issue, "--json"]
-        case .taskAbandon(_, let issue): ["task", "abandon", issue, "--json"]
-        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)", "--json"]
-        case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
+        case .prPublish, .prOpen, .prSubmit, .prArm, .prLand, .prAbandon, .prReconcile, .prRequestReview: return prArgv
+        case .accountDisconnect, .accountConnect, .accountSet, .accountToken, .accountRedeemReset, .accountUse:
+            return accountArgv
+        case .graphRun(_, let name, let message, let agent):
+            return ["--batch"] + Self.option("--agent", agent) + ["graph", name] + argument(nil, message)
+        case .skillRun(_, let name, let message, let agent):
+            return ["--batch"] + Self.option("--agent", agent) + ["skill", name] + argument(nil, message)
+        case .taskFromSession(_, let id, let title): return ["task", "create", "--session", id, "--title", title, "--json"]
+        case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
+        case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
+        case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
+        case .taskNotes(_, let issue, let notes): return ["task", "edit", issue, "--notes=\(notes)", "--json"]
+        case .taskOwnership(_, let issue, let claimed): return ["task", claimed ? "claim" : "unassign", issue, "--json"]
         case .taskRun(_, let issue, let from, let agent, let approve):
-            (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
+            return (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
                 + Self.option("--from", from) + ["--json"]
-        case .taskShip(_, let issue): ["--task", issue, "ship", "--json"]
-        case .taskHold(_, let issue): ["task", "hold", issue, "--json"]
-        case .taskSteer(_, let issue, let message): ["task", "steer", issue, message, "--json"]
-        case .taskReport(_, let issue, let message): ["task", "report", issue, message, "--json"]
-        case .taskInterrupt(_, let issue): ["task", "interrupt", issue, "--json"]
+        case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
+        case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
+        case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
+        case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
+        case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave):
-            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
+            return ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
-            ["task", "save", issue, path, "--revision", revision, "--json"]
+            return ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionSteer(_, let session, let wave, let message):
-            Self.option("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
-        case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
+            return Self.option("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
+        case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task, let preview):
-            ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
+            return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent):
-            Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
+            return Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
-            Self.prepared(agent, ["session", "new", id], repo: nil)
-        case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
-        case .planningRefresh(_, let wave): ["wave", "sync", wave, "--json"]
-        case .wavePlanningBind(_, let wave, let project): ["wave", "planning", "bind", wave, project, "--json"]
+            return Self.prepared(agent, ["session", "new", id], repo: nil)
+        case .waveAdd(_, let wave, let objective): return ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
+        case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
+        case .wavePlanningBind(_, let wave, let project): return ["wave", "planning", "bind", wave, project, "--json"]
         case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
-            ["wave", "planning", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
+            return ["wave", "planning", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
                 + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
-        case .wavePlanningReteam(_, let apply): ["wave", "planning", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
-        case .graphCustomize(_, let name): ["graph", "customize", name, "--json"]
+        case .wavePlanningReteam(_, let apply): return ["wave", "planning", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
+        case .graphCustomize(_, let name): return ["graph", "customize", name, "--json"]
         case .repositoryRelease(_, let version, let target):
-            ["repository", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
+            return ["repository", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
         case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
-            Self.option("--agent", agent) + ["commit"] + Self.option("--message", message) + (push ? ["--push"] : [])
-                + (noAdd ? ["--no-add"] : []) + paths + ["--json"]
+            var argv = Self.option("--agent", agent) + ["commit"] + Self.option("--message", message)
+            argv += Self.flags([("--push", push), ("--no-add", noAdd)])
+            return argv + paths + ["--json"]
         case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
-            ["sync"] + [onto].compactMap { $0 } + (preview ? ["--plan"] : []) + (manual ? ["--manual"] : [])
-                + (continueSync ? ["--continue"] : []) + (abort ? ["--abort"] : []) + (adopt ? ["--adopt"] : []) + ["--json"]
+            var argv = ["sync"] + argument(nil, onto)
+            argv += Self.flags([("--plan", preview), ("--manual", manual), ("--continue", continueSync)])
+            argv += Self.flags([("--abort", abort), ("--adopt", adopt)])
+            return argv + ["--json"]
         case .checkoutCreate(_, let name, let preview, let persistent):
-            ["wt", "create", name] + (preview ? ["--plan"] : []) + (persistent ? ["--persistent"] : []) + ["--json"]
-        case .portfolio(let change): ["desktop", "portfolio"] + change + ["--json"]
+            return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
+        case .portfolio(let change): return ["desktop", "portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
-            ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
+            return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
         case .dashboardPin(_, let id, let pinned, let revision):
-            ["desktop", "dashboard", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
+            return ["desktop", "dashboard", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
         case .dashboardRename(_, let id, let name, let revision):
-            ["desktop", "dashboard", "rename", "--revision=\(revision)", "--", "query:" + id, name]
+            return ["desktop", "dashboard", "rename", "--revision=\(revision)", "--", "query:" + id, name]
         case .dashboardTile(_, let id, let member, let hidden):
-            ["desktop", "dashboard", hidden ? "hide" : "show", "query:\(id)/\(member)"]
+            return ["desktop", "dashboard", hidden ? "hide" : "show", "query:\(id)/\(member)"]
         case .dashboardSlots(_, let id, let revision, _):
-            ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
+            return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .tileMove(_, let board, let member, let destination):
-            ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
-        case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
+            return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
+        case .paneLayout(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -380,8 +447,79 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         option("--repo", repo) + option("--agent", agent) + command + ["--prepare", "--json"]
     }
 
+    /// The `pr` namespace's spellings.
+    private var prArgv: [String] {
+        switch self {
+        case .prPublish(_, let title, let body, let agent):
+            return Self.prArgv("publish", agent: agent, flags: [], worktree: nil, message: nil, title: title, body: body)
+        case .prOpen(_, let title, let body, let agent):
+            return Self.prArgv("open", agent: agent, flags: [], worktree: nil, message: nil, title: title, body: body)
+        case .prSubmit(_, let strict, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("submit", agent: agent, flags: [("--strict", strict)], worktree: worktree, message: message,
+                        title: title, body: body)
+        case .prArm(_, let strict, let local, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("arm", agent: agent, flags: [("--strict", strict), ("--local", local)], worktree: worktree,
+                        message: message, title: title, body: body)
+        case .prLand(_, let waitAndFix, let strict, let local, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("land", agent: agent, flags: [("--wait-and-fix", waitAndFix), ("--strict", strict), ("--local", local)],
+                        worktree: worktree, message: message, title: title, body: body)
+        case .prAbandon(_, let branch, let force):
+            var argv = ["pr", "abandon"] + argument(nil, branch)
+            if force { argv.append("--force") }
+            return argv + ["--json"]
+        case .prReconcile: return ["pr", "reconcile", "--json"]
+        case .prRequestReview(_, let pr, let reviewers):
+            var argv = ["pr", "request-review"] + argument(nil, pr)
+            for reviewer in reviewers { argv += ["-r", reviewer] }
+            return argv + ["--json"]
+        default: return []
+        }
+    }
+
+    /// The `account` namespace's spellings.
+    private var accountArgv: [String] {
+        switch self {
+        case .accountDisconnect(let provider, let email):
+            return ["account", "disconnect", provider] + argument(nil, email)
+        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
+            var argv = ["account", "connect", provider] + argument(nil, email) + argument("--chrome-profile", chromeProfile)
+            return argv + Self.flags([("--import", `import`), ("--api-key", apiKey)])
+        case .accountSet(let provider, let email, let loginEmail, let routing, let plan, let clearPlan, let paidThrough,
+                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
+            var argv = ["account", "set", provider] + argument(nil, email)
+            argv += argument("--login-email", loginEmail) + argument("--routing", routing) + argument("--plan", plan)
+            argv += argument("--paid-through", paidThrough)
+            argv += Self.flags([("--clear-plan", clearPlan), ("--clear-paid-through", clearPaidThrough),
+                                ("--clear-cooldown", clearCooldown), ("--clear-chrome-profiles", clearChromeProfiles)])
+            for profile in chromeProfiles { argv += ["--chrome-profile", profile] }
+            return argv
+        case .accountToken(let provider, let email, let file, let chromeProfile):
+            return ["account", "token", provider, email] + argument("--file", file)
+                + argument("--chrome-profile", chromeProfile)
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+            return ["account", "redeem-reset", provider, email] + argument("--idempotency-key", idempotencyKey)
+                + argument("--credit-id", creditId) + ["--json"]
+        case .accountUse(let provider, let email): return ["account", provider, "use", email]
+        default: return []
+        }
+    }
+
     private static func option(_ flag: String, _ value: String?) -> [String] {
-        value.map { [flag, $0] } ?? []
+        argument(flag, value)
+    }
+
+    /// The flags that are on, in order.
+    private static func flags(_ flags: [(String, Bool)]) -> [String] {
+        flags.filter(\.1).map(\.0)
+    }
+
+    /// `lf [--agent] pr <verb> <flags> [--worktree] [--message] [--title] [--body] --json`.
+    private static func prArgv(_ verb: String, agent: String?, flags: [(String, Bool)], worktree: String?,
+                               message: String?, title: String?, body: String?) -> [String] {
+        var argv = option("--agent", agent) + ["pr", verb] + Self.flags(flags)
+        argv += option("--worktree", worktree) + option("--message", message)
+        argv += option("--title", title) + option("--body", body)
+        return argv + ["--json"]
     }
 
     /// The directory `argv` runs in; Rust's `--cwd`.
@@ -465,6 +603,49 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutCreate(let directory, let name, let preview, let persistent):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
                                              "persistent": persistent])
+        case .accountDisconnect(let provider, let email):
+            TaggedFields("account.disconnect", ["provider": provider, "email": email])
+        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
+            TaggedFields("account.connect", ["provider": provider, "email": email, "chrome_profile": chromeProfile,
+                                             "import": `import`, "api_key": apiKey])
+        case .accountSet(let provider, let email, let loginEmail, let routing, let plan, let clearPlan, let paidThrough,
+                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
+            TaggedFields("account.set", ["provider": provider, "email": email, "login_email": loginEmail,
+                                         "routing": routing, "plan": plan, "clear_plan": clearPlan,
+                                         "paid_through": paidThrough, "clear_paid_through": clearPaidThrough,
+                                         "clear_cooldown": clearCooldown, "chrome_profiles": chromeProfiles,
+                                         "clear_chrome_profiles": clearChromeProfiles])
+        case .accountToken(let provider, let email, let file, let chromeProfile):
+            TaggedFields("account.token", ["provider": provider, "email": email, "file": file,
+                                           "chrome_profile": chromeProfile])
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+            TaggedFields("account.redeem_reset", ["provider": provider, "email": email,
+                                                  "idempotency_key": idempotencyKey, "credit_id": creditId])
+        case .accountUse(let provider, let email): TaggedFields("account.use", ["provider": provider, "email": email])
+        case .graphRun(let directory, let name, let message, let agent):
+            TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
+        case .skillRun(let directory, let name, let message, let agent):
+            TaggedFields("skill.run", ["directory": directory, "name": name, "message": message, "agent": agent])
+        case .prPublish(let directory, let title, let body, let agent):
+            TaggedFields("pr.publish", ["directory": directory, "title": title, "body": body, "agent": agent])
+        case .prOpen(let directory, let title, let body, let agent):
+            TaggedFields("pr.open", ["directory": directory, "title": title, "body": body, "agent": agent])
+        case .prSubmit(let directory, let strict, let worktree, let message, let title, let body, let agent):
+            TaggedFields("pr.submit", ["directory": directory, "strict": strict, "worktree": worktree,
+                                       "message": message, "title": title, "body": body, "agent": agent])
+        case .prArm(let directory, let strict, let local, let worktree, let message, let title, let body, let agent):
+            TaggedFields("pr.arm", ["directory": directory, "strict": strict, "local": local, "worktree": worktree,
+                                    "message": message, "title": title, "body": body, "agent": agent])
+        case .prLand(let directory, let waitAndFix, let strict, let local, let worktree, let message, let title,
+                     let body, let agent):
+            TaggedFields("pr.land", ["directory": directory, "wait_and_fix": waitAndFix, "strict": strict,
+                                     "local": local, "worktree": worktree, "message": message, "title": title,
+                                     "body": body, "agent": agent])
+        case .prAbandon(let directory, let branch, let force):
+            TaggedFields("pr.abandon", ["directory": directory, "branch": branch, "force": force])
+        case .prReconcile(let directory): TaggedFields("pr.reconcile", ["directory": directory])
+        case .prRequestReview(let directory, let pr, let reviewers):
+            TaggedFields("pr.request_review", ["directory": directory, "pr": pr, "reviewers": reviewers])
         case .portfolio(let change):
             TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):
@@ -1760,4 +1941,10 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
         case state, activation
         case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
     }
+}
+
+/// `[flag, value]` for a present value, the bare value with no flag, nothing when absent.
+private func argument(_ flag: String?, _ value: String?) -> [String] {
+    guard let value else { return [] }
+    return (flag.map { [$0] } ?? []) + [value]
 }

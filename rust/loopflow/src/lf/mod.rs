@@ -1351,7 +1351,7 @@ fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
         None => true,
         Some(PrCommand::Checks { .. } | PrCommand::Reviews { .. }) => false,
         Some(
-            PrCommand::Reconcile
+            PrCommand::Reconcile { .. }
             | PrCommand::RequestReview { .. }
             | PrCommand::Publish { .. }
             | PrCommand::Open { .. }
@@ -2585,7 +2585,10 @@ pub enum InstallCommand {
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
     /// Check recorded repository landings once, record CI failures, and settle verified merges.
-    Reconcile,
+    Reconcile {
+        #[arg(long)]
+        json: bool,
+    },
     /// Show CI status for current branch
     Checks {
         #[arg(short = 'w', long = "watch")]
@@ -2595,6 +2598,9 @@ pub enum PrCommand {
         /// Show only checks required by repository protection.
         #[arg(long)]
         required: bool,
+        /// Print the report as JSON; not with --watch.
+        #[arg(long, conflicts_with = "watch")]
+        json: bool,
     },
 
     /// Request or re-request a teammate's review of an existing PR.
@@ -2604,6 +2610,8 @@ pub enum PrCommand {
         /// GitHub login or org/team. Repeat to request several reviewers.
         #[arg(short = 'r', long, required = true)]
         reviewer: Vec<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Read requested reviews and review submissions from GitHub.
     Reviews {
@@ -2621,6 +2629,8 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
@@ -2629,6 +2639,8 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Prepare a PR to land: sync, clear committed scratch additions and mark ready.
     /// Leave it for manual merge without changing reviewers or assignees.
@@ -2643,6 +2655,8 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Prepare a PR, request exact-head auto-merge, and return without watching.
     Arm {
@@ -2658,6 +2672,8 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Request auto-merge, retain settlement intent, and return.
     Land {
@@ -2676,6 +2692,8 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Abandon branch: close PR, remove worktree, delete branch
     Abandon {
@@ -2683,6 +2701,8 @@ pub enum PrCommand {
         branch: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 

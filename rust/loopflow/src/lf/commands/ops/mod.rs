@@ -17,13 +17,11 @@ use crate::ops::branch_prune::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
-    continue_sync_after_authorization, continue_sync_for_resolution, create_or_update_pr,
-    current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync, preview_release_notes,
-    recover_sync, release_bump, release_check, release_issues, release_notes, release_promote,
-    release_publish, release_regress, release_status, release_tag, submit, sync_class_name,
-    sync_strategy_name, sync_with_plan, AbandonOptions, LandOptions, PrOptions, Progress,
-    SyncOptions,
+    abort_sync_after_authorization, abort_sync_for_resolution, continue_sync_after_authorization,
+    continue_sync_for_resolution, current_pr, plan_sync, preview_release_notes, recover_sync,
+    release_bump, release_check, release_issues, release_notes, release_promote, release_publish,
+    release_regress, release_status, release_tag, sync_class_name, sync_strategy_name,
+    sync_with_plan, Progress, SyncOptions,
 };
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
@@ -40,20 +38,32 @@ use std::time::Instant;
 mod review;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
+    use crate::engine::pr as engine;
     let progress = CliProgress;
-    let wait_and_fix = matches!(
-        cmd,
-        Some(PrCommand::Land {
-            wait_and_fix: true,
-            ..
-        })
-    );
+    let repo_root = find_repo_root()?;
+    let land_input = |strict: &bool,
+                      local: bool,
+                      wait_and_fix: bool,
+                      worktree: &Option<String>,
+                      message: &Option<String>,
+                      title: &Option<String>,
+                      body: &Option<String>| engine::LandInput {
+        strict: *strict,
+        local,
+        wait_and_fix,
+        worktree: worktree.clone(),
+        message: message.clone(),
+        title: title.clone(),
+        body: body.clone(),
+        agent: cli_agent.map(str::to_string),
+    };
     match cmd {
-        None => pr_status(),
-        Some(PrCommand::Reconcile) => {
-            let repo = find_repo_root()?;
-            crate::ops::task::reconcile_checkout_pr(&repo)?;
-            let report = crate::ops::pr_landing::reconcile_repository(&repo)?;
+        None => pr_status(&repo_root),
+        Some(PrCommand::Reconcile { json }) => {
+            let report = engine::reconcile(&repo_root)?;
+            if *json {
+                print_json(&report)?;
+            }
             if !report.errors.is_empty() {
                 anyhow::bail!(report.errors.join("\n"));
             }
@@ -64,14 +74,53 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             watch,
             logs,
             required,
-        }) => pr_checks(*watch, *logs, *required),
-        Some(PrCommand::RequestReview { pr, reviewer }) => review::request(pr.as_deref(), reviewer),
-        Some(PrCommand::Reviews { pr, json }) => review::show(pr.as_deref(), *json),
-        Some(PrCommand::Publish { title, body }) => {
-            publish_pr(title.clone(), body.clone(), cli_agent, &progress)
+            json,
+        }) => pr_checks(&repo_root, *watch, *logs, *required, *json),
+        Some(PrCommand::RequestReview { pr, reviewer, json }) => {
+            let requested = engine::request_review(&repo_root, pr.as_deref(), reviewer)
+                .map_err(engine::exit_of)?;
+            if *json {
+                print_json(&requested)?;
+            }
+            Ok(())
         }
-        Some(PrCommand::Open { title, body }) => {
-            open_pr(title.clone(), body.clone(), cli_agent, &progress)
+        Some(PrCommand::Reviews { pr, json }) => {
+            let reviews = engine::reviews(&repo_root, pr.as_deref()).map_err(engine::exit_of)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&reviews)?);
+            } else {
+                print!("{}", review::render(&reviews));
+            }
+            Ok(())
+        }
+        Some(PrCommand::Publish { title, body, json }) => {
+            let published = engine::publish(
+                &repo_root,
+                title.as_deref(),
+                body.as_deref(),
+                cli_agent,
+                &progress,
+            )?;
+            print_published(&published, *json)
+        }
+        Some(PrCommand::Open { title, body, json }) => {
+            let published = engine::open(
+                &repo_root,
+                title.as_deref(),
+                body.as_deref(),
+                cli_agent,
+                &progress,
+            )?;
+            // The PR exists — print it before presenting so a failed
+            // review-surface launch fails only `pr open` and never hides the PR.
+            print_published(&published, *json)?;
+            crate::ops::present_pr_review(&published.url).map_err(|err| {
+                anyhow!(
+                    "PR available at {} but opening it for review failed: {err}",
+                    published.url
+                )
+            })?;
+            Ok(())
         }
         Some(PrCommand::Submit {
             strict,
@@ -79,19 +128,19 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        }) => submit_current(
-            &LandOptions {
-                strict: *strict,
-                local: false,
-                wait_and_fix: false,
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_agent.map(str::to_string),
-            },
-            &progress,
-        ),
+            json,
+        }) => {
+            let prepared = engine::submit(
+                &repo_root,
+                &land_input(strict, false, false, worktree, message, title, body),
+                &progress,
+            )?;
+            if *json {
+                print_json(&prepared)?;
+            }
+            progress.status("Ready to land — click merge on the PR once checks pass.");
+            Ok(())
+        }
         Some(PrCommand::Arm {
             strict,
             local,
@@ -99,32 +148,80 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        })
-        | Some(PrCommand::Land {
-            wait_and_fix: _,
+            json,
+        }) => {
+            let landed = engine::arm(
+                &repo_root,
+                &land_input(strict, *local, false, worktree, message, title, body),
+                &progress,
+            )?;
+            if *json {
+                print_json(&landed)?;
+            }
+            Ok(())
+        }
+        Some(PrCommand::Land {
+            wait_and_fix,
             strict,
             local,
             worktree,
             message,
             title,
             body,
-        }) => land_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                wait_and_fix,
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_agent.map(str::to_string),
-            },
-            &progress,
-        ),
-        Some(PrCommand::Abandon { force, branch }) => {
-            abandon_current(branch.as_deref(), *force, &progress)
+            json,
+        }) => {
+            let landed = engine::carry_land(
+                &repo_root,
+                &land_input(
+                    strict,
+                    *local,
+                    *wait_and_fix,
+                    worktree,
+                    message,
+                    title,
+                    body,
+                ),
+                &progress,
+            )?;
+            if *json {
+                print_json(&landed)?;
+            }
+            Ok(())
+        }
+        Some(PrCommand::Abandon {
+            force,
+            branch,
+            json,
+        }) => {
+            let abandoned = engine::abandon(&repo_root, branch.as_deref(), *force, &progress)?;
+            if *json {
+                print_json(&abandoned)?;
+            }
+            Ok(())
         }
     }
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string(value)?);
+    Ok(())
+}
+
+/// Print the PR's state and URL; the raw URL when GitHub state wasn't re-read.
+fn print_published(published: &crate::engine::pr::Published, json: bool) -> Result<()> {
+    if json {
+        return print_json(published);
+    }
+    let verb = if published.created {
+        "created"
+    } else {
+        "updated"
+    };
+    match &published.pr {
+        Some(pr) => println!("{verb} #{} {} {}", pr.number, pr.state, published.url),
+        None => println!("{verb} {}", published.url),
+    }
+    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
@@ -499,7 +596,7 @@ mod sync_performance_tests {
 
 /// Run a PR-mutating op; on a sync conflict, launch the sync agent to
 /// resolve it and retry once. A second conflict is a real error.
-fn with_sync_retry<T>(
+pub(crate) fn with_sync_retry<T>(
     repo_root: &Path,
     label: &str,
     progress: &impl Progress,
@@ -528,163 +625,8 @@ fn with_sync_retry<T>(
     }
 }
 
-fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    land_repo(&repo_root, options, progress)
-}
-
-pub(crate) fn land_repo(
-    repo_root: &Path,
-    options: &LandOptions,
-    progress: &impl Progress,
-) -> Result<()> {
-    let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
-    if !options.local {
-        if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
-            let unchanged = pr.phase() == crate::work::task::PrPhase::Merged
-                && crate::git::git_stdout(
-                    &checkout,
-                    &["status", "--porcelain", "--", ".", ":(exclude)scratch"],
-                )?
-                .trim()
-                .is_empty()
-                && (pr.head_sha() == Some(crate::git::rev_parse(&checkout, "HEAD")?.as_str())
-                    || crate::ops::landed_at(
-                        &checkout,
-                        &crate::git::integration_base(&checkout)?,
-                        "HEAD",
-                    )?);
-            if unchanged {
-                let next = match state {
-                    crate::durable::TaskState::Done => {
-                        format!("Task {} is complete.", task.identifier)
-                    }
-                    crate::durable::TaskState::Abandoned => {
-                        format!("Task {} is abandoned.", task.identifier)
-                    }
-                    _ => format!(
-                        "Complete the accepted outcome with lf task complete {}.",
-                        task.identifier
-                    ),
-                };
-                progress.status(&format!("Pull request already merged. {next}"));
-                return Ok(());
-            }
-        }
-    }
-    // The wave home stays put on land.
-    let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
-        if integrated {
-            finish_arm_after_sync(repo, options, progress, &|_| {})
-        } else {
-            arm(repo, options, progress)
-        }
-    })?;
-    if let Some(pr) = pr {
-        if options.wait_and_fix {
-            crate::agent::register_interrupt_cleanup(|| {
-                eprintln!("Landing wait interrupted; merge intent retained.");
-            });
-            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
-                match error {
-                    OpsError::DeliveryHeld(reason) => {
-                        anyhow::Error::new(crate::process::GraphHeld(reason))
-                    }
-                    error => anyhow::Error::new(error),
-                }
-            })?;
-            progress.status("Pull request merged; Task completion can proceed.");
-            return Ok(());
-        }
-        progress.status(&format!(
-            "PR #{} handed off; lf pr reconcile checks delivery.",
-            pr.number
-        ));
-    }
-    Ok(())
-}
-
-fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    with_sync_retry(&repo_root, "submit", progress, |repo, integrated| {
-        if integrated {
-            finish_submit_after_sync(repo, options, progress)
-        } else {
-            submit(repo, options, progress)
-        }
-    })?;
-    progress.status("Ready to land — click merge on the PR once checks pass.");
-    Ok(())
-}
-
-/// Push and create/update the PR with the requested readiness. Opens no browser.
-fn prepare_current_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    draft: bool,
-    progress: &impl Progress,
-) -> Result<crate::ops::PrResult> {
-    let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            draft,
-            title,
-            body,
-            agent: agent_override.map(str::to_string),
-        },
-        progress,
-    )?;
-    Ok(result)
-}
-
-fn publish_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let result = prepare_current_pr(title, body, agent_override, false, progress)?;
-    print_pr_result(&result);
-    Ok(())
-}
-
-fn open_pr(
-    title: Option<String>,
-    body: Option<String>,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let result = prepare_current_pr(title, body, agent_override, true, progress)?;
-    // The PR exists — print the URL before presenting so a failed
-    // review-surface launch fails only `pr open` and never hides the PR.
-    print_pr_result(&result);
-    crate::ops::present_pr_review(&result.url).map_err(|err| {
-        anyhow!(
-            "PR available at {} but opening it for review failed: {err}",
-            result.url
-        )
-    })?;
-    Ok(())
-}
-
-/// Print the PR's state and URL. Falls back to the raw URL when
-/// GitHub state can't be re-read.
-fn print_pr_result(result: &crate::ops::PrResult) {
-    let verb = if result.created { "created" } else { "updated" };
-    match find_repo_root()
-        .ok()
-        .and_then(|repo| current_pr(&repo).ok()?)
-    {
-        Some(pr) => println!("{verb} #{} {} {}", pr.number, pr.state, result.url),
-        None => println!("{verb} {}", result.url),
-    }
-}
-
-fn pr_status() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match current_pr(&repo_root)? {
+fn pr_status(repo_root: &Path) -> Result<()> {
+    match current_pr(repo_root)? {
         Some(pr) => {
             println!("#{} {} {} {}", pr.number, pr.state, pr.branch, pr.url);
         }
@@ -743,19 +685,6 @@ pub fn run_commit(
     if json {
         println!("{}", serde_json::to_string(&committed)?);
     }
-    Ok(())
-}
-
-fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    abandon_branch(
-        &repo_root,
-        &AbandonOptions {
-            branch: branch.map(str::to_string),
-            force,
-        },
-        progress,
-    )?;
     Ok(())
 }
 
@@ -1877,34 +1806,44 @@ fn task_ownership() -> Result<WorktreeOwnership> {
     Ok(ownership)
 }
 
-fn pr_checks(watch: bool, logs: bool, required: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let branch = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-
-    let mut args = vec!["pr", "checks", &branch];
+fn pr_checks(repo_root: &Path, watch: bool, logs: bool, required: bool, json: bool) -> Result<()> {
+    use crate::engine::pr::ChecksState;
     if watch {
-        args.push("--watch");
-    }
-    if required {
-        args.push("--required");
-    }
-
-    let status = Command::new("gh")
-        .args(&args)
-        .current_dir(&repo_root)
-        .status()?;
-
-    if status.code() == Some(1) && logs {
-        print_failed_check_logs(&repo_root, &branch)?;
-    }
-
-    if status.success() {
-        Ok(())
-    } else {
-        if status.code() == Some(8) {
-            eprintln!("CI checks are pending.");
+        // gh streams the watch to the terminal; the served read has no watch.
+        let branch = current_branch(repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
+        let mut args = vec!["pr", "checks", &branch, "--watch"];
+        if required {
+            args.push("--required");
         }
-        Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
+        let status = Command::new("gh")
+            .args(&args)
+            .current_dir(repo_root)
+            .status()?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
+        };
+    }
+    let checks =
+        crate::engine::pr::checks(repo_root, required).map_err(crate::engine::pr::exit_of)?;
+    if json {
+        print_json(&checks)?;
+    } else {
+        print!("{}", checks.report);
+    }
+    match checks.state {
+        ChecksState::Passing => Ok(()),
+        ChecksState::Pending => {
+            eprintln!("CI checks are pending.");
+            Err(crate::process::CommandExit(checks.exit_code()).into())
+        }
+        ChecksState::Failing => {
+            if logs {
+                print_failed_check_logs(repo_root, &checks.branch)?;
+            }
+            Err(crate::process::CommandExit(checks.exit_code()).into())
+        }
     }
 }
 

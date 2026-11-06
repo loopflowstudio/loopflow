@@ -220,6 +220,161 @@ pub enum Write {
         preview: bool,
         persistent: bool,
     },
+    /// `lf account disconnect <provider> [<email>]`: forget the provider's
+    /// local credentials, or one managed login's.
+    #[serde(rename = "account.disconnect")]
+    AccountDisconnect {
+        provider: String,
+        email: Option<String>,
+    },
+    /// `lf account connect <provider> [<email>] [--chrome-profile] [--import]
+    /// [--api-key]`. Served, no profile is chosen interactively: a login with
+    /// no remembered profile needs `chrome_profile`.
+    #[serde(rename = "account.connect")]
+    AccountConnect {
+        provider: String,
+        email: Option<String>,
+        chrome_profile: Option<String>,
+        import: bool,
+        api_key: bool,
+    },
+    /// `lf account set <provider> [<email>] …`: a managed login's lifecycle,
+    /// cooldown and browser choices, or the local credentials' browser choices.
+    #[serde(rename = "account.set")]
+    AccountSet {
+        provider: String,
+        email: Option<String>,
+        login_email: Option<String>,
+        routing: Option<String>,
+        plan: Option<String>,
+        clear_plan: bool,
+        paid_through: Option<String>,
+        clear_paid_through: bool,
+        clear_cooldown: bool,
+        chrome_profiles: Vec<String>,
+        clear_chrome_profiles: bool,
+    },
+    /// `lf account token <provider> <email> [--file] [--chrome-profile]`: a
+    /// long-lived Claude token for a managed login. `file` is a path on this
+    /// Machine; the token itself never travels in the request.
+    #[serde(rename = "account.token")]
+    AccountToken {
+        provider: String,
+        email: String,
+        file: Option<PathBuf>,
+        chrome_profile: Option<String>,
+    },
+    /// `lf account redeem-reset <provider> <email> [--idempotency-key]
+    /// [--credit-id] --json`: spend one banked Codex reset.
+    #[serde(rename = "account.redeem_reset")]
+    AccountRedeemReset {
+        provider: String,
+        email: String,
+        idempotency_key: Option<String>,
+        credit_id: Option<String>,
+    },
+    /// `lf account <provider> use <email>`: sign the provider's ordinary home
+    /// in as a stored login.
+    #[serde(rename = "account.use")]
+    AccountUse { provider: String, email: String },
+    /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
+    /// Process carrying the Graph.
+    #[serde(rename = "graph.run")]
+    GraphRun {
+        directory: PathBuf,
+        name: String,
+        message: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf -b [--agent <agent>] skill <name> [message]`, started detached: the
+    /// Process carrying the skill's headless run.
+    #[serde(rename = "skill.run")]
+    SkillRun {
+        directory: PathBuf,
+        name: String,
+        message: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr publish [--title] [--body] --json`: push and
+    /// create or refresh the checkout's ready PR.
+    #[serde(rename = "pr.publish")]
+    PrPublish {
+        directory: PathBuf,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr open [--title] [--body] --json`: push and
+    /// create or refresh the checkout's draft PR; served, no review surface
+    /// opens.
+    #[serde(rename = "pr.open")]
+    PrOpen {
+        directory: PathBuf,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr submit [--strict] [--worktree] [--message]
+    /// [--title] [--body] --json`: prepare the PR for a teammate's merge.
+    #[serde(rename = "pr.submit")]
+    PrSubmit {
+        directory: PathBuf,
+        strict: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr arm [--strict] [--local] [--worktree]
+    /// [--message] [--title] [--body] --json`: arm exact-head auto-merge and
+    /// return.
+    #[serde(rename = "pr.arm")]
+    PrArm {
+        directory: PathBuf,
+        strict: bool,
+        local: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr land [--wait-and-fix] [--strict] [--local]
+    /// [--worktree] [--message] [--title] [--body] --json`, started
+    /// detached: the Process carrying the landing.
+    #[serde(rename = "pr.land")]
+    PrLand {
+        directory: PathBuf,
+        wait_and_fix: bool,
+        strict: bool,
+        local: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf pr abandon [<branch>] [--force] --json`: close the PR and delete
+    /// its worktree and branches. Served, unpublished work is deleted only
+    /// with `force`.
+    #[serde(rename = "pr.abandon")]
+    PrAbandon {
+        directory: PathBuf,
+        branch: Option<String>,
+        force: bool,
+    },
+    /// `lf pr reconcile --json`: check recorded landings once and settle
+    /// verified merges.
+    #[serde(rename = "pr.reconcile")]
+    PrReconcile { directory: PathBuf },
+    /// `lf pr request-review [<pr>] -r <reviewer>… --json`.
+    #[serde(rename = "pr.request_review")]
+    PrRequestReview {
+        directory: PathBuf,
+        pr: Option<String>,
+        reviewers: Vec<String>,
+    },
     /// `lf desktop portfolio <change> --json`, run from `/`: which
     /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
@@ -521,6 +676,192 @@ impl Write {
                     adopt: *adopt,
                 },
             )?),
+            Self::AccountDisconnect { provider, email } => value(
+                &crate::engine::account::disconnect(provider, email.as_deref())?,
+            ),
+            Self::AccountConnect {
+                provider,
+                email,
+                chrome_profile,
+                import,
+                api_key,
+            } => value(&crate::engine::account::connect(
+                provider,
+                email.as_deref(),
+                chrome_profile.as_deref(),
+                *import,
+                *api_key,
+            )?),
+            Self::AccountSet {
+                provider,
+                email,
+                login_email,
+                routing,
+                plan,
+                clear_plan,
+                paid_through,
+                clear_paid_through,
+                clear_cooldown,
+                chrome_profiles,
+                clear_chrome_profiles,
+            } => value(&crate::engine::account::set(
+                provider,
+                email.as_deref(),
+                &crate::engine::account::Settings {
+                    login_email: login_email.clone(),
+                    routing: routing.clone(),
+                    plan: plan.clone(),
+                    clear_plan: *clear_plan,
+                    paid_through: paid_through.clone(),
+                    clear_paid_through: *clear_paid_through,
+                    clear_cooldown: *clear_cooldown,
+                    chrome_profiles: chrome_profiles.clone(),
+                    clear_chrome_profiles: *clear_chrome_profiles,
+                },
+            )?),
+            Self::AccountToken {
+                provider,
+                email,
+                file,
+                chrome_profile,
+            } => value(&crate::engine::account::token(
+                provider,
+                email,
+                file.as_deref(),
+                chrome_profile.as_deref(),
+            )?),
+            Self::AccountRedeemReset {
+                provider,
+                email,
+                idempotency_key,
+                credit_id,
+            } => value(&crate::engine::account::redeem_reset(
+                provider,
+                email,
+                idempotency_key.as_deref(),
+                credit_id.as_deref(),
+            )?),
+            Self::AccountUse { provider, email } => {
+                value(&crate::engine::account::activate(provider, email)?)
+            }
+            Self::GraphRun {
+                name,
+                message,
+                agent,
+                ..
+            } => value(&crate::engine::graph::run(
+                directory,
+                name,
+                message.as_deref(),
+                agent.as_deref(),
+            )?),
+            Self::SkillRun {
+                name,
+                message,
+                agent,
+                ..
+            } => value(&crate::engine::skill::run(
+                directory,
+                name,
+                message.as_deref(),
+                agent.as_deref(),
+            )?),
+            Self::PrPublish {
+                title, body, agent, ..
+            } => value(&crate::engine::pr::publish(
+                directory,
+                title.as_deref(),
+                body.as_deref(),
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrOpen {
+                title, body, agent, ..
+            } => value(&crate::engine::pr::open(
+                directory,
+                title.as_deref(),
+                body.as_deref(),
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrSubmit {
+                strict,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::submit(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: false,
+                    wait_and_fix: false,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrArm {
+                strict,
+                local,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::arm(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: *local,
+                    wait_and_fix: false,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrLand {
+                wait_and_fix,
+                strict,
+                local,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::land(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: *local,
+                    wait_and_fix: *wait_and_fix,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+            )?),
+            Self::PrAbandon { branch, force, .. } => value(&crate::engine::pr::abandon(
+                directory,
+                branch.as_deref(),
+                *force,
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrReconcile { .. } => value(&crate::engine::pr::reconcile(directory)?),
+            Self::PrRequestReview { pr, reviewers, .. } => value(
+                &crate::engine::pr::request_review(directory, pr.as_deref(), reviewers)?,
+            ),
             Self::CheckoutCreate {
                 name,
                 preview,
@@ -757,6 +1098,16 @@ impl Write {
             | Self::CheckoutCommit { directory, .. }
             | Self::CheckoutSync { directory, .. }
             | Self::CheckoutCreate { directory, .. }
+            | Self::GraphRun { directory, .. }
+            | Self::SkillRun { directory, .. }
+            | Self::PrPublish { directory, .. }
+            | Self::PrOpen { directory, .. }
+            | Self::PrSubmit { directory, .. }
+            | Self::PrArm { directory, .. }
+            | Self::PrLand { directory, .. }
+            | Self::PrAbandon { directory, .. }
+            | Self::PrReconcile { directory }
+            | Self::PrRequestReview { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
             | Self::DashboardUnpin { directory, .. }
@@ -767,6 +1118,12 @@ impl Write {
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
             Self::Portfolio { .. }
+            | Self::AccountDisconnect { .. }
+            | Self::AccountConnect { .. }
+            | Self::AccountSet { .. }
+            | Self::AccountToken { .. }
+            | Self::AccountRedeemReset { .. }
+            | Self::AccountUse { .. }
             | Self::ConfigSet { .. }
             | Self::ConfigUnset { .. }
             | Self::ConfigTheme { .. } => Path::new("/"),
@@ -807,6 +1164,22 @@ mod tests {
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
+            r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
+            r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
+            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"routing":"active","plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
+            r#"{"kind":"account.token","provider":"claude","email":"maya@example.com","file":"/tmp/token","chrome_profile":null}"#,
+            r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
+            r#"{"kind":"account.use","provider":"claude","email":"maya@example.com"}"#,
+            r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
+            r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
+            r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.open","directory":"/r","title":"Spike","body":null,"agent":"claude"}"#,
+            r#"{"kind":"pr.submit","directory":"/r","strict":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.arm","directory":"/r","strict":true,"local":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.land","directory":"/r","wait_and_fix":true,"strict":false,"local":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.abandon","directory":"/r","branch":"spike","force":true}"#,
+            r#"{"kind":"pr.reconcile","directory":"/r"}"#,
+            r#"{"kind":"pr.request_review","directory":"/r","pr":null,"reviewers":["alice"]}"#,
         ] {
             let write: Write = serde_json::from_str(json).unwrap();
             assert_eq!(

@@ -9,11 +9,15 @@
 //! `ops` keeps the domain functions; an operation composes them into the unit
 //! a client names (`task.run`), one module per namespace.
 
+pub mod account;
 pub mod checkout;
 pub mod config;
+pub mod graph;
 pub mod launch;
+pub mod pr;
 pub mod repository;
 pub mod session;
+pub mod skill;
 pub mod task;
 pub mod wave;
 

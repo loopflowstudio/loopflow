@@ -257,6 +257,40 @@ pub enum Read {
         wave: Option<String>,
         repo: Option<String>,
     },
+    /// `lf account [<provider>] [--cached] [--details] --json`: every login's
+    /// state on this Machine.
+    #[serde(rename = "account.list")]
+    AccountList {
+        provider: Option<crate::provider_auth::Provider>,
+        cached: bool,
+        details: bool,
+    },
+    /// `lf --cwd <directory> account route [--repo <repo>] [--default]
+    /// --json`: how the repository selects an account for each provider.
+    #[serde(rename = "account.route")]
+    AccountRoute {
+        directory: PathBuf,
+        repo: Option<String>,
+        default: bool,
+    },
+    /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
+    /// graphs and Waves under `path`.
+    #[serde(rename = "skill.list")]
+    SkillList {
+        directory: PathBuf,
+        path: Vec<String>,
+    },
+    /// `lf --cwd <directory> pr checks [--required] --json`: the branch's
+    /// check report as the provider prints it, with its state.
+    #[serde(rename = "pr.checks")]
+    PrChecks { directory: PathBuf, required: bool },
+    /// `lf --cwd <directory> pr reviews [<pr>] --json`: requested reviews
+    /// and review submissions, each with the commit it reviewed.
+    #[serde(rename = "pr.reviews")]
+    PrReviews {
+        directory: PathBuf,
+        pr: Option<String>,
+    },
     /// `lf task wait <issue> --until <until> --timeout 0s --json`: the Task now
     /// and whether it reached `until`. Subscribed, it reads on each change and
     /// ends after the reading that reached it.
@@ -439,6 +473,59 @@ impl Read {
                 if let Some(repo) = repo {
                     argv.extend(words(&["--repo", repo]));
                 }
+                argv.push("--json".into());
+                argv
+            }
+            Self::AccountList {
+                provider,
+                cached,
+                details,
+            } => {
+                let mut argv = words(&["account"]);
+                argv.extend(provider.map(|provider| provider.as_str().to_owned()));
+                for (flag, on) in [("--cached", cached), ("--details", details)] {
+                    if *on {
+                        argv.push(flag.into());
+                    }
+                }
+                argv.push("--json".into());
+                argv
+            }
+            Self::AccountRoute {
+                directory,
+                repo,
+                default,
+            } => {
+                let mut argv = at(directory, &["account", "route"]);
+                if let Some(repo) = repo {
+                    argv.extend(words(&["--repo", repo]));
+                }
+                if *default {
+                    argv.push("--default".into());
+                }
+                argv.push("--json".into());
+                argv
+            }
+            Self::SkillList { directory, path } => {
+                let mut argv = at(directory, &["list"]);
+                argv.extend(path.iter().cloned());
+                argv.push("--json".into());
+                argv
+            }
+            Self::PrChecks {
+                directory,
+                required,
+            } => {
+                let mut argv = at(directory, &["pr", "checks"]);
+                if *required {
+                    argv.push("--required".into());
+                }
+                argv.push("--json".into());
+                argv
+            }
+            Self::PrReviews { directory, pr } => {
+                let mut argv = at(directory, &["pr", "reviews"]);
+                argv.extend(pr.clone());
                 argv.push("--json".into());
                 argv
             }
@@ -647,6 +734,30 @@ impl Read {
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
+            Self::AccountList {
+                provider,
+                cached,
+                details,
+            } => value(&crate::engine::account::list(*provider, !cached, *details)?),
+            Self::AccountRoute {
+                directory,
+                repo,
+                default,
+            } => value(&crate::engine::account::route(
+                directory,
+                repo.as_deref(),
+                *default,
+            )?),
+            Self::SkillList { directory, path } => {
+                value(&crate::engine::skill::list(directory, path)?)
+            }
+            Self::PrChecks {
+                directory,
+                required,
+            } => value(&crate::engine::pr::checks(directory, *required)?),
+            Self::PrReviews { directory, pr } => {
+                value(&crate::engine::pr::reviews(directory, pr.as_deref())?)
+            }
             Self::TaskWait { issue, until } => value(&crate::engine::task::waited(issue, *until)?),
         }
     }

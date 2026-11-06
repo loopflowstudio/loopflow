@@ -3,14 +3,15 @@ use std::path::Path;
 
 use anyhow::Result;
 use clap::Command;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::definition::{resolve_definition, DefinitionKind};
 use crate::lf::navigation::{
     command_tree, definition_invocation, definition_source, format_target, resolve_path,
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Entry {
     pub name: String,
     pub kind: String,

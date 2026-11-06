@@ -1,0 +1,1 @@
+{"type":"request","id":"connect-1","operation":{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}}

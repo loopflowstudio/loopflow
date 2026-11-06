@@ -121,6 +121,36 @@ struct ServerProtocolTests {
                                                       continueSync: false, abort: false, adopt: false)),
             ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
                                                             persistent: false)),
+            ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "claude", email: "maya@example.com")),
+            ("account_connect", "connect-1", .accountConnect(provider: "codex", email: "maya@example.com",
+                                                             chromeProfile: "Profile 1", import: false, apiKey: false)),
+            ("account_set", "set-1", .accountSet(provider: "codex", email: "maya@example.com", loginEmail: nil,
+                                                 routing: "active", plan: nil, clearPlan: false, paidThrough: nil,
+                                                 clearPaidThrough: false, clearCooldown: true, chromeProfiles: [],
+                                                 clearChromeProfiles: false)),
+            ("account_token", "token-1", .accountToken(provider: "claude", email: "maya@example.com",
+                                                       file: "/Users/maya/.lf/tmp/token", chromeProfile: nil)),
+            ("account_redeem_reset", "redeem-1", .accountRedeemReset(provider: "codex", email: "maya@example.com",
+                                                                     idempotencyKey: "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
+                                                                     creditId: nil)),
+            ("account_use", "use-1", .accountUse(provider: "claude", email: "maya@example.com")),
+            ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",
+                                               agent: "claude")),
+            ("skill_run", "skill-1", .skillRun(directory: "/repo", name: "debug", message: nil, agent: nil)),
+            ("pr_publish", "publish-1", .prPublish(directory: "/repo", title: "Serve the pr namespace", body: nil,
+                                                   agent: nil)),
+            ("pr_open", "open-1", .prOpen(directory: "/repo", title: nil, body: nil, agent: "claude")),
+            ("pr_submit", "submit-1", .prSubmit(directory: "/repo", strict: false, worktree: nil, message: nil,
+                                                title: nil, body: nil, agent: nil)),
+            ("pr_arm", "arm-1", .prArm(directory: "/repo", strict: true, local: false, worktree: nil, message: nil,
+                                       title: nil, body: nil, agent: nil)),
+            ("pr_land", "land-1", .prLand(directory: "/repo", waitAndFix: true, strict: false, local: false,
+                                          worktree: nil, message: nil, title: "Serve the pr namespace", body: nil,
+                                          agent: nil)),
+            ("pr_abandon", "abandon-1", .prAbandon(directory: "/repo", branch: "spike", force: true)),
+            ("pr_reconcile", "reconcile-1", .prReconcile(directory: "/repo")),
+            ("pr_request_review", "review-1", .prRequestReview(directory: "/repo", pr: "1813",
+                                                               reviewers: ["alice", "org/platform"])),
         ]
         for (name, id, write) in writes {
             #expect(try encoded(.request(id: id, operation: .command(write))) == value(name), "\(name)")
@@ -163,6 +193,49 @@ struct ServerProtocolTests {
         let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)))
         #expect(try encoded(ci) == value("repository_ci"))
         #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repository", "ci", "--since", "7d", "--json"])
+        #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
+                                   message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
+            == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])
+        guard case .response(_, _, .object(let published)) = try message("pr_published") else {
+            Issue.record("Missing pr.publish result"); return
+        }
+        #expect(published["created"] == .bool(false))
+        guard case .response(_, _, .object(let checks)) = try message("pr_checks_report") else {
+            Issue.record("Missing pr.checks result"); return
+        }
+        #expect(checks["state"] == .string("pending"))
+        let checksRead = ServerClientMessage.request(id: "checks-1",
+                                                     operation: .read(.prChecks(directory: "/repo", required: true)))
+        #expect(try encoded(checksRead) == value("pr_checks"))
+        let reviewsRead = ServerClientMessage.request(id: "reviews-1",
+                                                      operation: .read(.prReviews(directory: "/repo", pr: nil)))
+        #expect(try encoded(reviewsRead) == value("pr_reviews"))
+        #expect(ServedRead.prReviews(directory: "/repo", pr: "1813").argv == ["pr", "reviews", "1813", "--json"])
+        #expect(ServedWrite.graphRun(directory: "/repo", name: "code", message: nil, agent: nil).argv
+            == ["--batch", "graph", "code"])
+        let list = ServerClientMessage.request(id: "list-1", operation: .read(.skillList(directory: "/repo", path: [])))
+        #expect(try encoded(list) == value("skill_list"))
+        guard case .response(_, _, .array(let entries)) = try message("skill_entries") else {
+            Issue.record("Missing skill.list result"); return
+        }
+        #expect(entries.count == 2)
+        #expect(ServedWrite.accountUse(provider: "claude", email: "maya@example.com").cwd == "/")
+        let accounts = ServerClientMessage.request(id: "accounts-1",
+                                                   operation: .read(.accountList(provider: "claude", cached: true,
+                                                                                 details: false)))
+        #expect(try encoded(accounts) == value("account_list"))
+        let route = ServerClientMessage.request(id: "route-1",
+                                                operation: .read(.accountRoute(directory: "/repo", repo: nil,
+                                                                               default: false)))
+        #expect(try encoded(route) == value("account_route"))
+        guard case .response(_, _, .object(let report)) = try message("account_report") else {
+            Issue.record("Missing account.list result"); return
+        }
+        #expect(report["browser"] == .null)
+        guard case .response(_, _, .object(let redeemed)) = try message("account_redeemed") else {
+            Issue.record("Missing account.redeem_reset result"); return
+        }
+        #expect(redeemed["after"] == .null)
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {

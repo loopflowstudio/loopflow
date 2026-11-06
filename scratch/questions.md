@@ -516,9 +516,5 @@ Step 3 (namespace alignment). Decisions made headless; each is reversible.
   No served account write prompts: a connect with no remembered browser
   profile refuses and names `--chrome-profile`, as the CLI does without a
   terminal.
-- **Found while checking slice 2:** `land_tests::land_generates_copy_when_cached_pr_copy_is_stale`
-  and `final_preparation_preserves_published_copy_only_for_the_same_head`
-  fail on this Machine before and after the change ("account reference
-  manabot-eng has no resident login"): in-process `ops::land` reads the real
-  account route. Not this Task's.
-- **`land_tests` depend on the Machine's installed agents.** `land_generates_copy_when_cached_pr_copy_is_stale` and `final_preparation_preserves_published_copy_only_for_the_same_head` call `land` with `agent: None`; `config::default_agent` picks the one installed harness and answers `AgentSelection` when both `claude` and `codex` are installed, so they fail on a two-harness Machine and pass in CI. Pre-existing on main; a fix pins the agent in the fixture (never an installed provider over a stand-in). Separate Task.
+- **Account routes read the process directory.** `provider_account::current_repo_id` uses `current_dir`, not the launch's repository, so a served launch (`pr.*`, or any `AgentConfig.cwd` elsewhere) routes by the server's directory. Fixtures now isolate it; the served path still needs the launch's directory.
+- **`lf task show` on an unsaved selector now errors** (`task.get` answers `not_found`). It printed a null Task with planning evidence; that evidence is now only in text `lf task status`, and `lf task status --json` errors as it did.

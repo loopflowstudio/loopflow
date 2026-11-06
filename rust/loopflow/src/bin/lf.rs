@@ -3445,9 +3445,9 @@ mod tests {
     #[test]
     fn reorder_args_keeps_nested_global_json_with_its_owner() {
         for args in [
-            vec!["lf", "portfolio", "--json"],
-            vec!["lf", "portfolio", "manual", "--json"],
-            vec!["lf", "portfolio", "--json", "manual"],
+            vec!["lf", "desktop", "portfolio", "--json"],
+            vec!["lf", "desktop", "portfolio", "manual", "--json"],
+            vec!["lf", "desktop", "portfolio", "--json", "manual"],
         ] {
             let cli =
                 Cli::try_parse_from(reorder_args(args.into_iter().map(String::from).collect()))
@@ -3487,11 +3487,14 @@ mod tests {
 
     #[test]
     fn reorder_args_moves_flags_to_nested_owners() {
-        let args: Vec<String> = ["lf", "wave", "--all", "connect"]
+        let args: Vec<String> = ["lf", "wave", "planning", "--all", "connect"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "wave", "connect", "--all"]);
+        assert_eq!(
+            reordered,
+            vec!["lf", "wave", "planning", "connect", "--all"]
+        );
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Wave {

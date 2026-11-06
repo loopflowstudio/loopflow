@@ -66,7 +66,9 @@ impl Fixture {
                 format!(
                     "{}:{}",
                     home.join("bin").display(),
-                    std::env::var("PATH").unwrap_or_default()
+                    loopflow_test_support::path_without_installed_harnesses(
+                        &std::env::var("PATH").unwrap_or_default()
+                    )
                 ),
             )
             .env("NO_COLOR", "1")

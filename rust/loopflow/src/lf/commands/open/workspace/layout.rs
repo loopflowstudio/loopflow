@@ -114,38 +114,37 @@ impl Tools<'_> {
         ))
     }
 
-    /// The named Session, else the Task's primary, else a new conversation.
+    /// The named Session, else the Task's primary, else `lf resume --task`, which
+    /// ranks the Task's conversations and starts one when there are none.
     fn conversation(&self, session: Option<&str>) -> Result<Option<Value>> {
         let session = session.or(self.content.primary_session.as_deref());
-        if !self.resume.admits(self.store, session)?
-            || (session.is_none() && self.called_from_task()?)
-        {
+        if !self.resume.admits(self.store, session)? {
             return Ok(None);
         }
-        let task = &self.content.work.id;
-        let pane = match session {
-            Some(session) => self.host.conversation(self.cwd, &[session])?,
-            None => match self.ensure_harness()? {
-                Some(agent) => self
-                    .host
-                    .conversation(self.cwd, &["--task", task, "--agent", &agent])?,
-                None => self.host.conversation(self.cwd, &["--task", task])?,
-            },
-        };
-        Ok(Some(pane))
-    }
-
-    /// With nothing named, `lf resume --task` ranks the Task's conversations,
-    /// and the one running this command can win.
-    fn called_from_task(&self) -> Result<bool> {
-        let Some(caller) = crate::journal::agent_caller() else {
-            return Ok(false);
-        };
+        if let Some(session) = session {
+            return self.host.conversation(self.cwd, &[session]).map(Some);
+        }
         let id = TaskId::parse(&self.content.work.id)?;
         let conversations = self.store.task_conversations(&id)?;
-        Ok(conversations
-            .iter()
-            .any(|(session, _)| session.id == caller.session_id))
+        // The ranking could pick the conversation running this command.
+        let caller = crate::journal::agent_caller();
+        if caller.is_some_and(|caller| {
+            conversations
+                .iter()
+                .any(|(session, _)| session.id == caller.session_id)
+        }) {
+            return Ok(None);
+        }
+        let agent = if conversations.is_empty() {
+            self.first_conversation_agent(&id)?
+        } else {
+            None
+        };
+        let mut resume = vec!["--task", &self.content.work.id];
+        if let Some(agent) = &agent {
+            resume.extend(["--agent", agent]);
+        }
+        self.host.conversation(self.cwd, &resume).map(Some)
     }
 
     fn conversation_pane(&self, session: Option<&str>) -> Result<Value> {
@@ -155,17 +154,11 @@ impl Tools<'_> {
         }
     }
 
-    /// A Task with no conversation yet starts one on the selected harness.
-    /// Without one the pane would exit and its host would close it, so this
-    /// opening reports the error instead. Returns this invocation's explicit
-    /// choice for the pane, which does not inherit it; earlier conversations
-    /// keep their own.
-    fn ensure_harness(&self) -> Result<Option<String>> {
-        let id = TaskId::parse(&self.content.work.id)?;
-        if !self.store.task_conversations(&id)?.is_empty() {
-            return Ok(None);
-        }
-        let task = self.store.task(&id)?.context("Task is unavailable")?;
+    /// A first conversation needs a harness: without one the pane would exit and
+    /// its host would close it, so this opening reports the error instead. Returns
+    /// this invocation's explicit choice, which the pane does not inherit.
+    fn first_conversation_agent(&self, id: &TaskId) -> Result<Option<String>> {
+        let task = self.store.task(id)?.context("Task is unavailable")?;
         wave_config(self.store, self.cwd, task.wave_id.as_ref())?
             .unwrap_or_default()
             .agent()?;

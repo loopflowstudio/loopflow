@@ -14,9 +14,9 @@ Opening a Task starts its conversation. Opening a repository or Wave starts no
 agents: it reconnects running conversations no terminal is showing and shows Task &
 workflow for the rest. Run `lf open --task <task>` to pick one up. That moves a
 conversation open in another terminal here; text you typed there and didn't send
-stays behind. A conversation running the command stays where it is. A conversation with no Task opens by itself:
-`lf open --session <id>` adds one Conversation tab where you are, and
-`lf open --available` does the same for each such conversation.
+stays behind. A conversation running the command stays where it is. A conversation
+with no Task opens by itself: `lf open --session <id>` adds one Conversation tab
+where you are, and `lf open --available` does the same for each such conversation.
 
 From a Task checkout, `lf open` selects that Task. From a repository checkout, it
 selects the repository's started, unfinished Tasks. Use `--task` or `--wave` to

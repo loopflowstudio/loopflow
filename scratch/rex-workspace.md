@@ -127,6 +127,6 @@ Built: `Resume::Detached` asks `session_state(viewed_summary(...)) == Detached`,
 
 Consequences: opening a Wave to pull everything into Rex leaves conversations attached in Desktop there; `lf open --task` moves each. An owner that never answers reads `detached` and reattaches, same as Desktop. A viewer that lost its connection reads `active` until expiry, so nothing moves on doubt.
 
-`lf open` and `lf resume` sharing, checked November 7 for comment d7ce2ccd: every pane runs `lf resume` through `Native::conversation`, now the one builder. `lf open` names only `session.or(primary)` and otherwise hands `--task` to resume's own ranking. `ensure_harness` launches nothing: it calls the same `Config::agent()` so a Task with no harness fails its receipt instead of opening an empty pane.
+`lf open` and `lf resume` sharing, checked November 7 for comment d7ce2ccd: every pane runs `lf resume` through `Native::conversation`, now the one builder. `lf open` names only `session.or(primary)`, else hands `--task` to resume's ranking. `first_conversation_agent` launches nothing: it calls `Config::agent()` so a Task with no harness fails its receipt.
 
-Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed, clippy clean. Parallel flake stays with gate.
+Compress: `Tools::conversation` reads `task_conversations` once for the caller and first-conversation checks. Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed. Flake: gate.

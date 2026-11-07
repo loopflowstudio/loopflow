@@ -37,7 +37,28 @@ fn supervised_path(path: &str, home: &std::path::Path) -> String {
 /// terminal keeps that terminal's `PATH`.
 pub(crate) const SUPERVISED_ENV: &str = "LF_SUPERVISED";
 
+/// Each terminal bridge holds two descriptors, and a supervisor's default soft
+/// limit is low. macOS refuses a soft limit above `OPEN_MAX` even when the hard
+/// limit is unlimited.
+fn raise_descriptor_limit() {
+    const WANTED: libc::rlim_t = 10240;
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: both calls read or write only the rlimit passed by reference.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0 && limit.rlim_cur < WANTED {
+            limit.rlim_cur = WANTED.min(limit.rlim_max);
+            if libc::setrlimit(libc::RLIMIT_NOFILE, &limit) != 0 {
+                tracing::warn!("Server could not raise its descriptor limit");
+            }
+        }
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
+    raise_descriptor_limit();
     // Before the runtime's threads exist: nothing reads the environment yet.
     if std::env::var_os(SUPERVISED_ENV).is_some() {
         std::env::remove_var(SUPERVISED_ENV);

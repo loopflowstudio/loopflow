@@ -35,7 +35,7 @@ Work and credentials stay in place.
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Messages are
-capped at 32 MiB and connections at 64; a connection has five seconds to send
+capped at 32 MiB and client connections at 64, which terminal bridges leave once attached; a connection has five seconds to send
 its first message and five seconds to take any message the server sends. The
 socket and its directory are private; remote proxies must never forward this
 endpoint. Remote admission is outside this revision.

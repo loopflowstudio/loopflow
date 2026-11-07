@@ -11,7 +11,7 @@ use fs2::FileExt;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Notify, Semaphore};
+use tokio::sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -150,8 +150,15 @@ pub(super) async fn run() -> Result<()> {
         let executable_sha256 = executable_sha256.clone();
         let clients = clients.clone();
         tokio::spawn(async move {
-            let _permit = permit;
-            if let Err(error) = connection(socket, &instance, &executable_sha256, &clients).await {
+            if let Err(error) = connection(
+                socket,
+                &instance,
+                &executable_sha256,
+                &clients,
+                Some(permit),
+            )
+            .await
+            {
                 tracing::warn!(%instance, %error, "Server connection ended");
             }
         });
@@ -176,6 +183,7 @@ async fn connection(
     instance: &str,
     executable_sha256: &str,
     clients: &Clients,
+    permit: Option<OwnedSemaphorePermit>,
 ) -> Result<()> {
     let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
         .await
@@ -270,7 +278,7 @@ async fn connection(
         }),
     )
     .await?;
-    session(lines, instance.into(), &admitted).await
+    session(lines, instance.into(), &admitted, permit).await
 }
 
 /// The newest revision both sides speak.
@@ -316,7 +324,12 @@ struct Inflight {
     checkpoints: Option<mpsc::Sender<u64>>,
 }
 
-async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> Result<()> {
+async fn session(
+    mut lines: Lines,
+    instance: Arc<str>,
+    admitted: &Admitted,
+    permit: Option<OwnedSemaphorePermit>,
+) -> Result<()> {
     let (outgoing, mut queue) = mpsc::channel::<ServerMessage>(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
     // work finishes on its worker. A task returns its request ID.
@@ -406,6 +419,9 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                         // long as the terminal stays: nothing else on it may keep
                         // running. Admitted writes finish on their workers.
                         tasks.abort_all();
+                        // The cap is for clients. Terminals are bounded by their
+                        // Sessions, and panes must never crowd one out.
+                        drop(permit);
                         return bridge(lines, destination).await;
                     }
                     Admission::Watch(query) => {
@@ -788,7 +804,7 @@ mod tests {
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
             let server = tokio::spawn(async move {
-                connection(server, "incarnation", "fixture", &clients).await
+                connection(server, "incarnation", "fixture", &clients, None).await
             });
             let (read, writer) = client.into_split();
             Self {
@@ -928,7 +944,7 @@ mod tests {
     async fn revision_one_frame_gets_a_revision_one_refusal() {
         let (mut client, server) = UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            connection(server, "incarnation", "fixture", &Clients::default()).await
+            connection(server, "incarnation", "fixture", &Clients::default(), None).await
         });
         let request = br#"{"version":1,"id":"old","operation":{"kind":"status"}}"#;
         client.write_u32(request.len() as u32).await.unwrap();

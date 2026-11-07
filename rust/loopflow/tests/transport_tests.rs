@@ -5527,6 +5527,28 @@ fn server_status_does_not_install_or_create_work() {
 }
 
 #[test]
+fn terminal_bridges_leave_the_client_connections_free() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let session = loopflow::id::LfSessionId::from(fixture.session(&owner).as_str());
+    let service = ServerProof::start(&fixture, false);
+    // More bridges than the server admits clients.
+    let bridges: Vec<_> = (0..loopflow::server::wire::MAX_CONNECTIONS + 8)
+        .map(|_| {
+            loopflow::server::client::attach(&fixture.endpoint("machine"), &session, None).unwrap()
+        })
+        .collect();
+    // Desktop's own connection still gets in.
+    let welcome = service.connect();
+    assert_eq!(
+        welcome.welcome().limits.max_connections,
+        loopflow::server::wire::MAX_CONNECTIONS
+    );
+    drop(bridges);
+}
+
+#[test]
 fn server_watches_refresh_work_and_resolve_primary_session() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));

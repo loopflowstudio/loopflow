@@ -24,10 +24,22 @@ pub mod ambient;
 /// fixture logins into that home, so every test binary drops both variables
 /// before `main`, while no other thread can read the environment. Fixtures
 /// that need a provider home set one explicitly.
+///
+/// A fixture `lf` that signs a Claude home in on macOS runs `security`, so
+/// the Keychain stand-in also goes first on PATH for the whole binary: a
+/// fixture that forgets its own would otherwise leave a real Keychain item
+/// per run. Fixtures that replace PATH outright find no `security` at all.
 #[ctor::ctor(unsafe)]
 fn scrub_inherited_provider_homes() {
     env::remove_var("CODEX_HOME");
     env::remove_var("CLAUDE_CONFIG_DIR");
+    let bin = env::temp_dir().join(format!("lf-test-security-{}", std::process::id()));
+    fs::create_dir_all(&bin).expect("create the Keychain stand-in directory");
+    write_executable(&bin, "security", FAKE_SECURITY);
+    let path = env::var_os("PATH").unwrap_or_default();
+    let joined = env::join_paths(std::iter::once(bin).chain(env::split_paths(&path)))
+        .expect("temp dir is a valid PATH entry");
+    env::set_var("PATH", joined);
 }
 
 /// A macOS `security` stand-in that keeps generic passwords in a `keychain`

@@ -122,7 +122,7 @@ fn step_log(reading: &Value, index: usize) -> Result<String> {
     let store = crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let process = store
         .sqlite
-        .process(&id)?
+        .lf_process(&id)?
         .context("Step Process is unavailable")?;
     let mut text = format!(
         "{} · {}\n{}\nOutcome: {} · exit {:?}\n",

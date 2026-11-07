@@ -118,7 +118,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
     }
     for task in tasks {
-        let started = super::chapters::task_started_or_published_in(conn, &task.id)?;
+        let started = super::project_adoption::task_started_or_published_in(conn, &task.id)?;
         let state = super::durable::task_state_in(conn, &task.id)?;
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
@@ -337,7 +337,7 @@ fn plan_in(
                             [
                                 "--machine".into(),
                                 location.machine_id.clone(),
-                                "--repository".into(),
+                                "--repo-id".into(),
                                 repository.to_string(),
                             ],
                         );
@@ -476,7 +476,9 @@ impl SqliteStore {
             .into_iter()
             .find(|saved| &saved.id == id);
         if previous.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let mut selection =
             Selection::parse(source, previous.as_ref().map(|saved| &saved.selection))
@@ -566,7 +568,9 @@ impl SqliteStore {
         let catalog = catalog_in(&tx, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let work = work_in(&tx, repository)?;
         let mut definitions = definitions(&catalog);
@@ -628,7 +632,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET name=coalesce(?1,name),pinned=coalesce(?2,pinned),revision=revision+1 WHERE repository_id=?3 AND id=?4 AND revision=?5",
             params![name,pinned,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -655,7 +661,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET slots_json=?1,revision=revision+1 WHERE repository_id=?2 AND id=?3 AND revision=?4",
             params![json,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -736,7 +744,9 @@ impl SqliteStore {
             params![repository.as_str(), id.0, expected_revision],
         )?;
         if deleted == 0 {
-            return Err(invalid("Dashboard changed; read it again before deleting"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before deleting".into(),
+            ));
         }
         Ok(())
     }

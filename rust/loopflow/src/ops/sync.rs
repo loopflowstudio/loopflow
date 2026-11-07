@@ -21,7 +21,10 @@ pub struct SyncOptions {
     pub fork_base: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SyncClass {
     StaleEmpty,
     ScratchOnly,
@@ -29,14 +32,20 @@ pub enum SyncClass {
     Protected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SyncStrategy {
     Noop,
     ResetToBase,
     MergeTarget,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
 pub struct SyncPlan {
     pub branch: String,
     /// The commit the plan classified; the sync refuses if HEAD moved since.

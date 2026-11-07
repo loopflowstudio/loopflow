@@ -6,7 +6,7 @@ Operate one Wave once: read, judge, act, check, and exit. A started Task you own
 with no live Graph has nobody else to take its next step, so that step is
 yours. The pass is done when every started Task you own has a disposition and
 every other Task is listed. Work the Wave's existing Tasks; the plan, key
-results, metric targets, chapter rotation, new Tasks and backlog are not this
+results, metric targets, new Tasks and backlog are not this
 skill's to change. Another conversation or scheduled pass may be operating this
 Wave too; work it is driving is moving, so leave it alone.
 

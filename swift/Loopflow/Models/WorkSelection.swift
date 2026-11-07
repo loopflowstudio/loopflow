@@ -149,6 +149,10 @@ public struct Dashboard: Codable, Equatable, Sendable {
     public let slots: DashboardSlotLayout?
     public let selection: WorkSelection
     public let arrangement: WorkArrangement
+
+    enum CodingKeys: String, CodingKey {
+        case repository = "repo", id, revision, name, pinned, slots, selection, arrangement
+    }
 }
 
 /// A plan carries observations and intent. It makes no native readiness claim.
@@ -187,7 +191,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let slots: DashboardSlotLayout
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
-        case repository, selection, resolution, arrangement, projection, slots, contents, name, pinned
+        case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", savedRevision = "saved_revision"
     }
 }

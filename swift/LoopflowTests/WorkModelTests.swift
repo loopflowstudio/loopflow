@@ -253,21 +253,21 @@ struct WorkModelTests {
         model.select(.wave(id: "wave-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.project(id: "project-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
         model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
-            "history", "--since", "7d", "--limit", "50",
+            "session", "history", "--since", "7d", "--limit", "50",
             "--wave", "product",
             "--task", "W2-144", "--json",
         ])
@@ -280,7 +280,7 @@ struct WorkModelTests {
         let selectedJSON = try fixture.workActivityJSON(replacingFirstSubjectWith: "W2-144")
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            guard args.first == "history" else {
+            guard args.prefix(2) == ["session", "history"] else {
                 throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
             if args.contains("W2-144") { return selectedJSON }
@@ -321,7 +321,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
@@ -346,7 +346,7 @@ struct WorkModelTests {
             encoding: .utf8
         )
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -371,7 +371,7 @@ struct WorkModelTests {
         )
         let deferred = DeferredActivityResponse()
         let query = RegistryQuery { args, _ in
-            #expect(args == ["desktop", "sessions", "--json", "--page", "--limit", "100"])
+            #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: "/src/first")
@@ -1050,11 +1050,11 @@ private struct WorkTestFixture {
         let activityArguments = ActivityArguments()
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmapJSON
-            case "planning": return #"{"destinations":[]}"#
+            case "plan" where args.dropFirst().first == "list": return roadmapJSON
+            case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
             case "wave" where args.dropFirst().first == "list": return wavesJSON
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
-            case "history":
+            case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
+            case "session" where args.dropFirst().first == "history":
                 await activityArguments.record(args)
                 return workActivityJSON
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")

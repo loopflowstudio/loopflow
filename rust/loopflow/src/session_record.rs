@@ -319,7 +319,7 @@ fn read_fact(evidence: &serde_json::Value) -> Option<FactEnvelope> {
 ///
 /// Optional counters stay unknown when no stream reported them. Finality is a
 /// count of direct provider receipts; Recorder settlement never upgrades it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionUsage {
     pub streams: usize,
     pub final_streams: usize,
@@ -338,7 +338,7 @@ pub struct SessionUsage {
 /// History beneath one conversation's immutable captured input. This is not a
 /// resumable object. Provider records retain separate outcomes and driving Processes;
 /// recorder completion is historical evidence, never native success or process exit.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
     pub session_id: crate::id::LfSessionId,
     pub captured: Option<i64>,
@@ -367,7 +367,7 @@ pub struct SessionHistory {
 
 /// An exact native turn, or an older provider observation with unknown native
 /// identity. References identify evidence; they confer no process/settlement API.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
     pub lf_process_id: Option<crate::id::LfProcessId>,
@@ -379,7 +379,7 @@ pub struct ProviderHistory {
     pub usage: SessionUsage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderHistoryReference {
     NativeTurn {
@@ -1167,7 +1167,7 @@ pub(crate) fn stdin_tty() -> Option<String> {
 /// Who chose a Session's current title. A human name is never replaced by a
 /// generated suggestion. `Unavailable` is never stored: the canonical name
 /// lives on another Machine and the reader only has a local display label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionTitleSource {
     Generated,

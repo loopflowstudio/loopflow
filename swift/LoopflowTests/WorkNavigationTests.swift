@@ -812,8 +812,8 @@ struct WorkNavigationTests {
         let gate = PlanningGate()
         let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": await gate.wait(); return snapshot
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(records),"next":null}"#
+            case "plan" where args.dropFirst().first == "list": await gate.wait(); return snapshot
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             default: return #"{"truncated":false,"items":[]}"#
             }
@@ -1221,10 +1221,10 @@ private actor ReadingSource {
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
-        case "desktop" where args.dropFirst().first == "plan": return roadmap
-        case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessions),"next":null}"#
+        case "plan" where args.dropFirst().first == "list": return roadmap
+        case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
-        case "history": return #"{"truncated":false,"items":[]}"#
+        case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

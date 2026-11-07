@@ -275,7 +275,7 @@ final class SessionsWorkspace {
             task = recorded
         } else { task = key.id }
         return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
-         "--repository", key.repository, "desktop", "shell", task,
+         "--repo-id", key.repository, "desktop", "shell", task,
          "--checkout", identity.worktree, "--id", tab.id]
     }
 

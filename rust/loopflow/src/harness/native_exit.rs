@@ -5,7 +5,7 @@
 //! beside the agent. Everything the launcher used to record after `wait` is
 //! handed to the owner first and settled here when the provider exits.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
 use anyhow::{Context, Result};
@@ -74,7 +74,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         )
     });
     if let (Some(account), Some(key), false) = (&exit.account, &exit.capture_key, lost) {
-        pin_account_home(&exit.provider, account, key, exit.isolate);
+        pin_account_home(&exit.provider, account, key, exit.isolate, &exit.cwd);
     }
     let command = crate::lf::commands::util::SessionCommandOutcome {
         status,
@@ -188,6 +188,7 @@ fn pin_account_home(
     account: &ProviderAccountId,
     capture_key: &str,
     isolate: Option<bool>,
+    cwd: &Path,
 ) {
     let pinned = (|| -> Result<()> {
         let Ok(provider) = provider.parse::<crate::provider_auth::Provider>() else {
@@ -203,6 +204,7 @@ fn pin_account_home(
             Some(account.clone()),
             None,
             isolate,
+            Some(cwd.to_path_buf()),
         )?;
         if let Some(route) = route {
             route.pin_session_blocking(Some(session.agent_session))?;

@@ -216,9 +216,9 @@ struct TaskGraphTests {
                 return try await reader.ensure(issue: args[3])
             case ("session", "resume"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
-            case ("desktop", "sessions"): return try await reader.inventory()
-            case ("desktop", "plan"): return roadmapJSON
-            case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
+            case ("session", "list"): return try await reader.inventory()
+            case ("plan", "list"): return roadmapJSON
+            case ("machine", "self"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }
@@ -696,11 +696,11 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("desktop", "plan"):
+        case ("plan", "list"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"truncated":false,"items":[]}"#
-        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
+        case ("session", "history"): return #"{"truncated":false,"items":[]}"#
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)

@@ -758,7 +758,12 @@ fn available_lists_only_conversations_ready_for_input() {
             let _ = self.0.wait();
         }
     }
-    let provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let provider = Child(
+        Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = tempfile::tempdir().unwrap();
     let cwd = home.path().join("work");
@@ -796,7 +801,7 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["available"], true);
+    assert_eq!(available[0]["availability"], "available");
     assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }

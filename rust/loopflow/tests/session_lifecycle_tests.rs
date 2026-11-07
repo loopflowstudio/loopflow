@@ -66,7 +66,9 @@ impl Fixture {
                 format!(
                     "{}:{}",
                     home.join("bin").display(),
-                    std::env::var("PATH").unwrap_or_default()
+                    loopflow_test_support::path_without_installed_harnesses(
+                        &std::env::var("PATH").unwrap_or_default()
+                    )
                 ),
             )
             .env("NO_COLOR", "1")
@@ -696,7 +698,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(history["plan_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -2447,6 +2449,9 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
         let fixture = Fixture::new(true);
         fixture
             .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
+        fixture
+            .repo
             .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
         fixture.repo.stage_all();
         fixture
@@ -3573,6 +3578,9 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
 fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
     for wave in [false, true] {
         let fixture = Fixture::new(false);
+        fixture
+            .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
         let scope = if wave {
             let task_path = fixture.repo.create_named_worktree("other-task");
             support::register_task_with_pr(

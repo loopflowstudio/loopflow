@@ -5,13 +5,13 @@ produces: one Wave chapter report with a dated verdict per KR
 Review this Wave's chapter: what improved, and whether each KR holds.
 
 The Wave's local binding selects the current Project; Planned and Completed
-Projects hold future and past plans. Review only reads: never rotate, check KRs,
+Projects hold future and past plans. Review only reads: never replan, check KRs,
 cancel Tasks, edit Projects or change Task state.
 
 Read any dated reviews supplied, the Wave's GOAL.md and MEMORY.md, and:
 
 ```bash
-lf wave status <wave> --no-sync --json
+lf wave plan <wave> --json
 lf wave show <wave> --json
 ```
 
@@ -37,7 +37,7 @@ removed claims separately.
 
 The Wave owns instruments and readings; the Project owns KRs, Tasks and targets.
 A target left out on the record is unset, not inherited or missed; a target with
-no record is unknown. Rotation doesn't copy readings, so use dated readings from
+no record is unknown. Plans don't copy readings, so use dated readings from
 the time and never judge an old promise by today's readings, targets or
 instrument.
 
@@ -47,10 +47,7 @@ claims, dates, verdicts, Task and PR links, and gaps. Recompute totals from the
 KR rows. State `Coverage: complete` or `Coverage: incomplete` with what's
 missing.
 
-Report past Task moves and cancellations only when the record shows them. If
-the caller supplies a dated repository rotation preview, list this Wave's
-proposed dispositions separately; they are neither history nor applied. Don't
-write a second classifier. Keep next-chapter recommendations apart from
+Report past Task moves and cancellations only when the record shows them. Keep next-chapter recommendations apart from
 observations, including work with no sign of priority.
 
 Return the full report with its dates. The repository review combines Wave

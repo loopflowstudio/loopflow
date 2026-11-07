@@ -1,0 +1,1 @@
+{"type":"request","id":"redeem-1","operation":{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":"4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b","credit_id":null}}

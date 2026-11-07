@@ -11,7 +11,7 @@ use crate::work::task::TaskId;
 
 use super::SessionRecord;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionWorkspace {
     pub machine_id: MachineId,
     pub worktree: PathBuf,

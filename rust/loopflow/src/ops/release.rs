@@ -273,7 +273,8 @@ pub enum ReleaseNotesStatus {
     Legacy,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReleaseReceipt {
     pub target: String,
     pub version: String,
@@ -284,7 +285,8 @@ pub struct ReleaseReceipt {
     pub release_exists: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum ReleaseRunOutcome {
     NoChanges {
         target: String,

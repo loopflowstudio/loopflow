@@ -31,7 +31,7 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
    - Before changing code, check whether the same check fails on the base
      branch's latest commit, or failed on a timeout, hang or race unrelated to
      the diff. That is a flake: rerun it (`gh run rerun <run-id> --failed`), or
-     re-queue a failed merge-queue run with `lf arm`, and report `published`
+     re-queue a failed merge-queue run with `lf pr arm`, and report `published`
      with no code change.
 
 3. **Fix and verify.**

@@ -401,7 +401,7 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         }, run: { args, _ in
             let value: [String: Any]
-            if args.contains("--files") {
+            if args[1] == "changes" {
                 throw RegistryQueryError("Task has no active PR")
             } else if args[1] == "files" {
                 value = ["path": "", "entries": [["path": "note.txt", "kind": "file"]]]
@@ -516,10 +516,10 @@ struct TaskFilesTests {
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "ls": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return "[]"
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected file/launch request")
             }
         }
@@ -592,7 +592,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let store = TaskFilesStore(issue: "TEST-1", cwd: directory.path, query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"] as! [String: Any]
+            var value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
             if args[1] == "diff" { value["patch"] = try String(contentsOf: file, encoding: .utf8) }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
@@ -623,8 +623,8 @@ struct TaskFilesTests {
         let readings = OSAllocatedUnfairLock(initialState: 0)
         let store = TaskFilesStore(issue: "TEST-1", cwd: checkout.path, query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            if args.contains("--files") { readings.withLock { $0 += 1 } }
-            let value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"]!
+            if args[1] == "changes" { readings.withLock { $0 += 1 } }
+            let value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"]!
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.showsChanges = true
@@ -659,7 +659,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let readings = OSAllocatedUnfairLock(initialState: 0)
         let store = TaskFilesStore(issue: "TEST-1", cwd: checkout.path, query: RegistryQuery { args, _ in
-            if args.contains("--files") {
+            if args[1] == "changes" {
                 readings.withLock { $0 += 1 }
                 let trace = traces.appendingPathComponent(UUID().uuidString)
                 try FileManager.default.createDirectory(at: trace, withIntermediateDirectories: true)
@@ -667,7 +667,7 @@ struct TaskFilesTests {
                 try Data("o".utf8).write(to: target.appendingPathComponent(UUID().uuidString))
             }
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            let value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"]!
+            let value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"]!
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.observeFiles()
@@ -906,7 +906,7 @@ private actor RemoteFilesFixture {
     private var changeOwnerDuringRead = false
 
     func watch(_ args: [String], cwd: String?) throws -> TaskFilesObservation {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan", "task", "watch-files", "remote-task"]),
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan", "task", "watch-files", "remote-task"]),
               let flag = args.firstIndex(of: "--request") else { throw RegistryQueryError("Not the pinned peer") }
         request = args[flag + 1]
         emit()
@@ -927,7 +927,7 @@ private actor RemoteFilesFixture {
             checkout: "/peer/checkout", paths: ["note.txt"]))
     }
     func read(_ args: [String], cwd: String?) throws -> String {
-        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repository", "plan"]) else {
+        guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan"]) else {
             throw RegistryQueryError("Peer paths must not reach local reads")
         }
         let command = Array(args.dropFirst(4))

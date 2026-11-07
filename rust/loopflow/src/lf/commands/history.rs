@@ -36,6 +36,38 @@ pub struct HistoryFeed {
     pub watch: bool,
 }
 
+/// `session.usage`: provider-authored usage from recorded Session inputs.
+#[derive(Debug, clap::Args)]
+pub struct UsageArgs {
+    /// Emit Session usage evidence as JSON
+    #[arg(long)]
+    pub json: bool,
+    /// Observation window, in days (zero means all time)
+    #[arg(long, default_value_t = 30)]
+    pub days: u32,
+    /// Report context cost and turn time by week since 2026-09-30
+    #[arg(long, conflicts_with_all = ["days", "parent"])]
+    pub weekly: bool,
+    /// Compare Task and Wave usage under prospective and post-hoc bind attribution
+    #[arg(long, conflicts_with_all = ["days", "parent", "weekly", "context", "wave", "project", "task"])]
+    pub binds: bool,
+    /// Inputs issued by this Session or retained capture
+    #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
+    pub parent: Option<String>,
+    /// Limit to Session inputs attributed to one Wave
+    #[arg(long)]
+    pub wave: Option<String>,
+    /// Limit to Session inputs attributed to one Project
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Limit to Session inputs attributed to one Task
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Break each step's submitted input down by source, flagged against budgets
+    #[arg(long)]
+    pub context: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum HistoryCommand {
     /// List a bounded page of recorded commands, newest first
@@ -90,11 +122,6 @@ pub enum HistoryCommand {
         #[arg(long, conflicts_with_all = ["final_answer", "context", "instructions", "input"])]
         transcript: bool,
     },
-    /// Show how much Session history providers still keep, and what they remove next
-    Retention {
-        #[arg(long)]
-        json: bool,
-    },
     /// Find text in the conversations of recent Sessions
     Search {
         text: String,
@@ -114,36 +141,6 @@ pub enum HistoryCommand {
         limit: usize,
         #[arg(long)]
         json: bool,
-    },
-    /// Show direct provider-authored usage from recorded Session inputs
-    Usage {
-        /// Emit Session usage evidence as JSON
-        #[arg(long)]
-        json: bool,
-        /// Observation window, in days (zero means all time)
-        #[arg(long, default_value_t = 30)]
-        days: u32,
-        /// Report context cost and turn time by week since 2026-09-30
-        #[arg(long, conflicts_with_all = ["days", "parent"])]
-        weekly: bool,
-        /// Compare Task and Wave usage under prospective and post-hoc bind attribution
-        #[arg(long, conflicts_with_all = ["days", "parent", "weekly", "context", "wave", "project", "task"])]
-        binds: bool,
-        /// Inputs issued by this Session or retained capture
-        #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
-        parent: Option<String>,
-        /// Limit to Session inputs attributed to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Limit to Session inputs attributed to one Project
-        #[arg(long)]
-        project: Option<String>,
-        /// Limit to Session inputs attributed to one Task
-        #[arg(long)]
-        task: Option<String>,
-        /// Break each step's submitted input down by source, flagged against budgets
-        #[arg(long)]
-        context: bool,
     },
     /// Show where this Machine's Linear requests went, by hour, command and operation
     #[command(
@@ -176,9 +173,7 @@ impl HistoryCommand {
         match self {
             Self::List { .. }
             | Self::Show { .. }
-            | Self::Retention { .. }
             | Self::Search { .. }
-            | Self::Usage { .. }
             | Self::Linear { .. }
             | Self::Export { .. } => false,
             Self::Replay { .. } => true,
@@ -206,12 +201,54 @@ fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
+/// `lf session usage`.
+pub fn usage(args: &UsageArgs) -> anyhow::Result<()> {
+    match args {
+        UsageArgs {
+            json, binds: true, ..
+        } => super::bind_attribution::run(*json),
+        UsageArgs {
+            json,
+            weekly: true,
+            wave,
+            project,
+            task,
+            ..
+        } => super::context_cost::run(
+            *json,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+        ),
+        UsageArgs {
+            json,
+            days,
+            parent,
+            wave,
+            project,
+            task,
+            weekly: false,
+            binds: false,
+            context,
+        } => super::usage::run(
+            *context,
+            *json,
+            *days,
+            wave.as_deref(),
+            project.as_deref(),
+            task.as_deref(),
+            parent.as_deref(),
+        ),
+    }
+}
+
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Linear { since, json } => super::linear_requests::run(since, *json),
         HistoryCommand::Export { since } => export(since),
-        HistoryCommand::Retention { json } => super::history_transcript::retention(*json),
         HistoryCommand::Search {
             text,
             since,
@@ -230,43 +267,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             },
             *limit,
             *json,
-        ),
-        HistoryCommand::Usage {
-            json, binds: true, ..
-        } => super::bind_attribution::run(*json),
-        HistoryCommand::Usage {
-            json,
-            weekly: true,
-            wave,
-            project,
-            task,
-            ..
-        } => super::context_cost::run(
-            *json,
-            super::WorkFilter {
-                wave: wave.as_deref(),
-                project: project.as_deref(),
-                task: task.as_deref(),
-            },
-        ),
-        HistoryCommand::Usage {
-            json,
-            days,
-            parent,
-            wave,
-            project,
-            task,
-            weekly: false,
-            binds: false,
-            context,
-        } => super::usage::run(
-            *context,
-            *json,
-            *days,
-            wave.as_deref(),
-            project.as_deref(),
-            task.as_deref(),
-            parent.as_deref(),
         ),
         HistoryCommand::Show {
             id,

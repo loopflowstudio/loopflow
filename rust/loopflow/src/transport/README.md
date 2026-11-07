@@ -24,6 +24,28 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
 but never answers reads `detached` too.
 
+Desktop's server relay stays alive when its service connection drops. Its native
+status row shows **Reconnecting…** and pauses input while local selection, copy,
+Find and scrolling remain available. Recovery refreshes the same owner's screen;
+byte streams resume from their received position or refresh when output expires.
+Disconnected typing and uncertain writes are never replayed. If another viewer
+took control, recovery observes it without replacing input or geometry. Choose
+**Move here** in the read-only pane's connection row to edit the same running
+Session. Input stays paused until its owner acknowledges; a lost reply never
+repeats that takeover. Eight attempts with capped backoff lead to **Session
+unavailable** and a native **Retry** action. Only an owner exit event means ended.
+Closing the surface cancels recovery. Ordinary explicit Open remains separate.
+
+The native surface creates a private temporary mailbox directory and passes
+`LF_SERVER_STATUS` to its relay only. Atomic JSON readings carry connection
+generation, state, input capability and optional explanation; `status.retry`
+requests another bounded cycle. `status.move` carries the current generation;
+the relay consumes it once before requesting an explicit replacing attachment,
+and advances the generation. Stale actions cannot cross a connection loss.
+Surface closure removes the directory and cancels pending actions. This is
+presentation state, not a durable viewer registry or execution authority. Plain
+CLI server relays retain their Ctrl+R/Ctrl+] interaction.
+
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn, pending request
@@ -60,7 +82,7 @@ background or are lost, logged.
 
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
-are the person quitting, `lf resume` taking the conversation over, `lf monitor
+are the person quitting, `lf resume` taking the conversation over, `lf process
 rollover`, the detached limit, or an explicit end. Failed store judgments retry
 at the next poll. An owner held past its detached limit logs why: native input,
 a live turn, running Graph, headless Run or no open Session. Repeated unchanged
@@ -79,7 +101,7 @@ owner stays on its own and an answering one is attached, but `lf resume` ends a
 superseded one that does not answer. Once protected work settles, another resume
 moves it.
 
-`lf monitor rollover --dry-run` lists the same takeover choices across owners;
+`lf process rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
 Rollover names the same retention reasons. Resume, rollover and the detached
@@ -190,7 +212,7 @@ and a `control` event to the connection that lost it.
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no
 public command. Session rows name that Process; viewer tokens remain in memory,
-and unresolved native input is recorded on the owner Process. A Claude conversation keeps one lf owner
+and unresolved native input is recorded on the owner LfProcess. A Claude conversation keeps one lf owner
 and one relay per terminal showing it. `lf resume` resolves the Session,
 then execs into `lf session attach OWNER`, which
 opens no store while relaying and parses no commands. It carries the original
@@ -214,6 +236,15 @@ over the terminal and reports newly recorded diagnostics after returning. Native
 provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
+
+Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
+relay passes `--session` and obtains a `session.attach` bridge for its exact owner from the local client API server before speaking
+this same owner protocol. No owner or provider is created on bridge failure.
+Ordinary CLI attachments keep their direct socket path. See
+[current server protocol](../server/README.md) for admission and framing.
+The [server boundary](../../../../docs/dev/server.md) separates
+client access from Machine routing. `lf session serve` remains the execution-owner
+entry, distinct from the server serving entry.
 
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also

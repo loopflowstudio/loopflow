@@ -1,9 +1,9 @@
 {
-  "planning_error": null,
-  "planning_stale": false,
+  "plan_error": null,
+  "plan_stale": false,
   "sync": null,
   "execution": null,
-  "planning_state": "available",
+  "plan_state": "available",
   "observed_at": 1790683200,
   "task": {
     "id": "task_11111111111111111111111111111111",
@@ -30,7 +30,7 @@
     "parent_pr_id": null,
     "created_at": "2026-09-29T12:00:00Z",
     "updated_at": "2026-09-29T12:00:00Z",
-    "repository_id": "repo_00000000000040008000000000000001"
+    "repo_id": "repo_00000000000040008000000000000001"
   },
   "project": {
     "id": "project_11111111111111111111111111111111",

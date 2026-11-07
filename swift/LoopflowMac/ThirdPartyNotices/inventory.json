@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "5986bda377ef763d5898db2f8dc0e78585ef70d090932bbaca940d82cb683525",
+    "Cargo.lock": "8d7f78e5622056baf0a9b81fc2d901fd9e97b3d643f79721ef6d40ff0611093b",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -63,7 +63,7 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "e94c5d32d844b9cabdf242d8cca2bb854cf0e6320975b6f6954c45e14b9d3544",
-    "swift/Package.swift": "5d0e22f4569ddf59c0ac3e75eab6ca57069a4b1bc80a0d892a1171b22fb6d62d",
+    "swift/Package.swift": "913803ac0ef1a0c1ebcf732a4db6e22c5ad4a896219c536d32d99dc9683c49bf",
     "third_party/README.md": "ab704e7eef1524c178bc75259b58c5a96406dc2160d59d0bce20e300458a4bcb",
     "third_party/REBUILD.md": "7f16e0e02ff9eeba71f70a2fd7812f2b9f21121775ca258125cd0ca4f34eb374",
     "third_party/manifest.json": "6eb513a714ada6d0bdb0326e44e014990c3a1df85e4e5ecf7d2f98bcfb0c87ba",
@@ -2752,14 +2752,14 @@
       }
     },
     {
-      "id": "zmij@1.0.21",
+      "id": "zmij@1.0.23",
       "scope": "lf",
       "license": "MIT",
       "source": {
-        "url": "https://static.crates.io/crates/zmij/zmij-1.0.21.crate",
-        "sha256": "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+        "url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+        "sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
       }
     }
   ],
-  "notices_sha256": "72a17ce1df76a9c6a07a773a0399b52f35167bb43079ce75b30f4284ffe40099"
+  "notices_sha256": "bfcc1d9ce13eee531f3e7dee178de1a8c17e0359ea753313212b918c565a14ae"
 }

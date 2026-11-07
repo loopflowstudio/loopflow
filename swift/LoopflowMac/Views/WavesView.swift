@@ -574,7 +574,7 @@ struct WavesView: View {
 }
 
 /// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
-/// the Wave through `lf wave add`. An add with leftovers (its files uncommitted
+/// the Wave through `lf wave create`. An add with leftovers (its files uncommitted
 /// on main) keeps the sheet open showing the receipt's lines; a clean add closes it.
 struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]

@@ -1,0 +1,1 @@
+{"type":"request","id":"set-1","operation":{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"routing":"active","plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}}

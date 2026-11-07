@@ -42,11 +42,11 @@ watch, check back or follow up.
 
 ## Begin work in a Wave
 
-To open a Wave or start new planning, run `lf wave add <wave> --json`. An
+To open a Wave or start new planning, run `lf wave create <wave> --json`. An
 existing Wave keeps its Project; a new one gets its first. Ordinary Projects
 need no chapter or workflow. An outage is not absence: report it and retry the
 same command. Status reads and operating passes add nothing. Chapter changes go
-through start-chapter; never rotate just to make ordinary work possible.
+through start-chapter; never replan just to make ordinary work possible.
 
 ## Develop direction
 

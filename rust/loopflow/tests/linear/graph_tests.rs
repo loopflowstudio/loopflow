@@ -419,8 +419,11 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         format!(
             "{}:{}",
             binary_dir.display(),
-            path.map(str::to_owned)
-                .unwrap_or_else(|| std::env::var("PATH").unwrap())
+            loopflow_test_support::path_without_installed_harnesses(
+                &path
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| std::env::var("PATH").unwrap())
+            )
         ),
     );
     command

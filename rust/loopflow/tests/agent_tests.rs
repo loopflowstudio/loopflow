@@ -241,6 +241,7 @@ while read -r line; do :; done
 "#,
     );
     let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _directory = support::InDirectory::enter(home.path());
     // Isolated launches run in the routed account's own home.
     std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
     struct RestoreLfBin(Option<std::ffi::OsString>);
@@ -459,6 +460,7 @@ fn launch_streaming_times_out() {
 fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
     let home = TempDir::new().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
+    let _directory = support::InDirectory::enter(home.path());
     let bin = home.path().join("bin");
     support::install_native_codex(&bin);
     let path = std::env::var_os("PATH").unwrap();

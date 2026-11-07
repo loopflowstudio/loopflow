@@ -9,7 +9,9 @@ use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingScope {
     Global,
@@ -17,7 +19,9 @@ pub enum SettingScope {
     Wave,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SettingTarget {
     General,
@@ -26,13 +30,14 @@ pub enum SettingTarget {
 }
 
 /// A Graph occurrence retains its defining graph through composition and capture.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OccurrenceSettings {
     pub graph: String,
     pub id: Option<String>,
     pub source: ConfigSource,
     pub path: Option<PathBuf>,
     pub address: Option<String>,
+    #[schemars(with = "serde_json::Value")]
     pub values: Value,
 }
 
@@ -69,7 +74,7 @@ impl OccurrenceSettings {
 }
 
 /// All candidates are ordered from lowest to highest authority.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SettingCandidate {
     /// Authored key; agent and default_agent retain their choice strength.
     pub key: String,
@@ -78,11 +83,13 @@ pub struct SettingCandidate {
     pub source: ConfigSource,
     pub scope: SettingScope,
     pub target: SettingTarget,
+    #[schemars(with = "serde_json::Value")]
     pub value: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EffectiveSetting {
+    #[schemars(with = "serde_json::Value")]
     pub value: Value,
     pub candidates: Vec<SettingCandidate>,
 }
@@ -110,6 +117,7 @@ pub fn validate_scope(
     layer: ConfigSource,
     scope: SettingScope,
 ) -> Result<(), LoadError> {
+    let key = &super::keys::typed_key(key);
     let preference = preference_path(key)?;
     let definition = super::catalog::definition(&preference.join(".")).expect("validated key");
     if !definition.applies(layer, scope, preference.len() != key.split('.').count()) {
@@ -118,10 +126,12 @@ pub fn validate_scope(
     Ok(())
 }
 
-/// Return the preference path after its optional skill/occurrence selector.
-pub fn preference_path(key: &str) -> Result<Vec<&str>, LoadError> {
-    let parts: Vec<_> = key.split('.').collect();
-    preference_parts(&parts).map(<[_]>::to_vec)
+/// Return the preference path after its optional skill/occurrence selector;
+/// `key` may use any spelling `config::keys` accepts.
+pub fn preference_path(key: &str) -> Result<Vec<String>, LoadError> {
+    let typed = super::keys::typed_key(key);
+    let parts: Vec<_> = typed.split('.').collect();
+    preference_parts(&parts).map(|path| path.iter().map(|part| (*part).to_owned()).collect())
 }
 
 pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b str], LoadError> {
@@ -153,6 +163,7 @@ pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b 
 /// CLI and file values use the same YAML types as configuration files.
 pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     let path = preference_path(key)?;
+    let path: Vec<&str> = path.iter().map(String::as_str).collect();
     let value: Value = serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
     validate_value(&path, &value)?;
     Ok(value)
@@ -352,7 +363,7 @@ pub(crate) fn validate_preferences(
         };
         if key == "skill_agents" {
             return Err(invalid(format!(
-                "{key} is retired; use skills.<name>.agent or agent"
+                "{key} is retired; use skill.<name>.agent or agent"
             )));
         }
         if !targeted && (key == "skills" || key == "graphs") {
@@ -794,6 +805,10 @@ impl Drop for InvocationSettings {
     }
 }
 
+pub(crate) fn replace_invocation(value: Value) -> InvocationSettings {
+    InvocationSettings(INVOCATION.with(|current| current.replace(value)))
+}
+
 pub fn select_invocation(value: Value) -> InvocationSettings {
     fn overlay(current: &mut Value, value: Value) {
         if let Value::Mapping(values) = value {
@@ -815,7 +830,7 @@ pub fn select_invocation(value: Value) -> InvocationSettings {
     }))
 }
 
-fn invocation_values() -> Value {
+pub(crate) fn invocation_values() -> Value {
     INVOCATION.with(|current| current.borrow().clone())
 }
 
@@ -831,6 +846,9 @@ pub(super) fn explicit_agent() -> Result<Option<String>, LoadError> {
 }
 
 fn environment() -> Result<Value, LoadError> {
+    if crate::journal::request::active() {
+        return Ok(Value::Mapping(Default::default()));
+    }
     let mut values = Value::Mapping(Default::default());
     if let Ok(text) = std::env::var("LF_SETTINGS") {
         values = serde_yaml_ng::from_str(&text)

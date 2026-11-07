@@ -15,16 +15,17 @@ use crate::store::sqlite::SqliteStore;
 
 const MAX_LIMIT: usize = 200;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkActivitySnapshot {
     /// More Session records exist in the window than `--limit` returned.
     pub truncated: bool,
     pub items: Vec<WorkActivityEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkActivityEntry {
     pub id: String,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub recorded_at: OffsetDateTime,
     pub summary: String,
@@ -34,7 +35,7 @@ pub struct WorkActivityEntry {
     pub fact: WorkActivityFact,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     InputCaptured {
@@ -57,7 +58,7 @@ pub enum WorkActivityFact {
 
 /// What `lf history` reads; the flags of the same name, which a `--watch`
 /// request can replace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HistoryWindow {
     pub since: String,
@@ -71,6 +72,7 @@ impl HistoryWindow {
     /// The `lf history` flags that read this window.
     pub(crate) fn argv(&self) -> Vec<String> {
         let mut argv = vec![
+            "session".into(),
             "history".into(),
             "--since".into(),
             self.since.clone(),

@@ -5,7 +5,6 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
-use super::waves::Shape;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
@@ -18,18 +17,28 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
         return crate::transport::serve(argv, *terminal);
     }
     if let SessionCommand::List(args) = command {
-        return list_sessions(args, Shape::Tasks);
+        return list_sessions(args);
+    }
+    if let SessionCommand::Usage(args) = command {
+        return super::history::usage(args);
+    }
+    if let SessionCommand::Retention { json } = command {
+        return super::history_transcript::retention(*json);
+    }
+    match command {
+        SessionCommand::History { cmd: Some(cmd), .. } => return super::history::run(cmd),
+        SessionCommand::History {
+            id: None,
+            feed,
+            cmd: None,
+            ..
+        } => return super::activity::run(feed),
+        _ => {}
     }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
-        SessionCommand::Resume {
-            connection: SessionConnectionArgs { prepare: false, .. },
-            ..
-        } | SessionCommand::New {
-            connection: SessionConnectionArgs { prepare: false, .. },
-            ..
-        }
+        SessionCommand::Resume { .. } | SessionCommand::New { .. }
     ) {
         let cwd = crate::repo::working_directory()?;
         let argv = std::env::args().collect::<Vec<_>>();
@@ -44,35 +53,22 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::Serve { .. } => {
             unreachable!("serve owns its process before any runtime")
         }
-        SessionCommand::Steer { id, message } => {
+        SessionCommand::Steer { id, message, json } => {
+            use crate::engine::session::SteerScope;
             let store = open_shared_store().await?;
-            let author = crate::config::participant_name()?
-                .unwrap_or_else(|| "attribution unresolved".into());
-            let Some(id) = id else {
-                // Global `--repo` has already entered the selected repository.
-                let steer = match cli.wave.as_deref() {
-                    Some(wave) => {
-                        crate::lf::commands::waves::save_steer(&store, wave, &author, message)
-                            .await?
-                    }
-                    None => {
-                        let root = crate::repo::find_repo_root()?;
-                        let repo = crate::repository::CanonicalRepo::discover(&root)?;
-                        store
-                            .sqlite
-                            .save_repository_steer(&repo, &author, message)?
-                    }
-                };
-                println!("Saved {}", steer.id);
-                return Ok(());
+            // Global `--repo` has already entered the selected repository.
+            let scope = match (id.as_deref(), cli.wave.as_deref()) {
+                (Some(id), _) => SteerScope::Session(id),
+                (None, Some(wave)) => SteerScope::Wave(wave),
+                (None, None) => SteerScope::Repository,
             };
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            let steer = store
-                .sqlite
-                .save_session_steer(&session.id, &author, message)?;
-            println!("Saved {}", steer.id);
+            let directory = std::env::current_dir()?;
+            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
+            if *json {
+                println!("{}", serde_json::to_string(&steer)?);
+            } else {
+                println!("Saved {}", steer.id);
+            }
             Ok(())
         }
         SessionCommand::Steers {
@@ -131,18 +127,23 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
+        SessionCommand::History { id: None, .. } => {
+            unreachable!("the history feed and its commands return before any runtime")
+        }
         SessionCommand::History {
-            id,
-            json,
+            id: Some(id),
+            feed,
             after,
-            limit,
+            ..
         } => {
             let store = open_shared_store().await?;
             let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
                 bail!("Session {id} was not found");
             };
-            let events = store.sqlite.session_history(&session.id, *after, *limit)?;
-            if *json {
+            let events = store
+                .sqlite
+                .session_history(&session.id, *after, feed.limit)?;
+            if feed.json {
                 println!("{}", serde_json::to_string(&events)?);
             } else {
                 for event in events {
@@ -157,7 +158,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) => unreachable!("lists return before any runtime"),
+        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+            unreachable!("reads return before any runtime")
+        }
         SessionCommand::Resume {
             id,
             connection,
@@ -174,12 +177,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::New { id, connection } => {
             new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
         }
-        SessionCommand::Rename {
-            id,
-            name,
-            suggest,
-            json,
-        } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send { id, task, to } => {
             let store = open_shared_store().await?;
             let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
@@ -231,49 +229,8 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::Bind {
-            id,
-            task,
-            dry_run,
-            json,
-        } => {
-            let store = open_shared_store().await?;
-            if *dry_run {
-                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&preview)?);
-                } else {
-                    println!(
-                        "{} → {} ({}) [{}]. Not assigned.",
-                        preview.session_id, preview.identifier, preview.title, preview.task_id
-                    );
-                }
-                return Ok(());
-            }
-            let session = crate::ops::human_session::bind(&store, id, task).await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&session)?);
-            } else {
-                println!(
-                    "Session {} belongs to {}.",
-                    session.id,
-                    session.work_path.as_deref().unwrap_or(task)
-                );
-            }
-            Ok(())
-        }
+        SessionCommand::Bind { .. } => unreachable!("binding uses shared mutation dispatch"),
     }
-}
-
-/// `lf session list --json`: one Session and the Work it belongs to. Wire
-/// type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionRow {
-    #[serde(flatten)]
-    pub session: SessionFacts,
-    pub task: Option<crate::durable::TaskId>,
-    /// Wave name, as `--wave` takes it.
-    pub wave: Option<String>,
 }
 
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
@@ -294,22 +251,6 @@ pub struct SessionFacts {
     pub agent_process_id: Option<crate::id::AgentProcessId>,
 }
 
-impl SessionRow {
-    fn of(session: SessionRecord, waves: &std::collections::HashMap<String, String>) -> Self {
-        Self {
-            task: match &session.work {
-                Some(crate::durable::WorkRef::Task(task)) => Some(task.clone()),
-                _ => None,
-            },
-            wave: session
-                .wave_id
-                .as_ref()
-                .and_then(|wave| waves.get(&wave.to_string()).cloned()),
-            session: SessionFacts::of(session),
-        }
-    }
-}
-
 impl SessionFacts {
     pub(crate) fn of(session: SessionRecord) -> Self {
         Self {
@@ -325,15 +266,15 @@ impl SessionFacts {
     }
 }
 
-/// `lf session list` (`Shape::Tasks`) and `lf desktop sessions` (`Shape::Desktop`).
-pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()> {
+/// `lf session list`.
+pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.watch {
-        return watch_list(filter, shape, super::watch::Transport::Stdio).map(drop);
+        return watch_list(filter, super::watch::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        list(&store, args.json || shape == Shape::Desktop, &filter, shape).await
+        list(&store, args.json, &filter).await
     })
 }
 
@@ -375,7 +316,6 @@ struct SessionWatchArgs {
 
 pub(crate) fn watch_list(
     filter: crate::session::SessionFilter,
-    shape: Shape,
     transport: super::watch::Transport,
 ) -> anyhow::Result<Option<super::watch::Subscription>> {
     let args = SessionWatchArgs {
@@ -403,7 +343,7 @@ pub(crate) fn watch_list(
             };
             async move {
                 match store {
-                    Some(store) => read_list(&store, &filter, shape).await,
+                    Some(store) => read_list(&store, &filter).await,
                     None => Ok(serde_json::Value::Array(Vec::new())),
                 }
             }
@@ -422,73 +362,50 @@ async fn rename_session(
     crate::ops::human_session::rename(&store, id, &requested, source).await
 }
 
-/// The Session `lf session rename --json -- <id> <name>` prints.
+/// `lf session rename <id> <name>`: the renamed Session.
 pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
-    let name = [name.to_owned()];
-    tokio::runtime::Runtime::new()?.block_on(rename_session(id, &name, SessionTitleSource::Human))
+    tokio::runtime::Runtime::new()?.block_on(rename_session(
+        id,
+        &[name.to_owned()],
+        SessionTitleSource::Human,
+    ))
 }
 
-/// The Session `lf session bind --json --task <task> -- <id>` prints.
-pub(crate) fn bound(id: &str, task: &str) -> anyhow::Result<SessionRecord> {
+/// `lf session bind <id> --task <task> --json`: the bound Session, or with
+/// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
+pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        crate::ops::human_session::bind(&store, id, task).await
+        Ok(if preview {
+            serde_json::to_value(
+                crate::ops::human_session::preview_binding(&store, id, task).await?,
+            )?
+        } else {
+            serde_json::to_value(crate::ops::human_session::bind(&store, id, task).await?)?
+        })
     })
 }
 
-/// What `lf session bind <id> --task <task> --dry-run --json` prints.
-pub(crate) fn binding_preview(
-    id: &str,
-    task: &str,
-) -> anyhow::Result<crate::ops::human_session::SessionBindingPreview> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_shared_store().await?;
-        crate::ops::human_session::preview_binding(&store, id, task).await
-    })
-}
-
-/// What `lf session list --json` prints for `filter` in `shape`.
+/// What `lf session list --json` prints for `filter`.
 pub(crate) fn read_once(
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        read_list(&store, filter, shape).await
+        read_list(&store, filter).await
     })
 }
 
-/// What `lf session list --json` prints: a page with `--page`, else every row.
+/// What `lf session list --json` prints: a page with `--page`, else every
+/// Session record.
 async fn read_list(
     store: &Arc<Store>,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
-    let waves = match shape {
-        Shape::Desktop => None,
-        Shape::Tasks => Some(
-            store
-                .list_waves(None)
-                .await?
-                .iter()
-                .map(|wave| (wave.id().to_string(), wave.name().to_owned()))
-                .collect::<std::collections::HashMap<_, _>>(),
-        ),
-    };
-    let rows = |sessions: Vec<SessionRecord>| -> anyhow::Result<Vec<serde_json::Value>> {
-        sessions
-            .into_iter()
-            .map(|session| match &waves {
-                None => serde_json::to_value(session),
-                Some(waves) => serde_json::to_value(SessionRow::of(session, waves)),
-            })
-            .collect::<Result<_, _>>()
-            .map_err(Into::into)
-    };
     if filter.after.is_none() {
-        return Ok(serde_json::to_value(rows(
+        return Ok(serde_json::to_value(
             crate::ops::human_session::list(store, filter).await?,
-        )?)?);
+        )?);
     }
     anyhow::ensure!(
         filter.limit > 0,
@@ -508,7 +425,10 @@ async fn read_list(
     };
     Ok(serde_json::to_value(
         crate::ops::human_session::SessionPage {
-            entries: rows(entries)?,
+            entries: entries
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<_, _>>()?,
             next,
         },
     )?)
@@ -518,12 +438,11 @@ async fn list(
     store: &Arc<Store>,
     json: bool,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<()> {
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&read_list(store, filter, shape).await?)?
+            serde_json::to_string_pretty(&read_list(store, filter).await?)?
         );
         return Ok(());
     }
@@ -610,23 +529,18 @@ async fn resume(
     target: crate::ops::human_session::SessionTarget<'_>,
     fork: bool,
 ) -> anyhow::Result<()> {
-    let SessionConnectionArgs {
-        message, prepare, ..
-    } = connection;
-    anyhow::ensure!(
-        !*prepare || message.is_none(),
-        "--prepare cannot be used with --message"
-    );
+    // Prepared connections have already returned through shared mutation dispatch.
+    let message = &connection.message;
     anyhow::ensure!(
         message.is_none() || cli.batch,
         "a next-turn message requires -b"
     );
     anyhow::ensure!(
-        !cli.batch || *prepare || message.is_some(),
+        !cli.batch || message.is_some(),
         "a headless connection requires --message TEXT"
     );
     anyhow::ensure!(
-        *prepare || cli.batch || cli.output_schema.is_none(),
+        cli.batch || cli.output_schema.is_none(),
         "response schemas require a headless Run (-b)"
     );
     let progress = crate::startup::Startup::new("Finding conversation");
@@ -653,11 +567,11 @@ async fn resume(
         &cwd,
         target,
         fork,
-        !*prepare,
+        true,
         connection.json || cli.json,
     )
     .await?;
-    print_opened(cli, connection, &session)
+    print_opened(connection.json || cli.json, &session)
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -668,7 +582,9 @@ async fn select(
 ) -> anyhow::Result<String> {
     let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
     if selected.started {
-        eprintln!("Nothing to resume here; starting a new conversation.");
+        crate::journal::request::diagnostic(format_args!(
+            "Nothing to resume here; starting a new conversation."
+        ));
     }
     Ok(selected.id)
 }
@@ -684,13 +600,13 @@ async fn reopen(
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, &id, fork, launch, json).await
+    crate::ops::human_session::open(store, directory, &id, fork, launch, json).await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
 /// prints: the conversation and the command that opens it, with no provider
 /// started.
-pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
+pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
@@ -715,8 +631,7 @@ pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<Sessio
 }
 
 /// `lf session new`: the scope's conversation continues on a fresh provider
-/// thread, seeded with what the last thread knew. `--prepare` records the new
-/// thread and returns the command that launches it.
+/// thread, seeded with what the last thread knew.
 async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
@@ -731,11 +646,11 @@ async fn new_thread(
         &store,
         &std::env::current_dir()?,
         target,
-        !connection.prepare,
+        true,
         connection.json || cli.json,
     )
     .await?;
-    print_opened(cli, connection, &record)
+    print_opened(connection.json || cli.json, &record)
 }
 
 /// The conversation `lf session new` run from `directory` selects, on a fresh
@@ -758,9 +673,19 @@ async fn restarted(
     if !threaded {
         // No earlier thread to hand off from: opening starts the first one.
         if selected.started {
-            eprintln!("Nothing to restart here; starting a new conversation.");
+            crate::journal::request::diagnostic(format_args!(
+                "Nothing to restart here; starting a new conversation."
+            ));
         }
-        return crate::ops::human_session::open(store, &selected.id, false, launch, json).await;
+        return crate::ops::human_session::open(
+            store,
+            directory,
+            &selected.id,
+            false,
+            launch,
+            json,
+        )
+        .await;
     }
     let agent = crate::config::agent_override();
     let next =
@@ -782,23 +707,20 @@ pub fn print_returned(id: &str) -> anyhow::Result<()> {
     })
 }
 
-fn print_opened(
-    cli: &crate::lf::Cli,
-    connection: &SessionConnectionArgs,
-    session: &SessionRecord,
-) -> anyhow::Result<()> {
-    if connection.json || cli.json {
+fn print_opened(json: bool, session: &SessionRecord) -> anyhow::Result<()> {
+    if json {
         println!("{}", serde_json::to_string_pretty(session)?);
-    } else if connection.prepare {
-        println!(
-            "{}",
-            shlex::try_join(session.open_argv.iter().map(String::as_str))?
-        );
     }
     Ok(())
 }
 
-async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow::Result<()> {
+async fn rename(
+    id: &str,
+    name: &[String],
+    suggest: bool,
+    json: bool,
+    output: &mut dyn std::io::Write,
+) -> anyhow::Result<()> {
     let source = if suggest {
         SessionTitleSource::Generated
     } else {
@@ -806,14 +728,19 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
     };
     let session = rename_session(id, name, source).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
+        writeln!(output, "{}", serde_json::to_string_pretty(&session)?)?;
     } else if suggest && session.title_source == SessionTitleSource::Human {
-        println!(
+        writeln!(
+            output,
             "Session {} keeps its human-assigned name {:?}.",
             session.id, session.title
-        );
+        )?;
     } else {
-        println!("Session {} is named {:?}.", session.id, session.title);
+        writeln!(
+            output,
+            "Session {} is named {:?}.",
+            session.id, session.title
+        )?;
     }
     Ok(())
 }
@@ -821,16 +748,108 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
-        bail!("{label} cannot be empty");
+        return Err(crate::engine::Error::new(
+            crate::engine::ErrorCode::Invalid,
+            format!("{label} cannot be empty"),
+        )
+        .into());
     }
     Ok(text)
 }
 
-async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
+pub(crate) async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     Ok(Arc::new(
         open_store(&config)
             .await
             .context("open the shared Loopflow store")?,
     ))
+}
+
+pub(super) fn is_mutation(command: &SessionCommand) -> bool {
+    matches!(
+        command,
+        SessionCommand::Rename { .. }
+            | SessionCommand::Bind { .. }
+            | SessionCommand::Resume {
+                connection: SessionConnectionArgs { prepare: true, .. },
+                ..
+            }
+            | SessionCommand::New {
+                connection: SessionConnectionArgs { prepare: true, .. },
+                ..
+            }
+    )
+}
+
+pub(super) fn mutate(
+    cli: &crate::lf::Cli,
+    directory: &Path,
+    command: &SessionCommand,
+    io: &mut super::mutation::CommandIo<'_>,
+) -> anyhow::Result<()> {
+    if let SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } =
+        command
+    {
+        anyhow::ensure!(
+            connection.message.is_none(),
+            "prepared Sessions do not accept a message"
+        );
+        let session = prepared(cli, directory)?;
+        if connection.json || cli.json {
+            writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
+        } else {
+            writeln!(
+                io.output,
+                "{}",
+                shlex::try_join(session.open_argv.iter().map(String::as_str))?
+            )?;
+        }
+        return Ok(());
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        match command {
+            SessionCommand::Rename {
+                id,
+                name,
+                suggest,
+                json,
+            } => rename(id, name, *suggest, *json, io.output).await,
+            SessionCommand::Bind {
+                id,
+                task,
+                dry_run,
+                json,
+            } => {
+                let store = open_shared_store().await?;
+                if *dry_run {
+                    let preview =
+                        crate::ops::human_session::preview_binding(&store, id, task).await?;
+                    if *json {
+                        writeln!(io.output, "{}", serde_json::to_string_pretty(&preview)?)?;
+                    } else {
+                        writeln!(
+                            io.output,
+                            "{} → {} ({}) [{}]. Not assigned.",
+                            preview.session_id, preview.identifier, preview.title, preview.task_id
+                        )?;
+                    }
+                    return Ok(());
+                }
+                let session = crate::ops::human_session::bind(&store, id, task).await?;
+                if *json {
+                    writeln!(io.output, "{}", serde_json::to_string_pretty(&session)?)?;
+                } else {
+                    writeln!(
+                        io.output,
+                        "Session {} belongs to {}.",
+                        session.id,
+                        session.work_path.as_deref().unwrap_or(task)
+                    )?;
+                }
+                Ok(())
+            }
+            _ => unreachable!("is_mutation selects Session mutations"),
+        }
+    })
 }

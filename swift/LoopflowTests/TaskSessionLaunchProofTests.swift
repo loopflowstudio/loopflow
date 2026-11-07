@@ -113,12 +113,11 @@ struct TaskSessionLaunchProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "graph": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return "[]"
-            case "history": return #"{"truncated":false,"items":[]}"#
-            case "pm": return #"{"identifier":"W2-131","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
+            case "session" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected read in preparation proof")
             }
         }

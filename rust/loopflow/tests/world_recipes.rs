@@ -67,8 +67,8 @@ impl Built {
             .as_array()
             .unwrap()
             .iter()
-            .find(|task| task["title"] == name)
-            .unwrap_or_else(|| panic!("no Task {name:?}"))["identifier"]
+            .find(|task| task["task"]["name"] == name)
+            .unwrap_or_else(|| panic!("no Task {name:?}"))["task"]["identifier"]
             .as_str()
             .unwrap()
             .to_string()
@@ -136,12 +136,12 @@ fn lifecycle_world_reports_each_state() {
         ]
     );
     // A standup's Done column: one bounded read.
-    let week = built.lf(&["task", "list", "--done", "--since", "7d", "--json"]);
+    let week = built.lf(&["task", "list", "--closed", "--since", "7d", "--json"]);
     let shipped: Vec<&str> = week["tasks"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|task| task["title"].as_str().unwrap())
+        .map(|task| task["task"]["name"].as_str().unwrap())
         .filter(|name| name.starts_with("Shipped"))
         .collect();
     assert_eq!(shipped, ["Shipped yesterday", "Shipped this week"]);
@@ -218,24 +218,27 @@ fn task_list_query_finds_open_tasks_only() {
     let names = |args: &[&str]| {
         let mut names: Vec<String> = search(args)
             .iter()
-            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .map(|task| task["task"]["name"].as_str().unwrap().to_owned())
             .collect();
         names.sort_unstable();
         names
     };
-    // Every "Shipped" Task is done, so the query leaves it to `--done`.
+    // Every "Shipped" Task is done, so the query leaves it to `--closed`.
     assert!(names(&["shipped"]).is_empty());
     assert_eq!(
         names(&["STANDALONE"]),
         ["Standalone fix", "Standalone idea"]
     );
     let unassigned = &search(&["unassigned mid"])[0];
-    assert_eq!(unassigned["state"], "idle");
-    assert!(unassigned["reason"]
+    assert_eq!(unassigned["runtime"]["status"], "idle");
+    assert!(unassigned["next_move"]["reason"]
         .as_str()
         .unwrap()
         .starts_with("Unassigned"));
-    let identifier = unassigned["identifier"].as_str().unwrap().to_lowercase();
+    let identifier = unassigned["task"]["identifier"]
+        .as_str()
+        .unwrap()
+        .to_lowercase();
     assert_eq!(names(&[&identifier]), ["Unassigned mid-flight"]);
 }
 
@@ -272,8 +275,8 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|row| row["identifier"] == issue.as_str())
-            .map(|row| row["state"].clone())
+            .find(|row| row["task"]["identifier"] == issue.as_str())
+            .map(|row| row["runtime"]["status"].clone())
     };
     let first = next();
     assert!(first["answers"].is_null(), "{first}");
@@ -295,8 +298,8 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["identifier"] == issue.as_str())
-        .map(|row| row["title"].clone());
+        .find(|row| row["task"]["identifier"] == issue.as_str())
+        .map(|row| row["task"]["name"].clone());
     assert_eq!(title, Some("Standalone fix, renamed".into()), "{renamed}");
 
     // A request replaces the arguments and is always answered.

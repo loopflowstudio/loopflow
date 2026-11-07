@@ -4,8 +4,8 @@
 
 ```bash
 lf set --global default_agent codex
-lf set --global skills.design.agent claude
-lf set --global skills.implement.agent codex
+lf set --global skill.design.agent claude
+lf set --global skill.implement.agent codex
 ```
 
 Design uses Claude, implementation uses Codex, and other work falls back to Codex.
@@ -14,7 +14,7 @@ These commands edit `~/.lf/config.yaml`; writing the same YAML has the same effe
 ```yaml
 # ~/.lf/config.yaml
 default_agent: codex
-skills:
+skill:
   design:
     agent: claude
   implement:
@@ -25,7 +25,7 @@ Use `agent` for a choice you want applied. Use `default_agent` for a fallback
 that lets another applicable `agent` choose differently. The examples below are
 separate setups; combine the pieces that fit your work.
 
-## Let a project choose its exceptions
+## Let a repository choose its exceptions
 
 Keep just a fallback in your personal global file:
 
@@ -38,34 +38,34 @@ Then give the team a design preference in the repository:
 
 ```yaml
 # .lf/config.yaml
-skills:
+skill:
   design:
     agent: claude
 ```
 
 Design uses Claude; implementation and other steps fall back to Codex. This is
-useful when you want one everyday default while each project chooses exceptions.
+useful when you want one everyday default while each repository chooses exceptions.
 
-To insist on Codex for design across your projects, make a personal choice:
+To insist on Codex for design across your repositories, make a personal choice:
 
 ```bash
-lf set --global skills.design.agent codex
+lf set --global skill.design.agent codex
 ```
 
 That personal choice wins over the repository's Claude choice. Change `agent` to
 `default_agent` if you want the repository's choice to win again.
 
-## Keep a preference just for this project or Wave
+## Keep a preference just for this repository or Wave
 
 ```bash
-lf set skills.design.agent claude
-lf set skills.implement.agent codex
-lf --wave frontend set skills.implement.agent claude
+lf set skill.design.agent claude
+lf set skill.implement.agent codex
+lf --wave frontend set skill.implement.agent claude
 ```
 
-The first two commands save your project preferences in `lf.config.local.yaml`.
+The first two commands save your repository preferences in `lf.config.local.yaml`.
 The third makes implementation use Claude for the `frontend` Wave; the rest of
-the project still uses Codex. These private settings do not change the team's files.
+the repository still uses Codex. These private settings do not change the team's files.
 
 To set a shared Wave default instead:
 
@@ -92,7 +92,7 @@ Give implementation a personal default, then make one occurrence an exception:
 
 ```yaml
 # lf.config.local.yaml
-skills:
+skill:
   implement:
     agent: codex
 graphs:
@@ -126,7 +126,7 @@ Help develop the design.
 ```
 
 This is another way to author a shared skill preference. Centralize preferences
-under `skills:` when you want to see them together; put them in the skill when
+under `skill:` when you want to see them together; put them in the skill when
 they belong with its instructions. Built-in skills recommend no harness.
 A repository Graph can make a choice for one occurrence:
 
@@ -153,8 +153,8 @@ None of these commands saves a new preference.
 Other settings use the same typed values as YAML:
 
 ```bash
-lf --setting 'skills.implement.yolo=false' implement
-LF_SETTINGS='{skills: {design: {agent: claude}}}' lf design
+lf --setting 'skill.implement.yolo=false' implement
+LF_SETTINGS='{skill: {design: {agent: claude}}}' lf design
 ```
 
 An explicit command-line choice wins over an environment choice. Shell-exported
@@ -169,7 +169,7 @@ context:
   docs: [README.md]
   exclude: [docs/generated/**]
   diff: true
-skills:
+skill:
   design:
     context:
       docs: [docs/product.md]
@@ -193,7 +193,7 @@ Use the same paths in setters and invocation overrides:
 
 ```bash
 lf set context.exclude '[docs/generated/**]'
-lf set skills.design.context.docs '[docs/product.md]'
+lf set skill.design.context.docs '[docs/product.md]'
 lf --setting context.diff=false design
 ```
 
@@ -211,13 +211,13 @@ account:
 
 Use your connected accounts' login emails, in preference order; an account with
 no login email is named by its ID. To use only your work Claude account in this
-project:
+repository:
 
 ```bash
 lf set account.claude '[work@example.com]'
 ```
 
-The project list replaces the global list. Accounts apply to a global, repository
+The repository list replaces the global list. Accounts apply to a global, repository
 or Wave scope; they are not selected per skill.
 
 Once a remote machine is registered, select its durable ID for new Tasks:
@@ -236,10 +236,10 @@ there for later use.
 
 ```bash
 lf config catalog --json
-lf config show --skill implement           # compact table of authored preferences
-lf config show --skill implement --explain # candidates, files, and winning reasons
-lf config show --skill implement --all     # include built-in defaults
-lf config show --graph release --step write-code --json
+lf config settings --skill implement           # compact table of authored preferences
+lf config settings --skill implement --explain # candidates, files, and winning reasons
+lf config settings --skill implement --all     # include built-in defaults
+lf config settings --graph release --step write-code --json
 lf context --json
 ```
 
@@ -260,7 +260,7 @@ values. A fallback remains identifiable as `default_agent`. CLI and Desktop read
 the same resolution used to prepare a launch.
 
 In Desktop Configuration, choose My global preferences, My project preferences or
-Shared project preferences. Select a project checkout and Wave for My Wave
+Shared project preferences. Select a repository checkout and Wave for My Wave
 preferences or Shared Wave preferences. Apply shows the destination file and when
 the change takes effect. Explain uses that same checkout, Wave and setting target;
 Unset removes only that declaration and shows what now applies. Changing the
@@ -288,6 +288,13 @@ or machine availability can still require runtime observations.
 `LF_HOME` changes the personal global directory. Run `set --global` to edit the
 personal global file. Bare `set` edits private repository settings; `--wave`
 selects a Wave within that private file. Add `--shared` to edit the committed repository or Wave file.
+
+Keys sit on their primitive: `repo.plan.team`, `skill.<name>.agent`,
+`wave.graph`, `wave.<id>.account`. A file or command may spell a key by its
+trailing path (`planning.team`, `graph`), by the typed layout
+(`skills.<name>.agent`, `waves.<id>.account`) or, for the Linear team, the
+released `linear.team`. `lf set` writes the canonical spelling, moving the
+key's group with it; `lf config catalog` lists each key with its shorthands.
 
 ## Which value wins
 
@@ -401,7 +408,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |
@@ -534,15 +541,15 @@ release:
       completion: github-release
 ```
 
-`lf release run patch --target cli` selects changes from the exact
+`lf repo release run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf check`
+`verify` runs during `lf repo release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf repo release check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
@@ -663,7 +670,7 @@ Choose a harness, with an optional model. Use `default_agent` for a fallback.
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
-skills:
+skill:
   implement:
     agent: claude:opus
 ```
@@ -678,7 +685,7 @@ choose and save a personal default. Installation order and remaining usage do no
 choose a harness.
 Inspection still works without a choice; a new launch explains how to select one.
 Existing Sessions retain their recorded provider when resumed.
-A personal `skills.implement.agent: codex` beats a repository occurrence's
+A personal `skill.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.
 Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
@@ -1013,7 +1020,7 @@ Renaming a Wave in Desktop uses the same operation as `lf wave rename`. Its
 `.lf/wave/<name>/` directory moves with its shared `config.yaml`, while the Wave's
 ID stays the same.
 
-Private Wave declarations are keyed by the Wave's authored UUID under `waves:`.
+Private Wave declarations are keyed by the Wave's authored UUID under `wave:`.
 `--wave <name>` resolves that identity from its authored files; `--wave <UUID>`
 addresses it directly. Rename and relocation retain the UUID. Reusing a retired
 name does not reuse its preferences.
@@ -1036,10 +1043,10 @@ another Graph's same-named step does not match. Steps without IDs use skill and
 general settings. Duplicate IDs within one definition are invalid.
 
 ```bash
-lf set --global skills.implement.default_agent codex
+lf set --global skill.implement.default_agent codex
 lf set graphs.release.steps.write-code.agent claude
-lf config show --graph release --step write-code --json
-lf config show --graph outer --json
+lf config settings --graph release --step write-code --json
+lf config settings --graph outer --json
 ```
 
 Whole-Graph inspection includes composed steps and routers. Targeting

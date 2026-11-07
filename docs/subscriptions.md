@@ -359,8 +359,10 @@ going, and a launch that names no model waits for every scope on the account.
 
 Open Claude Sessions need nothing either. When one hits a limit in shared mode,
 the login moves to the eligible account that ranks first, and every open Claude
-follows at its next request. Send your next message where you left off. Isolated
-Sessions and Codex keep their login until you `lf resume` them, which moves them.
+follows at its next request. Send your next message where you left off. A running
+Codex keeps its login until you `lf resume` it. Naming another login with
+`lf --account codex=<login> resume <session>` restarts it there, and the old
+terminal says where the conversation went.
 
 To see what would fail next, and move it in one go:
 
@@ -571,7 +573,7 @@ lf account connect opencode --api-key
 ```
 
 Its stored credential applies to local OpenCode launches.
-Subscription polling, repository account routes, and room ordering do not apply.
+Subscription polling, repository account routes, and login ranking do not apply.
 
 ## Rust API migration
 

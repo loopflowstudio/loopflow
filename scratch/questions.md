@@ -18,14 +18,9 @@ Overturns decision 7 and question 2 as policy. Exact shape still open.
 
 Scope (Jack, November 5): this discussion covers Claude and Codex only. OpenCode and Pi accounts generalize later in their own Task.
 
-# Account separation research (November 5, 2026; from code and live state, no login touched)
+# Account separation research (November 5, 2026)
 
-- Live: all 34 running Claude processes use `~/.claude`, none isolated. Recorded conversations: Claude 5,680 shared / 261 isolated; Codex 5,728 shared / 3,317 isolated. `isolate:` and `--isolate` apply to the launch and its children; nothing distinguishes Sessions from Runs.
-- Decision 6 and `running_agents_follow_native_login` are unproven and likely wrong as "immediately". Claude 2.1.318's minified change check stats `.credentials.json` mtime; while the cached token is usable it does not re-read the Keychain. lf's switch (`write_claude_keychain_credential`) writes only the Keychain, and `~/.claude/.credentials.json` is dated October 18 despite 46 logged switches. A 401 or expiry does re-read; a usage limit is neither. A `X()`-gated versioned path exists whose state on this Machine is unverified. Needs a live probe.
-- `used_account` credits usage to the newest switch on the same assumption, so attribution may be wrong after a switch.
-- Switch log disagrees with the login: last row moves to `loopflow` at 15:30 UTC, `lf account route` reports `jackstah@gmail.com` at 16:54. Unexplained.
-- Cause is unreliable: 42 of 46 Claude and 700 of 732 Codex switches say `person`; a launch with a named account list records Person (likely, not confirmed).
-- Split hazard: refresh tokens rotate, and the same login in both the native home and an isolated profile holds two copies. A dedicated split avoids this; a soft reserve does not, unless workers use a long-lived `lf account token`.
+Settled by deleting isolation (Accepted at demo, item 7); the research is in git at 400ab22ea. Still open from it: a launch with a named account list records its switch cause as `person`, so `provider_account_switches.cause` is unreliable.
 
 # Interactive policy (Jack, November 5, 2026)
 
@@ -65,7 +60,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 9. **Claude model rungs** are `opus`, `sonnet`, `haiku` in that order, skipping the model already running; Codex limits are account-wide, so it has no model rungs.
 10. **Busy Sessions** move at their next Stop hook rather than mid-turn; a Session whose program status reports a draft is skipped and listed.
 - Remote isolation (`lf ssh`, `f72bc3ab9d` #1493): set only when a launch selects accounts. Two reasons: a laptop-selected account must not switch the target's shared login under the target's own work, and SSH launches need file-backed credentials (the macOS Keychain is generally unusable from SSH). Jack doubts it is essential. Both look replaceable on Jack's own Machines: a shared home can hold a file login (Claude falls back to a plaintext `.credentials.json`; mtime change is what running Claude watches). That would make isolation deletable everywhere, pending Jack's choice.
-- Comps for remote credentials (web research, secondary sources mostly): Paseo runs a daemon on the target with agent CLIs logged in there; nothing is forwarded. Omnara wraps the local Claude session; its own auth covers only its dashboard. Warp cloud agents use API keys stored as Warp secrets, billed to the API, not subscriptions. None forward subscription logins. Anthropic documents `CLAUDE_CODE_OAUTH_TOKEN` (setup-token) as the long-lived, inference-only route for headless machines; lf exposes it as `lf account token`. Forwarding a refreshing OAuth login creates a second copy that rotation can break, independent of isolation; a long-lived token avoids that.
+- Comps for remote credentials (Paseo, Omnara, Warp): none forward subscription logins; detail in git at 400ab22ea.
 
 # HumanLayer comp (github.com/humanlayer/humanlayer, read November 5)
 - One provider login per daemon host, nothing forwarded; no multiple accounts or switching. Its own login: device flow, refresh session in `~/.humanlayer/riptide/`, or a short-lived launch token used for one process and never saved.
@@ -96,3 +91,6 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 24. **`use` does not count Sessions.** It says open Claude Sessions follow at their next request and Codex ones when resumed, instead of the mock's "3 open Sessions follow".
 25. **`next` reasons.** Held, then the order naming only it, then "the only login ready", else the urgency reason (`31% left before Wed 12:00`). "without that order" appears only when no default order exists either.
 26. **lf's own Claude refresh** takes Claude's refresh lock (settled by the concept review after the CLI pass; built in b840306cf).
+27. **Fixture isolation is one ctor, not a `CODEX_HOME` per fixture (November 7).** About 45 test files spawn `lf`, and fixtures that set `HOME` expect `<HOME>/.codex`, so a process-wide `CODEX_HOME` would break them. Moving `HOME` covers `~/.codex` and `~/.claude` for every inheriting fixture. Fixtures without their own `HOME` share one home per test binary.
+28. **`lf --account <other> resume` on a running Claude attaches and does not switch the login.** Attaching launches nothing, so the named login is ignored until the next launch. The demo answer assumes Claude "follows the switched login"; left as built.
+29. **A running Codex with no recorded account** (no `provider_session_accounts` row) counts as a different login, so naming any login restarts it.

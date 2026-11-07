@@ -316,8 +316,7 @@ pub struct SessionRecord {
     /// The provider its current input launched with; absent until a review's
     /// first launch records one.
     pub provider: Option<String>,
-    /// The login its conversation is pinned to; absent for a shared or
-    /// unrouted conversation.
+    /// The login its conversation last ran on; absent for an unrouted one.
     pub account: Option<crate::store::ProviderAccountId>,
     /// The model its current input launched with, when one was named.
     pub model: Option<String>,

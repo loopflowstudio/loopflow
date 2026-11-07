@@ -150,15 +150,18 @@ Built (Nov 6, implement), choices in `scratch/questions.md` 19–26:
 
 Outstanding demo questions (bare login names, `pause` with no "disabled", Anthropic's terms, overage, open-ended waits), Jack Heart, November 7: "none of this concersn me". They stay as built.
 
-Next pass (November 7), in order:
-1. Failing integration tests, seen locally Nov 6 with and without the Keychain stand-in change: `context_launch_tests` (3, "Codex app-server disconnected before auth completed"), `session_cli_tests` (5–7), `session_launch_contract` (4), `transport_tests` (2–3). First establish which also fail on origin/main; fix every one this branch causes. CI skips these suites on #1828, so local runs are the check (empty cwd, isolated `HOME`, `CARGO_HOME` kept, `LF_*` unset, `< /dev/null`).
-2. `settings_launch_tests::command` (and any fixture spawning `lf` without one) sets its own `CODEX_HOME`, so a run with the real `HOME` cannot reach `~/.codex`. On Nov 6 such a run is the likely reason the active Codex login (manabot-eng) lost its only current credential.
-3. Build the resume decision above (Codex restart on a different named login).
+## Built: November 7 pass
+- **Failing integration tests.** Cause was this branch: merge 0f71d266c8 (#1831) kept the older `tests/support/native_codex.py` and undid main's `session_launch_contract.rs` expectations, so the stand-in had no stdio `app-server` ("disconnected before auth completed"). Both restored from the merge base; the other conflicted files of all six merges keep main's lines (audited). origin/main 81a79796f passed the same suites but for `native_background_watches_survive_until_settlement` (transport_tests, which passes here).
+- **Fixtures.** `support`'s ctor moves `HOME` into the temp directory for every test binary, keeping `CARGO_HOME`/`RUSTUP_HOME` (questions 27). `settings_launch_tests::command` sets its own `CODEX_HOME`; `auth_tests::cached_auth_leaves_no_process_or_account_state` sets `HOME`. Checked with a stand-in real home holding sentinels: `settings_launch_tests::`, `auth_tests::` left it untouched.
+- **Resume naming another login.** `Departure::Account`, `names_another_account` (Codex only) and `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went` are back; `provider_session_account` replaces `provider_session_routed`.
+- `session_moves` joins `NEVER_DISPLAYED`; `store_revisions_cover_every_table` was failing on it.
+Checks (empty cwd, isolated `HOME`, `LF_*` unset): integration `context_launch_tests:: session_cli_tests::` 34, `session_launch_contract` 27, `transport_tests` 66, `test_environment_tests` 4, lib `harness::agent_process:: provider_account:: store::sqlite::revisions` pass; fmt, clippy clean. Gate owns the full suites the ctor reaches.
+Compress (Nov 7): comments and docs only; `cargo fmt --check` clean, nothing else rerun.
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.
-- Laptop-side status per Machine is `lf --machine <m> account`; a single laptop view across Machines is not built.
+- No single laptop view across Machines; `lf --machine <m> account` shows one.
 - Removal Task e1f359 (`isolate:`, long-lived token columns, `provider_session_accounts.isolated`) exists locally; its Linear export was rate-limited on November 5 and still awaits confirmation.
 
 Still true from the first pass:
@@ -167,17 +170,9 @@ Still true from the first pass:
 - Native Claude limits cool for the 15-minute default: `StopFailure` carries no reset time, and it was confirmed from Claude 2.1.318's schema, not a live limit. Codex terminal limits are seen only through the relay's stream.
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
 - Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, explicit-only switch-away) has not been shown on the configured path; no paid quota may be spent.
-- Open for Jack at demo: `scratch/questions.md` 3, 4, 16–25; the mock as build target (answer 5); the Anthropic credentials policy.
+- Open at demo: the mock as build target (answer 5).
 - Unverified, sharper now that launches switch often: a running Codex keeps its own login in memory; if it refreshes and writes `auth.json` after the home switched to another account, the home silently flips back and the other account's rotated refresh token, if it rotated in between, is lost (`save_back` runs only at the next switch). Demo checks: after a switch, does a running Codex's refresh rewrite `~/.codex/auth.json`?
 
-## Concept review (November 6, 2026, headless, after urgency routing)
-Two doc fixes (`use` scope, stale ranking text in `docs/ops.md`), built Nov 6; the `use` part is superseded by the hold (3a). Detail in git at 4b9b4ecde.
-
-Checks (Nov 6, after compress: logins resolve once per verb, `Target::parse_login`, one `tightest_weekly`): lib `provider_account:: lf::commands::account lf::commands::profile lf::tests::account` (93, 1 ignored) and integration `auth_tests:: cli_discovery:: documented_commands::` (47) pass as built binaries from an empty dir with isolated `HOME`; fmt, clippy clean. Gate: `served_reads` (needs a canonical `TMPDIR`), Swift in CI.
-
 ## Concept review (November 6, 2026, headless, after the CLI pass)
-The concepts hold: one login per provider per Machine, the top-ranked login at every launch unless a `use` hold names one, `pause` to keep a login out. No deleted spelling (`route`, `--details`, `--routing`, `drain`, `session move --account`) survives in docs or builtins. One correction for implement:
-- **Every lf refresh of the shared Claude login takes Claude's refresh lock.** Built: `fresh_claude_token` holds `ClaudeRefreshLock` on its home (acquired on a blocking thread) around the refresh POST and write-back, re-reading the login once it holds it and taking a refresh Claude finished meanwhile. `activate`/`observe_active_account` pass their held lock through `save_back` → `claude_identity(native, Some(&lock))`, so the nested refresh never waits on itself; `renew_claude_login` writes and never refreshes. Two `subscription::observation_tests` cover both. Lib `subscription::` 12, `provider_account::` 54, `lf::commands::account::` 34 pass (empty dir, isolated HOME, `LF_*` unset); fmt and clippy clean. Gate owns the affected suites.
-Open product choices stand for demo: the mock as build target (answer 5), the Anthropic credentials policy, `scratch/questions.md` 3, 4, 16–25.
-Re-reviewed after b840306cf (Nov 6, headless): no change. One lock owner (`ClaudeRefreshLock`), one refresh path (`fresh_claude_token`), held-lock passing instead of re-entry; nothing new for Jack.
-
+The concepts hold. One correction:
+- **Every lf refresh of the shared Claude login takes Claude's refresh lock.** Built in b840306cf: `fresh_claude_token` holds `ClaudeRefreshLock`, re-reading the login once held; `activate`/`observe_active_account` pass their lock through `save_back`.

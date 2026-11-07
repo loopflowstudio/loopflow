@@ -1056,12 +1056,10 @@ async fn select_route(
     ensure_supported(provider)?;
     let store = route_store().await?;
     let resumed = match (&store, agent_session) {
-        (Some(store), Some(session_id)) => {
-            store
-                .provider_session_account(provider, session_id)
-                .await?
-                .is_some()
-        }
+        (Some(store), Some(session_id)) => store
+            .provider_session_account(provider, session_id)
+            .await?
+            .is_some(),
         _ => false,
     };
     let exact_account_id = exact_account_id.filter(|_| !resumed);

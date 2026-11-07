@@ -24,7 +24,9 @@ Keep this Task’s walkthroughs; parent scratch filenames are independent review
 - Broad `lf open` starts no agents (November 7 demo, [workspace-demo.md](workspace-demo.md); built). An explicit Task or named Session resumes anything. A repository or Wave opening follows the Session states every other client uses; see the third concept review in [rex-workspace.md](rex-workspace.md). The Wave's own conversation follows the same rule.
 - A Task with no conversations and no resolvable harness now fails its receipt and creates no tab, rather than a pane that exits. A Task with an earlier conversation skips the check because resume reuses its saved agent. A pane starting a Task's first conversation receives `--agent` from `lf -a`; an ended Session keeps its harness. The `Resume::Import` path stays untraced because this rule never reaches it.
 
-No product choice is open after the third November 7 concept review. The three listed before it closed on existing direction:
+One product choice is open, found November 7 and not blocking: should `lf open --task` on an attached conversation act the same on every host? Rex, Herdr and cmux move it (`Resume::Any`). tmux and plain terminals refuse and print `lf resume <id>`, as they did before this work. Either they also move it, which removes `elsewhere`, or native hosts refuse too, which changes the accepted “explicit Task resumes anything”. Kept as built; `docs/workspaces.md` states the split.
+
+The three listed before the third concept review closed on existing direction:
 
 1. A broad open finding a conversation live elsewhere: it reconnects a `detached` Session and leaves an `active` one where it is. Neither earlier option. `session_actions` already says an active Session's Open is unavailable, “use Take back to transfer it”, and that “unsent text in the previous terminal is not transferred”. The Task says to reuse LOO-672's Session semantics and preserve unfinished input; steer 288a39bd says “Preserve input authority”. Built. If Jack wants a broad open to take conversations back anyway, that reverses one predicate.
 2. Auto-Ship: stands, per the entry above.

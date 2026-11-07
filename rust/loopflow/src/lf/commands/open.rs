@@ -1281,8 +1281,9 @@ struct Live {
     placement: Option<String>,
 }
 
-/// A live provider attached to another client keeps its conversation; ordinary
-/// opening never takes it over. Desktop shows and moves its own retained panes.
+/// A live provider attached to another client keeps its conversation; tmux and
+/// plain terminals never take it over. Native hosts follow `Resume` instead, and
+/// Desktop shows and moves its own retained panes.
 /// One whose terminal closed has no viewer in control, so it opens here.
 fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;

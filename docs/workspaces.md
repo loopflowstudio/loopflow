@@ -45,7 +45,9 @@ it joins the current workspace's group, or the window when there is no group.
 Opening a repository or Wave creates a new container named for it.
 
 Rex, Herdr and cmux support layouts. tmux and plain terminals open the conversation
-alone. Herdr and cmux support local Tasks only. Rex can open remote Tasks on their
+alone. They don't move a conversation open in another terminal: tmux focuses its
+pane when it can, otherwise LF prints the `lf resume <session>` that moves it.
+Herdr and cmux support local Tasks only. Rex can open remote Tasks on their
 recorded Machine. Use `--server <endpoint>` to select a Rex Unix socket.
 
 If the selected host is unavailable, LF reports the error instead of opening

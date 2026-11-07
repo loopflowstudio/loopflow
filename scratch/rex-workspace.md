@@ -37,11 +37,8 @@ The prior design, failed demos and superseded constraints are retained in
 `21bbb00329:scratch/rex-workspace.md` and `21bbb00329:scratch/workspace-demo.md`.
 No shipping or installation requested. PR #1814 remains the delivery.
 
-
-Jack Heart also requested that `docs/` read as user documentation. The workspace
-guide now starts with commands and describes behavior, configuration and recovery.
-Design acceptance dates, testing provenance, delivery status and internal Task
-ownership remain in scratch/PR evidence instead of the guide.
+Jack Heart requested that `docs/` read as user documentation: acceptance dates,
+testing provenance and delivery status stay in scratch and the PR.
 
 Jack Heart rejected the November 6 demo showing only Task & workflow. The immediate demo must be one ordinary Task conversation in a Rex tab. A status tool is not a substitute for working agent input; do not present partial layout creation as that experience. This does not remove the previously requested optional Task/workflow tool.
 
@@ -56,10 +53,8 @@ Task diff command. Changes panes invoke `lf task diff`; that command owns Git
 paging and `--difftool`. Files and Shell use internal workspace command construction;
 there is no `task tool` or `desktop tool` command.
 
-Jack Heart identified remaining host-specific rendering in layout.rs. Move native
-wire formats, shell quoting and the Rex cwd wrapper into their adapters. Reuse
-the existing Native dispatch; remove the duplicate Host renderer enum. Shared
-layout code selects tools and splits only. Preserve launch behavior.
+Host wire formats, quoting and the Rex cwd wrapper live in the adapters, at Jack
+Heart's request; shared layout code selects tools and splits only.
 
 Jack Heart selected internal launch code: remove `TaskCommand::Tool` and the
 `lf task tool` command entirely, with no `desktop tool` replacement. Native
@@ -69,7 +64,7 @@ Jack then wrote “otherwise lg2m ship it” after this removal, before the LOO-
 merge; see [questions.md](questions.md). Do not reopen the active conversation or
 manipulate its native panes; retained demo resources have no cleanup release.
 
-## Status on 746bb5fca plus the realign fix below
+## Status on 41cf7defb
 
 Exists, seen in real Rex with real Claude on 8a8ae78ef ([workspace-demo.md](workspace-demo.md)): bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime; a Task with no checkout is placed and starts its conversation, with no second Session, worktree or replay on reopening.
 
@@ -103,7 +98,7 @@ Kept after challenge:
 - Each `lf open` creates fresh tabs, as accepted on November 5, so the Task text's “reuse/focus existing panes” no longer applies.
 - Scope stays on `lf open`, with no membership record: the selection is recomputed on each opening.
 
-Compress: `Resume::admits` is the one rule for what a pane runs, including the caller and the Wave tab; `Resolved::current_conversation` is the one caller check. `--agent` trails the argv like other optional flags. `lf -a claude open` no longer prints "--agent has no effect" (exempted in `bin/lf.rs`, not `may_launch_agent`, which also feeds `reads_work`).
+`lf -a claude open` no longer prints "--agent has no effect" (exempted in `bin/lf.rs`, not `may_launch_agent`, which also feeds `reads_work`).
 
 ## Concept review, November 7, second pass, on 746bb5fca plus the realign fix
 
@@ -117,16 +112,16 @@ Checked and left alone:
 - A running conversation that is not the Task's primary shows Task & workflow on a broad open. `Resume::Detached` judges the Session a pane names; the first pass kept this.
 - Followers from two broad opens each add an arrival tab. Each is a separate view of the same Work, as fresh tabs accepted on November 5 imply.
 
-Realign on 8b841cfb3: `docs/workspaces.md` retention wording read against `task_retirement.rs` and `retirement.rs`, and it agrees; no test rerun, PR #1814 head is this commit's parent.
-
 ## Concept review, November 7, third pass, on 2a26d37d3
 
-`lf open` had its own idea of a live conversation. `Resume::Running` asked only whether the provider was alive, so a broad open performed Take back on every conversation; `session_actions` says an active Session's Open is unavailable, “use Take back to transfer it”, and “unsent text in the previous terminal is not transferred”.
+`Resume::Running` asked only whether the provider was alive, so a broad open performed Take back on every conversation, against `session_actions`.
 
-Built: `Resume::Detached` asks `session_state(viewed_summary(...)) == Detached`, the read `elsewhere` and Desktop use, for Task panes and the Wave's own conversation. `provider_running` is gone; `docs/workspaces.md` updated. `repository_open_reconnects_detached_conversations_and_starts_none` and `wave_open_reconnects_its_detached_conversation_and_starts_none` failed first on the old predicate. They cover detached gets `lf resume`, an attached one gets Task & workflow, a broad open twice leaves it in the first terminal, and `lf open --task` still moves it. Fixture limit: `attach` clears the transport owner rather than running a viewer; demo owns the real one.
+Built: `Resume::Detached` asks `session_state(viewed_summary(...)) == Detached`, the read `elsewhere` and Desktop use, for Task panes and the Wave's own conversation. `provider_running` is gone. `repository_open_reconnects_detached_conversations_and_starts_none` and `wave_open_reconnects_its_detached_conversation_and_starts_none` failed first on the old predicate. They cover detached gets `lf resume`, an attached one gets Task & workflow, a broad open twice leaves it in the first terminal, and `lf open --task` still moves it. Fixture limit: `attach` clears the transport owner rather than running a viewer; demo owns the real one.
 
-Consequences: opening a Wave to pull everything into Rex leaves conversations attached in Desktop there; `lf open --task` moves each. An owner that never answers reads `detached` and reattaches, same as Desktop. A viewer that lost its connection reads `active` until expiry, so nothing moves on doubt.
+Consequences: opening a Wave to pull everything into Rex leaves conversations attached in Desktop there; `lf open --task` moves each. An owner that never answers reads `detached` and reattaches, same as Desktop. A viewer whose connection ended reads `detached` at once, so a broad open reattaches it; silent network loss reads `active` for up to 30 seconds.
 
-`lf open` and `lf resume` sharing, checked November 7 for comment d7ce2ccd: every pane runs `lf resume` through `Native::conversation`, now the one builder. `lf open` names only `session.or(primary)`, else hands `--task` to resume's ranking. `first_conversation_agent` launches nothing: it calls `Config::agent()` so a Task with no harness fails its receipt.
+`lf open` and `lf resume` sharing, checked November 7 for comment d7ce2ccd: native panes run `lf resume` through `Native::conversation`; tmux and plain terminals run the same command through `Resolved::resume_argv`, with no selection of their own. `lf open` names only `session.or(primary)`, else hands `--task` to resume's ranking. `first_conversation_agent` launches nothing: it calls `Config::agent()` so a Task with no harness fails its receipt.
 
-Compress: `Tools::conversation` reads `task_conversations` once for the caller and first-conversation checks. Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed. Flake: gate.
+Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed. Flake: gate.
+
+Realign on 41cf7defb: the third-pass fix and docs agree with the code. Found by reading: an explicit `lf open --task` on an attached Session moves it in native hosts but not tmux or plain terminals, which keep `elsewhere`'s refusal (`work_open_tests.rs:848`, `:946`). `docs/workspaces.md` now says so; the choice is in [questions.md](questions.md). Tests not rerun: comment-only code change.

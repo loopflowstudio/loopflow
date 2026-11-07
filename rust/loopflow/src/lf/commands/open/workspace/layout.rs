@@ -10,6 +10,7 @@ use super::{
     lf_argv, tool_cwd, tools, wave_config, with_machine_home, Native, Presentation, Resume,
     SqliteStore, TaskId, ViewContent,
 };
+use crate::ops::human_session::primary::{task_resume, TaskResume};
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
@@ -125,20 +126,10 @@ impl Tools<'_> {
             return self.host.conversation(self.cwd, &[session]).map(Some);
         }
         let id = TaskId::parse(&self.content.work.id)?;
-        let conversations = self.store.task_conversations(&id)?;
-        // The ranking could pick the conversation running this command.
-        let caller = crate::journal::agent_caller();
-        if caller.is_some_and(|caller| {
-            conversations
-                .iter()
-                .any(|(session, _)| session.id == caller.session_id)
-        }) {
-            return Ok(None);
-        }
-        let agent = if conversations.is_empty() {
-            self.first_conversation_agent(&id)?
-        } else {
-            None
+        let agent = match task_resume(self.store, &id)? {
+            TaskResume::Caller => return Ok(None),
+            TaskResume::Existing => None,
+            TaskResume::First => self.first_conversation_agent(&id)?,
         };
         let mut resume = vec!["--task", &self.content.work.id];
         if let Some(agent) = &agent {

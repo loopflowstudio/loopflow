@@ -114,3 +114,13 @@ zombie PID were absent from `ps` after fixture teardown. Successful local/SSH
 cycle tests asserted their owned process/socket baseline. No app, provider,
 server or watcher remains from this pass, and no candidate was installed or
 live scheduler registered.
+
+## Demo (2026-11-06, headless)
+
+Headless demo step, standing in for Jack Heart. The branch's only code change
+against `origin/main` is the five-line zombie filter in `ssh_shells.rs`, so the
+real configured path is the loopback-SSH acceptance suite.
+`cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`
+(LF_* cleared, stdin closed) — 3 passed in 68.59 s; log `/tmp/loo717-demo-ssh.log`.
+The prepared-viewer test ran through healthy idle, resize, Leave and return.
+Decision: advance. Native Desktop/Rex observations stay with Task `a0dff7`.

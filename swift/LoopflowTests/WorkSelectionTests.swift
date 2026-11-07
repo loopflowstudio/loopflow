@@ -84,13 +84,14 @@ struct WorkSelectionTests {
     }
 }
 
-func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content]) -> WorkViewPlan {
+func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
+                     slots: DashboardSlotLayout = DashboardSlotLayout(root: .slot(0))) -> WorkViewPlan {
     let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository,
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
-        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)), contents: members)
+        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,

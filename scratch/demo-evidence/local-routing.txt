@@ -1,4 +1,0 @@
-local identity: {"label":null,"id":"home_2d020e6cbdfe96157271b17e5378982a","route":"local","created_at":"2026-11-04T20:10:42Z","observed_at":"2026-11-04T20:10:42Z"}
-local task list exit: 0
-same-Machine route exit: 1
-Error: machine "home_2d020e6cbdfe96157271b17e5378982a" is not added; run `lf machine add home_2d020e6cbdfe96157271b17e5378982a` first

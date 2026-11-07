@@ -964,42 +964,43 @@ pub fn observe_native_limit() {
 }
 
 fn start_limit_recording(input: &str) -> anyhow::Result<()> {
+    // Anything else, a capacity blip included, records nothing: the person
+    // still sees Claude's own message.
+    let Some(reason) = spent_limit_reason(input) else {
+        return Ok(());
+    };
     crate::os_process::detached_context_block("record-limit")?
-        .env(LIMIT_REASON_ENV, displayed_limit_line(input))
+        .env(LIMIT_REASON_ENV, reason)
         .spawn()?;
     Ok(())
 }
 
-/// The line Claude showed. Every 429 reaches the hook as `rate_limit`, and the
-/// cause Claude knows stays out of the hook's input, so this line alone tells
-/// spent quota from a capacity blip.
-fn displayed_limit_line(input: &str) -> String {
-    let details: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
-    details["last_assistant_message"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string()
+/// The spent quota a `StopFailure` reports. Every 429 reaches the hook as
+/// `rate_limit` and Claude keeps the cause to itself, so only the line it
+/// displayed tells spent quota from a capacity blip.
+fn spent_limit_reason(input: &str) -> Option<String> {
+    let details: serde_json::Value = serde_json::from_str(input).ok()?;
+    crate::agent::subscription_limit_text(details["last_assistant_message"].as_str()?)
 }
 
-/// The recorder a limit hook started: on spent quota the account cools and a
-/// shared login moves to the eligible account that ranks first, which every
-/// open Claude follows. Their next message runs there, with no input of ours.
-/// Other Sessions reporting the same limit find the login already moved.
+/// The recorder a limit hook started: the account cools and a shared login
+/// moves to the eligible account that ranks first, which every open Claude
+/// follows. Their next message runs there, with no input of ours. Other
+/// Sessions reporting the same limit find the login already moved.
 pub fn record_limit() {
-    let line = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    let reason = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
     let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
-        runtime.block_on(record_native_limit(Provider::Claude, line))
+        runtime.block_on(record_native_limit(Provider::Claude, reason))
     });
     if let Err(error) = recorded {
         RecordingGap::default().note("usage limit", &error);
     }
 }
 
-async fn record_native_limit(provider: Provider, line: String) -> Result<(), ProviderAccountError> {
-    // A line lf cannot read moves nothing: the person still sees Claude's own.
-    let Some(reason) = crate::agent::subscription_limit_text(&line) else {
-        return Ok(());
-    };
+async fn record_native_limit(
+    provider: Provider,
+    reason: String,
+) -> Result<(), ProviderAccountError> {
     let Some(store) = route_store().await? else {
         return Ok(());
     };
@@ -4015,14 +4016,14 @@ mod account_first_tests {
             }
         };
 
-        record_native_limit(Provider::Codex, "You've hit your usage limit".into())
+        record_native_limit(Provider::Codex, "usage limit".into())
             .await
             .unwrap();
         assert_eq!(active().await, "second");
         assert!(cooling("first").await.is_some());
 
         // Every other open Session reports the same limit moments later.
-        record_native_limit(Provider::Codex, "You've hit your usage limit".into())
+        record_native_limit(Provider::Codex, "usage limit".into())
             .await
             .unwrap();
         assert_eq!(active().await, "second");
@@ -4044,40 +4045,8 @@ mod account_first_tests {
         input.to_string()
     }
 
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn only_spent_quota_cools_and_moves_a_native_login() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
-        let first = parse_account_id("first").unwrap();
-        let cooldown = || {
-            let store = Arc::clone(&store);
-            let first = first.clone();
-            async move {
-                store
-                    .get_provider_account("claude", &first)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .cooldown_until
-            }
-        };
-        let active = || {
-            let store = Arc::clone(&store);
-            let native = native.clone();
-            async move {
-                activation::observe_active_account(&store, Provider::Claude, &native)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .as_str()
-                    .to_string()
-            }
-        };
-
+    #[test]
+    fn only_spent_quota_starts_a_limit_recording() {
         for input in [
             stop_failure(
                 "API Error: Request rejected (429) \u{b7} this may be a temporary capacity issue.",
@@ -4093,21 +4062,9 @@ mod account_first_tests {
             ),
             serde_json::json!({"hook_event_name":"StopFailure","error":"rate_limit"}).to_string(),
         ] {
-            record_native_limit(Provider::Claude, displayed_limit_line(&input))
-                .await
-                .unwrap();
-            assert_eq!(active().await, "first", "{input}");
-            assert_eq!(cooldown().await, None, "{input}");
+            assert_eq!(spent_limit_reason(&input), None, "{input}");
         }
-
-        record_native_limit(
-            Provider::Claude,
-            displayed_limit_line(&stop_failure(SPENT_LINE, None)),
-        )
-        .await
-        .unwrap();
-        assert_eq!(active().await, "second");
-        assert!(cooldown().await.is_some());
+        assert!(spent_limit_reason(&stop_failure(SPENT_LINE, None)).is_some());
     }
 
     #[allow(clippy::await_holding_lock)]

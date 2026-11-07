@@ -9,7 +9,7 @@ use layout::layout;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -83,6 +83,15 @@ struct Container {
     spare_tab: Option<String>,
 }
 
+impl Container {
+    fn existing(id: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()),
+            spare_tab: None,
+        }
+    }
+}
+
 impl Native {
     fn resolve(host: OpenHost, server: Option<&str>) -> Result<Self> {
         Ok(match host {
@@ -128,14 +137,11 @@ impl Native {
     /// The container the caller is in, when there is one.
     fn here(&self) -> Result<Option<Container>> {
         Ok(match self {
-            Self::Rex(rex) => rex.caller.as_ref().map(|caller| Container {
-                id: Some(caller.session.clone()),
-                spare_tab: None,
-            }),
-            Self::Herdr(herdr) => herdr.here()?.map(|id| Container {
-                id: Some(id),
-                spare_tab: None,
-            }),
+            Self::Rex(rex) => rex
+                .caller
+                .as_ref()
+                .map(|caller| Container::existing(&caller.session)),
+            Self::Herdr(herdr) => herdr.here()?.map(Container::existing),
             // The caller's group, else its window (cmux's default placement).
             Self::Cmux(cmux) => Some(Container {
                 id: cmux.caller_group()?,
@@ -147,10 +153,7 @@ impl Native {
     fn create_container(&self, name: &str, cwd: &Path) -> Result<Container> {
         let name = label(name);
         match self {
-            Self::Rex(rex) => Ok(Container {
-                id: Some(rex.create_session(&name)?),
-                spare_tab: None,
-            }),
+            Self::Rex(rex) => Ok(Container::existing(rex.create_session(&name)?)),
             Self::Herdr(herdr) => {
                 let (workspace, tab) = herdr.create_workspace(&name, cwd)?;
                 Ok(Container {
@@ -158,10 +161,7 @@ impl Native {
                     spare_tab: Some(tab),
                 })
             }
-            Self::Cmux(cmux) => Ok(Container {
-                id: Some(cmux.create_group(&name, cwd)?),
-                spare_tab: None,
-            }),
+            Self::Cmux(cmux) => Ok(Container::existing(cmux.create_group(&name, cwd)?)),
         }
     }
 
@@ -299,12 +299,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
                 report.receipts.extend(opened.receipts);
                 report.unknown.extend(opened.unknown);
             }
-            Err(error) => report.receipts.push(target.receipt(
-                Some(host),
-                None,
-                OpenStatus::Failed,
-                Some(format!("{error:#}")),
-            )),
+            Err(error) => report
+                .receipts
+                .push(failed(target, host, format!("{error:#}"))),
         }
     }
     if args.json || cli.json {
@@ -336,6 +333,10 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
         "Some workspace items could not be opened; successful native work was retained"
     );
     Ok(())
+}
+
+fn failed(target: &Resolved, host: OpenHost, reason: String) -> OpenReceipt {
+    target.receipt(Some(host), None, OpenStatus::Failed, Some(reason))
 }
 
 /// Opening a Task starts it, so one without a checkout is placed before its
@@ -425,11 +426,10 @@ fn open_machines(
                     receipts.append(&mut report.receipts);
                     unknown.append(&mut report.unknown);
                 }
-                Err(error) => receipts.push(target.receipt(
-                    Some(host),
-                    None,
-                    OpenStatus::Failed,
-                    Some(format!("Machine {peer}: {error:#}; no local fallback")),
+                Err(error) => receipts.push(failed(
+                    target,
+                    host,
+                    format!("Machine {peer}: {error:#}; no local fallback"),
                 )),
             }
         }
@@ -448,12 +448,7 @@ fn open_machines(
         });
         match result {
             Ok(mut opened) => receipts.append(&mut opened),
-            Err(error) => receipts.push(target.receipt(
-                Some(host),
-                None,
-                OpenStatus::Failed,
-                Some(format!("{error:#}")),
-            )),
+            Err(error) => receipts.push(failed(target, host, format!("{error:#}"))),
         }
     } else if receipts.is_empty() {
         receipts.push(target.receipt(
@@ -817,10 +812,7 @@ fn launch(
     // An arrival appends to its follower's container. A Task joins the container
     // the caller is in; a repository or Wave gets its own.
     let mut container = if let Some(into) = &args.into {
-        Container {
-            id: Some(into.clone()),
-            spare_tab: None,
-        }
+        Container::existing(into)
     } else {
         match native.here()?.filter(|_| explicit) {
             Some(here) => here,
@@ -1052,7 +1044,6 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
             .as_deref()
             .context("Repository has no Work identity")?,
     )?;
-    let repo: PathBuf = target.repository_path.clone();
     let mut remotes = Placement::parse(&args.remote)?;
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
     let watched = repository.clone();
@@ -1072,14 +1063,11 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     let mut seen: BTreeSet<String> = args.seen.iter().cloned().collect();
     let mut templates = Templates {
         store: &store,
-        repo: &repo,
+        repo: &target.repository_path,
         read: HashMap::new(),
     };
     let native = Native::Rex(rex.clone());
-    let mut container = Container {
-        id: Some(session.into()),
-        spare_tab: None,
-    };
+    let mut container = Container::existing(session);
     let local = store.local_machine()?.id;
     let mut refresh = std::time::Instant::now();
     let mut request_id = 0_u64;

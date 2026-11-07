@@ -120,7 +120,6 @@ One mismatch, found by reading and not run. Only a Task Session viewer keeps a c
 
 Checked and left alone:
 - A running conversation that is not the Task's primary shows Task & workflow on a broad open. `Resume::Running` judges the Session a pane names; the first pass kept this.
-- `calling_conversation` returns the caller so `admits` can reject it. It reads backwards but stays correct; a compress item, not a concept.
 - Followers from two broad opens each add an arrival tab. Each is a separate view of the same Work, as fresh tabs accepted on November 5 imply.
 
-Check: `documented_commands::` 4 passed. Next proof is unchanged: the demo rerun under Remains.
+Check: `documented_commands::` 4 passed. Compress: `called_from_task` replaces `calling_conversation`; `--lib lf::commands::open::` 17 passed, `work_open_tests::` 32 passed single-threaded, clippy clean. Next proof is unchanged: the demo rerun under Remains. The parallel `work_open_tests::` flake stays with gate.

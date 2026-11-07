@@ -117,9 +117,9 @@ impl Tools<'_> {
     /// The named Session, else the Task's primary, else a new conversation.
     fn conversation(&self, session: Option<&str>) -> Result<Option<Value>> {
         let session = session.or(self.content.primary_session.as_deref());
-        let calling = self.calling_conversation(session)?;
-        let session = session.or(calling.as_deref());
-        if !self.resume.admits(self.store, session)? {
+        if !self.resume.admits(self.store, session)?
+            || (session.is_none() && self.called_from_task()?)
+        {
             return Ok(None);
         }
         let task = &self.content.work.id;
@@ -135,16 +135,15 @@ impl Tools<'_> {
 
     /// With nothing named, `lf resume --task` ranks the Task's conversations,
     /// and the one running this command can win.
-    fn calling_conversation(&self, named: Option<&str>) -> Result<Option<String>> {
-        let Some(caller) = crate::journal::agent_caller().filter(|_| named.is_none()) else {
-            return Ok(None);
+    fn called_from_task(&self) -> Result<bool> {
+        let Some(caller) = crate::journal::agent_caller() else {
+            return Ok(false);
         };
         let id = TaskId::parse(&self.content.work.id)?;
         let conversations = self.store.task_conversations(&id)?;
         Ok(conversations
             .iter()
-            .any(|(session, _)| session.id == caller.session_id)
-            .then(|| caller.session_id.to_string()))
+            .any(|(session, _)| session.id == caller.session_id))
     }
 
     fn conversation_pane(&self, session: Option<&str>) -> Result<Value> {

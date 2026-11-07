@@ -57,7 +57,10 @@ private actor ServerLinks {
     func link(for location: ServerLocation) async throws -> ServerLink {
         let key = ObjectIdentifier(location)
         while let opening = links[key] {
-            if let link = try? await opening.value, !link.isClosed { return link }
+            // A failed open answers everyone it kept waiting; only a link that
+            // opened and later closed is worth another attempt.
+            let link = try await opening.value
+            if !link.isClosed { return link }
             if links[key] == opening { links[key] = nil }
         }
         let attempt = failures[key] ?? 0
@@ -234,7 +237,11 @@ final class ServerLink: @unchecked Sendable {
         let line = try Self.line(message)
         try writes.withLock {
             if let failure = state.withLock({ failure }) { throw failure }
-            try Self.write(fd, line)
+            do { try Self.write(fd, line) } catch {
+                // A torn line would corrupt whatever follows it: end the connection.
+                Darwin.shutdown(fd, SHUT_RDWR)
+                throw error
+            }
         }
     }
 
@@ -390,12 +397,14 @@ private final class ServerSubscription: @unchecked Sendable {
     func start(on link: ServerLink, query: ServedRead) throws {
         guard !lock.withLock({ stopped }) else { return }
         try link.subscribe(self, query: query)
-        let queued: [UInt64] = lock.withLock {
-            guard !stopped else { return [] }
+        let queued: [UInt64]? = lock.withLock {
+            guard !stopped else { return nil }
             self.link = link
             defer { self.queued = [] }
             return self.queued
         }
+        // Stopped while subscribing: `stop` found no link to cancel through.
+        guard let queued else { link.unsubscribe(id); return }
         for checkpoint in queued {
             do { try link.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error); return }
         }

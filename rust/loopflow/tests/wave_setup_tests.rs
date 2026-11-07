@@ -478,12 +478,12 @@ fn settings_scope_by_the_typed_wave_only() {
     )
     .unwrap();
     assert_eq!(settings["agent"].as_str(), Some("claude:haiku"));
-    // Written at the canonical spelling: the Wave, then the skill.
+    // Written in the layout released `lf` reads: the Wave, then the skill.
     assert_eq!(
-        settings["wave"][wave.as_str()]["skill"]["probe"]["agent"].as_str(),
+        settings["waves"][wave.as_str()]["skills"]["probe"]["agent"].as_str(),
         Some("codex")
     );
-    assert!(settings["wave"][wave.as_str()].get("agent").is_none());
+    assert!(settings["waves"][wave.as_str()].get("agent").is_none());
 }
 
 #[test]

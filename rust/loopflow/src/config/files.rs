@@ -495,7 +495,7 @@ pub(crate) fn edit(
     root: super::keys::Root,
 ) -> Result<bool> {
     update(path, |document| {
-        let written = super::keys::canonicalize(document, parts, root);
+        let written = super::keys::gather(document, parts, root);
         let written: Vec<&str> = written.iter().map(String::as_str).collect();
         if written.len() >= 2 && written[written.len() - 2] == "machine" {
             if let Some(placement) = written[..written.len() - 1]
@@ -578,7 +578,7 @@ pub fn import(
         for (key, value) in incoming {
             let key = key.as_str().context("setting key must be text")?;
             let parts: Vec<_> = prefix.iter().map(String::as_str).chain([key]).collect();
-            let written = super::keys::canonicalize(document, &parts, super::keys::Root::General);
+            let written = super::keys::gather(document, &parts, super::keys::Root::General);
             let written: Vec<&str> = written.iter().map(String::as_str).collect();
             let existing = written
                 .iter()
@@ -609,7 +609,7 @@ pub(crate) fn copy_wave(
         .cloned();
     if let Some(value) = &value {
         update(&target, |document| {
-            let written = super::keys::canonicalize(
+            let written = super::keys::gather(
                 document,
                 &["waves", id.as_str()],
                 super::keys::Root::General,
@@ -641,7 +641,7 @@ pub(crate) fn finish_wave_move(
         let mut typed = document.clone();
         super::keys::fold(&mut typed);
         if typed.get("waves").and_then(|waves| waves.get(id.as_str())) == Some(copied) {
-            let written = super::keys::canonicalize(
+            let written = super::keys::gather(
                 document,
                 &["waves", id.as_str()],
                 super::keys::Root::General,
@@ -694,7 +694,9 @@ mod tests {
         crate::engine::config::set(&shared, "planning", "{provider: linear, team: typed}").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("# shared\n"), "{text}");
-        assert!(text.contains("repo:\n  plan:\n"), "{text}");
+        // Released `lf` reads this layout and silently ignores `repo:`.
+        assert!(text.contains("planning:\n"), "{text}");
+        assert!(!text.contains("repo:"), "{text}");
         assert!(!text.contains("linear:"), "{text}");
         assert!(text.contains("skills:\n  design:\n"), "{text}");
         assert_eq!(
@@ -710,10 +712,9 @@ mod tests {
         assert_eq!(saved.key, "skill.design.agent");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("skill:\n  design:\n    agent: claude\n"),
+            text.contains("skills:\n  design:\n    agent: claude\n"),
             "{text}"
         );
-        assert!(!text.contains("skills:"), "{text}");
         assert!(crate::engine::config::unset(&shared, "wave.graph")
             .unwrap()
             .value

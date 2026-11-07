@@ -1852,7 +1852,7 @@ fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool>
         )));
     }
     let previous = document.clone();
-    let written = crate::config::keys::canonicalize(
+    let written = crate::config::keys::gather(
         &mut document,
         &["planning"],
         crate::config::keys::Root::General,

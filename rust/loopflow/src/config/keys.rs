@@ -3,8 +3,8 @@
 //! (`Config`) keeps the released layout (`planning`, `skills`, `graph`,
 //! `waves`), which is also each key's shorthand; the released `linear.team`
 //! spells `repo.plan.team`, and `plan.team` is its shorthand. Readers accept every spelling and fold a
-//! document into the typed layout; writers relocate the key's group to its
-//! canonical spelling before they edit it.
+//! document into the typed layout; writers gather the key's group into that
+//! released layout, the one both builds read, before they edit it.
 use serde_yaml_ng::{Mapping, Value};
 
 /// A Wave's own file already stands on the primitive: `graph` stays bare there.
@@ -137,10 +137,11 @@ pub fn fold(document: &mut Value) {
     {
         map.remove("repo");
     }
-    if let Some(plan) = repo_plan {
+    // The canonical spelling goes last, so it wins over its shorthand.
+    if let Some(plan) = map.remove("plan") {
         merge(map, "planning".into(), plan);
     }
-    if let Some(plan) = map.remove("plan") {
+    if let Some(plan) = repo_plan {
         merge(map, "planning".into(), plan);
     }
     // The released `linear: {team}` block; a Wave file's `linear: {initiative}` stays.
@@ -203,10 +204,13 @@ fn merge(map: &mut Mapping, key: Value, value: Value) {
     }
 }
 
-/// Move the group holding the typed path `parts` to its canonical spelling in
-/// `document`, folding other spellings of that group into it, and return the
-/// canonical path to edit. Groups the path does not touch keep their spelling.
-pub fn canonicalize(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
+/// Fold every spelling of the group holding the typed path `parts` into the
+/// released layout in `document`, and return the path to edit. Released `lf`
+/// silently ignores `repo:`, `skill:` and `wave:` in a committed file, so
+/// writers keep the layout both builds read until a release reads the new one
+/// (Task 3644a6 moves them to the canonical spellings).
+/// Groups the path does not touch keep their spelling.
+pub fn gather(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
     let (group, rest, inner): (&[&str], &[&str], Root) = match parts {
         ["planning", rest @ ..] => (&parts[..1], rest, Root::General),
         ["skills", _, rest @ ..] => (&parts[..2], rest, Root::General),
@@ -214,7 +218,7 @@ pub fn canonicalize(document: &mut Value, parts: &[&str], root: Root) -> Vec<Str
         ["waves", _, rest @ ..] => (&parts[..2], rest, Root::Wave),
         _ => return parts.iter().map(|part| (*part).to_owned()).collect(),
     };
-    let target = canonical(group, root);
+    let target: Vec<String> = group.iter().map(|part| (*part).to_owned()).collect();
     // Gather the group's spellings into their own document and fold it, so
     // the same rule as a read decides what the group holds.
     let mut spelled = spellings(group, root);
@@ -253,8 +257,8 @@ pub fn canonicalize(document: &mut Value, parts: &[&str], root: Root) -> Vec<Str
         .iter()
         .try_fold(&mut *document, |value, key| value.get_mut(key.as_str()));
     let tail = match node {
-        Some(node) => canonicalize(node, rest, inner),
-        None => canonical(rest, inner),
+        Some(node) => gather(node, rest, inner),
+        None => rest.iter().map(|part| (*part).to_owned()).collect(),
     };
     [target, tail].concat()
 }
@@ -274,7 +278,7 @@ pub fn shorthands(key: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical, canonicalize, fold, typed, Root};
+    use super::{canonical, fold, gather, typed, Root};
     use serde_yaml_ng::Value;
 
     fn yaml(text: &str) -> Value {
@@ -333,28 +337,32 @@ mod tests {
     }
 
     #[test]
-    fn writers_relocate_only_the_edited_group() {
+    fn writers_gather_only_the_edited_group_in_the_layout_released_lf_reads() {
         let mut document = yaml(
-            "planning: {provider: linear}\nlinear: {team: released}\nskills: {design: {agent: codex}}\nagent: claude\n",
+            "repo: {plan: {provider: linear}}\nlinear: {team: released}\nskill: {design: {agent: codex}}\nagent: claude\n",
         );
-        let path = canonicalize(&mut document, &["planning", "team"], Root::General);
-        assert_eq!(path, ["repo", "plan", "team"]);
+        let path = gather(&mut document, &["planning", "team"], Root::General);
+        assert_eq!(path, ["planning", "team"]);
         assert_eq!(
             document,
-            yaml("repo: {plan: {provider: linear, team: released}}\nskills: {design: {agent: codex}}\nagent: claude\n")
+            yaml("planning: {provider: linear, team: released}\nskill: {design: {agent: codex}}\nagent: claude\n")
         );
-        let path = canonicalize(
+        let path = gather(
             &mut document,
             &["waves", "abc", "skills", "design", "agent"],
             Root::General,
         );
-        assert_eq!(path, ["wave", "abc", "skill", "design", "agent"]);
+        assert_eq!(path, ["waves", "abc", "skills", "design", "agent"]);
         assert!(document.get("wave").is_none());
         let mut wave_file = yaml("graph: code\nid: abc\n");
-        assert_eq!(
-            canonicalize(&mut wave_file, &["graph"], Root::Wave),
-            ["graph"]
-        );
+        assert_eq!(gather(&mut wave_file, &["graph"], Root::Wave), ["graph"]);
         assert_eq!(wave_file, yaml("graph: code\nid: abc\n"));
+    }
+
+    #[test]
+    fn the_canonical_spelling_beats_its_shorthand() {
+        let mut document = yaml("plan: {team: short}\nrepo: {plan: {team: long}}\n");
+        fold(&mut document);
+        assert_eq!(document, yaml("planning: {team: long}\n"));
     }
 }

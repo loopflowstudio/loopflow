@@ -293,8 +293,9 @@ Keys sit on their primitive: `repo.plan.team`, `skill.<name>.agent`,
 `wave.graph`, `wave.<id>.account`. A file or command may spell a key by its
 trailing path (`planning.team`, `graph`), by the typed layout
 (`skills.<name>.agent`, `waves.<id>.account`) or, for the Linear team, the
-released `linear.team`. `lf set` writes the canonical spelling, moving the
-key's group with it; `lf config catalog` lists each key with its shorthands.
+released `linear.team`. `lf set` gathers the key's group into the typed layout,
+the one released `lf` reads too; `lf config catalog` lists each key with its
+shorthands.
 
 ## Which value wins
 

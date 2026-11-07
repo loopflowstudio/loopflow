@@ -69,7 +69,6 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
         team_response(),
         json_response(StatusCode::OK, provider_issue.clone()),
         json_response(StatusCode::OK, provider_issue.clone()),
-        team_response(),
         json_response(StatusCode::OK, provider_issue.clone()),
         json_response(StatusCode::OK, provider_issue),
     ])
@@ -369,12 +368,10 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
         ),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
@@ -452,7 +449,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
                 .unwrap()
                 .remove(field);
         }
-        responses.extend([team_response(), json_response(StatusCode::OK, incomplete)]);
+        responses.push(json_response(StatusCode::OK, incomplete));
     }
     let (url, _) = spawn(responses).await;
     LINEAR_TEST_CONTEXT
@@ -494,7 +491,6 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -567,7 +563,6 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
         ),
-        team_response(),
         json_response(
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
@@ -800,7 +795,6 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -887,7 +881,6 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         absent,
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
@@ -1123,7 +1116,6 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
             team_response(),
             json_response(StatusCode::OK, issue(project())),
             json_response(StatusCode::OK, issue(project())),
-            team_response(),
             json_response(StatusCode::OK, issue(refreshed.clone())),
             json_response(StatusCode::OK, issue(refreshed)),
         ])
@@ -1349,7 +1341,6 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
         team_response(),
         json_response(StatusCode::OK, issue(project())),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
         absent,
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])

@@ -2374,7 +2374,8 @@ mod tests {
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
-                    json_response(StatusCode::OK, team.clone()),
+                    // This process already validated the claim; the second
+                    // connect skips that ListTeams.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team),
                     projects_response(json!([])),

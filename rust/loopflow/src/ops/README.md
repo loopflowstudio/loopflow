@@ -21,7 +21,8 @@ lf task sync ISSUE        look now, ahead of the window, and re-send if absent
 **Pass cost.** A pass over N pending exports costs no requests when nothing
 changed. The repository's Team claim is validated once per process
 (`ops/linear.rs`, `VALIDATED_TEAM_CLAIMS`), so `ListTeams` is sent at most once
-per process. An attempted creation whose outcome is unknown (the reply was lost
+per process. Queued-response fixtures (`linear::test_server::spawn`) therefore
+answer one Team validation per repository, however many lookups follow. An attempted creation whose outcome is unknown (the reply was lost
 or the deadline fired) is *uncertain*; its receipt records when a pass last
 looked for it (`export_observed_at`), and the pass refuses it inside the window
 before any client is built. An unattempted export is new work and always

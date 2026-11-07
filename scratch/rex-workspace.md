@@ -20,6 +20,8 @@ Use isolated fixtures for validation; future hands-on demos need separate work.
   and existing input ownership: show Task/workflow in the conversation slot until
   explicitly opened. This is the minimal implementation choice needed to avoid
   background `resume` moving somebody's input.
+- Repository and Wave openings start no agents: only a Session with a running
+  provider resumes; other Tasks show Task/workflow in the conversation slot.
 - Actual working-directory reporting/inheritance for native splits and manually
   resumed conversations. No changes to normal resume's screen protocol.
 
@@ -92,6 +94,8 @@ Remains:
 - Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
 - Task with no checkout: explicit `lf open --task` places it, then opens the usual layout; see [questions.md](questions.md).
+- Broad `lf open` must stop starting agents: Tasks with no running provider show Task & workflow; see [questions.md](questions.md). Correct the “send a message” line in `docs/workspaces.md`, and make a Conversation pane that fails at start visible instead of vanishing behind an `opening` receipt.
+- Check, November 7: `cargo test -p loopflow --test integration work_open_tests::` passed 5 of 6 runs; the other had 2 failures, names not captured, right after clippy at load ~15. Gate reruns it and keeps failure output. `--lib commands::open::`, fmt and clippy pass.
 - Shipping coverage of this tree: open in [questions.md](questions.md).
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

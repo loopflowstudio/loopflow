@@ -7,17 +7,19 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::{
-    tool_cwd, tools, viewer_argv, with_machine_home, Native, Presentation, SqliteStore, ViewContent,
+    provider_running, tool_cwd, tools, viewer_argv, wave_config, with_machine_home, Native,
+    Presentation, Resume, SqliteStore, TaskId, ViewContent,
 };
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
 
 struct Tools<'a> {
+    store: &'a SqliteStore,
     host: &'a Native,
     content: &'a ViewContent,
     cwd: &'a Path,
-    resume: bool,
+    resume: Resume,
 }
 
 /// The native layout for one Task, and how many fresh shells it starts.
@@ -31,6 +33,7 @@ pub(super) fn layout(
 ) -> Result<(Value, usize)> {
     let cwd = tool_cwd(content, repo);
     let tools = Tools {
+        store,
         host,
         content,
         cwd,
@@ -49,7 +52,7 @@ pub(super) fn layout(
         "Recorded Task checkout is unavailable; no home-directory fallback"
     );
     if presentation.session.is_some() || presentation.diff {
-        let conversation = tools.conversation(presentation.session)?;
+        let conversation = tools.conversation_pane(presentation.session)?;
         return Ok((
             if presentation.diff {
                 host.split(
@@ -78,16 +81,16 @@ pub(super) fn layout(
             .transpose()?,
     };
     let Some(source) = source else {
-        let conversation = tools.conversation(None)?;
         let shell = tools.shell();
-        // Background arrivals show workflow in place of an interactive resume.
-        let secondary = if tools.resume {
-            host.split(SplitAxis::Horizontal, 0.618, tools.task_view()?, shell)
-        } else {
-            shell
-        };
+        let task_view = tools.task_view()?;
         return Ok((
-            host.split(SplitAxis::Vertical, 0.618, conversation, secondary),
+            match tools.conversation(None)? {
+                Some(conversation) => {
+                    let secondary = host.split(SplitAxis::Horizontal, 0.618, task_view, shell);
+                    host.split(SplitAxis::Vertical, 0.618, conversation, secondary)
+                }
+                None => host.split(SplitAxis::Vertical, 0.618, task_view, shell),
+            },
             1,
         ));
     };
@@ -111,17 +114,51 @@ impl Tools<'_> {
         ))
     }
 
-    fn conversation(&self, session: Option<&str>) -> Result<Value> {
-        if !self.resume {
-            return self.task_view();
-        }
-        let words = match session.or(self.content.primary_session.as_deref()) {
-            Some(session) => vec!["resume", session],
-            None => vec!["resume", "--task", &self.content.work.id],
+    /// The named Session, else the Task's primary, else a new conversation.
+    fn conversation(&self, session: Option<&str>) -> Result<Option<Value>> {
+        let session = session.or(self.content.primary_session.as_deref());
+        let resume = match self.resume {
+            Resume::None => false,
+            Resume::Running => match session {
+                Some(session) => provider_running(self.store, session)?,
+                None => false,
+            },
+            Resume::Any => true,
         };
-        Ok(self
-            .host
-            .block("Conversation", self.cwd, viewer_argv(self.cwd, &words)?))
+        if !resume {
+            return Ok(None);
+        }
+        let words = match session {
+            Some(session) => vec!["resume", session],
+            None => {
+                self.ensure_harness()?;
+                vec!["resume", "--task", &self.content.work.id]
+            }
+        };
+        let argv = viewer_argv(self.cwd, &words)?;
+        Ok(Some(self.host.block("Conversation", self.cwd, argv)))
+    }
+
+    fn conversation_pane(&self, session: Option<&str>) -> Result<Value> {
+        match self.conversation(session)? {
+            Some(conversation) => Ok(conversation),
+            None => self.task_view(),
+        }
+    }
+
+    /// A Task with no conversation yet starts one on the configured harness.
+    /// Without one the pane would exit and its host would close it, so this
+    /// opening reports the error instead. Earlier conversations keep their own.
+    fn ensure_harness(&self) -> Result<()> {
+        let id = TaskId::parse(&self.content.work.id)?;
+        if !self.store.task_conversations(&id)?.is_empty() {
+            return Ok(());
+        }
+        let task = self.store.task(&id)?.context("Task is unavailable")?;
+        wave_config(self.store, self.cwd, task.wave_id.as_ref())?
+            .unwrap_or_default()
+            .agent()?;
+        Ok(())
     }
 
     fn shell(&self) -> Value {
@@ -183,7 +220,9 @@ impl Tools<'_> {
 
     fn render_pane(&self, pane: &PaneIntent, shells: &mut usize) -> Result<Option<Value>> {
         Ok(Some(match pane {
-            PaneIntent::Session { session_id, .. } => self.conversation(session_id.as_deref())?,
+            PaneIntent::Session { session_id, .. } => {
+                self.conversation_pane(session_id.as_deref())?
+            }
             PaneIntent::Shell { tabs, selected } => {
                 if let Some(tab) = tabs.iter().find(|tab| Some(&tab.id) == selected.as_ref()) {
                     anyhow::ensure!(
@@ -231,7 +270,7 @@ impl Tools<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Native, Tools};
+    use super::{Native, Resume, SqliteStore, Tools};
     use crate::lf::commands::open::rex::Rex;
     use crate::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
 
@@ -265,11 +304,13 @@ mod tests {
             server: "unix:///task.sock".into(),
             caller: None,
         });
+        let store = SqliteStore::open_ephemeral(&directory.path().join("store.db")).unwrap();
         let tools = Tools {
+            store: &store,
             host: &host,
             content: &content,
             cwd: &cwd,
-            resume: true,
+            resume: Resume::Any,
         };
         for (hidden, expected_shells) in [(saved.hidden.clone(), 0), (Default::default(), 1)] {
             let mut shells = 0;
@@ -323,16 +364,13 @@ mod tests {
             assert!(!editing.iter().any(|arg| arg == "--checkout"));
             assert!(!secondary.to_string().contains("README.md"));
         }
-        // Without an existing Session, ordinary resume selects this Task.
-        let launch = tools.conversation(None).unwrap().to_string();
-        assert!(launch.contains("resume") && launch.contains("--task"));
         // Background arrivals must not move input from an active terminal.
         let background = Tools {
-            resume: false,
+            resume: Resume::None,
             ..tools
         };
         let launch = background
-            .conversation(Some("session_primary"))
+            .conversation_pane(Some("session_primary"))
             .unwrap()
             .to_string();
         assert!(launch.contains("Task & workflow") && !launch.contains("resume"));

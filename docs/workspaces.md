@@ -10,6 +10,10 @@ In Rex, Herdr or cmux, each open creates a fresh Task tab with its configured
 splits. Conversation panes run `lf resume` in the Task's worktree. Return to existing tabs through your
 terminal app; use its controls to rearrange, rename, close and restore them.
 
+Opening a Task starts its conversation. Opening a repository or Wave starts no
+agents: it reconnects conversations that are still running and shows Task/workflow
+for the rest. Run `lf open --task <task>` to pick one up.
+
 From a Task checkout, `lf open` selects that Task. From a repository checkout, it
 selects the repository's started, unfinished Tasks. Use `--task` or `--wave` to
 choose another scope. Backlog Tasks appear only when explicitly selected.
@@ -41,8 +45,9 @@ alone. Herdr and cmux support local Tasks only. Rex can open remote Tasks on the
 recorded Machine. Use `--server <endpoint>` to select a Rex Unix socket.
 
 If the selected host is unavailable, LF reports the error instead of opening
-somewhere else. `--no-focus` preserves the selected tab; Conversation panes still
-run normal resume, which moves conversation input to the new terminal.
+somewhere else. `--no-focus` preserves the selected tab; a Conversation pane still
+runs normal resume, which moves conversation input to the new terminal. That
+includes a running conversation reconnected by a repository or Wave open.
 
 ## Choose a layout
 
@@ -110,16 +115,16 @@ Changing a template affects future launches; existing tabs stay as you arranged 
 
 | Pane | What opens in a terminal host |
 | --- | --- |
-| Conversation | `lf resume <session>` in the Task worktree |
+| Conversation | `lf resume <session>` in the Task worktree, or Task/workflow when a repository or Wave open finds no running conversation |
 | Shell | A fresh shell in the Task worktree |
 | Files | Your file browser or editor |
 | Changes | Git's pager or your diff tool |
 | Task/workflow | The Task brief, workflow and recorded runs |
 
 Conversation panes use ordinary resume. If the Task has no conversation, they run
-`lf resume --task <task>` to start one. Opening does not start the Task's Graph or
-send a message. A new shell starts in the worktree without copying another
-shell's jobs or variables.
+`lf resume --task <task>` to start one, and that new conversation takes its first
+turn on the Task. Opening does not start the Task's Graph. A new shell starts in
+the worktree without copying another shell's jobs or variables.
 
 ```bash
 export LF_FILE_BROWSER=yazi          # directory browser
@@ -173,6 +178,13 @@ splits again.
 
 Check the error in the terminal. A successful open receipt means the native tab
 was created; resume may still be connecting or may report its own error there.
+
+Starting a Task's first conversation needs a harness. With no `default_agent` and
+several harnesses installed, the open fails and creates no tab:
+
+```bash
+lf set --global default_agent claude
+```
 
 If LF reports that a tab may have opened without a reply, look for it in your
 terminal app before running the command again. Each invocation creates fresh

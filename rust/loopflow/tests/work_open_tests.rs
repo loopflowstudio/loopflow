@@ -60,6 +60,7 @@ fn lf_command(
         );
     }
     command
+        .env("LF_SETTINGS", "agent: claude")
         .envs(env.iter().copied())
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
@@ -1209,6 +1210,161 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
 }
 
 #[test]
+fn repository_open_resumes_running_providers_and_starts_none() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let url = format!("loopflow://{}", folder(repo.path()));
+    let open = || {
+        let report = json(&lf(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &["open", &url, "--host", "rex", "--no-focus", "--json"],
+        ));
+        assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+        let requests = bin.path().join("session.new_window.requests");
+        let created = std::fs::read_to_string(&requests).unwrap();
+        std::fs::remove_file(requests).unwrap();
+        created.lines().next().unwrap().to_owned()
+    };
+
+    // No conversation: resume would start a provider and take a first turn.
+    let created = open();
+    assert!(created.contains("Task & workflow"), "{created}");
+    assert!(!created.contains("resume"), "{created}");
+    assert_eq!(sessions(home.path()), 0);
+
+    let primary = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Design",
+        0,
+        1,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    let created = open();
+    assert!(
+        created.contains("resume") && created.contains(&primary),
+        "{created}"
+    );
+
+    let ended = live_conversation(home.path(), &provider.0, started, repo.path(), "Side", 0, 1);
+    db.execute(
+        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
+        [&ended],
+    )
+    .unwrap();
+
+    // The provider is gone: its Session stays recorded and is not relaunched.
+    let set_primary = |session: &str| {
+        db.execute(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            rusqlite::params![registered.task.id.as_str(), session],
+        )
+        .unwrap();
+    };
+    set_primary(&ended);
+    let created = open();
+    assert!(created.contains("Task & workflow"), "{created}");
+    assert!(!created.contains("resume"), "{created}");
+
+    // A saved pane answers for its own Session, whatever the primary is doing.
+    set_primary(&primary);
+    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+        .unwrap()
+        .save_pane_layout(
+            &serde_json::from_value(serde_json::json!({
+                "work": {
+                    "repository": registered.task.repository_id.as_str(),
+                    "kind": "task",
+                    "id": registered.task.id.as_str(),
+                },
+                "revision": 0,
+                "tree": {
+                    "kind": "split",
+                    "axis": "vertical",
+                    "ratio": 0.5,
+                    "first": {
+                        "kind": "pane",
+                        "id": "pane-0",
+                        "content": {"kind": "session", "session_id": ended, "location": null},
+                    },
+                    "second": {
+                        "kind": "split",
+                        "axis": "horizontal",
+                        "ratio": 0.5,
+                        "first": {
+                            "kind": "pane",
+                            "id": "pane-1",
+                            "content": {"kind": "shell", "tabs": [], "selected": null},
+                        },
+                        "second": {
+                            "kind": "pane",
+                            "id": "pane-2",
+                            "content": {"kind": "browser", "location": null, "tabs": [], "selected": null},
+                        },
+                    },
+                },
+                "focused": null,
+                "zoomed": null,
+                "hidden": [],
+                "drafts": [],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let created = open();
+    assert!(created.contains("Task & workflow"), "{created}");
+    assert!(!created.contains("resume"), "{created}");
+}
+
+#[test]
+fn opening_a_task_without_a_harness_reports_it_instead_of_an_empty_tab() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    for harness in ["claude", "codex"] {
+        host(bin.path(), harness, "", 0);
+    }
+    let output = lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("LF_SETTINGS", "{}")],
+        &["open", "--task", "INF-123", "--host", "rex", "--json"],
+    );
+    assert!(!output.status.success(), "{output:?}");
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "failed", "{report}");
+    let reason = report["receipts"][0]["reason"].as_str().unwrap();
+    assert!(reason.contains("No agent selected"), "{reason}");
+    assert!(!bin.path().join("session.new_window.requests").exists());
+}
+
+#[test]
 fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1534,6 +1690,7 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
         .env("HOME", home.path())
         .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_SETTINGS", "agent: claude")
         .env("REX_SESSION", "session:fixture")
         .env("REX_BLOCK", "block:shell")
         .current_dir(repo.path())

@@ -244,12 +244,24 @@ impl Native {
 // Opening
 // ---------------------------------------------------------------------------
 
+/// Which conversations a pane shows; Task & workflow takes the place of the rest.
+/// Resuming anything but a running provider starts one.
+#[derive(Clone, Copy, Default)]
+enum Resume {
+    /// Background arrivals do not take input from an existing terminal.
+    #[default]
+    None,
+    /// A repository or Wave opening reattaches and starts nothing.
+    Running,
+    /// A selected Task or Session.
+    Any,
+}
+
 #[derive(Clone, Copy, Default)]
 struct Presentation<'a> {
     session: Option<&'a str>,
     diff: bool,
-    /// Background arrivals must not move input from an existing terminal.
-    resume: bool,
+    resume: Resume,
 }
 
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
@@ -627,6 +639,23 @@ fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
     }))
 }
 
+/// Settings that apply to a Task in this Wave.
+fn wave_config(
+    store: &SqliteStore,
+    repo: &Path,
+    wave: Option<&WaveId>,
+) -> Result<Option<crate::config::Config>> {
+    let slug = wave
+        .map(|wave| store.get_wave(wave))
+        .transpose()?
+        .flatten()
+        .map(|wave| wave.slug().to_owned());
+    Ok(crate::config::load_wave_config(
+        Some(repo),
+        slug.as_deref(),
+    )?)
+}
+
 /// Configured `task_layout` per Wave, read once per launch.
 struct Templates<'a> {
     store: &'a SqliteStore,
@@ -644,14 +673,8 @@ impl Templates<'_> {
         if let Some(template) = self.read.get(&wave) {
             return Ok(template.clone());
         }
-        let slug = wave
-            .as_ref()
-            .map(|wave| self.store.get_wave(wave))
-            .transpose()?
-            .flatten()
-            .map(|wave| wave.slug().to_owned());
-        let template = crate::config::load_wave_config(Some(self.repo), slug.as_deref())?
-            .and_then(|config| config.task_layout);
+        let template =
+            wave_config(self.store, self.repo, wave.as_ref())?.and_then(|c| c.task_layout);
         self.read.insert(wave, template.clone());
         Ok(template)
     }
@@ -709,19 +732,34 @@ fn launch(
     };
     let mut receipts = Vec::new();
     if let SelectionExpression::Wave { wave } = &selected.expression {
-        if let Some(session) = store
-            .primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))?
-            .filter(|_| !arriving)
-        {
-            let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
-            receipt.label = "Wave conversation".into();
-            let opened = viewer_argv(repo, &["resume", session.id.as_str()])
-                .map(|argv| native.block("Conversation", repo, argv))
-                .and_then(|layout| native.add_tab(&mut container, "Conversation", repo, layout));
-            settle_receipt(&mut receipt, opened);
-            receipts.push(receipt);
+        match store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))? {
+            Some(session) if !arriving && provider_running(store, session.id.as_str())? => {
+                let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
+                receipt.label = "Wave conversation".into();
+                let opened = viewer_argv(repo, &["resume", session.id.as_str()])
+                    .map(|argv| native.block("Conversation", repo, argv))
+                    .and_then(|layout| {
+                        native.add_tab(&mut container, "Conversation", repo, layout)
+                    });
+                settle_receipt(&mut receipt, opened);
+                receipts.push(receipt);
+            }
+            _ => {}
         }
     }
+    let presentation = if arriving {
+        Presentation::default()
+    } else {
+        Presentation {
+            session: target.session.as_deref(),
+            diff: args.diff || target.url.diff,
+            resume: if explicit || target.session.is_some() {
+                Resume::Any
+            } else {
+                Resume::Running
+            },
+        }
+    };
     let mut templates = Templates {
         store,
         repo,
@@ -748,16 +786,7 @@ fn launch(
                 content,
                 repo,
                 template.as_ref(),
-                // Arrivals do not take input from an existing terminal.
-                if arriving {
-                    Presentation::default()
-                } else {
-                    Presentation {
-                        session: target.session.as_deref(),
-                        diff: args.diff || target.url.diff,
-                        resume: true,
-                    }
-                },
+                presentation,
             )
         });
         let opened = opened.map(|(tab, shells)| {
@@ -800,6 +829,14 @@ fn launch(
         receipt.container = container.id.clone();
     }
     Ok(receipts)
+}
+
+fn provider_running(store: &SqliteStore, session: &str) -> Result<bool> {
+    Ok(store
+        .session_summary(session, crate::store::rows::now_unix())?
+        .is_some_and(|summary| {
+            summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+        }))
 }
 
 /// Record a tab's native result. A lost reply is reported, never retried.

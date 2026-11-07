@@ -285,3 +285,29 @@ Not proven:
 Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261106-head`. Rex server 53061 stopped by its recorded group and `/tmp/loo498-head-tYqw` removed. Provider transcripts and the `~/.claude.json` project entry for that path remain.
 
 Stand-in decision: advance to deliver. The accepted target, an ordinary Task conversation from `lf open`, held on this tree, and what remains needs a person or an install, which another implement pass cannot supply. The two choices in [questions.md](questions.md) stay open.
+
+## November 7 headless demo: Task with no checkout, on 8a8ae78ef
+
+Isolated Rex server, private LF_HOME, one pinned copy of the branch binary (`lf 0.15.1+8a8ae78ef`), real Claude with ambient credentials. LOO-498's conversation and panes and the retained roots were not touched. No person watched, so nothing here is Jack Heart's acceptance. Focused test `opening_an_unplaced_task_places_it_and_starts_its_conversation`: 1 passed.
+
+Held, for `"$LF_BIN" open --task d32d29 --json` from a shell in the Rex session, no host or server flag, Task created with no worktree:
+- Exit 0. The worktree and branch appeared, and the tab held Conversation, Task & workflow and shell. The pane printed “Nothing to resume here; starting a new conversation.”, then the trust dialog.
+- `lsof` on provider PID 85879: cwd is the Task worktree. Claude answered `damson-7`.
+- Same command again: one Session, same PID, `damson-7` on screen, no second worktree. Claude answered `medlar-3` in the new pane. `/exit`: PID gone, Session closed, `lf ps` empty.
+- No Graph started. An abandoned Task (73625d) opened as Task & workflow alone, 0 shells, no worktree. Broad `lf open` created no worktree: e6be5f, unstarted, got none and no tab.
+
+Failed: broad `lf open` starts agents. Run from the repository with three placed Tasks, it launched three Claude providers:
+- 200837 and d8456d had no conversation. Each started fresh and took an unprompted turn from the Task-session prompt, in bypass permissions: 16–17 assistant messages and 6 tool calls each (`broad-transcripts.txt`).
+- d32d29's Session had ended with `/exit`. Its provider was relaunched.
+- The Task's accepted outcome says “Restore familiar state without eagerly starting agents for every historical Session.” LOO-709 removed `lf resume --all` for this reason, and broad open now does the same per repository. The cause is in `launch()`: every non-arrival gets `resume: true`, so the explicit Task case and the broad case share one branch. This predates 8a8ae78ef. 8a8ae78ef widens it slightly: a Task opened once stays placed, so it is started by later broad opens.
+- `docs/workspaces.md` says “Opening does not start the Task's Graph or send a message.” The fresh start's first turn contradicts the second half, for `--task` too.
+
+Smaller, seen by accident: with no `default_agent` and several harnesses installed, `lf resume --task` exits 1 and Rex closes the Conversation pane. The tab is left with Task & workflow and shell, the receipt still says `opening`, and the error is shown nowhere. Reproduced by hand in the Task's shell.
+
+Not rerun: Split shortcut and resize, which still need the Rex app by hand. Two-Machine behavior.
+
+Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261107-unplaced`. Server 47264 stopped by its recorded group; the broad open's nine processes outlived it as detached owners, and were stopped by verified PID. `/private/tmp/loo498-unplaced-GiNF` removed. Provider transcripts and `~/.claude.json` project entries for those paths remain.
+
+Stand-in decision: iterate to implement. Rule to build is in [questions.md](questions.md).
+
+Built after that demo, not yet seen in Rex: broad gating, doc correction, harness failure. Fixture Rex only: `cargo test -p loopflow --test integration -- --test-threads=1 work_open_tests::` 27 passed, 2 ignored; `cargo test -p loopflow --lib lf::commands::open::` 17 passed. Rerun the three-Task broad open in the demo.

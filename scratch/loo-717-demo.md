@@ -1,5 +1,66 @@
 # LOO-717 — Session viewer and shell lifetime demo
 
+## November 6, 2026 — headless decision pass 1
+
+**Advance.** Reviewed candidate `5f4ee78ee99a959c1cee251f884dc16189e520a3`
+against the [accepted design](loo-717-shell-lifetimes.md) and
+[decisions](questions.md). This is an autonomous delivery judgment, not a claim
+that Jack tried the native experience. Jack Heart's recorded November 6 words,
+“ok, lg2m, ship it”, authorize LOO-717 / PR #1811 with native and physical-remote
+demonstration limits carried forward. The November 5 no-shipping statement below
+is superseded for this Task only. LOO-498 / PR #1814 remains separate.
+
+### Intended progress and observed results
+
+The preceding pass was to publish the Desktop ownership revision with affected
+checks, then return to demo. It removed the Task shell API and extra SSH terminal
+layer, kept one Desktop execution owner, and repaired return-before-sweep
+cancellation. Existing execution logs were inspected directly in this pass;
+they were not rerun or presented as newly performed demonstrations.
+
+| Experience | Observed result and source |
+| --- | --- |
+| Local reconnect retains state; Close settles jobs | Publication's real transport checks passed `desktop_shell_reconnects_without_replay_and_close_settles_its_jobs` and `desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets`. |
+| Remote reconnect uses the same execution without replay | Three real loopback OpenSSH checks passed in 119.29 seconds. The twenty-cycle check asserts destination cwd and Machine, same shell PID and variable, one startup per identity, Close/job settlement, owner socket removal and process/PTY/SSH baseline. This uses production Machine routing and the Desktop runtime with isolated stores, not native Desktop rendering or a physical peer. |
+| Remote errors stay remote | The SSH failure check passed for rejected authentication, missing checkout and ended execution; it asserts no local shell creation. |
+| Session return prevents pending automatic Close | The real transport regression `returning_task_viewer_cancels_shell_close_without_another_sweep` passed. Store/retirement checks passed for cancellation, observed absence deadlines, drafts/work protection, retries and interrupted finite sweeps. |
+| The shared viewer protocol replaces the extra relay | Prepared SSH viewer reuse/leave and silent-viewer heartbeat checks passed. They do not establish Rex's own connection-loss detection. |
+| Removed commands and private runtime metadata | Fresh built-CLI inspection in this pass rejected `help task shell` and `help session remote` with unknown-command errors. `help desktop shell` describes GUI-independent execution; its JSON reports a null result schema. |
+
+Supporting logs: [471 selected Rust checks](../.lf/tmp/gate/run-94140/rust/rust.log),
+`/tmp/loo717-publication-ssh.log`, `/tmp/loo717-publication-boundaries.log`,
+`/tmp/loo717-publication-current.log`, and `/tmp/loo717-publication-upgrade.log`.
+The latter records a populated Linux 0.14.3 upgrade retaining Task/Session identity,
+history and edits. The aggregate records 687 passing headless Swift tests and an
+initial architecture-map failure; the design records the correction and passing
+recheck. There was no fresh all-green aggregate. These results add concrete
+runtime coverage beyond the November 5 unlaunched private app, not native proof.
+
+### Limits, feedback and next action
+
+No new human observation or design change was made. No product question is open.
+This surface has no rendering environment, so native Desktop/Rex interaction,
+orderly GUI Quit/relaunch, actual two-Machine outages, sleep/logout/reboot and
+wall-clock fifteen-minute cleanup plus scheduler cadence remain unproved.
+The old private app below was not rebuilt or launched. Accelerated lifecycle
+fixtures do not establish elapsed fifteen-minute behavior. The recorded Rex
+opening failure in [coordination](rex-coordination.md) remains a separate gap.
+
+No concrete implementation defect was found that warrants returning to implement.
+Advance under the recorded shipping direction, retaining these limits in delivery
+copy; the primary Task operator owns shipping and merge/completion verification.
+This pass neither ships nor completes the Task, installs a candidate, registers a
+schedule, or migrates the live store. The earlier native runbook remains available
+below, but its absent observations are not conditions newly imposed on shipping.
+
+No provider, shell owner, SSH daemon, app or background command was launched by this
+pass. No draft or request was submitted; its own inspection input is settled.
+The existing private history/runtime roots remain untouched. No new HTML page was
+generated because this pass is headless; the November 5 page is not a current
+demonstration result.
+
+## November 5 preparation — historical, no app launched
+
 November 5, 2026. Jack Heart invoked demo for the published change at
 `500425244c`. Design: [shell lifetimes](loo-717-shell-lifetimes.md).
 Review page: `scratch/demo.html` (written after the demonstration record).

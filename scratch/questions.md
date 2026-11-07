@@ -88,6 +88,13 @@ all-green aggregate rerun. The design records commands and logs for PR #1811.
 Native Desktop/Rex and physical remote-Machine proof remain at interactive demo.
 LF-owned SSH heartbeat tests do not establish external hosts' loss detection.
 
+The subsequent gate found Xcode fallback app/test-runner compilation missing from
+that record. Two attempts stopped before compilation because the shared uv-cache
+inventory exceeded 15 seconds. A diagnostic read completed in 18.41 seconds;
+145.3 GiB was free. Xcode is deferred to macOS CI's `loopflow-ui-test`, not passed.
+No executable code changed; the lifetime module comment now includes retirement.
+The design's gate continuation records commands, logs and carried results.
+
 The private demo app/provider has not launched. Rebuild the old candidate and keep
 its history/runtime roots and input-release contract in [the demo record](loo-717-demo.md).
 `lf sync` completed cleanly against `c8d7a7f4a8` during publication and

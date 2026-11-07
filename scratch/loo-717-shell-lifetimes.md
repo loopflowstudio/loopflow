@@ -603,6 +603,40 @@ schedule registration, credentials change or live-store migration occurred.
 Publication updates the existing PR for review; it neither arms merge nor completes
 this Task. The historical walkthrough predates these replacements.
 
+### Gate continuation — November 6, `5f4ee78ee`
+
+Compared all 81 changed paths with `origin/main` (`c8d7a7f4a8`), including the
+existing uncommitted demo record. The source and test inputs match publication's
+`eaf88994c` tree; only the architecture row and scratch notes changed afterward.
+The review corrected the lifetime module's opening comment to include scheduled
+retirement and Desktop shell Close. No executable behavior changed.
+
+Check plan: transport/viewer/SSH and Desktop runtime paths reach the transport,
+CLI discovery, Machine routing and startup suites; retirement/store/migration
+paths reach Task, landing, worktree, revision and upgrade checks; installer paths
+reach schedule fixtures. Swift workspace/Ghostty paths reach headless view tests
+and both app link paths. Docs/CI paths reach architecture, website and inventory
+checks. The publication logs above retain the passing Rust, SSH, upgrade, Swift,
+website, formatting and Clippy results for unchanged executable inputs. No broad
+suite rerun is needed. The missed Xcode fallback compile is added here.
+
+- `uv run python scripts/test.py --list` — mapped 81 changed paths; the default plan skips Xcode, which `swift/README.md` requires for terminal changes.
+- `uv run python scripts/test.py --base HEAD --architecture --loopflow --reuse-passing` — stopped before product checks: shared uv-cache inventory exceeded its 15-second deadline; `/tmp/loo717-gate-xcode.log`.
+- `/usr/bin/time -l du -sk /Users/jack/.cache/uv` — completed in 18.41 s, 13,334,588 KiB; storage was readable. Preflight reported 145.3 GiB free against the 32 GiB reserve. No cache was manually deleted and no timeout was raised; `/tmp/loo717-gate-uv-inventory.log`.
+
+- Same bounded command after the inventory read — failed at the same 15-second uv-cache inventory, before architecture or Xcode; `/tmp/loo717-gate-xcode-retry.log`. No product test timed out. The cache scan exceeds the runner's measurement budget; the successful 18.41-second diagnostic does not turn either failed gate attempt into a pass.
+- `git diff --check` — passed. The sole source edit is module documentation; no executable inputs changed and no compiler/test rerun is required for it.
+
+Xcode app/test-runner compilation is deferred to macOS CI's `loopflow-ui-test`.
+This is not an all-green aggregate gate and the compile is not marked passed.
+The preceding passing architecture recheck and executable checks remain recorded
+above. Native Desktop/Rex, physical remote Machines, sleep/logout/reboot and
+wall-clock cleanup cadence remain unproved. The existing headless navigation/view
+tests cover presentation changes; native time from opening to a usable terminal
+remains the relevant experience measurement, with no new performance claim here.
+No candidate install, live schedule change or background process remains from
+this pass. The existing demo notes were retained.
+
 Remaining work:
 
 - Demo: local and real remote Desktop reconnect/Close, orderly Quit delivery,

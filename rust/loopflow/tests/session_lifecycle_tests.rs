@@ -55,20 +55,22 @@ impl Fixture {
             }
         }
         let home = self.home.path();
+        // Another installed harness would leave the stand-in one of several, and
+        // lf selects only when exactly one is installed.
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let inherited = std::env::split_paths(&inherited).filter(|dir| {
+            !["claude", "codex", "pi"]
+                .iter()
+                .any(|h| dir.join(h).exists())
+        });
+        let path = std::env::join_paths(std::iter::once(home.join("bin")).chain(inherited));
         command
             .args(args)
             .current_dir(self.repo.path())
             .env("HOME", home)
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    home.join("bin").display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            )
+            .env("PATH", path.unwrap())
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -447,7 +449,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("no setup checklist first"));
-    assert!(prompt.contains("When there is work, run it without waiting for a greeting"));
+    assert!(prompt.contains("Opening this conversation asks for nothing"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);

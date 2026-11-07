@@ -1,0 +1,76 @@
+{
+ "task": {
+  "id": "task_725acbdd32db401193bcfb98dc1ef67f",
+  "identifier": "725acb",
+  "title": "Stopped run",
+  "wave": null,
+  "project": null,
+  "state": "idle",
+  "reason": "commit --no-such-flag: command exited with status 2. Inspect its history and effects, then launch fresh work",
+  "graph": {
+   "name": "stops",
+   "step": null
+  },
+  "pr": null,
+  "next": "lf task run 725acb"
+ },
+ "sessions": [
+  {
+   "id": "4b9ab6c9ece84611b4f4469f65414164",
+   "title": "725acb Stopped run review",
+   "provider": "claude",
+   "interactive": true,
+   "state": "active",
+   "available": true,
+   "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.725acb-stopped-run",
+   "agent_process_id": "d29f8e3b-131f-4d4c-9cc6-ae84a296d53d"
+  }
+ ],
+ "graph_processes": [
+  {
+   "id": "99f1b704-b14e-4c61-82f9-0d792bbe32e3",
+   "name": "stops",
+   "state": "stopped",
+   "step": "commit --no-such-flag",
+   "updated_at": "2026-11-07T12:49:13Z"
+  },
+  {
+   "id": "e0a18ff3-9706-41b3-9875-e37d9f0c6080",
+   "name": "stops",
+   "state": "stopped",
+   "step": "commit --no-such-flag",
+   "updated_at": "2026-11-07T12:49:13Z"
+  },
+  {
+   "id": "c5db926f-851f-427e-98c4-163fc724b368",
+   "name": "stops",
+   "state": "stopped",
+   "step": "commit --no-such-flag",
+   "updated_at": "2026-11-07T12:49:14Z"
+  }
+ ],
+ "comments": {
+  "comments": [
+   {
+    "id": "892d80a4-03af-413b-a41e-07833c6e0b56",
+    "body": "Jack Heart claimed this on home_627258e2a2f32ff56be754fdff18229d\n\n<!-- loopflow-ownership:{\"id\":\"own_8614ddc474bf48619a4030a30e139f9d\",\"task_id\":\"task_725acbdd32db401193bcfb98dc1ef67f\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"loo672-demo@example.invalid\",\"machine_id\":\"home_627258e2a2f32ff56be754fdff18229d\",\"machine_label\":null,\"at\":1794055752} -->",
+    "author": {
+     "kind": "integration"
+    },
+    "created_at": "2026-11-07T12:49:12.114Z"
+   },
+   {
+    "id": "7ba05650-3e1c-498a-8bb4-28909f53b52e",
+    "body": "start it\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:7ba05650-3e1c-498a-8bb4-28909f53b52e -->",
+    "author": {
+     "kind": "person",
+     "name": "Jack Heart"
+    },
+    "created_at": "2026-11-07T12:49:14.669862Z"
+   }
+  ],
+  "pending_sync": [],
+  "conflicts": {},
+  "refresh_error": null
+ }
+}

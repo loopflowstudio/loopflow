@@ -34,7 +34,9 @@ def main() -> None:
     plist = plistlib.loads((source / "swift/LoopflowMac/Info.plist").read_bytes())
     # A bundle identifier of its own: app defaults restore the last scene per
     # identifier, so a shared one reopens an earlier candidate's repository.
-    plist.update(CFBundleIdentifier="com.loopflow.mac.redemo.loo672." + root.name.rsplit("-", 1)[-1],
+    # Short: the Desktop socket is named for it under LF_HOME, within a 103-byte path.
+    bundle_id = "com.loopflow.l672." + root.name.rsplit("-", 1)[-1][:6]
+    plist.update(CFBundleIdentifier=bundle_id,
                  CFBundleExecutable="Loopflow LOO-672 Redemo",
                  CFBundleName="Loopflow LOO-672 Redemo",
                  CFBundleDisplayName="Loopflow LOO-672 Redemo")
@@ -81,6 +83,9 @@ def main() -> None:
     run(["git", "remote", "add", "origin", str(durable / "origin.git")])
     run(["git", "push", "-q", "origin", "main"])
 
+    # A fresh Machine with several harnesses has no default: Sessions that name no
+    # provider (repository, Wave, absent Task) would fail to open with "No agent selected".
+    run([str(cli), "set", "--global", "default_agent", "codex"])
     wave = json.loads(run([str(cli), "wave", "add", "Review", "--objective",
         "Disposable conversation review for Jack Heart. Report status only; no project work.", "--json"]))
 
@@ -112,7 +117,7 @@ def main() -> None:
     manifest = {"source_head": run(["git", "-C", str(source), "rev-parse", "HEAD"]).strip(),
                 "source_diff_sha256": hashlib.sha256(run(["git", "-C", str(source), "diff", "HEAD", "--", "rust", "swift"]).encode()).hexdigest(),
                 "durable_root": str(durable), "runtime_root": str(runtime), "wave": wave,
-                "candidate": str(bundle), "repository": str(repo), "machine": str(home), "tasks": tasks,
+                "candidate": str(bundle), "bundle_id": bundle_id, "repository": str(repo), "machine": str(home), "tasks": tasks,
                 "exercised": "Fresh data with no Session; load must start every conversation without a click",
                 "expect": "Stopped run reports its status and the start-it comment, and `lf ps` shows no new Graph"}
     (durable / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

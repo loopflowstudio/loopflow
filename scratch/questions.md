@@ -150,3 +150,8 @@ warm set, Close and window close detach with Ctrl+]. Presence reporting, quit
 release and the retention tests built on them were deleted. Assumption: a
 minimal `DesktopAppDelegate` stays only to fence window teardown on quit, so
 quitting does not erase saved warm intent; it reports nothing.
+
+## Headless demo, November 7
+
+- Open: should a first launch with several harnesses and no `default_agent` pick one or ask once, rather than failing every provider-less conversation? Left as is; the failure is actionable.
+- Open: `loopflow://…/wave/<name>` selection bug exists on main; not fixed here (LOO-672 scope is opening and prefetch). Needs its own Task.

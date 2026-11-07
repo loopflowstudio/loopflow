@@ -1,5 +1,51 @@
 # LOO-672 — Task conversation demo
 
+## Headless native demo at HEAD — November 7, 2026, 04:48–05:08 PST
+
+No one was present; this pass stood in for Jack Heart. Built `8c6a706be` (after the
+LOO-717 viewer-hold sync and main merges, which the November 5 acceptance predates)
+and ran the real candidate on fresh private data, real Claude and Codex. **Result:
+the accepted experience holds at HEAD. Decision: advance.** Nothing here is Jack's
+observation; Jack's last words on the experience remain “ok lg2m ship it”.
+
+| Case | Observed |
+|---|---|
+| Fresh load, nothing selected | Six live providers: repository, Review Wave, four Tasks (one with no Session). No Start/Open click ([sessions](demo-evidence/head-load-sessions.json), [ps](demo-evidence/head-load-ps.json), [repo](demo-evidence/head-load-repo.png)) |
+| No unrequested work | Reading passes only. Stopped run's three Graph IDs equal the prelaunch set after load and after the reboot case ([status](demo-evidence/head-load-stopped.json)); fixture repo has no new commits |
+| Selection | Task and Wave reveal the turn already finished at 4:52, provider PIDs unchanged ([Task](demo-evidence/head-task-selected.png), [Wave](demo-evidence/head-wave-selected.png)) |
+| A → B → A draft | Typed unsubmitted draft kept after switching away and back ([shot](demo-evidence/head-draft-return.png)), same provider PID; cleared afterwards |
+| Desktop quit and relaunch, four times | All provider PIDs unchanged; panes reattach |
+| Reboot-like: SIGKILL every fixture process, relaunch | Five conversations resumed unaided with native history, no new turn, no error, no Graph; new agent process IDs ([Wave](demo-evidence/head-reboot-wave.png), [sessions](demo-evidence/head-reboot-sessions.json)). First reboot-style native proof for this Task |
+| Close | The closed Task stayed closed through that relaunch; selecting it reopened history live ([shot](demo-evidence/head-close-reselected.png)) |
+
+The Wave was selected with `LOOPFLOW_UI_TEST_SELECT_BRANCH=Review` at launch, which
+calls the same `select(.wave)`, because macOS would not let the candidate take focus
+for a click. The real Close was `lf desktop do close -p session`.
+
+Found, not LOO-672 regressions:
+
+- **No default agent.** First launch on a new Machine with several harnesses and no
+  `default_agent`: Repository, Wave and the absent-Session Task showed “Conversation
+  failed to open / No agent selected” with Retry ([shot](demo-evidence/head-no-default-agent.png));
+  prepared Sessions opened. Main changed this default. The failure is actionable and
+  honest, though the text repeats itself three times and appears twice. The fixture now
+  sets `default_agent`. Selecting a harness on first run is open (`questions.md`).
+- **Wave links.** `loopflow://repo/wave/Review` sends the Wave's name; Swift's
+  `LinkedWork.wave(id:)` treats it as an ID. The selection clears: repo page, sidebar
+  stuck on an empty Wave scope (`lf desktop goto` then fails), and once a “Session location
+  unavailable” pane. `WorkDestination.swift` is identical on origin/main. Separate fix.
+- A Codex app-server killed alone leaves the TUI at “Reconnecting to server…” with the
+  Session marked closed and no recovery; found by an incomplete kill, not a reboot shape.
+
+Still unmeasured: Rex takeover and Take back, exceeding the sixteen-Task warm set and
+cold return, twenty-Task memory. Disclosed at Jack's shipping approval.
+
+Teardown: candidate quit, all fixture processes stopped, runtime root removed. No human
+input was involved. Durable root kept: `/Users/jack/.lf/demos/loo672-19f917dca4/durable`.
+The November 5 candidate (`loo672-9cd2824ab8`) was not touched; its teardown stays
+unreleased. Two synthetic clicks meant for the candidate landed on whatever was frontmost
+at about (344,964) and (816,1015) while it could not take focus; no effect was observed.
+
 ## Accepted native re-demo — November 5, 2026, 12:03 PST
 
 Built source `990fab54d3` with the fresh Rust CLI/FFI and Swift app. Jack Heart

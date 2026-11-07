@@ -1,0 +1,74 @@
+[
+  {
+    "agent_process_id": "ef7ae168-b815-4698-85af-474a783d0d43",
+    "available": true,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.017ca0-claude-continuity",
+    "id": "fa258b05d71f45528b0dc285c7c5bb0e",
+    "interactive": true,
+    "provider": "claude",
+    "state": "active",
+    "task": "task_017ca06ded514fbcadbc4fc75c1089c8",
+    "title": "017ca0 Claude continuity",
+    "wave": null
+  },
+  {
+    "agent_process_id": "e0c8e80a-28a7-46a3-89f2-f5516e39576d",
+    "available": false,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.0864c4-codex-continuity",
+    "id": "43600b4ff31c40238d46015ca847355e",
+    "interactive": true,
+    "provider": "codex",
+    "state": "closed",
+    "task": "task_0864c481ecdf4507963419f2d93857d1",
+    "title": "0864c4 Codex continuity",
+    "wave": null
+  },
+  {
+    "agent_process_id": "c4b84788-4ecc-4ba2-a671-b4c1e83fce75",
+    "available": true,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.4087fd-automatic-conversation",
+    "id": "14653e55ca8f409fb9629689c8cd00d4",
+    "interactive": true,
+    "provider": "codex",
+    "state": "active",
+    "task": "task_4087fdf4cc844ab5a193f98becc479f8",
+    "title": "4087fd Automatic conversation",
+    "wave": null
+  },
+  {
+    "agent_process_id": "8ef9dc9c-5946-4bb3-a0bd-ebdeae691665",
+    "available": false,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.725acb-stopped-run",
+    "id": "4b9ab6c9ece84611b4f4469f65414164",
+    "interactive": true,
+    "provider": "claude",
+    "state": "active",
+    "task": "task_725acbdd32db401193bcfb98dc1ef67f",
+    "title": "725acb Stopped run review",
+    "wave": null
+  },
+  {
+    "agent_process_id": "6ab032df-a236-4c31-82ab-10b1b1337458",
+    "available": true,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.repo",
+    "id": "0799a297660644bea58fe4e691bfe928",
+    "interactive": true,
+    "provider": "codex",
+    "state": "active",
+    "task": null,
+    "title": "Repository review",
+    "wave": null
+  },
+  {
+    "agent_process_id": "ffac4724-4db2-4aaa-a8af-094fda1ad747",
+    "available": true,
+    "cwd": "/Users/jack/.lf/demos/loo672-19f917dca4/durable/repo.wave-59fc043c-aad5-4945-a0d3-cf5c09c47f19",
+    "id": "7ee17eb6ba014e65978e7190da7de426",
+    "interactive": true,
+    "provider": "codex",
+    "state": "active",
+    "task": null,
+    "title": "Review Wave",
+    "wave": "Review"
+  }
+]

@@ -15,9 +15,12 @@ use serde_json::{Map, Value};
 use crate::provider_account::launch_env;
 
 const TRUST_FIELD: &str = "hasTrustDialogAccepted";
-const LOCK_WAIT: Duration = Duration::from_secs(2);
 // Matches proper-lockfile's default staleness, which Claude uses for this lock.
 const LOCK_STALE: Duration = Duration::from_secs(10);
+// A burst of booting Claudes keeps this lock busy for seconds, and losing the race
+// stops that conversation on a dialog, so the launch waits. Longer than LOCK_STALE,
+// so a dead holder clears first and only a live one can still run the wait out.
+const LOCK_WAIT: Duration = Duration::from_secs(30);
 
 /// Pre-accept trust when `command` launches Claude in an lf-created worktree.
 pub(crate) fn accept_created_worktree(command: &Command) {
@@ -181,11 +184,13 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
 
     use serde_json::{json, Value};
     use tempfile::TempDir;
 
-    use super::{accept_created_worktree, awaits_dialog};
+    use super::{_accept, accept_created_worktree, awaits_dialog};
     use crate::git::{git_stdout, worktree_add, WorktreeBranch};
 
     struct Fixture {
@@ -360,6 +365,35 @@ mod tests {
 
         fs::write(fixture.config(), "{not json").unwrap();
         assert!(!awaits_dialog(&command));
+    }
+
+    #[test]
+    fn a_burst_behind_a_busy_lock_trusts_every_worktree() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join(".claude.json");
+        fs::write(&config, json!({"numStartups": 3}).to_string()).unwrap();
+        let lock = root.path().join(".claude.json.lock");
+        fs::create_dir(&lock).unwrap();
+
+        let keys: Vec<String> = (0..12).map(|n| format!("/worktrees/{n}")).collect();
+        thread::scope(|scope| {
+            for key in &keys {
+                let config = &config;
+                scope.spawn(move || _accept(config, Path::new(key)).unwrap());
+            }
+            // Another Claude holds the lock for longer than one save.
+            thread::sleep(Duration::from_secs(3));
+            fs::remove_dir(&lock).unwrap();
+        });
+
+        let saved = read(&config);
+        assert_eq!(saved["numStartups"], json!(3));
+        for key in &keys {
+            assert_eq!(
+                saved["projects"][key]["hasTrustDialogAccepted"],
+                json!(true)
+            );
+        }
     }
 
     #[test]

@@ -120,19 +120,13 @@ struct DashboardSlotGrid<Tile: View>: View {
     let focused: WorkWorkspaceKey?
     let layout: DashboardSlotLayout
     var editing: DashboardSlotEditing?
-    /// A view that turns pages from elsewhere holds the page; otherwise the grid does.
-    var heldPage: Binding<Int>?
+    /// The model holds the page: a turn changes which conversations are warm.
+    @Binding var page: Int
     /// ⌘⌥←/→ turn pages; a view whose ⌘⌥ arrows move pane focus turns off.
     var pagerKeys = true
     @ViewBuilder let tile: (WorkMemberRef) -> Tile
-    @State private var localPage = 0
     @State private var forward = true
     @Environment(\.palette) private var palette
-
-    private var page: Int {
-        get { heldPage?.wrappedValue ?? localPage }
-        nonmutating set { if let heldPage { heldPage.wrappedValue = newValue } else { localPage = newValue } }
-    }
 
     var body: some View {
         let pages = layout.pages(members)
@@ -157,7 +151,7 @@ struct DashboardSlotGrid<Tile: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: layout.pages(members).count) { _, count in page = min(page, count - 1) }
+        .onChange(of: layout.pages(members).count) { _, count in if page >= count { page = count - 1 } }
     }
 
     private func turn(to target: Int) {

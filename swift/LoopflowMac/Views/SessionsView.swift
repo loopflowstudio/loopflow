@@ -462,6 +462,10 @@ final class SessionsWorkspaceRegistry {
         let closed: Set<WorkWorkspaceKey>
     }
     private var closedConversations: Set<WorkWorkspaceKey> = []
+    /// Tasks the bound or a window Close let go; only a visit admits them again. Off-page
+    /// tiles keep workspaces, so without this each refresh would readmit what the
+    /// cross-repository bound just evicted.
+    private var releasedTasks: Set<WorkWorkspaceKey> = []
     private var warmPersistenceKey: String?
     private var quitting = false
     private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
@@ -477,6 +481,7 @@ final class SessionsWorkspaceRegistry {
 
     func evict(_ key: WorkWorkspaceKey) {
         recentTasks.removeAll { $0 == key }
+        releasedTasks.insert(key)
         reconcileWarmth()
     }
 
@@ -499,17 +504,18 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// Restore saved intent or fill spare warmth from fresh working Tasks.
-    /// A visit, Close or eviction already decided an existing workspace's lifetime.
+    /// Restore saved intent or fill spare warmth from fresh working Tasks. A tile's
+    /// workspace was shown, not chosen, so it qualifies on or off its page; Close or
+    /// eviction already decided the others. Tiles on screen share the bound and
+    /// never spend it: admitting one keeps it warm after its board leaves.
     func prefetch(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity, completed: Bool) {
         guard !presentationClosed, !quitting else { return }
         let restoring = restoreCandidates.contains(key)
         restoreCandidates.removeAll { $0 == key }
-        // A visible tile's workspace was shown, not chosen: admitting it keeps the
-        // conversation warm after the Dashboard leaves; its location is already in use.
-        guard !completed, !closedConversations.contains(key), !recentTasks.contains(key),
-              restoring || workspaces[key] == nil || visibleWork.contains(key),
-              recentTasks.count < Self.warmConversationLimit else { return }
+        let warm = Set(recentTasks).union(visibleWork.filter { $0.kind == .task })
+        guard !completed, !closedConversations.contains(key), !recentTasks.contains(key), !releasedTasks.contains(key),
+              recentTasks.count < Self.warmConversationLimit,
+              warm.contains(key) || warm.count < Self.warmConversationLimit else { return }
         let fresh = workspaces[key] == nil
         let workspace = workspace(for: key, title: title, location: location)
         if fresh || restoring { workspace.requiresLocationValidation = true }
@@ -550,7 +556,7 @@ final class SessionsWorkspaceRegistry {
     private func reconcileWarmth() {
         let visible = Set(visibleWork)
         while recentTasks.count > Self.warmConversationLimit, let index = recentTasks.lastIndex(where: { !visible.contains($0) }) {
-            recentTasks.remove(at: index)
+            releasedTasks.insert(recentTasks.remove(at: index))
         }
         for workspace in workspaces.values {
             let retained = visible.contains(workspace.key) || recentTasks.contains(workspace.key)
@@ -745,6 +751,7 @@ final class SessionsWorkspaceRegistry {
     func clearPresentation() {
         surfaces.clearFocus()
         openWork = []
+        shownWork = []
         selectedWork = nil
         reconcileWarmth()
     }
@@ -760,6 +767,7 @@ final class SessionsWorkspaceRegistry {
     func closePresentation() {
         guard !quitting else { return }
         presentationClosed = true
+        releasedTasks.formUnion(recentTasks)
         recentTasks = []
         restoreCandidates = []
         saveWarmIntent()
@@ -770,9 +778,10 @@ final class SessionsWorkspaceRegistry {
         onPreparationFinished?()
     }
 
-    func present(open: [WorkWorkspaceKey]) {
+    func present(open: [WorkWorkspaceKey], shown: [WorkWorkspaceKey]) {
         presentationClosed = false
         openWork = open
+        shownWork = shown
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
             surfaces.clearFocus()
@@ -780,10 +789,18 @@ final class SessionsWorkspaceRegistry {
         reconcileWarmth()
     }
 
-    /// Work shown in the window, in slot fill order: readback, not an arrangement owner.
+    /// The window's Work in slot fill order, every board page included: readback,
+    /// not an arrangement owner.
     private(set) var openWork: [WorkWorkspaceKey] = []
+    /// The part of `openWork` on the current page.
+    private var shownWork: [WorkWorkspaceKey] = []
     private var presentationClosed = false
-    var visibleWork: [WorkWorkspaceKey] { presentationClosed ? [] : openWork }
+    /// Work shown in the window. A selection a page turn left behind keeps its viewer.
+    var visibleWork: [WorkWorkspaceKey] {
+        guard !presentationClosed else { return [] }
+        guard let selectedWork, !shownWork.contains(selectedWork) else { return shownWork }
+        return shownWork + [selectedWork]
+    }
 
     private(set) var selectedWork: WorkWorkspaceKey?
 
@@ -795,6 +812,7 @@ final class SessionsWorkspaceRegistry {
     func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, deliberate: Bool = true) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
         openWork = [key]
+        shownWork = [key]
         focus(key, deliberate: deliberate)
         return workspace
     }
@@ -816,6 +834,7 @@ final class SessionsWorkspaceRegistry {
         if key.kind == .task, !completedTasks.contains(key), !closedConversations.contains(key) {
             recentTasks.removeAll { $0 == key }
             recentTasks.insert(key, at: 0)
+            releasedTasks.remove(key)
         } else if key.kind != .task, deliberate, !warmPrimaries.contains(key) {
             warmPrimaries.append(key)
         }
@@ -977,11 +996,13 @@ final class SessionsWorkspaceRegistry {
         workspace.key = key
         workspaces[key] = workspace
         openWork = openWork.map { $0 == previous ? key : $0 }
+        shownWork = shownWork.map { $0 == previous ? key : $0 }
         recentTasks = recentTasks.map { $0 == previous ? key : $0 }
         warmPrimaries = warmPrimaries.map { $0 == previous ? key : $0 }
         restoreCandidates = restoreCandidates.map { $0 == previous ? key : $0 }
         if closedConversations.remove(previous) != nil { closedConversations.insert(key) }
         if completedTasks.remove(previous) != nil { completedTasks.insert(key) }
+        if releasedTasks.remove(previous) != nil { releasedTasks.insert(key) }
         saveWarmIntent()
         if selectedWork == previous { selectedWork = key }
     }

@@ -45,7 +45,9 @@ switch moves (and reports) every open Session of that provider. Remote logins
 are fresh; rentals get laptop-refreshed Claude access tokens (~8h), resent
 every 2h by `lf install schedule`; no long-lived tokens. Lessons: a thread
 without a transcript gets a seeded one; provider words cool an account only on
-a failed exit; the pin follows the real launch. Jack Heart, November 7: overage
+a failed exit; the pin follows the real launch. Claude's `StopFailure` calls
+every 429 `rate_limit`: only the displayed line tells spent quota and names its
+model; a usage poll then supplies the reset. Jack Heart, November 7: overage
 cooling and unbounded waits stay as built. Open: prompt-cache cost of a switch,
 LOO-435.
 

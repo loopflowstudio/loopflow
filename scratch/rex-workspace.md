@@ -64,20 +64,21 @@ Jack then wrote “otherwise lg2m ship it” after this removal, before the LOO-
 merge; see [questions.md](questions.md). Do not reopen the active conversation or
 manipulate its native panes; retained demo resources have no cleanup release.
 
-## Status on 41cf7defb
+## Status on 93fdb52dd
 
 Exists, seen in real Rex with real Claude on 8a8ae78ef ([workspace-demo.md](workspace-demo.md)): bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime; a Task with no checkout is placed and starts its conversation, with no second Session, worktree or replay on reopening.
 
+Exists, seen in real Rex with real Claude on 93fdb52dd ([workspace-demo.md](workspace-demo.md)): broad `lf open` from a repository starts no agents, reconnects a detached conversation and leaves an attached one with its draft; explicit `lf open --task` starts, resumes and moves; an agent opening its own Task from its tool shell stays where it is.
+
 Exists, fixture Rex only (built in b321745bd, Wave test 554cdc476, one `route` for opening and following 702935727):
-- Broad `lf open` starts no agents. Explicit Task or Session: `Resume::Any`. Repository or Wave: `Resume::Detached`, for Task panes and the Wave's own conversation. Remote Machines receive the repository or Wave expression and judge their own Sessions.
+- Broad open of a Wave, and Remote Machines, which receive the repository or Wave expression and judge their own Sessions.
 - A Task with no conversation and no resolvable harness fails its receipt and creates no tab.
 - `docs/workspaces.md` says a fresh conversation takes its first turn.
 
 Remains:
-- Demo, real Rex, isolated server, pinned branch binary: rerun the three-Task broad `lf open` from the repository, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched, Tasks without a detached Session showing Task & workflow, a detached Session reconnected, and a Session attached in another terminal left there with its typed text intact. Then confirm explicit `lf open --task` still resumes and starts its conversation. Add an agent-tool `lf open` of its own Task.
 - Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task. Jack Heart's acceptance: two Tasks in one Wave session, a new native split beside Conversation, Shell, Files, Changes and Task & workflow lands in that tab's Task worktree on its Machine, checked with `pwd` in the new shell, after reopening too; a gap in the host's scoped defaults is recorded exactly. Two-Machine behavior was not rerun.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
-- `work_open_tests::` flake, cause now seen (November 7, load ~28, 1 of 3 parallel runs): `rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones` failed its receipt with “Rex did not answer within 2s”. The shell stand-in missed the production reply deadline. Unrelated to this diff, and no test knob exists. Real Rex under load could report the same failure after creating the tab; the receipt says to inspect the host before retrying. Gate reruns it in parallel.
+- `work_open_tests::` flake, cause now seen (November 7, load ~28, 1 of 3 parallel runs): `rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones` failed its receipt with “Rex did not answer within 2s”. The shell stand-in missed the production reply deadline. Unrelated to this diff, and no test knob exists. Real Rex under load could report the same failure after creating the tab; the receipt says to inspect the host before retrying. Passed in both November 7 gate passes.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.
 
@@ -125,3 +126,14 @@ Consequences: opening a Wave to pull everything into Rex leaves conversations at
 Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed. Flake: gate.
 
 Realign on 41cf7defb: the third-pass fix and docs agree with the code. Found by reading: an explicit `lf open --task` on an attached Session moves it in native hosts but not tmux or plain terminals, which keep `elsewhere`'s refusal (`work_open_tests.rs:848`, `:946`). `docs/workspaces.md` now says so; the choice is in [questions.md](questions.md). Tests not rerun: comment-only code change.
+
+## Gate, November 7, on 93fdb52dd plus the demo's edits
+
+Changed: `AMBIENT_TASK_ENV` clears `REX_*`, since `in_rex()` made `served_reads` fail when run from a Rex terminal (the in-process side inherited it, `isolated_lf` children did not). `docs/config.md` anchor fixed. `docs/surfaces.md` no longer says every Conversation pane resumes. README names Rex.
+
+- First pass, `uv run python scripts/test.py --reuse-passing` with the modules this diff reaches (376 Rust tests, load 29–55): 374 Rust passed. Failed: `served_reads` (above), `linked_worktree_metadata_is_accessible_on_launch_and_resume`, website, Swift.
+- Second pass, `binary(served_reads) | binary(session_launch_contract) | test(work_open_tests::)`: architecture, inventory, fmt, Rust, clippy and website passed. Swift failed as below.
+- `linked_worktree_metadata…`: `Error: Broken pipe` from `lf -i` once at load ~55. Passed 4 of 4 alone and in the second pass. Cause not found; this diff does not touch provider input.
+- Website first-pass error: the dev server missed conftest's 10-second stop wait under load; 72 passed. No website code changed.
+- Swift: 728 of 730. `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed in both passes, each waiting on a file event. `fseventsd` is at 100% CPU, and a standalone FSEvents probe outside the repository got no event in 60 seconds, 3 of 3. Not passed here: deferred to the merge queue's macos job. The Swift diff sends the same arguments when `head` is nil. `check_swift_multiplatform_boundaries.py`, not reached by the runner, passed when run alone.
+- `--loopflow`, e2e and `session_lifecycle_tests` not run; CI owns them.

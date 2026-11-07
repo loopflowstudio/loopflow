@@ -310,4 +310,35 @@ Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261107-unplaced`. Se
 
 Stand-in decision: iterate to implement. Rule to build is in [questions.md](questions.md).
 
-Built after that demo, not yet seen in Rex: broad gating, doc correction, harness failure. Fixture Rex results are in [rex-workspace.md](rex-workspace.md). Rerun the three-Task broad open in the demo.
+Built after that demo: broad gating, doc correction, harness failure. Broad gating and the doc were seen in real Rex on November 7, next section. Harness failure has fixture Rex results only, in [rex-workspace.md](rex-workspace.md).
+
+## November 7 headless demo: broad open on 93fdb52dd
+
+Isolated Rex server, private LF_HOME, one pinned copy of the branch binary (`lf 0.15.1+93fdb52dd`), real Claude with ambient credentials. LOO-498's conversation and panes and the retained roots were not touched. No person watched, so nothing here is Jack Heart's acceptance.
+
+Four Tasks, set up with real conversations:
+
+| Task | State before | Broad `lf open` | Then `lf open --task` |
+| --- | --- | --- | --- |
+| 965665 (A) | Placed, no conversation | Task & workflow, no provider | Started its conversation, PID 71149 |
+| 1e8b15 (B) | Session closed by `/exit` | Task & workflow, not relaunched | Resumed the closed Session; transcript 72 → 73 lines before the next message, no replay; answered `kiwi-1` |
+| 1751b4 (C) | `detached`, Conversation pane closed, PID 67979 | `lf resume` in the new tab, same PID, `plum-2` on screen; answered `lime-5` | Not run |
+| e7ad39 (D) | `active` in a second Rex session, PID 68345, `unsent-draft-quince` typed | Left there, draft intact; Task & workflow in the new tab | Moved here, same PID, `fig-8` and the draft on screen; first pane closed |
+
+Held:
+- `"$LF_BIN" open --json` from the repository, no host flag: exit 0, four Task tabs, one Workspace tab, in a new Rex session named for the repository.
+- Over 90 seconds after it, no provider started and all three transcripts stayed byte-identical (`transcripts-before.txt`, `transcripts-broad-90s.txt`). On November 7's first run this same opening launched three providers.
+- A second broad open: exit 0, a further new Rex session, C and D now `active` and left in place, transcripts unchanged, draft intact.
+- Claude in A ran `"$LF_BIN" open --json` through its Bash tool: exit 0, `opening`. Its Conversation stayed put with PID 71149, four Sessions in all, and the caller's Rex session gained one tab of Task & workflow and shell. `pwd -P` there printed A's worktree.
+- `lsof`: A's and D's providers run in their Task worktrees. OSC 7 on the three explicit Conversation panes names their worktrees.
+- All four left through `/exit`: Sessions closed, no providers left.
+
+Found, repaired: `docs/workspaces.md` said text typed and not sent stays behind on a move. D's draft came along, since Claude's prompt lives in the provider. The sentence is gone. `session_actions` still says “unsent text in the previous terminal is not transferred”; that text is LOO-672's and was left. The run covers Claude only.
+
+Harness mistakes, not product: the login shell puts the installed `lf` first on PATH, so the first `lf open` typed bare ran 5519340b4 and returned a `desktop` receipt for a Task only the private store knows. The Desktop app may have received that URL. Later commands used `"$LF_BIN"`. Sending `/exit` to D appended it to the draft; Ctrl-U and `/exit` ended it.
+
+Not rerun: Split shortcut and resize, which need the Rex app by hand. Two-Machine behavior. A Task with no resolvable harness, which stays fixture Rex.
+
+Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261107-broad`. Server 41008 stopped by its recorded group, which took the two followers with it; no process names the root. `/private/tmp/loo498-broad-H1km` removed. Provider transcripts and `~/.claude.json` project entries for those paths remain.
+
+Stand-in decision: advance. The November 7 failure is gone in real Rex and every owed headless case held. What remains needs the Rex app or a second Machine, which another implement pass cannot supply. The host-parity choice in [questions.md](questions.md) stays open and does not block.

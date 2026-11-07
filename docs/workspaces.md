@@ -7,16 +7,17 @@ lf open --wave product              # open Product's started, unfinished Tasks
 ```
 
 In Rex, Herdr or cmux, each open creates a fresh Task tab with its configured
-splits. Conversation panes run `lf resume` in the Task's worktree. Return to existing tabs through your
-terminal app; use its controls to rearrange, rename, close and restore them.
+splits. Conversation panes run `lf resume` in the Task's worktree. Return to
+existing tabs through your terminal app; use its controls to rearrange, rename,
+close and restore them.
 
 Opening a Task starts its conversation. Opening a repository or Wave starts no
 agents: it reconnects running conversations no terminal is showing and shows Task &
 workflow for the rest. Run `lf open --task <task>` to pick one up. That moves a
-conversation open in another terminal here; text you typed there and didn't send
-stays behind. A conversation running the command stays where it is. A conversation
-with no Task opens by itself: `lf open --session <id>` adds one Conversation tab
-where you are, and `lf open --available` does the same for each such conversation.
+conversation open in another terminal here. A conversation running the command
+stays where it is. A conversation with no Task opens by itself:
+`lf open --session <id>` adds one Conversation tab where you are, and
+`lf open --available` does the same for each such conversation.
 
 From a Task checkout, `lf open` selects that Task. From a repository checkout, it
 selects the repository's started, unfinished Tasks. Use `--task` or `--wave` to

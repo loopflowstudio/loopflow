@@ -4,7 +4,7 @@ Your Tasks and conversations live in `lf`, not in a window. Open them wherever
 you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
 
 For Task layouts, Wave defaults, automatic arrivals and native splits, read
-[Open your Loopflow workspace](workspaces.md).
+[Open Task workspaces](workspaces.md).
 
 ## Open Work where you are
 
@@ -25,10 +25,11 @@ process ancestry; opening never scans running apps, and failure in your host nev
 falls through to another. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one
 explicitly.
 
-Rex, Herdr and cmux start `lf resume` in each Conversation pane's Task checkout.
-Resume handles the existing conversation and moves its input normally. Automatic
-Task arrivals show workflow information without resuming a conversation. tmux and
-terminal routes focus an existing conversation or report it as `elsewhere`.
+For a selected Task, Rex, Herdr and cmux run `lf resume` in its Conversation pane,
+which moves the conversation's input here. A repository or Wave opening starts no
+agents: it reconnects running conversations no terminal is showing and shows
+workflow information for the rest, as automatic Task arrivals do. tmux and terminal
+routes focus an existing conversation or report it as `elsewhere`.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.

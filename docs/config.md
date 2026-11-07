@@ -1026,7 +1026,7 @@ cooldowns, machine identity, Sessions, execution history and Desktop’s current
 Task arrangements. A saved Desktop arrangement is current state, not a default.
 
 `task_layout` holds the default Task layout, including Wave-scoped preferences
-([workspaces](workspaces.md#configure-a-waves-default)). External hosts own the
+([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
 workspaces launched from it or from Desktop layouts; LF keeps no external-host
 workspace registry.
 

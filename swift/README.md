@@ -80,26 +80,53 @@ layouts alone. Rex reads those defaults for new windows and owns its active
 native layout independently.
 
 Repository and Wave
-entry shows their retained conversation or an explicit **Open conversation** action.
+entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, current Project and
 full Task inventory, followed by their metrics. **Project history**, **Realign Projects…** and **Workflow**
 open the existing planning inspectors. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
-relaunch; ordinary launch still opens the repository, without acquiring a Session.
+relaunch; ordinary launch restores the selected Work.
 
 Closing a repository window keeps its panes, selected Work and file drafts until
 Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Selecting a retained Session reuses its surface. When a surface needs reconnecting,
-Desktop attaches to the recorded execution without starting a provider, replaying
-input or taking control from another viewer. A failed connection stays visible.
-**Resume** does what `lf resume` does: it attaches to a running conversation, or
-otherwise reopens its saved provider history. Launching Desktop does not restart
-other conversations. Repository, Wave and Task conversation entry share metadata-only
-preparation; only a newly admitted conversation offers its first launch.
+Every conversation a window can select opens on load, before any selection and
+with no saved recent visits: the repository's, each Wave's and every claimed
+working Task's (idle, active or moving). Selecting any of them shows opening, the
+live conversation, a passive view of a conversation another client controls, or a
+failure with **Retry**; never a **No session** or **Open** gate. Load opens the
+selected Work first, then visible tiles, then the repository and Waves, then
+recent working Tasks, two preparations at a time; initial rendering does not wait.
+A prepared conversation starts its provider at once, before any pane shows it;
+selecting the Work shows the running terminal. A small **Connecting…** indicator
+remains until the live relay accepts input.
+
+Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
+any additional visible panes; a Task shown as a Dashboard tile stays warm after the
+Dashboard leaves. Repository and Wave conversations stay warm beside that bound.
+Return lands at the bottom. Older conversations reconnect or resume the same
+provider history automatically. After relaunch, the saved selected Work opens
+first, then the bounded warm set reconnects with at most two preparations at once.
+Fresh completion and recorded Machine/checkout evidence must arrive before
+background retention. Close removes warm intent; refresh does not reopen it, and a
+deliberate selection does. Completed Tasks release on departure through the
+shared two-minute/fifteen-minute lifecycle.
+
+Automatic opening creates the primary Session if absent and starts its native
+conversation if it has no history. Existing history resumes on the same Session.
+No Start or Open click is needed, including after relaunch, and a started Task
+opens whether or not anyone owns it. An unstarted Task has no checkout and no
+conversation: its Session slot offers **Start**, which runs its Workflow. Opening never launches a Graph, claims or starts a Task, runs the
+repository or Wave operator, or replays consumed input: with no request, the first
+turn of any primary reads its scope and reports where it stands. A failed
+automatic Start shows its error with **Retry**. A launch that ended with no saved
+history stays closed until **Try again** repeats it; Retry and refresh never do.
+If another client holds input, the pane offers **Take back** and leaves that client
+in control until clicked. Close and eviction discard late opening results.
+
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
@@ -206,7 +233,7 @@ Search and terminal state stay with their retained pane when switching Work.
 Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
-remains available when the Task has no conversation open.
+remains available when the Work has no conversation open.
 Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
 recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
 Command-P in the file pane to search **scratch** and files changed from the
@@ -330,8 +357,9 @@ long lines retain the native editor's known responsiveness limitation.
 Select a repository, then a Task to open its conversation. Its workspace retains
 conversations, shells, file drafts and layout across visits. Use **+** for supporting
 panes; expand **Overview** for Task details. Active clients elsewhere require
-explicit **Move here**. An ended Session shows a bounded excerpt of its final
-terminal screen; reopening is explicit and preserves the conversation's history.
+explicit **Take back**. The pane retains its last available screen and shows
+Rust's command beside the action. Passive reveal leaves the other client in control.
+With no saved screen, the pane explains where the conversation is controlled.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
 its provider history. Ctrl-C interruption is recorded; interrupted Graph reviews,
@@ -353,9 +381,8 @@ conversation. Unscoped Sessions remain available through `lf session list --orph
 Missing planning or selection readings retain known Work and show the read error.
 **Task details** opens the description, comments and Run history.
 
-Opening a Task enters its retained panes. **Open conversation** explicitly reuses
-or prepares its primary through `lf`; it never starts the Workflow or takes over
-another client. Returning preserves panes, drafts and focus, including historical
+Opening a Task enters its retained panes and opens its conversation.
+Navigation never starts its Graph. Returning preserves panes, drafts and focus, including historical
 conversations. Explicit bare CLI Task links still support inspection without
 conversation acquisition.
 The compact header shows the current Workflow position and available actions;
@@ -511,20 +538,18 @@ text; an accepted write with unavailable readback retains the draft and explains
 what happened. Wave details expose Work outside the current plan. Failed and
 partial reads remain visible in the outline.
 
-Each terminal pane owns one native libghostty surface. A Session without a local
-terminal shows its shared Open or Move here action; opening and failure states
-remain in that pane. Sessions
-include interactive provider Sessions and Task human GraphSteps.
+Each terminal pane owns one native libghostty surface. Opening, failure and
+recovery actions stay in that pane. Sessions include interactive provider
+Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-Opening a Task or selecting a Session active in another client shows its conversation
-pane with **Move here**. Clicking it stops the other client and resumes the Session
-in that pane. Unsent text typed in the other client is lost; the pane warns before
-the click. Opening or selecting the Session leaves the other client running.
+**Take back** transfers input to this pane; the previous terminal reports the move.
+Opening the pane leaves the other client in control.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
-the view: the terminal and its provider client keep running and reopen as left.
+the view and releases its Desktop hold. Shared lifecycle protections determine
+how long the provider stays running; conversation history remains available.
 Session completion controls are retired; historical completion timestamps and
 feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
@@ -557,7 +582,7 @@ directory does not move it into another workspace.
 Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell; selection leaves both the
 conversation and shell running.
-External clients require explicit **Move here**. Terminals and their command titles survive Work list and detail
+External clients require explicit **Take back**. Terminals and their command titles survive Work list and detail
 navigation. Switching repositories focuses that repository’s window without replacing
 the origin’s panes or drafts. Native surfaces belong to
 that window and are never mounted twice.

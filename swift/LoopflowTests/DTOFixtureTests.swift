@@ -7,6 +7,13 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
+        let data = try loadFixtureData("session_open_intents.json")
+        let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)
+        #expect(intents == [.resume, .start, .reveal])
+        #expect(try JSONDecoder().decode([SessionOpenIntent].self, from: JSONEncoder().encode(intents)) == intents)
+    }
+
     @Test func waveRemovalPreviewDecodesEveryField() throws {
         let removal = try RegistryQuery.decode(
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
@@ -783,7 +790,7 @@ struct DTOFixtureTests {
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
-        #expect(session.actions.map(\.kind) == [.open, .moveHere])
+        #expect(session.actions.map(\.kind) == [.open, .moveHere, .reveal])
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -887,7 +894,7 @@ struct DTOFixtureTests {
         #expect(session.availability == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
-        #expect(session.actions.map(\.kind) == [.open])
+        #expect(session.actions.map(\.kind) == [.open, .reveal])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")

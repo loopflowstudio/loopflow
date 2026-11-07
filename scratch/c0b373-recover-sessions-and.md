@@ -148,6 +148,13 @@ Built (Nov 6, implement), choices in `scratch/questions.md` 19–26:
 ## Demo answers, second pass (Jack Heart, November 6, 2026)
 - Resume naming another login (questions 16): "b. When the named login differs from the one the running Codex process uses, restart it on the new login, as before, and say so in terminal 1. I guess". Next implement: `lf resume --account <login>` on a Session whose running Codex process uses a different login ends that process, relaunches on the named login, and prints in the old terminal where the conversation went (restore the behavior of the deleted `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went`). Claude keeps attaching, since it follows the switched login. Not built.
 
+Outstanding demo questions (bare login names, `pause` with no "disabled", Anthropic's terms, overage, open-ended waits), Jack Heart, November 7: "none of this concersn me". They stay as built.
+
+Next pass (November 7), in order:
+1. Failing integration tests, seen locally Nov 6 with and without the Keychain stand-in change: `context_launch_tests` (3, "Codex app-server disconnected before auth completed"), `session_cli_tests` (5–7), `session_launch_contract` (4), `transport_tests` (2–3). First establish which also fail on origin/main; fix every one this branch causes. CI skips these suites on #1828, so local runs are the check (empty cwd, isolated `HOME`, `CARGO_HOME` kept, `LF_*` unset, `< /dev/null`).
+2. `settings_launch_tests::command` (and any fixture spawning `lf` without one) sets its own `CODEX_HOME`, so a run with the real `HOME` cannot reach `~/.codex`. On Nov 6 such a run is the likely reason the active Codex login (manabot-eng) lost its only current credential.
+3. Build the resume decision above (Codex restart on a different named login).
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

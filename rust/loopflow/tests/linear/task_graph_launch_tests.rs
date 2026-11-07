@@ -2156,6 +2156,11 @@ fn task_ship_defers_to_a_live_ship() {
         "{}",
         String::from_utf8_lossy(&second.stdout)
     );
+    // The spelling `task.ship` runs, here and over SSH: its typed result.
+    let answered = task.run(&["--task", "INF-123", "ship", "--json"]);
+    assert!(answered.status.success(), "{answered:?}");
+    let answer: serde_json::Value = serde_json::from_slice(&answered.stdout).unwrap();
+    assert_eq!(answer["state"], "already_shipping");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));

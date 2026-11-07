@@ -2575,7 +2575,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             *json || cli.json,
         );
     }
-    if let Some(Commands::Ship { graph, reason, .. }) = &cli.command {
+    if let Some(Commands::Ship {
+        graph,
+        reason,
+        json,
+        ..
+    }) = &cli.command
+    {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
@@ -2586,6 +2592,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &issue,
             graph.as_deref(),
             reason.as_deref(),
+            *json,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

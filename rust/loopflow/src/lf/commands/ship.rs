@@ -25,13 +25,14 @@ pub fn run(
     issue: &str,
     graph: Option<&str>,
     reason: Option<&str>,
+    json: bool,
 ) -> Result<()> {
     let task = match ship_begin(issue, graph, reason)? {
         ShipStart::Begun(task) => task,
         ShipStart::AlreadyShipping { issue, process } => {
-            return announce(&TaskShip::AlreadyShipping { issue, process })
+            return announce(&TaskShip::AlreadyShipping { issue, process }, json)
         }
-        ShipStart::AtEnd { issue } => return announce(&TaskShip::AtEnd { issue }),
+        ShipStart::AtEnd { issue } => return announce(&TaskShip::AtEnd { issue }, json),
     };
     let issue = task.identifier.clone();
     let process = crate::journal::current_lf_process_id()
@@ -45,7 +46,7 @@ pub fn run(
         process,
         log: log.as_ref().map(|log| log.path.clone()),
     };
-    announce(&shipping)?;
+    announce(&shipping, json)?;
     if let Some(log) = &log {
         super::graph::release_launcher(&log.file)?;
     }
@@ -126,9 +127,11 @@ fn halt(issue: &str, step: &ShipStep) -> Result<()> {
 }
 
 /// Report what this ship set going to its launcher and print it.
-fn announce(shipping: &TaskShip) -> Result<()> {
+fn announce(shipping: &TaskShip, json: bool) -> Result<()> {
     crate::engine::launch::report(Ok(shipping));
-    if let Some(text) = shipping.render() {
+    if json {
+        println!("{}", serde_json::to_string(shipping)?);
+    } else if let Some(text) = shipping.render() {
         println!("{text}");
     }
     Ok(())

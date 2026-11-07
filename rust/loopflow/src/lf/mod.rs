@@ -490,6 +490,9 @@ pub enum Commands {
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
+        /// Print what it set going as JSON, as `task.ship` answers
+        #[arg(long = "json", id = "ship_json")]
+        json: bool,
     },
     /// Inspect and continue Sessions
     Session {

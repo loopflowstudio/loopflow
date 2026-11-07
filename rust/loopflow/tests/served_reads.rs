@@ -39,6 +39,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     repo.create_file("edit.txt", "working\n");
     let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
     let task_diff = |path: Option<&str>, draft: Option<&str>| Read::TaskDiff {
+        head: None,
         issue: "INF-123".into(),
         path: path.map(str::to_owned),
         base: "parent".into(),
@@ -172,6 +173,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 sessions(true),
                 task_pane(),
                 Read::TaskChanges {
+                    head: None,
                     issue: "INF-123".into(),
                     base: "parent".into(),
                 },

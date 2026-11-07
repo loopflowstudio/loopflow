@@ -272,6 +272,13 @@ No open product choice: the wire shape, IDs and stored data are unchanged by
 either rename. Both done (2026-11-06): `Store`/`SqliteStore::lf_process`,
 `ProcessOutcomeFilter`, `ProcessWorkFilter`.
 
+Second pass (2026-11-06, HEAD `c0f923bc1`): no `LfProcess{Cursor,Filter,Page,
+OutcomeFilter,WorkFilter}`, `ProcessKind` or cross-ID `From` remains in Rust or
+Swift. Swift mirrors `AgentProcess` / `ProcessEntry` / `ProcessPage`, and
+`reference-models.md` names both ID types. The LOO-443 paragraph in
+`reference-cutover.md` covers the whole provider-identity cutover, so this Task
+leaves it in place. Nothing to change, no open product choice.
+
 ## Remaining
 
 - After #1813 lands: rebase, regenerate `tests/fixtures/dto/server_schema.json`,
@@ -283,6 +290,7 @@ either rename. Both done (2026-11-06): `Store`/`SqliteStore::lf_process`,
 - compress `lf_evidence` rename + `agent_evidence` dedupe (2026-11-06): `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- journal:: store::sqlite::processes:: harness::agent_process:: harness::task_updates::` 72/72.
 - implement renames (2026-11-06): `cargo check -p loopflow --all-targets` clean; `cargo test -p loopflow --lib store::sqlite::processes::` 18/18; `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
 - realign (2026-11-06, after merging main `12d897b6b`): `cargo check -p loopflow --all-targets` — clean; Done-when greps still empty.
+- realign (2026-11-06, HEAD `c0f923bc1`, renames in tree; #1813 still OPEN): `cargo check -p loopflow --all-targets` clean; `cargo test -p loopflow --lib store::sqlite::processes::` 18/18; `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
 
 - compress: `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- store::sqlite::processes:: lf::commands::top:: ops::task_execution:: harness::agent_process:: lf::commands::doctor:: store::sqlite::retention::` — 50 pass; `swift build --target Loopflow` — builds. `TaskWorkView` (LoopflowMac): gate.
 

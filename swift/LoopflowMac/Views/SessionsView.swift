@@ -159,7 +159,7 @@ final class SessionsWorkspace {
     var title: String
     var location: WorkspaceIdentity?
     var presentation = WorkNavigation.WorkspacePresentation()
-    let localMachineId: String?
+    var localMachineId: String?
 
     /// A Task's first conversation brings its Files into view once.
     func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
@@ -180,9 +180,13 @@ final class SessionsWorkspace {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
         let (location, execution) = try shellLocation()
-        let argv = try command.map { try shellCommand($0, at: location, execution: execution) }
-            ?? shellCommand(at: location, execution: execution)
-        return multiplexer.newShell(command: argv, location: location, execution: execution, focus: focus)
+        if location.machineId != localMachineId {
+            guard let execution, execution.machineID == location.machineId,
+                  case .recorded(_, let checkout) = execution.location, checkout == location.worktree else {
+                throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
+            }
+        }
+        return multiplexer.newShell(command: command ?? [], location: location, execution: execution, focus: focus)
     }
 
     func toggleShell() throws {
@@ -215,13 +219,25 @@ final class SessionsWorkspace {
     }
 
     /// ⌘W closes the named tab, else the selected one; a session pane, or one
-    /// without tabs, hides. The closed tab keeps its shell or page for Undo until
-    /// another close replaces it.
+    /// without tabs, hides. Shell Close ends execution; Undo restores its identity
+    /// and history, never a new process.
     func closePane(_ paneId: String, tab: String? = nil) {
         guard let pane = multiplexer.layout.pane(for: paneId) else { return }
         let id = tab ?? pane.content.selectedTabID
         let replaced: ClosedOccurrence?
-        if case .shell(let tabs, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
+        if case .shell(let tabs, _) = pane.content, let id, let shell = tabs.first(where: { $0.id == id }) {
+            if shell.location != nil {
+                do {
+                    let argv = try shellCommand(shell)
+                    Task { [weak self] in
+                        do {
+                            _ = try await LocalWaveAgentLauncher.queryLf(Array(argv.dropFirst()) + ["--close"], cwd: nil)
+                        } catch { self?.conversationError = error.localizedDescription }
+                    }
+                } catch { conversationError = error.localizedDescription }
+            }
+            disconnectedShells.insert(id)
+            if let terminal = shell.terminal { surfaces.release(terminal) }
             replaced = multiplexer.closeShell(id)
         } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeBrowserTab(id)
@@ -252,25 +268,58 @@ final class SessionsWorkspace {
         return (location, execution)
     }
 
-    /// A script's command runs in the shell's login shell at the recorded location.
-    private func shellCommand(_ command: [String], at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
-        guard identity.machineId == localMachineId else {
-            throw RegistryQueryError("Commands run in local Task shells; this Task is on another Machine. No shell was opened.")
-        }
-        return command
+    /// Both local and remote shells are owned on their recorded Machine.
+    private func shellCommand(_ tab: ShellTab) throws -> [String] {
+        guard let identity = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
+        let observed = tab.execution ?? multiplexer.layout.allPanes.first { $0.content.location == identity }?.executionLocation
+        let task: String
+        if let observed, observed.machineID == identity.machineId,
+           case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
+            task = recorded
+        } else { task = key.id }
+        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
+         "--repository", key.repository, "desktop", "shell", task,
+         "--checkout", identity.worktree, "--id", tab.id]
     }
 
-    private func shellCommand(at identity: WorkspaceIdentity, execution: TaskLocationObservation?) throws -> [String] {
-        if identity.machineId == localMachineId { return [] }
-        guard let location = execution, location.machineID == identity.machineId,
-              case .recorded(let task, let checkout) = location.location,
-              checkout == identity.worktree else {
-            throw RegistryQueryError("Reopen the remote Task before adding a shell; no local shell was opened.")
+    func shellAttachment(_ tab: ShellTab) throws -> [String] {
+        var argv = try shellCommand(tab)
+        if let initial = tab.command {
+            argv += ["--create", "--bootstrap", try desktopShellBootstrap()]
+            if !initial.isEmpty { argv += ["--"] + initial }
         }
-        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", location.machineID,
-            "--repository", location.repositoryID, "task", "shell", task,
-            "--checkout", identity.worktree]
+        return argv
     }
+
+    func reconnectShell(_ tab: ShellTab) {
+        guard let terminal = tab.terminal else { return }
+        surfaces.release(terminal)
+        disconnectedShells.remove(tab.id)
+    }
+
+    // Exiting an attachment does not establish that its remote execution ended.
+    var disconnectedShells: Set<String> = []
+    var shellScreens: [String: String] = [:]
+
+    /// Whether this Task's terminals are shown. An open LF viewer retains its
+    /// Task checkout, so departure ends this Work's viewers rather than keeping
+    /// them resident; shell and agent execution continue on their Machine.
+    private(set) var presented = false
+
+    func present(_ shown: Bool) {
+        guard key.kind == .task, presented != shown else { return }
+        presented = shown
+        if !shown { detachTerminals() }
+    }
+
+    private func detachTerminals() {
+        for pane in multiplexer.layout.allPanes {
+            if case .shell(let tabs, _) = pane.content {
+                for tab in tabs { if let terminal = tab.terminal { surfaces.release(terminal) } }
+            } else if let terminal = pane.terminal { surfaces.release(terminal) }
+        }
+    }
+
     let multiplexer: MultiplexerStore
     /// One flag per pane strip, read only by that strip's Close control, so a
     /// crossing never re-renders another pane. Lookup itself is unobserved.
@@ -378,8 +427,9 @@ final class SessionsWorkspace {
                 guard let terminal = notification.object as? TerminalIdentity,
                       case .shell(let tabId, _) = terminal else { return }
                 MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.multiplexer.removeExitedShell(tabId, machineId: terminal.machineId)
+                    guard let self, self.multiplexer.shell(tabId)?.terminal == terminal else { return }
+                    self.disconnectedShells.insert(tabId)
+                    if let output = notification.userInfo?["output"] as? String { self.shellScreens[tabId] = output }
                 }
             }
     }
@@ -407,17 +457,28 @@ final class SessionsWorkspaceRegistry {
     }
 
     func refreshMachine(query: RegistryQuery) async {
-        do { localMachineId = try await query.localMachineId(); machineError = nil }
+        do {
+            localMachineId = try await query.localMachineId()
+            for workspace in workspaces.values { workspace.localMachineId = localMachineId }
+            machineError = nil
+        }
         catch { machineError = error.localizedDescription }
     }
 
     func clearPresentation() {
-        surfaces.clearFocus()
+        closePresentation()
         openWork = []
         selectedWork = nil
     }
 
+    /// Closing the window ends its terminal viewers; Work and history remain.
+    func closePresentation() {
+        for workspace in workspaces.values { workspace.present(false) }
+        surfaces.clearFocus()
+    }
+
     func present(open: [WorkWorkspaceKey]) {
+        for workspace in workspaces.values where !open.contains(workspace.key) { workspace.present(false) }
         openWork = open
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
@@ -446,6 +507,7 @@ final class SessionsWorkspaceRegistry {
         guard openWork.contains(key) else { return }
         if selectedWork != key { surfaces.clearFocus() }
         selectedWork = key
+        for workspace in workspaces.values { workspace.present(workspace.key == key) }
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {

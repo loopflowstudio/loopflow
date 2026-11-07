@@ -704,10 +704,10 @@ fn print_task_snapshot(
         for process in &snapshot.work.processes {
             println!(
                 "  Process: {}  {}  {}{}",
-                process.id,
-                process.command.as_deref().unwrap_or("unknown command"),
-                process.outcome.as_deref().unwrap_or("unknown"),
-                log(process.id.as_str()),
+                process.id(),
+                process.command().unwrap_or("unknown command"),
+                process.outcome().unwrap_or("unknown"),
+                log(process.id()),
             );
         }
         if let Some(project) = &snapshot.project_id {
@@ -1046,21 +1046,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Shell { .. }
+        TaskCommand::Retire { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
-            unreachable!("location reads precede repository commands")
+            unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
             issue,
-            retry_creation,
             retry_updates,
         } => {
-            println!(
-                "{}",
-                loopflow::ops::task::task_sync(issue, *retry_creation, *retry_updates)?
-            );
+            println!("{}", loopflow::ops::task::task_sync(issue, *retry_updates)?);
             Ok(())
         }
         TaskCommand::List {
@@ -1596,6 +1592,15 @@ fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
     // While relaying it opens no store or command tree: socket in, terminal out.
     let mut raw_args: Vec<String> = std::env::args().collect();
+    if raw_args
+        .get(1..4)
+        .is_some_and(|args| args == ["session", "attach", "--"])
+    {
+        journal::mark_effect_free_read();
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        return loopflow::transport::relay_over(&raw_args[4..]);
+    }
     if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
@@ -1926,12 +1931,18 @@ fn run() -> anyhow::Result<()> {
     }
     match &cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Shell { issue, checkout },
+            cmd: TaskCommand::Retire { issue },
+        }) => {
+            journal::admit_process(&std::env::current_dir()?, &args);
+            return loopflow::ops::task::retirement::run(issue.as_deref()).map_err(Into::into);
+        }
+        Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(issue, checkout);
+            return loopflow::desktop::shells::run(shell);
         }
         Some(Commands::Task {
             cmd:

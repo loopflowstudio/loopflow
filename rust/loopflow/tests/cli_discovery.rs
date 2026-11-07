@@ -546,6 +546,26 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
+fn help_skips_a_provider_named_before_its_subcommand() {
+    let normalized =
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
+        ["lf", "ops", "account", "codex", "use", "a@example.com"]
+    );
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "--help"]),
+        ["lf", "help", "ops", "account", "use"]
+    );
+    let tree = loopflow::lf::navigation::command_tree();
+    let path = ["account", "codex", "use"].map(String::from);
+    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &path).unwrap();
+    assert_eq!(canonical, ["ops", "account", "use"]);
+    let unknown = ["account", "codex", "nosuch"].map(String::from);
+    assert!(loopflow::lf::navigation::resolve_path(&tree, &unknown).is_err());
+}
+
+#[test]
 fn help_preserves_location_without_promoting_query_filters() {
     for (args, task) in [
         (
@@ -1232,6 +1252,33 @@ fn portable_help_describes_exact_kind_selection() {
     assert!(help(&["help", "team-check"]).contains("team-check — graph"));
     assert!(help(&["help", "skill", "team-check"])
         .contains("Untyped lookup selects the same-named graph"));
+}
+
+#[test]
+fn structured_help_describes_desktop_shell_as_private_runtime() {
+    use loopflow::lf::navigation::describe_command;
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "desktop", "shell", "--json"],
+    ));
+    let runtime: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(runtime["definition"]["command"], "lf desktop shell");
+    assert_eq!(
+        runtime["definition"].get("result_schema"),
+        Some(&serde_json::Value::Null)
+    );
+    assert!(!home.path().join(".lf").exists());
+    for recursive in [false, true] {
+        let desktop = describe_command(&["desktop".into()], recursive).unwrap();
+        assert!(!desktop["definition"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["command"] == "lf desktop shell"));
+    }
 }
 
 #[test]

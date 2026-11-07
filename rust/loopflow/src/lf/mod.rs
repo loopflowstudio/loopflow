@@ -732,6 +732,12 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    #[command(hide = true)]
+    Shell {
+        #[command(flatten)]
+        args: crate::desktop::shells::ShellArgs,
+    },
     /// Show a Work selection, or derive a passive plan for external hosts
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
@@ -1135,6 +1141,7 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
+            Self::Retire { .. } => true,
             Self::Comment { message, .. } => message.is_some(),
             Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
@@ -1145,7 +1152,6 @@ impl TaskCommand {
             | Self::Create { .. }
             | Self::Claim { .. }
             | Self::Unassign { .. }
-            | Self::Shell { .. }
             | Self::Save { .. }
             | Self::Abandon { .. }
             | Self::Delete { .. }
@@ -1215,6 +1221,7 @@ impl SkillCommand {
 impl DesktopCommand {
     pub fn changes_work(&self) -> bool {
         match self {
+            Self::Shell { .. } => true,
             Self::View { .. }
             | Self::Plans { .. }
             | Self::Plan { .. }
@@ -1996,9 +2003,6 @@ pub enum TaskCommand {
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
-        /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
-        #[arg(long)]
-        retry_creation: bool,
         /// Retry uncertain saved field/state updates after observing current Linear values
         #[arg(long)]
         retry_updates: bool,
@@ -2132,12 +2136,9 @@ until `lf ship`."
         #[arg(long)]
         json: bool,
     },
-    /// Open a shell in an existing Task checkout, without preparing work
-    Shell {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-    },
+    /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
+    #[command(hide = true)]
+    Retire { issue: Option<String> },
     /// Stream invalidations from an existing Task checkout (JSON lines)
     WatchFiles {
         issue: String,
@@ -2291,12 +2292,12 @@ impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2319,12 +2320,12 @@ impl TaskCommand {
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -3120,6 +3121,34 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
+        assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
+        let cli = Cli::try_parse_from([
+            "lf",
+            "desktop",
+            "shell",
+            "task-id",
+            "--checkout",
+            "/checkout",
+            "--id",
+            "shell-id",
+            "--create",
+        ])
+        .unwrap();
+        let Some(Commands::Desktop { cmd }) = cli.command else {
+            panic!("Desktop runtime command");
+        };
+        assert!(crate::lf::commands::desktop::runs_without_desktop(&cmd));
+        assert!(cmd.changes_work());
+        assert!(!cmd.is_read());
+        let mut command = Cli::command();
+        let task = command.find_subcommand_mut("task").unwrap();
+        assert!(task.find_subcommand("shell").is_none());
+        let desktop = command.find_subcommand_mut("desktop").unwrap();
+        assert!(!desktop.render_help().to_string().contains("shell runtime"));
+    }
 
     #[test]
     fn only_changes_to_work_record_a_process() {

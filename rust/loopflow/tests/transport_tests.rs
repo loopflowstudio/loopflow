@@ -87,7 +87,11 @@ impl Fixture {
             .read_line(&mut line)
             .unwrap();
         std::thread::spawn(move || child.wait());
-        assert!(!line.trim().is_empty(), "owner exited before acknowledging");
+        assert!(
+            !line.trim().is_empty(),
+            "owner exited before acknowledging: {}",
+            std::fs::read_to_string(logs.join("transport.log")).unwrap_or_default()
+        );
         line.trim().to_owned()
     }
     fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
@@ -606,6 +610,73 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
             fixture.home.path().display()
         )
     );
+}
+
+/// The owner's recorded checkout hold, as Task cleanup reads it.
+fn viewer_hold(fixture: &Fixture, owner: &str) -> Option<String> {
+    fixture
+        .sql()
+        .query_row(
+            "SELECT viewer_hold FROM processes WHERE id=?1",
+            [owner],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+#[track_caller]
+fn wait_hold(fixture: &Fixture, owner: &str, expected: Option<&str>) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while viewer_hold(fixture, owner).as_deref() != expected {
+        assert!(
+            Instant::now() < deadline,
+            "viewer hold stayed {:?}, expected {expected:?}",
+            viewer_hold(fixture, owner)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    assert_eq!(viewer_hold(&fixture, &owner), None);
+    // A controlling and a passive (hidden, unfocused) viewer both hold.
+    let mut controller = fixture.viewer(&owner, true);
+    let passive = fixture.viewer(&owner, false);
+    wait_hold(&fixture, &owner, Some("viewed"));
+    controller.request(json!({"kind":"leave"}));
+    drop(controller);
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    // A dropped connection starts absence immediately; replay grace is independent.
+    // Resuming the same stream restores viewing without replaying input.
+    passive.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    wait_hold(&fixture, &owner, Some("absent"));
+    let mut resumed = fixture.connect(&owner);
+    resumed.request(json!({"kind":"resume","reconnect":passive.reconnect,
+        "received":passive.received,"control":false,"own":null,"rows":24,"cols":80}));
+    assert_eq!(resumed.until_reply()["kind"], "attached");
+    drop(passive);
+    resumed.request(json!({"kind":"leave"}));
+    drop(resumed);
+    wait_hold(&fixture, &owner, Some("absent"));
+    // A viewer whose connection is lost may still be running elsewhere.
+    let remote = fixture.viewer(&owner, false);
+    wait_hold(&fixture, &owner, Some("viewed"));
+    remote.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(remote);
+    let mut finisher = fixture.viewer(&owner, true);
+    finisher.input("done\n");
+    finisher.finish();
+    assert_eq!(fixture.wait_file("answer"), "done");
+    // Ending does not create an indefinite hold for the lost viewer.
+    wait_hold(&fixture, &owner, Some("absent"));
 }
 
 #[test]
@@ -1142,7 +1213,8 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         let output = wait_for_viewer(viewer, Duration::from_secs(8));
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("stopped reading"), "{error}");
+        assert!(error.contains("stopped reading requests"), "{error}");
+        assert!(error.contains("later input was not delivered"), "{error}");
         assert!(!error.contains("os error"), "{error}");
         return;
     }
@@ -4104,4 +4176,621 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
         "{} bytes on the wire",
         viewer.wire
     );
+}
+
+struct ShellOwnerGuard<'a>(&'a Fixture, String);
+
+#[test]
+fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
+    let fixture = Fixture::new();
+    let task = "task_5e55105e000040008000000000000006";
+    fixture.shell_task(task);
+    let base = [
+        "desktop",
+        "shell",
+        task,
+        "--checkout",
+        fixture.repo.path().to_str().unwrap(),
+        "--id",
+        "desktop-shell",
+    ];
+    let mut launch = fixture
+        .command(&base)
+        .args([
+            "--create",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready > \"$HOME/ready\"",
+        ])
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    fixture.wait_file("ready");
+    let shell = fixture.shell_owner("desktop-shell");
+    let _shell_guard = ShellOwnerGuard(&fixture, shell.clone());
+    let mut terminal = fixture.viewer(&shell, true);
+    launch.wait().unwrap();
+    terminal.input("export RETAINED=still-here; sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
+    let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
+
+    // This independent Session can be viewed passively, without controlling
+    // either execution. Its viewers, rather than shell viewers, retain the Task.
+    let session_owner = fixture.start(&["/bin/sleep", "60"]);
+    let _session_guard = ShellOwnerGuard(&fixture, session_owner.clone());
+    let session = fixture.session(&session_owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET task_id=?1,interactive=1 WHERE id=?2",
+            rusqlite::params![task, session],
+        )
+        .unwrap();
+    fixture
+        .sql()
+        .execute(
+            "UPDATE tasks SET planning_completed=1,planning_completed_at='completion' WHERE id=?1",
+            [task],
+        )
+        .unwrap();
+    fixture
+        .sql()
+        .execute(
+            "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
+        SELECT id,planning_completed_at,worktree,branch,0,'waiting' FROM tasks WHERE id=?1",
+            [task],
+        )
+        .unwrap();
+
+    for brief_return in [false, true] {
+        // Hold the consumer while the sweep's queued close and the Session's
+        // return are recorded, then let the actual owner judge the request.
+        let pid = fixture
+            .sql()
+            .query_row("SELECT pid FROM processes WHERE id=?1", [&shell], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // SAFETY: pid belongs to this fixture's shell owner and the guard resumes it.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        let paused = PausedOwner(pid);
+        fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;
+            UPDATE desktop_shells SET close_requested=2;").unwrap();
+        let mut passive = fixture.viewer(&session_owner, false);
+        wait_hold(&fixture, &session_owner, Some("viewed"));
+        let state: (String, Option<i64>, Option<i64>, i64, i64) = fixture
+            .sql()
+            .query_row(
+                "SELECT h.phase,h.due_at,h.retry_at,h.failures,s.close_requested
+             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("waiting".into(), None, None, 0, 0));
+        if brief_return {
+            passive.request(json!({"kind":"leave"}));
+            wait_hold(&fixture, &session_owner, Some("absent"));
+        }
+        drop(paused);
+        // Allow the owner policy to consume any queued candidate. No sweep or
+        // retirement reconciliation occurs between return and these assertions.
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(fixture.running(&shell));
+        terminal.input("printf 'value:%s\\n' \"$RETAINED\"\r");
+        until_out(&mut terminal, "value:still-here");
+        let job_state = Command::new("ps")
+            .args(["-p", &job.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        assert!(job_state.status.success());
+        assert!(!String::from_utf8_lossy(&job_state.stdout)
+            .trim()
+            .starts_with('Z'));
+        if !brief_return {
+            passive.request(json!({"kind":"leave"}));
+            wait_hold(&fixture, &session_owner, Some("absent"));
+        }
+    }
+    // An explicit Close still ends this shell with a passive Task viewer present.
+    let _passive = fixture.viewer(&session_owner, false);
+    wait_hold(&fixture, &session_owner, Some("viewed"));
+    assert!(fixture
+        .command(&base)
+        .arg("--close")
+        .output()
+        .unwrap()
+        .status
+        .success());
+    fixture.ends(&shell);
+    let settled: bool = fixture
+        .sql()
+        .query_row(
+            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
+            [&shell],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(settled);
+}
+
+impl Fixture {
+    fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
+        let output = self.command(&["machine", "id"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
+                .unwrap();
+        let repo = store
+            .ensure_repository(self.repo.path().to_str().unwrap())
+            .unwrap();
+        let machine = store.local_machine().unwrap().id;
+        self.sql().execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,checkout_machine_id,branch)
+             VALUES(?1,?2,'SHELL-1',1,?3,?4,'task')",
+            rusqlite::params![task,repo.as_str(),self.repo.path().to_str().unwrap(),machine.as_str()],
+        ).unwrap();
+        machine
+    }
+
+    fn shell_owner(&self, id: &str) -> String {
+        self.sql()
+            .query_row("SELECT owner FROM desktop_shells WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
+    fn shell_count(&self) -> u32 {
+        self.sql()
+            .query_row("SELECT count(*) FROM desktop_shells", [], |r| r.get(0))
+            .unwrap()
+    }
+}
+
+impl Drop for ShellOwnerGuard<'_> {
+    fn drop(&mut self) {
+        if self.0.running(&self.1) {
+            self.0.stop(&self.1);
+        }
+    }
+}
+
+fn desktop_shell_bootstrap() -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../swift/LoopflowMac/GhosttyResources/share/ghostty");
+    let mut files = std::collections::BTreeMap::new();
+    for (destination, source) in [
+        (".zshenv", "task-zshenv"),
+        ("bash-env", "task-bash-env"),
+        (
+            "ghostty/shell-integration/zsh/.zshenv",
+            "shell-integration/zsh/.zshenv",
+        ),
+        (
+            "ghostty/shell-integration/zsh/ghostty-integration",
+            "shell-integration/zsh/ghostty-integration",
+        ),
+        (
+            "ghostty/shell-integration/bash/ghostty.bash",
+            "shell-integration/bash/ghostty.bash",
+        ),
+        (
+            "ghostty/shell-integration/bash/bash-preexec.sh",
+            "shell-integration/bash/bash-preexec.sh",
+        ),
+        (
+            "ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+            "shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+        ),
+    ] {
+        files.insert(
+            destination.to_owned(),
+            std::fs::read_to_string(root.join(source)).unwrap(),
+        );
+    }
+    serde_json::to_string(&json!({
+        "script": std::fs::read_to_string(root.join("task-shell.sh")).unwrap(),
+        "files": files,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
+    shell_reconnects_and_settles(false);
+    shell_reconnects_and_settles(true);
+}
+
+fn shell_reconnects_and_settles(integrated: bool) {
+    let fixture = Fixture::new();
+    let task = "task_5e55105e000040008000000000000005";
+    fixture.shell_task(task);
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 1s\n",
+    )
+    .unwrap();
+    let base = [
+        "desktop",
+        "shell",
+        task,
+        "--checkout",
+        fixture.repo.path().to_str().unwrap(),
+        "--id",
+        "desktop-shell",
+    ];
+    let mut command = fixture.command(&base);
+    command.arg("--create");
+    if integrated {
+        command.args(["--bootstrap", &desktop_shell_bootstrap()]);
+    }
+    let mut launch = command
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s\\n' \"$1\" >> \"$HOME/launches\"",
+            "initial",
+            "$(literal); spaced argument",
+        ])
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert_eq!(
+        fixture.wait_file("launches").trim(),
+        "$(literal); spaced argument"
+    );
+    let owner = fixture.shell_owner("desktop-shell");
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut viewer = fixture.viewer(&owner, true);
+    launch.wait().unwrap();
+    viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
+    until_out(&mut viewer, "state-ready");
+    viewer.input(
+        "printf 'integration:%s\\n' \"${GHOSTTY_RESOURCES_DIR-unset}\" > \"$HOME/integration\"\r",
+    );
+    let integration = fixture.wait_file("integration");
+    viewer.input("command -v lf > \"$HOME/lf-path\"; printf '%s\\n' \"$LF_TERMINAL_ID\" > \"$HOME/terminal-id\"\r");
+    assert_eq!(
+        fixture.wait_file("lf-path").trim(),
+        env!("CARGO_BIN_EXE_lf")
+    );
+    assert_eq!(fixture.wait_file("terminal-id").trim(), "desktop-shell");
+    if integrated {
+        assert!(integration.contains("shell-resources"), "{integration}");
+    } else {
+        assert_eq!(integration.trim(), "integration:unset");
+        assert!(!fixture.home.path().join("shell-resources").exists());
+    }
+    let job = fixture
+        .wait_file("job")
+        .trim()
+        .strip_prefix("job:")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
+    drop(viewer);
+    // Simulate a completed nested conversation; shell purpose stays immutable.
+    let session = fixture.session(&owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1,completed_at=unixepoch() WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(fixture.running(&owner));
+    let mut retry = fixture
+        .command(&base)
+        .arg("--create")
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    fixture.wait_controlled(&owner);
+    let mut returning = fixture.viewer(&owner, true);
+    retry.wait().unwrap();
+    returning.input("printf 'value:%s\\n' \"$RETAINED\"\r");
+    until_out(&mut returning, "value:still-here");
+    assert_eq!(fixture.wait_file("launches").lines().count(), 1);
+    let close = fixture.command(&base).arg("--close").output().unwrap();
+    assert!(
+        close.status.success(),
+        "{}",
+        String::from_utf8_lossy(&close.stderr)
+    );
+    fixture.ends(&owner);
+    let settled: bool = fixture
+        .sql()
+        .query_row(
+            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
+            [&owner],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        settled,
+        "shell job settlement was not recorded: {:?}",
+        std::fs::read_to_string(fixture.home.path().join("logs/transport.log"))
+    );
+    // Zombies cannot execute or retain terminal descriptors.
+    let output = Command::new("ps")
+        .args(["-p", &job.to_string(), "-o", "stat="])
+        .output()
+        .unwrap();
+    assert!(
+        output.stdout.is_empty()
+            || String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .starts_with('Z')
+    );
+    // History remains readable after retirement removed the recorded directory.
+    let checkout = fixture.repo.path().to_path_buf();
+    let retired = checkout.with_extension("retired");
+    std::fs::rename(&checkout, &retired).unwrap();
+    let ended = fixture
+        .command(&base)
+        .current_dir(fixture.home.path())
+        .arg("--create")
+        .output()
+        .unwrap();
+    std::fs::rename(&retired, &checkout).unwrap();
+    assert!(!ended.status.success());
+    assert!(String::from_utf8_lossy(&ended.stderr).contains("Shell ended"));
+    assert_eq!(fixture.wait_file("launches").lines().count(), 1);
+    assert!(!fixture.endpoint(&owner).exists());
+}
+
+#[test]
+fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
+    let fixture = Fixture::new();
+    let task = "task_5e55105e000040008000000000000006";
+    fixture.shell_task(task);
+    for cycle in 0..20 {
+        let id = format!("cycle-{cycle}");
+        let base = [
+            "desktop",
+            "shell",
+            task,
+            "--checkout",
+            fixture.repo.path().to_str().unwrap(),
+            "--id",
+            &id,
+        ];
+        let ready = fixture.home.path().join("cycle-ready");
+        let _ = std::fs::remove_file(&ready);
+        let _ = std::fs::remove_file(fixture.home.path().join("shell-pid"));
+        let mut launch = fixture
+            .command(&base)
+            .args([
+                "--create",
+                "--",
+                "/bin/sh",
+                "-c",
+                "printf ready > \"$HOME/cycle-ready\"",
+            ])
+            .env("SHELL", "/bin/bash")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        fixture.wait_file("cycle-ready");
+        let owner = fixture.shell_owner(&id);
+        let _stop = ShellOwnerGuard(&fixture, owner.clone());
+        let mut viewer = fixture.viewer(&owner, true);
+        launch.wait().unwrap();
+        viewer
+            .input("sleep 30 & printf '%s\\n' $$ > \"$HOME/shell-pid\"; printf 'cycle-ready\\n'\r");
+        until_out(&mut viewer, "cycle-ready");
+        let pid = fixture
+            .wait_file("shell-pid")
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        drop(viewer);
+        assert!(fixture
+            .command(&base)
+            .arg("--close")
+            .output()
+            .unwrap()
+            .status
+            .success());
+        fixture.ends(&owner);
+        assert!(!fixture.endpoint(&owner).exists(), "cycle {cycle}");
+        let inventory = Command::new("ps")
+            .args(["-axo", "pid=,stat="])
+            .output()
+            .unwrap();
+        assert!(inventory.status.success());
+        for row in String::from_utf8_lossy(&inventory.stdout).lines() {
+            let mut fields = row.split_whitespace();
+            let process = fields.next().unwrap().parse::<i32>().unwrap();
+            let state = fields.next().unwrap();
+            // SAFETY: getsid only inspects the enumerated PID; a raced exit is absent.
+            let session = unsafe { libc::getsid(process) };
+            assert!(
+                session != pid as i32 || state.starts_with('Z'),
+                "cycle {cycle} retained PTY process {process}"
+            );
+        }
+        let settled: bool = fixture
+            .sql()
+            .query_row(
+                "SELECT jobs_settled FROM desktop_shells WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(settled, "cycle {cycle}");
+    }
+    let (total, settled): (u32, u32) = fixture
+        .sql()
+        .query_row(
+            "SELECT count(*),sum(jobs_settled) FROM desktop_shells WHERE task_id=?1",
+            [task],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((total, settled), (20, 20));
+}
+
+#[path = "transport/ssh_shells.rs"]
+mod ssh_shells;
+
+#[test]
+fn viewer_stream_over_pipes_preserves_terminal_input_size_and_exit() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r line; stty size; printf 'received:<%s>\\n' \"$line\"; exit 7",
+    ]);
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut child = fixture
+        .command(&[
+            "session",
+            "attach",
+            "--",
+            "/usr/bin/env",
+            "LF_VIEWER_STREAM=1",
+            env!("CARGO_BIN_EXE_lf"),
+            "session",
+            "attach",
+            &owner,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"typed-value\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(7), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("received:<typed-value>"), "{text}");
+    assert!(text.contains("24 80"), "initial terminal size: {text}");
+}
+
+#[test]
+fn viewer_stream_heartbeat_expires_only_the_silent_viewer_while_output_continues() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "while :; do printf 'tick\\n'; sleep 0.1; done",
+    ]);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut lost = fixture.viewer(&owner, true);
+    let mut passive = fixture.viewer(&owner, false);
+    let started = Instant::now();
+    let mut next_heartbeat = started;
+    // Keep reading the silent endpoint: only missing heartbeats can end it.
+    while lost.next().is_some() {
+        assert!(started.elapsed() < Duration::from_secs(35));
+        if Instant::now() >= next_heartbeat {
+            passive.request(json!({"kind":"controlled"}));
+            next_heartbeat = Instant::now() + Duration::from_secs(5);
+        }
+    }
+    assert!(started.elapsed() >= Duration::from_secs(29));
+    assert!(fixture.running(&owner));
+    assert_eq!(viewer_hold(&fixture, &owner).as_deref(), Some("viewed"));
+    // The expired controller cannot prevent a new connection claiming input.
+    let mut replacement = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":true,
+        "replace":false,"own":"take","rows":31,"cols":97}),
+    );
+    assert!(replacement.token.is_some());
+    replacement.request(json!({"kind":"leave"}));
+    passive.request(json!({"kind":"leave"}));
+    wait_hold(&fixture, &owner, Some("absent"));
+    // Replay grace and the unchanged execution still permit a reconnect.
+    let mut resumed = fixture.connect(&owner);
+    resumed.request(json!({"kind":"resume","reconnect":lost.reconnect,
+        "received":lost.received,"control":true,"own":"take","rows":24,"cols":80}));
+    assert_eq!(resumed.until_reply()["kind"], "attached");
+    wait_hold(&fixture, &owner, Some("viewed"));
+    resumed.request(json!({"kind":"leave"}));
+    wait_hold(&fixture, &owner, Some("absent"));
+}
+
+#[test]
+fn viewer_stream_backpressure_releases_bridge_and_owner_keeps_draining() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "read -r start; head -c 16777216 /dev/zero"],
+    ));
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut child = fixture
+        .command(&["session", "attach", &owner])
+        .env("LF_VIEWER_STREAM", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(&frame(REQUEST, br#"{"id":1,"kind":"attach","control":true,"replace":false,"own":null,"rows":24,"cols":80}"#)).unwrap();
+    input.write_all(&frame(INPUT, b"go\n")).unwrap();
+    // Keep stdin open and leave stdout completely unread until the bridge exits.
+    // The owner must keep draining execution, then release this stalled viewer.
+    let output = wait_for_viewer(child, Duration::from_secs(15));
+    assert!(!output.status.success());
+    let (tag, payload) = read_frame(&mut std::io::Cursor::new(&output.stdout)).unwrap();
+    assert_eq!(tag, REPLY);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).unwrap()["kind"],
+        "attached"
+    );
+    fixture.ends(&owner);
+}
+
+#[test]
+fn viewer_stream_waits_for_destination_resolution_before_attachment() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "read -r line; printf 'received:%s' \"$line\"",
+    ]);
+    let _session = fixture.session(&owner);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut child = fixture
+        .command(&[
+            "session",
+            "attach",
+            "--",
+            "/bin/sh",
+            "-c",
+            "sleep 6; exec \"$@\"",
+            "fixture",
+            "/usr/bin/env",
+            "LF_VIEWER_STREAM=1",
+            env!("CARGO_BIN_EXE_lf"),
+            "session",
+            "attach",
+            &owner,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(b"ready\n").unwrap();
+    let output = wait_for_viewer(child, Duration::from_secs(15));
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("received:ready"));
 }

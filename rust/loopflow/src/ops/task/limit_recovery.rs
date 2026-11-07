@@ -25,7 +25,7 @@ pub(crate) fn waiting_on_limit(
     let Some(step) = graph.latest() else {
         return Ok(None);
     };
-    if crate::journal::process_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
+    if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
     Ok(store

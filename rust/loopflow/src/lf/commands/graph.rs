@@ -82,7 +82,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
     };
     let parent = journal::current_lf_process_id()
-        .and_then(|id| store.sqlite.process(&id).ok().flatten())
+        .and_then(|id| store.sqlite.lf_process(&id).ok().flatten())
         .and_then(|process| process.parent_lf_process_id);
     anyhow::ensure!(
         parent.as_ref() == Some(&carrier.id),
@@ -482,7 +482,7 @@ fn execute(
                 .get_task(task)
                 .await?
                 .context("Graph Task disappeared")?;
-            crate::ops::task::cleanup_completed_task(&running.store, &task).await?;
+            crate::ops::task::retirement::schedule(&running.store, &task).await?;
         }
         Ok(outcome)
     })?)

@@ -15,7 +15,7 @@ use crate::ops::graph_process::{GraphProcess, GraphProcessStep};
 use crate::session::{GraphProcessSummary, GraphProcessSummaryState};
 use crate::store::{StoreError, StoreResult};
 
-use super::processes::{read_process, PROCESS_SELECT};
+use super::processes::{read_lf_process, PROCESS_SELECT};
 use super::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -39,7 +39,7 @@ pub(super) fn graphs_in(
         ))?
         .query_map(values, |row| {
             Ok((
-                read_process(row)?,
+                read_lf_process(row)?,
                 row.get::<_, String>("graph")?,
                 row.get::<_, String>("compiled")?,
             ))
@@ -60,7 +60,7 @@ pub(super) fn graphs_in(
         ))?
         .query_map([&ids], |row| {
             Ok((
-                read_process(row)?,
+                read_lf_process(row)?,
                 row.get::<_, String>("graph_lf_process_id")?,
                 row.get::<_, u32>("node")?,
                 row.get::<_, String>("iterations")?,
@@ -354,7 +354,7 @@ impl SqliteStore {
             return Ok(None);
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(graph) = graphs_in(&conn, "e.id=?1", &[&process.id])?.pop() else {
+        let Some(graph) = graphs_in(&conn, "e.id=?1", &[&process.id()])?.pop() else {
             return Ok(None);
         };
         let entry = entry_in(&conn, &graph)?;
@@ -631,8 +631,6 @@ mod tests {
             let process = crate::process::LfProcess {
                 id: crate::id::LfProcessId::new(),
                 pid: Some(pid),
-                kind: crate::process::ProcessKind::Lf,
-                agent_session_id: None,
                 os_started_at: None,
                 trace_id: crate::id::TraceId::new(),
                 parent_lf_process_id: parent.cloned(),

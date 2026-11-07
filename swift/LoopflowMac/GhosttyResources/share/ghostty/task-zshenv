@@ -1,0 +1,12 @@
+if [[ -o interactive ]]; then
+    _loopflow_prompt() {
+        precmd_functions=(${precmd_functions:#_loopflow_prompt})
+        if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
+        [[ $PROMPT == '%n@%m %1~ %# ' ]] || builtin return 0
+        PROMPT=$'\n%{\e[8m%}¶ %60<…<%~%<<%{\e[28m%}\n%F{5}❯%f '
+        zle_highlight=(${zle_highlight:#default:*} default:bold)
+    }
+    builtin typeset -ga precmd_functions zle_highlight
+    precmd_functions+=(_loopflow_prompt)
+fi
+builtin source -- "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv"

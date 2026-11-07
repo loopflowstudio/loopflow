@@ -133,7 +133,7 @@ struct TaskSessionLaunchProofTests {
         let terminal = registry.surfaces.view(for: try #require(shell.terminal))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)
         terminal.workingDirectory = repo
-        terminal.command = buildWorkspaceShellCommand(id: shell.id, argv: ["/bin/cat"], env: [:])
+        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
         let surface = try #require(terminal.surface)
         defer {

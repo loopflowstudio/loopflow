@@ -365,10 +365,12 @@ mod tests {
             json!({"id":intent.issue_id,"teamId":"original-team","projectId":"original-project",
             "stateId":"original-state","title":intent.title,"description":intent.notes,"dueDate":intent.due})
         );
-        let (attempted, _) = store
-            .planning_export_attempts(PlanningChanges::Task(&child.id))
-            .unwrap();
-        assert!(attempted);
+        assert!(
+            store
+                .planning_export_attempts(PlanningChanges::Task(&child.id))
+                .unwrap()
+                .creation
+        );
         let error: String = store
             .conn
             .lock()

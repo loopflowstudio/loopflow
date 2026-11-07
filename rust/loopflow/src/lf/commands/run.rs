@@ -110,7 +110,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
     let caller_graph = crate::journal::current_lf_process_id()
-        .map(|process| store.process(&process))
+        .map(|process| store.lf_process(&process))
         .transpose()?
         .flatten()
         .and_then(|process| process.parent_lf_process_id);

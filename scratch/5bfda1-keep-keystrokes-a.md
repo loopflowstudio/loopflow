@@ -168,4 +168,6 @@ Out: busy-timeout behavior of `lf resume` against a frozen owner.
   between the two. It is a Linux stress check (where CI saw the loss); the
   paused-owner case is the deterministic regression.
 - compress: `viewer_input_survives_its_disconnect` re-run after the `flush` reshape, macOS: pass.
-- Remaining: gate (`binary(transport_tests)`, fmt, clippy); Linux CI for both tests.
+- publish, macOS: `cargo fmt --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
+- publish, macOS: full `transport_tests` run 1 failed `unanswering_superseded_owner…` at `until_out(first, "EDITOR_READY")` (line 2571, first viewer startup, before the pause this branch changes); run 2 passed 67/67; the test alone passed 3/3. A startup-wait timeout under full-suite load, not the frozen-owner cause.
+- Remaining: Linux CI for both tests.

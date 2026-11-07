@@ -5,7 +5,6 @@
 //! which `lf account use` switches, and a running Codex keeps its own until
 //! `lf --account codex=<login> resume`. Nothing here writes preferences.
 
-use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -146,22 +145,9 @@ pub(crate) fn start_pending_move(store: &SqliteStore, session: &str) -> Result<b
     if store.pending_session_move(session)?.is_none() {
         return Ok(false);
     }
-    let mut command = std::process::Command::new(crate::os_process::resolve_lf_binary()?);
-    command
-        .args(["__context-block", "--moment", "move"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    // SAFETY: only an async-signal-safe syscall runs between fork and exec.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    command.spawn().context("start the pending Session move")?;
+    crate::os_process::detached_context_block("move")?
+        .spawn()
+        .context("start the pending Session move")?;
     Ok(true)
 }
 
@@ -220,6 +206,7 @@ mod tests {
 
     #[test]
     fn a_failed_apply_leaves_the_move_for_the_next_stop() {
+        let _lock = crate::journal::test_env_lock();
         let home = super::super::tests::SessionHome::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {

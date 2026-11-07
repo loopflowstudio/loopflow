@@ -29,9 +29,11 @@ pub enum ContextMoment {
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
-    /// A native turn ended on a usage limit: record it and move the shared
-    /// login to an account with capacity.
+    /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
+    /// Started by a limit hook: record the limit and move the shared login to
+    /// an account with capacity.
+    RecordLimit,
     /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
     PiEvent,
     /// A Pi bash command is about to run: join its tool group to the watchdog
@@ -781,6 +783,7 @@ mod tests {
     #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempdir().unwrap();
         let delivery = delivery(repo.path());

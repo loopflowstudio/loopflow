@@ -359,9 +359,9 @@ A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
 limit, holds back only launches of that model: Sonnet on the same account keeps
 going, and a launch that names no model waits for every scope on the account.
 
-Open Claude Sessions need nothing either. When one hits a limit in shared mode,
-the login moves to the eligible account that ranks first, and every open Claude
-follows at its next request. Send your next message where you left off. A running
+Open Claude Sessions need nothing either. When one hits a limit, the login
+moves to the eligible account that ranks first, and every open Claude follows
+at its next request. Send your next message where you left off. A running
 Codex keeps its login until you `lf resume` it. Naming another login with
 `lf --account codex=<login> resume <session>` restarts it there, and the old
 terminal says where the conversation went. A running Claude stays put:

@@ -21,7 +21,8 @@ use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::store::{
-    open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, SharedStore, StoreError,
+    open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, RecordingGap, SharedStore,
+    StoreError,
 };
 use crate::store::{CredentialState, RoutingState};
 
@@ -947,23 +948,45 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
+const LIMIT_REASON_ENV: &str = "LF_LIMIT_REASON";
+
 /// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
-/// not ours to read, so this hook is how lf hears of it: the account cools and
-/// a shared login moves to the eligible account that ranks first, which every
-/// open Claude follows. Their next message runs there, with no input of ours.
-/// Other Sessions reporting the same limit find the login already moved.
-pub fn observe_native_limit() -> anyhow::Result<()> {
-    let input = std::io::read_to_string(std::io::stdin())?;
-    let details: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+/// not ours to read, so this hook is how lf hears of it. Recording it can wait
+/// on Claude's lock and the provider's token endpoint, longer than the hook's
+/// timeout, and a kill between a token reply and the profile write loses a
+/// rotated grant. So the hook starts `record_limit` beside the provider and
+/// exits.
+pub fn observe_native_limit() {
+    let input = std::io::read_to_string(std::io::stdin()).unwrap_or_default();
+    if let Err(error) = start_limit_recording(&input) {
+        RecordingGap::default().note("usage limit", &format!("{error:#}"));
+    }
+}
+
+fn start_limit_recording(input: &str) -> anyhow::Result<()> {
+    let details: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
     let reason = details["error_details"]
         .as_str()
         .or(details["error"].as_str())
-        .unwrap_or("usage limit")
-        .to_string();
-    _run_blocking_account(Provider::Claude, "record", |runtime| {
-        runtime.block_on(record_native_limit(Provider::Claude, reason))
-    })?;
+        .unwrap_or("usage limit");
+    crate::os_process::detached_context_block("record-limit")?
+        .env(LIMIT_REASON_ENV, reason)
+        .spawn()?;
     Ok(())
+}
+
+/// The recorder a limit hook started: the account cools and a shared login
+/// moves to the eligible account that ranks first, which every open Claude
+/// follows. Their next message runs there, with no input of ours. Other
+/// Sessions reporting the same limit find the login already moved.
+pub fn record_limit() {
+    let reason = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
+        runtime.block_on(record_native_limit(Provider::Claude, reason))
+    });
+    if let Err(error) = recorded {
+        RecordingGap::default().note("usage limit", &error);
+    }
 }
 
 async fn record_native_limit(
@@ -3997,6 +4020,89 @@ mod account_first_tests {
             .unwrap();
         assert_eq!(active().await, "second");
         assert_eq!(cooling("second").await, None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_limit_hook_returns_while_its_recorder_waits_on_the_provider() {
+        // The stand-in endpoints exist only in this binary, so `lf` here is it.
+        // Its ctor drops the provider home, so the fixture variable carries it.
+        if let Some(native) = std::env::var_os("LIMIT_RECORDER_NATIVE") {
+            std::env::set_var("CLAUDE_CONFIG_DIR", native);
+            record_limit();
+            return;
+        }
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _lf_bin = EnvRestore::capture(&["LF_BIN"]);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        expire_claude_login(&store, temp.path(), "second").await;
+        let recorder = temp.path().join("lf");
+        fs::write(
+            &recorder,
+            format!(
+                "#!/bin/sh\nLIMIT_RECORDER_NATIVE='{}' exec '{}' --exact provider_account::account_first_tests::a_limit_hook_returns_while_its_recorder_waits_on_the_provider\n",
+                native.display(),
+                std::env::current_exe().unwrap().display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(
+            &recorder,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        std::env::set_var("LF_BIN", &recorder);
+        let (asked, token_requested) = std::sync::mpsc::channel();
+        let (answer, answered) = std::sync::mpsc::channel::<()>();
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"second@example.com","uuid":"second"}})
+                        .to_string(),
+                ),
+            ],
+            move |request| {
+                if request == 0 {
+                    asked.send(()).unwrap();
+                    answered.recv().unwrap();
+                }
+            },
+        )
+        .await;
+
+        // Run inline, this would sit on the token request the endpoint holds.
+        start_limit_recording(r#"{"error_details":"usage limit"}"#).unwrap();
+        tokio::task::spawn_blocking(move || {
+            token_requested
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+
+        let first = parse_account_id("first").unwrap();
+        let limited = store.get_provider_account("claude", &first).await.unwrap();
+        assert!(limited.unwrap().cooldown_until.is_some());
+        assert!(!claude_credential(&native).contains("rotated"));
+
+        answer.send(()).unwrap();
+        server.await.unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !claude_credential(&native).contains("rotated") {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the login never moved"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(claude_credential(&temp.path().join("second")).contains("rotated"));
     }
 
     #[allow(clippy::await_holding_lock)]

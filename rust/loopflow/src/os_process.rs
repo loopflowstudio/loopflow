@@ -235,6 +235,29 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
+/// `lf __context-block --moment <moment>` in its own OS session, so it outlives
+/// the provider hook that starts it and that hook's timeout.
+pub(crate) fn detached_context_block(moment: &str) -> Result<Command> {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(resolve_lf_binary()?);
+    command
+        .args(["__context-block", "--moment", moment])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: only an async-signal-safe syscall runs between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(command)
+}
+
 /// Resolve a stable installed entry, the Desktop helper running this process,
 /// or an explicit private-Home executable.
 /// Keep symlinks intact so later launches pick up installation changes.

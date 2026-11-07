@@ -143,10 +143,7 @@ Built (Nov 6, implement), choices in `scratch/questions.md` 19–26:
 Outstanding demo questions (bare login names, `pause` with no "disabled", Anthropic's terms, overage, open-ended waits), Jack Heart, November 7: "none of this concersn me". They stay as built.
 
 ## Built: November 7 pass
-- **Failing integration tests.** Merge 0f71d266c8 (#1831) kept the older `tests/support/native_codex.py` and undid main's `session_launch_contract.rs` expectations; both restored from the merge base, other conflicted files audited.
-- **Fixtures.** `support`'s ctor moves `HOME` into the temp directory for every test binary, keeping `CARGO_HOME`/`RUSTUP_HOME` (questions 27).
-- **Resume naming another login.** `Departure::Account` (Codex only), `names_another_account` and `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went` are back; `provider_session_account` replaces `provider_session_routed`.
-Gate owns the full suites the ctor reaches.
+Merge 0f71d266c8 (#1831) undid main's `native_codex.py` and `session_launch_contract.rs`; both restored. `support`'s ctor moves `HOME` into the temp directory for every test binary (questions 27).
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none). `--owned` is likewise unexercised on a real rental: it takes a browser approval, so tests cover it with a stand-in `ssh`.
@@ -165,35 +162,27 @@ Still true from the first pass:
 
 ## Concept reviews (November 7, 2026, headless), all built
 1. **`lf account use` beats scoped orders** (questions 30). `held_login` runs before the order in `select_route`; `inspect_provider_route` puts the held login first, so `next`, pause's replacement and the rental pick agree. Naming the held login counts as the hold. Counterexample, accepted as reversible: a repository order keeping a client's work on its login is overridden while a hold stands.
-2. **`lf --account claude=b@ resume <running Claude>` switches, then attaches** (questions 28). `switch_to_named_login` shares `install_login` with `switch_login`; the line goes to stderr so `--json` stays clean.
-3. **Old spelling.** `lf help account claude use` and `lf account codex use --help` fail as unknown; `lf account codex --help`, `--cached` work. `lf ops account` is the only command with a positional beside subcommands.
-4. **`--blocked` and `--on` read the login the Session uses.** `LaunchCapacity::login`: a running Codex reads its recorded account, everything else the shared home.
-5. **`--on` takes a login as every command does.** `SessionOn::resolve` runs once before filtering, through `account::resolve_on`; unknown or ambiguous is an error. A harness name keeps its meaning in any case. An account ID matches only a login with no email.
+2. **`lf --account claude=b@ resume <running Claude>` switches, then attaches** (questions 28).
+3. **Old spelling.** `lf help account claude use` and `lf account codex use --help` fail as unknown. `lf ops account` is the only command with a positional beside subcommands.
+4. **`--blocked` and `--on` read the login the Session uses.** A running Codex reads its recorded account, everything else the shared home.
+5. **`--on` takes a login as every command does,** through `account::resolve_on`; unknown or ambiguous is an error.
 6. **A restarted wait keeps its `-a`.** `agent_limit_recoveries.agent` records the step's override; `ship::restart_lf_in` passes `--agent` and clears the reader's `LF_AGENT_OVERRIDE`/`LF_SETTINGS`. A ship process that dies outside a wait restarts with no `-a`: no wait row holds it.
 7. **An owned rental.** `lf machine connect <rental> claude <email> --owned` takes `fresh_machine_login`, judged by `inspect --full`; `install_managed` replaces an access token with the full login. Renewal leaves a rental holding a full login alone, and asks the rental before skipping an account the laptop holds no rental login for.
 
-Proposed for Wave memory (read-only outside a Graph that maintains it): a restarted wait keeps its recorded `-a` and clears the reader's; `--owned` gives one rental its own Claude login, which renewal leaves alone.
+Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gives one rental its own Claude login, which renewal leaves alone.
 
 ## Concept review (November 7, 2026, headless, after items 6–7), built
 8. **A dead parked login is out of rotation before a switch.** An unchanged digest says nothing about a revoked grant, and a window past its reset scores a full week, so such a login ranked first and took every open Claude with it. `identity::check_routable_identity`, called by `select_route`, `held_login` and `ordered_selected_candidates`, refreshes a Connected parked login whose token is due: `NeedsLogin` sets `Missing`, `Unavailable` skips it this launch and leaves it Connected, success records the identity on the new bytes, so a parked login pays once per ~8h. `check_current_identity` stays network-only-on-missing-evidence for readiness.
-   The active login is never refreshed here. `observe_active_account` runs first, because a fully rotated active login matches no stored copy and its spent grant would read as rejected; `claude_credential_home` then tells it apart. Missing evidence on an active login now reads through that home too, in `check_current_identity` and the peer loop in `validate_observed_identity`, where the stored profile used to be refreshed.
-   A native login the provider rejects lets the parked check run, since that is when a parked login is needed. One the provider cannot answer for skips due parked logins this launch: any may be its spent copy. The refresh holds the native refresh lock, so `activate` cannot install the bytes it spends. Limit: missing evidence on a due active login refreshes the native home under Claude's lock, never the stored profile.
+   The active login is never refreshed here: `observe_active_account` runs first, since a fully rotated active login matches no stored copy and its spent grant would read as rejected. A native login the provider rejects lets the parked check run; one it cannot answer for skips due parked logins this launch. The refresh holds the native refresh lock, so `activate` cannot install the bytes it spends.
 9. **Fix-it text parses.** Every printed `lf account connect|disconnect|set|use` is `provider=login`. `account_commands_printed_by_errors_parse` scans the sources that print them and runs each through `normalize_args` and Clap. `docs/subscriptions.md` corrected.
 
-Checked, no change: a per-minute 429 stays `AgentFailure::RateLimit` (same login, same thread, no cooldown); items 6–7 and the renewal repair hold on a normal path, a death mid-wait and an owned rental; `require_unattended_logins` only gates a new paid rental.
+## Concept review (November 7, 2026, headless, after item 9), built
+10. **The limit hook cannot be killed mid-refresh.** `lf __context-block --moment limit` reads stdin, starts `--moment record-limit` through `os_process::detached_context_block` (shared with the Stop hook's move) and exits 0; the recorder runs `record_native_limit` unchanged and notes a `RecordingGap` on failure.
+    Accepted cost: a message sent before the recorder finishes can hit the old login and fail once; its own `StopFailure` lands inside `SWITCH_SETTLE_SECS` or finds the login already moved.
+11. **The deleted spellings left the tests.** `global_commands` uses `account next`; the isolated e2e cases, their `results` keys and the `--shared` launches are gone (`--shared-provider-home` is the fixture's own flag and stays). `tests/README.md` and `docs/subscriptions.md` say one mode.
 
-Checks (isolated): lib `provider_account::` 61, Clap test pass; fmt, clippy clean. Gate reruns `remote_file_observer_keeps_the_recorded_owner_and_streams_changes` (failed once under `fseventsd` load) and owns the integration suites.
+A terminal Claude limit stays unscoped: `StopFailure` carries no model, so a Fable limit cools the whole account for 15 minutes and moves the login, and that is safe.
 
-## Concept review (November 7, 2026, headless, after item 9): next implement direction
-No product choice is open. Two accepted rules are not yet true in the code; build both.
+Found running these: `context_block`'s `tool_hook_starts_lf_only_after_a_newer_steer` and `moves_bulk`'s `a_failed_apply_leaves_the_move_for_the_next_stop` changed `LF_HOME` without the env lock. Under libtest a neighbour fell through to `/Users/jack/.lf/loopflow.db` despite an isolated `HOME`; the ordinary open refused it before any write. Both now take the lock: 3 of 3 runs failed before, 3 of 3 pass after.
 
-10. **The limit hook cannot be killed mid-refresh.** Harness rule: a turn-boundary invocation is best-effort and records a gap. Item 8 put network and lock work inside `select_route`, and `observe_native_limit` runs it in Claude's `StopFailure` hook, which has `"timeout":30`. Worst case inside that hook: `observe_active_account` (15s HTTP), the native read (15s), `CLAUDE_LOCK_WAIT` (65s), then a token POST per due parked login. A kill between the provider's token reply and the profile write loses a rotated grant, so one slow network at a limit turns into a dead login. The observe also comes before `record_rate_limit_signal`, so a contended lock loses the limit too. Errors leave as exit 1 with no `RecordingGap`.
-    Direction: the same shape as the Stop hook's move. `lf __context-block --moment limit` reads stdin, spawns a setsid child that runs `record_native_limit` unchanged, and exits 0. The child logs failure to `logs/lf.log`. Launch-path refreshes are not under a hook timeout and stay as they are.
-    Accepted cost: a message sent before the child finishes can hit the old login and fail once; its own `StopFailure` lands inside `SWITCH_SETTLE_SECS` or finds the login already moved. Test: the hook returns at once with a stand-in token endpoint that hangs, and the limit and switch land afterwards.
-11. **The deleted spellings leave the tests that still use them.**
-    - `tests/global_commands.rs:238` `machine_commands_and_catalog_work_without_git_or_a_repository` fails on this branch: `error: unexpected argument '--details' found`, usage `lf ops account --cached [TARGET]` (run November 7, empty cwd, isolated `HOME`). The next lines call `account route`, and the assertion at `args.get(1) == Some(&"route")` needs `account next`. The earlier integration pass did not reach this binary; run all of `global_commands`.
-    - `tests/e2e/claude_shared_home.py:249,256` and `tests/e2e/codex_connect.py:1311` launch with `--shared`/`--isolate`. Delete the isolated cases and their `results` keys, and the sentence at `rust/loopflow/tests/README.md:300`.
-    - `docs/subscriptions.md:362`: drop "in shared mode". There is only one mode.
-
-Checked, no change: `used_account` charges a limit to the login a running Claude moved to, so a launch that switched mid-step does not cool the wrong account; a rejection ends the headless turn from the stream, so Claude's own parked wait cannot hide it; `lf task status` keeps retrying, waiting and blocked apart, and promises a restart only when the sweep would do it; the sweep is lazy, as ship's is, so a Machine nothing reads restarts on its next read; `.lf/config.yaml` and builtins pin no provider. A terminal Claude limit stays unscoped: `StopFailure` carries no model, so a Fable limit cools the whole account for 15 minutes and moves the login, and that is safe.
-The uncommitted `a_login_the_provider_cannot_place_spends_no_stored_grant` and its `identity.rs` guard match item 8's text; they await the next checkpoint.
+Checks (isolated, empty cwd): lib `provider_account:: context_block:: human_session::moves os_process::` 109 pass; `global_commands` 45 pass; `binary(lf)` 24 pass; fmt, clippy clean; `ruff --select F` on the e2e scripts clean. `claude_shared_home.py` and `codex_connect.py --shared-provider-home` were not run (the Claude one writes a Keychain item): gate/CI. Gate also reruns `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`.

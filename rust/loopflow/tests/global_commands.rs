@@ -3,8 +3,10 @@
 mod support;
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
@@ -224,6 +226,39 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
 }
 
 #[test]
+fn a_limit_lf_cannot_record_ends_the_hook_cleanly_and_reaches_the_log() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
+    let cwd = tempfile::tempdir().unwrap();
+    // A directory where the store belongs: no recording, so no provider request.
+    fs::create_dir_all(home.path().join(".lf/loopflow.db")).unwrap();
+
+    let mut hook = command(
+        home.path(),
+        cwd.path(),
+        &["__context-block", "--moment", "limit"],
+    )
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .unwrap();
+    hook.stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"error":"rate_limit"}"#)
+        .unwrap();
+    success(hook.wait_with_output().unwrap());
+
+    let log = home.path().join(".lf/logs/lf.log");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !fs::read_to_string(&log).is_ok_and(|text| text.contains("recording gap: usage limit")) {
+        assert!(Instant::now() < deadline, "no gap in {}", log.display());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
 fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
@@ -235,9 +270,8 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["graph", "show", "pursue"],
         vec!["help", "graph", "pursue"],
         vec!["account", "--cached"],
-        vec!["account", "--cached", "--details"],
-        vec!["account", "route"],
-        vec!["account", "route", "--repo", cwd.path().to_str().unwrap()],
+        vec!["account", "next"],
+        vec!["account", "next", "--repo", cwd.path().to_str().unwrap()],
         vec!["wave", "list", "--json"],
         vec!["monitor", "ps", "--json"],
     ] {
@@ -250,7 +284,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
             assert!(stdout.contains("debug"));
             assert!(stdout.contains("unbreak"));
         }
-        if args.get(1) == Some(&"route") {
+        if args.get(1) == Some(&"next") {
             assert!(stdout.contains("claude"));
         }
         assert!(

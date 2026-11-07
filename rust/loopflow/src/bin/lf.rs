@@ -2884,7 +2884,17 @@ fn execute_command(
         Some(Commands::ContextBlock {
             moment: ContextMoment::Limit,
             ..
-        }) => loopflow::provider_account::observe_native_limit(),
+        }) => {
+            loopflow::provider_account::observe_native_limit();
+            Ok(())
+        }
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::RecordLimit,
+            ..
+        }) => {
+            loopflow::provider_account::record_limit();
+            Ok(())
+        }
         Some(Commands::ContextBlock {
             moment: ContextMoment::Move,
             ..

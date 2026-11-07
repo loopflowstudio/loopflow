@@ -85,3 +85,7 @@ Direct launch verification: opening unit tests 17 passed; opening integration te
 24 passed, 2 opt-in native-host tests ignored; formatting and all-targets Clippy
 passed. The direct-shell regression executes the generated shell command and
 opens back into its Rex session with the private Machine context preserved.
+
+Fresh-conversation startup is proven on a private Machine with one pinned runtime, including real Claude; the four native tests pass on 502a14596. Results and limits: [workspace-demo.md](workspace-demo.md). This approves no shipping.
+
+Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped; details in [workspace-demo.md](workspace-demo.md). Task-branch syncs against a stack parent that lacks a main commit can repeat this: check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

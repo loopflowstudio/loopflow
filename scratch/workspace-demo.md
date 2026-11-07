@@ -206,8 +206,7 @@ conversation worked for him. It does not establish individual split/cwd or resiz
 checks, repair of branch fresh-conversation startup, or approval to ship. The demo
 input has not been released for cleanup; leave the conversation and roots intact.
 
-Remaining work: repair and verify branch fresh-conversation startup against this
-accepted ordinary-conversation experience before claiming PR acceptance.
+Branch fresh-conversation startup was verified later; see the November 6 native proof below.
 
 
 ## November 6 headless demo decision: advance
@@ -246,3 +245,49 @@ Since 6b3818bc5, only scratch gate notes changed (3b5061b18); no code changed, s
 ## November 6 gate (fb810b8e4)
 
 - Since the eaf36a5d3 gate, non-scratch changes are only the one-line `docs/architecture-reference.md` map entry, already checked by `check_architecture.py` and `website/dev.py test` (72 passed). No suite inputs changed, so no rerun; earlier results stand, with CI owning `served_reads` and the Desktop Breakpad death (both identical on origin/main 12d897b6b). Added Rust/Swift/Python lines carry no TODO or debug output.
+
+## November 6 native proof (tree 502a14596 plus the new test)
+
+Fresh-conversation startup works when one runtime runs the whole launch. All runs used isolated servers with `LF_*` unset; the active Task's panes and the retained demo roots were not touched.
+
+Native tests, one at a time, `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` set, herdr 0.9.3:
+- `--test integration rex_native_fresh -- --ignored`: 1 passed (11.83s).
+- `--test transport_tests rex_workspace_resumes -- --ignored`: 1 passed (6.70s).
+- `--test transport_tests rex_manual_resume_elsewhere -- --ignored`: 1 passed (5.62s).
+- `--test integration herdr_native -- --ignored`: 1 passed (12.84s).
+- `--test transport_tests rex_open_starts_a_fresh -- --ignored` (new): 1 passed (5.77s). `lf open --task` on a Task in a linked worktree, stand-in provider: pane draws, provider `pwd -P` is the worktree, OSC 7 names it, typed input arrives, one launch.
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed.
+
+Real Claude, by hand: isolated Rex server, private LF_HOME, LF_BIN pinned to a copy of the branch binary (`lf 0.15.1+502a14596`, SHA-256 `b91f70766d851c8abd036590a974ef01486275c6547961437eded227e793f886`), guarded `rex` on PATH. Task 0f9e97, placed with `lf task checkout`, no conversation:
+- `lf open --task 0f9e97 --host rex --server … --no-focus --json`: exit 0; tab held Conversation, Task & workflow and shell.
+- Pane printed “Nothing to resume here; starting a new conversation.”, then Claude's folder-trust dialog. After Yes, Claude ran its first turn and stayed up.
+- `lsof` on provider PID 50510: cwd `/private/tmp/loo498-fresh-ybHz/repo.0f9e97-fresh-conversation-demo`, the Task worktree. Rex reported the same path by OSC 7.
+- Typed “Reply with exactly the word marmalade-7 and nothing else, and run no tools.”; Claude answered `marmalade-7`.
+- `lf open --task 0f9e97` again: new tab, same Session, same PID 50510, `marmalade-7` still in the scrollback. No second provider.
+- Second Task 775232 from the same repository: no trust dialog, provider started. Its name, “Trust declined”, records a planned experiment that never ran.
+
+The provider was real but the Machine was private, with ambient Claude credentials. A branch build on the real Machine was not rerun; that path hands its child to the installed runtime (`human_session.rs`, `resolve_lf_binary`), so the November 6 mix can recur on a dev build until `lf` is installed.
+
+November 6 failure, from retained `history.json` and `lf.log`, read only:
+- Trust dialog ruled out: account selected 16:14:05.164, provider session observed .179, `terminal.json` failed .202. The end came 38 ms after opening; a dialog would have waited. `loopflow` is also trusted, and this run's second worktree shows a trusted repository's worktree skips the prompt.
+- 54 seconds passed between capture (16:13:11) and opening; this run took under 8 seconds. Unexplained.
+- `result_ref` is null and no owner log line beyond “Execution owner closed before answering” was found, so the exact cause stays unknown. The mixed runtime remains the only difference established; it was not reproduced.
+
+Other observations:
+- `lf open --task` on an unplaced Task (`worktree: null`) opens only Task & workflow, by design in `layout.rs`, with no conversation. See [questions.md](questions.md).
+- No `default_agent` and several harnesses on PATH: the pane shows “No agent selected” and stops. Clear, and unchanged.
+- Claude reported plain `lf` in the pane failing with “a newer lf migrated this store”: `~/.local/bin/lf` (5519340b4) predates the branch store. `$LF_BIN` worked. This is branch-versus-installed skew and ends with `lf install`.
+
+Not proven headless: a native Split from the app shortcut (raw `session.new_split` is not that path) and resize. Both need the Rex app.
+
+Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261106-fresh`. Both Claudes left through `/exit` (Sessions closed, `lf ps` empty), the four demo Rex sessions were destroyed, server 1947 stopped by its recorded group, and `/tmp/loo498-fresh-ybHz` removed. Provider transcripts for those paths and their `~/.claude.json` project entries remain.
+
+## November 6 compress: main's #1834 restored
+
+`94cb745eb` merged LOO-717's older tip (`a1067c99c`, before #1834) onto a tree that already held #1834, and kept the older files. No conflict records it, and later syncs treat #1834 as merged, so #1834 was being reverted by this PR: 82 of its 83 files matched `c8d7a7f4a^` byte for byte, including `builtins.rs`, `graph/compiled.rs`, `graph/mod.rs`, `prompt/mod.rs`, `PROMPTS.md`, the skills and goldens, and the deleted `optimize` Graph. None held branch work; `AGENTS.md`, the 83rd, keeps its intended testing rule. Restored from merge base 76a5a3012. Working tree against main went from +11,626/−4,542 to +6,504/−487. A blob comparison over the other changed files found no other main commit lost this way; it cannot see partial hunk losses in files the branch also edits.
+
+Checks on the final tree, `LF_*` unset:
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `check_architecture.py`: passed.
+- `--lib builtins:: prompt:: graph:: lf::commands::open::`: 225 passed. `golden_prompt`: 1 passed. `documented_commands`: 4 passed. `world_recipes` selection: 7 passed. `work_open_tests`: 24 passed, 2 ignored.
+- Native, one at a time, after the `isolated_rex` helper: `rex_workspace_resumes`, `rex_open_starts_a_fresh`, `rex_manual_resume_elsewhere`, `rex_native_fresh`, `herdr_native`: 1 passed each. A final binding rename touched only `rex_manual_resume_elsewhere`, which was rerun after it.
+- `session_lifecycle_tests`: 35 passed, 6 failed with “No agent selected”; committed HEAD fails the same six, measured in a throwaway worktree. The fixture installs a stand-in `opencode` and assumes no ambient harness. With none on PATH, 41 passed. Not fixed here.

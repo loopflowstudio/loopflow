@@ -93,6 +93,8 @@ Mechanical steps ride along as commands:
 - loop: implement     # loop-or-next decides: advance, iterate, or blocked
 - concept-review
 - loop: implement
+- qa                  # use the change through its real path before anyone demos it
+- loop: implement
 - pr-publish
 ```
 
@@ -135,6 +137,22 @@ work. Name your own decider with `step:`:
         description: "Reproduced defects within the change need repair"
       silence:
         description: "No actionable defect in the supplied change"
+```
+
+## Move one number
+
+```bash
+lf graph optimize : "cut p50 export time on the 60k-row dataset"
+```
+
+`optimize` measures, plans one change, makes it, and keeps or reverts it, until
+no clear way forward remains. It then compresses, refreshes and measures the
+whole result. It runs without a person and delivers nothing, so compose it:
+
+```yaml
+# .lf/graphs/speed-up.yaml
+- graph: optimize
+- graph: deliver
 ```
 
 ## Where a person takes part

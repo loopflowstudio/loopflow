@@ -741,8 +741,13 @@ them one at a time: together they can miss a follower's arrival deadline.
 export LOOPFLOW_TEST_REX="$(command -v rex)"
 cargo test -p loopflow --test integration rex_native_fresh -- --ignored
 cargo test -p loopflow --test transport_tests rex_workspace_resumes -- --ignored
+cargo test -p loopflow --test transport_tests rex_open_starts_a_fresh -- --ignored
+cargo test -p loopflow --test transport_tests rex_manual_resume_elsewhere -- --ignored
 LOOPFLOW_TEST_HERDR="$(command -v herdr)" cargo test -p loopflow --test integration herdr_native -- --ignored
 ```
+
+A fixture that starts a provider sets `default_agent`: with several harnesses on
+PATH, `lf resume --task` otherwise prints "No agent selected" in the pane.
 
 ### Test without an installed Loopflow
 

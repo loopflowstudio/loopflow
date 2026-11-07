@@ -648,11 +648,8 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     );
 }
 
-/// Workspace opening uses the same resume command as a person in a native tab.
-#[test]
-#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
-fn rex_workspace_resumes_the_existing_provider_in_the_task_worktree() {
-    let fixture = Fixture::new();
+/// A Rex server of its own, under a short path: Unix socket paths are limited.
+fn isolated_rex() -> (tempfile::TempDir, PathBuf, support::rex::IsolatedRex) {
     let root = tempfile::Builder::new()
         .prefix("rex498-")
         .tempdir_in("/tmp")
@@ -661,6 +658,15 @@ fn rex_workspace_resumes_the_existing_provider_in_the_task_worktree() {
     std::fs::create_dir(&bin).unwrap();
     let rex =
         support::rex::IsolatedRex::start(root.path(), &bin, Path::new(env!("CARGO_BIN_EXE_lf")));
+    (root, bin, rex)
+}
+
+/// Workspace opening uses the same resume command as a person in a native tab.
+#[test]
+#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
+fn rex_workspace_resumes_the_existing_provider_in_the_task_worktree() {
+    let fixture = Fixture::new();
+    let (_root, bin, rex) = isolated_rex();
     support::register_task_without_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -736,6 +742,93 @@ printf '%s' "$answer" > "$HOME/answer"
     );
 }
 
+/// A Task with no conversation yet: opening it starts one provider, in the Task's
+/// linked worktree rather than the repository, ready for what a person types.
+#[test]
+#[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
+fn rex_open_starts_a_fresh_conversation_in_the_task_worktree() {
+    let fixture = Fixture::new();
+    let (_root, bin, rex) = isolated_rex();
+    let registered = support::register_task_without_pr(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let worktree = fixture.repo.create_named_worktree("fresh-task");
+    support::register_sibling_task(&registered, "INF-124", "fresh-task", &worktree);
+    // Rex children find the provider on the server's PATH, the guarded `bin`,
+    // and their $HOME is the server's, so the script names the fixture's.
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+pwd -P >> '{home}/launches'
+printf 'fresh-ready\r\n'
+read -r answer < /dev/tty
+printf '%s' "$answer" > '{home}/answer'
+"#,
+            home = fixture.home.path().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agent = fixture
+        .command(&["set", "--global", "default_agent", "claude"])
+        .output()
+        .unwrap();
+    assert!(agent.status.success(), "{agent:?}");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let opened = fixture
+        .command(&[
+            "open",
+            "--task",
+            "INF-124",
+            "--host",
+            "rex",
+            "--server",
+            &rex.endpoint,
+            "--no-focus",
+            "--json",
+        ])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(opened.status.success(), "{opened:?}");
+    let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
+    let container = report["receipts"][0]["container"].as_str().unwrap();
+    let blocks = rex.call("session.list_blocks", json!({"session_id":container}));
+    let block = blocks["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["label"] == "Conversation")
+        .unwrap_or_else(|| panic!("no Conversation pane: {blocks}"))["block_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !rex.screen(container, &block).contains("fresh-ready") {
+        assert!(
+            Instant::now() < deadline,
+            "provider never drew: {}\n{:?}",
+            rex.screen(container, &block),
+            std::fs::read_to_string(fixture.home.path().join("logs/lf.log"))
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let checkout = worktree.canonicalize().unwrap();
+    assert_eq!(fixture.launches(1), [checkout.to_str().unwrap()]);
+    assert!(rex
+        .pwd(container, &block)
+        .is_some_and(|url| url.ends_with(&format!("{}/", checkout.display()))));
+    rex.write(container, &block, "typed-here\n");
+    assert_eq!(fixture.wait_file("answer"), "typed-here");
+}
+
 /// Someone in an ordinary Rex terminal elsewhere resumes a live Session by hand.
 /// While attached, the terminal's process and its report both name the Task
 /// directory, so a native Split starts there; leaving withdraws the report.
@@ -743,14 +836,7 @@ printf '%s' "$answer" > "$HOME/answer"
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
 fn rex_manual_resume_elsewhere_reports_the_session_directory_until_it_leaves() {
     let fixture = Fixture::new();
-    let root = tempfile::Builder::new()
-        .prefix("rex498-")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let bin = root.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let rex =
-        support::rex::IsolatedRex::start(root.path(), &bin, Path::new(env!("CARGO_BIN_EXE_lf")));
+    let (root, _bin, rex) = isolated_rex();
     let provider = fixture.waiting_provider();
     let lf = env!("CARGO_BIN_EXE_lf");
     let owner = fixture.owner(fixture.native(Path::new(lf), &provider, "manual"));

@@ -21,3 +21,6 @@ remains the stack parent; its current Desktop ownership and shared stream
 transport are incorporated. Parent review history remains at
 `5f4ee78ee9:scratch/questions.md` and in [its design](loo-717-shell-lifetimes.md).
 Keep this Task’s walkthroughs; parent scratch filenames are independent reviews.
+
+- `lf open --task` on a Task with no checkout shows only Task & workflow, and `lf task checkout` must come first for a conversation. Jack Heart rejected a Task & workflow-only view on November 6 (“some weird thing that isnt just a task session”). Open choice: (a) keep it, opening prepares nothing; (b) opening places the Task, then starts the conversation. Left at (a), unchanged.
+- Jack Heart's “otherwise lg2m ship it” predates the LOO-717 merge; its coverage of this tree is unconfirmed.

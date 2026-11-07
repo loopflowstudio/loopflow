@@ -807,7 +807,10 @@ mod tests {
                 // The native conversation survives the OS process's interruption.
                 harness.set_agent_session(Some("native-conversation".into()));
                 harness.interrupt().await.unwrap();
-                let ended = store.process(&first.agent_process_id).unwrap().unwrap();
+                let ended = store
+                    .agent_process(&first.agent_process_id)
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(ended.pid, Some(first_pid));
                 assert!(ended.completed_at.is_some());
 
@@ -823,11 +826,17 @@ mod tests {
                 let (_, second) = capture.session_attachment().unwrap();
                 assert_ne!(first.agent_process_id, second.agent_process_id);
                 assert_ne!(first.token, second.token);
-                let running = store.process(&second.agent_process_id).unwrap().unwrap();
+                let running = store
+                    .agent_process(&second.agent_process_id)
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(running.pid, harness.pid());
                 assert_eq!(running.parent_lf_process_id, first.lf_process_id);
                 assert!(running.completed_at.is_none());
-                assert_eq!(store.process(&first.agent_process_id).unwrap(), Some(ended));
+                assert_eq!(
+                    store.agent_process(&first.agent_process_id).unwrap(),
+                    Some(ended)
+                );
                 assert!(capture.prepare_agent_process(&session, &first).is_err());
                 assert!(store
                     .record_session_connection(&session, &first, "stale", &"stale".into())

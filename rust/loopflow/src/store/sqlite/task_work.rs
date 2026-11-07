@@ -239,7 +239,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
             conn.query_row(
                 &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
-                super::processes::read_process,
+                super::processes::read_lf_process,
             )?,
         )),
         None => None,
@@ -624,7 +624,10 @@ impl SqliteStore {
     }
 
     /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
-    pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
+    pub(crate) fn task_open_processes(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::process::ProcessEntry>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let mut query = conn.prepare(&format!(
@@ -641,7 +644,7 @@ impl SqliteStore {
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::process_evidence(self, &process.id)
+        crate::journal::lf_evidence(self, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
@@ -935,7 +938,7 @@ mod tests {
 
     use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
+    use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
 
@@ -1681,7 +1684,7 @@ mod tests {
         assert_eq!(initial_open.len(), 2);
         assert!(initial_open
             .iter()
-            .all(|process| process.completed_at.is_none()));
+            .all(|process| process.completed_at().is_none()));
         let unfinished = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -1694,7 +1697,9 @@ mod tests {
         }
         let open = store.task_open_processes(&task).unwrap();
         assert_eq!(open.len(), 3);
-        assert!(open.iter().any(|process| process.id == unfinished));
+        assert!(open
+            .iter()
+            .any(|process| process.id() == unfinished.as_str()));
         // With every Process unfinished, each membership path agrees: checkout,
         // Session event and attachment.
         store
@@ -1706,10 +1711,10 @@ mod tests {
              UPDATE processes SET completed_at=NULL;",
             )
             .unwrap();
-        let ids = |processes: Vec<crate::process::LfProcess>| {
+        let ids = |processes: Vec<crate::process::ProcessEntry>| {
             processes
-                .into_iter()
-                .map(|process| process.id)
+                .iter()
+                .map(|process| process.id().to_owned())
                 .collect::<Vec<_>>()
         };
         let all = ids(store.task_work(&task).unwrap().processes);
@@ -1730,11 +1735,11 @@ mod tests {
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == mechanical));
+            .any(|process| process.id() == mechanical.as_str()));
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == bound_process));
+            .any(|process| process.id() == bound_process.as_str()));
         assert_eq!(
             store.session_task_ids("manual").unwrap(),
             std::slice::from_ref(&task)
@@ -1769,8 +1774,8 @@ mod tests {
         // The Graph's step is the only work performed in the checkout.
         let performed = store
             .processes(
-                &LfProcessFilter {
-                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
+                &ProcessFilter {
+                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
@@ -1782,9 +1787,9 @@ mod tests {
             performed
                 .entries
                 .iter()
-                .map(|process| &process.id)
+                .map(crate::process::ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            [&graph.steps[0].process.id]
+            [graph.steps[0].process.id.as_str()]
         );
 
         let child = TaskId::new();

@@ -1319,7 +1319,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 if !execution_directory_reported {
                     if let Some(record) = &exit_record {
                         let connected = crate::journal::process_ledger()
-                            .and_then(|store| store.process(&record.attachment.agent_process_id))
+                            .and_then(|store| {
+                                store.agent_process(&record.attachment.agent_process_id)
+                            })
                             .ok()
                             .flatten()
                             .is_some_and(|process| {

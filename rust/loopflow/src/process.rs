@@ -29,7 +29,7 @@ pub struct LfProcess {
 
 /// One recorded provider OS process, launched under the lf process that
 /// reserved it. It never has a receipt or an agent caller of its own.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentProcess {
     pub id: AgentProcessId,
     pub pid: Option<u32>,

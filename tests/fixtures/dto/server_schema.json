@@ -447,6 +447,127 @@
       ],
       "type": "string"
     },
+    "AgentProcess": {
+      "description": "One recorded provider OS process, launched under the lf process that\nreserved it. It never has a receipt or an agent caller of its own.",
+      "properties": {
+        "agent_session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfSessionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completed_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/AgentProcessId"
+        },
+        "os_started_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_lf_process_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/TraceId"
+        }
+      },
+      "required": [
+        "id",
+        "pid",
+        "os_started_at",
+        "agent_session_id",
+        "trace_id",
+        "parent_lf_process_id",
+        "command",
+        "repo",
+        "cwd",
+        "started_at",
+        "completed_at",
+        "outcome",
+        "exit_code",
+        "signal",
+        "error"
+      ],
+      "type": "object"
+    },
+    "AgentProcessId": {
+      "type": "string"
+    },
     "AgentSessionId": {
       "description": "A provider-owned conversation id. Opaque vendor bytes, never an lf identity.",
       "type": "string"
@@ -3532,20 +3653,10 @@
     "LfProcess": {
       "description": "One recorded lf process. Unknown historical caller and exit evidence stays absent.",
       "properties": {
-        "agent_session_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfSessionId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "caller_agent_process_id": {
           "anyOf": [
             {
-              "$ref": "#/$defs/LfProcessId"
+              "$ref": "#/$defs/AgentProcessId"
             },
             {
               "type": "null"
@@ -3596,9 +3707,6 @@
         },
         "id": {
           "$ref": "#/$defs/LfProcessId"
-        },
-        "kind": {
-          "$ref": "#/$defs/ProcessKind"
         },
         "os_started_at": {
           "format": "int64",
@@ -3660,8 +3768,6 @@
       "required": [
         "id",
         "pid",
-        "kind",
-        "agent_session_id",
         "os_started_at",
         "trace_id",
         "parent_lf_process_id",
@@ -6107,13 +6213,36 @@
       ],
       "type": "object"
     },
-    "ProcessKind": {
-      "description": "Both kinds have one durable identity and one inventory entry.",
-      "enum": [
-        "lf",
-        "agent"
-      ],
-      "type": "string"
+    "ProcessEntry": {
+      "description": "One row of the process inventory: both kinds share one history and paging order.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LfProcess",
+          "properties": {
+            "kind": {
+              "const": "lf",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/AgentProcess",
+          "properties": {
+            "kind": {
+              "const": "agent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Project": {
       "properties": {
@@ -8410,31 +8539,6 @@
       ],
       "type": "object"
     },
-    "RoadmapSection": {
-      "description": "Where a row sits in the plan, derived once so every surface buckets it\nidentically.",
-      "oneOf": [
-        {
-          "const": "now",
-          "description": "This Work's own planner must move next.",
-          "type": "string"
-        },
-        {
-          "const": "waiting",
-          "description": "Someone else must move: a Session, User, CI, or supervising Work.",
-          "type": "string"
-        },
-        {
-          "const": "not_started",
-          "description": "Filed, not started, not complete — ready for someone to pick up.",
-          "type": "string"
-        },
-        {
-          "const": "later",
-          "description": "Done or dormant: terminal Work and completed plan rows.",
-          "type": "string"
-        }
-      ]
-    },
     "RoadmapSnapshot": {
       "description": "`lf wave show` — every Wave's plan joined to durable Work and local delivery\nevidence, bucketed by planning section.",
       "properties": {
@@ -8537,7 +8641,7 @@
           ]
         },
         "section": {
-          "$ref": "#/$defs/RoadmapSection"
+          "$ref": "#/$defs/TaskSection"
         },
         "ship_control": {
           "$ref": "#/$defs/TaskRunControl"
@@ -8924,7 +9028,8 @@
             "active",
             "moving",
             "shipping",
-            "backlog",
+            "working",
+            "autonomous",
             "done"
           ],
           "type": "string"
@@ -8942,6 +9047,11 @@
         {
           "const": "unstarted",
           "description": "Task axis: the Task's own state, as `TaskState` derives it.",
+          "type": "string"
+        },
+        {
+          "const": "backlog",
+          "description": "Board axis: the Task's `TaskSection`.",
           "type": "string"
         }
       ]
@@ -9622,7 +9732,7 @@
         "agent_process_id": {
           "anyOf": [
             {
-              "$ref": "#/$defs/LfProcessId"
+              "$ref": "#/$defs/AgentProcessId"
             },
             {
               "type": "null"
@@ -12608,6 +12718,33 @@
       ],
       "type": "object"
     },
+    "TaskSection": {
+      "description": "Where a Task sits on the Wave board. The one bucketing rule: the board, the\nsidebar's Working Tasks, Wave counts and `lf wave show` all read it.",
+      "oneOf": [
+        {
+          "enum": [
+            "done",
+            "abandoned"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "backlog",
+          "description": "Waiting for someone to pick it up: unstarted, or started and unassigned.",
+          "type": "string"
+        },
+        {
+          "const": "working",
+          "description": "Someone's idle, active or moving Task.",
+          "type": "string"
+        },
+        {
+          "const": "autonomous",
+          "description": "Someone's shipping Task, running to merge with nothing left for a person.",
+          "type": "string"
+        }
+      ]
+    },
     "TaskSession": {
       "description": "Conversation identity and completion, without loading its input or transcript.",
       "properties": {
@@ -13092,7 +13229,7 @@
         },
         "processes": {
           "items": {
-            "$ref": "#/$defs/LfProcess"
+            "$ref": "#/$defs/ProcessEntry"
           },
           "type": "array"
         },

@@ -31,6 +31,8 @@ const SEND: Duration = Duration::from_secs(5);
 const QUEUE: usize = 64;
 /// Checkpoints one subscription may have waiting.
 const CHECKPOINTS: usize = 64;
+/// How long the listener rests after `accept` fails, as it does out of descriptors.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 type Lines = Framed<UnixStream, LinesCodec>;
 
@@ -116,10 +118,23 @@ pub(super) async fn run() -> Result<()> {
     let clients = Clients::default();
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
-        let (socket, _) = listener.accept().await?;
-        // Unix admission is deliberately unavailable to remote proxies.
+        // One connection's failure is never the listener's: every client on
+        // this Machine reaches its Sessions through this loop.
+        let socket = match listener.accept().await {
+            Ok((socket, _)) => socket,
+            Err(error) => {
+                tracing::warn!(%instance, %error, "Server could not accept a connection");
+                tokio::time::sleep(ACCEPT_RETRY).await;
+                continue;
+            }
+        };
+        // Unix admission is deliberately unavailable to remote proxies. macOS
+        // has no peer to name once a client has closed, so that client is gone.
         // SAFETY: geteuid has no preconditions.
-        if socket.peer_cred()?.uid() != unsafe { libc::geteuid() } {
+        if !socket
+            .peer_cred()
+            .is_ok_and(|peer| peer.uid() == unsafe { libc::geteuid() })
+        {
             continue;
         }
         let Ok(permit) = slots.clone().try_acquire_owned() else {
@@ -387,8 +402,10 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                         };
                         let result = serde_json::to_value(SessionAttached { owner_lf_process_id: owner }).expect("an owner serializes");
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
-                        // The connection now speaks only the owner protocol; other
-                        // answers on it are dropped with the task set.
+                        // The connection now speaks only the owner protocol, for as
+                        // long as the terminal stays: nothing else on it may keep
+                        // running. Admitted writes finish on their workers.
+                        tasks.abort_all();
                         return bridge(lines, destination).await;
                     }
                     Admission::Subscribe(query) => {
@@ -489,6 +506,17 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
     }
     let operation = value.get("operation")?;
     let kind = operation.get("kind")?.as_str()?.to_owned();
+    // A `subscribe` reaches here for any kind that is not a read.
+    if kind_of == "subscribe"
+        && (serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).is_ok()
+            || serde_json::from_value::<ServerOperation>(operation.clone()).is_ok())
+    {
+        let refusal = Error::new(
+            ErrorCode::Invalid,
+            format!("`{kind}` is not a read, so it has no watch; send it as a request"),
+        );
+        return Some((id, refusal.with(serde_json::json!({ "kind": kind }))));
+    }
     let refusals = [
         serde_json::from_value::<crate::lf::commands::read::Read>(operation.clone()).err(),
         serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).err(),
@@ -1075,6 +1103,31 @@ mod tests {
                 panic!("the connection should still answer")
             };
             assert_eq!(id, "next");
+        });
+    }
+
+    #[test]
+    fn subscribing_to_a_write_says_it_has_no_watch() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+                .writer
+                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
+                .await
+                .unwrap();
+            let ServerMessage::Error {
+                id, code, message, ..
+            } = client.receive().await.unwrap()
+            else {
+                panic!("expected an error")
+            };
+            assert_eq!(id.as_deref(), Some("w"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert!(message.contains("no watch"), "{message}");
         });
     }
 

@@ -56,22 +56,10 @@ Task diff command. Changes panes invoke `lf task diff`; that command owns Git
 paging and `--difftool`. Files and Shell use internal workspace command construction;
 there is no `task tool` or `desktop tool` command.
 
-Validation of the consolidation (November 6):
-- `cargo test -p loopflow --test integration task_diff_tests::`: 2 passed, including real Git difftool, pipe output and terminal paging.
-- `cargo test -p loopflow --lib lf::commands::open::`: 14 passed.
-- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 24 passed, 2 native-host opt-in tests ignored. The initial overlapping build/edits and Desktop launch timeout are superseded by this final-tree run.
-- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. Gate/CI retain broader coverage; no new live demo or startup repair is claimed.
-
 Jack Heart identified remaining host-specific rendering in layout.rs. Move native
 wire formats, shell quoting and the Rex cwd wrapper into their adapters. Reuse
 the existing Native dispatch; remove the duplicate Host renderer enum. Shared
 layout code selects tools and splits only. Preserve launch behavior.
-
-Renderer extraction checks:
-- `cargo test -p loopflow --lib lf::commands::open::`: 15 passed.
-- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 23 passed, 2 native-host opt-in tests ignored; cmux caller-group lookup hit the unchanged two-second host deadline before rendering.
-- `cargo test -p loopflow --test integration work_open_tests::cmux_task_joins_the_group_its_caller_is_in_now -- --exact`: passed alone using the built CLI. No timeout or retry behavior changed.
-- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. No live demo or fresh-conversation repair is claimed by this refactor.
 
 Jack Heart selected internal launch code: remove `TaskCommand::Tool` and the
 `lf task tool` command entirely, with no `desktop tool` replacement. Native
@@ -80,11 +68,6 @@ Preserve configured editor/browser selection, literal file paths and checkout cw
 Jack then wrote “otherwise lg2m ship it” after this removal, before the LOO-717
 merge; see [questions.md](questions.md). Do not reopen the active conversation or
 manipulate its native panes; retained demo resources have no cleanup release.
-
-Direct launch verification: opening unit tests 17 passed; opening integration tests
-24 passed, 2 opt-in native-host tests ignored; formatting and all-targets Clippy
-passed. The direct-shell regression executes the generated shell command and
-opens back into its Rex session with the private Machine context preserved.
 
 ## Status at b321745bd
 
@@ -103,5 +86,7 @@ Remains:
 - Open choices in [questions.md](questions.md): shipping coverage of this tree, and whether a broad open moves input from a live conversation.
 
 Check, November 7: `cargo test -p loopflow --test integration -- --test-threads=1 work_open_tests::` 28 passed, 2 ignored; the new Wave test fails with the `provider_running` guard removed; fmt and clippy pass.
+
+Check after compress, November 7: one `route` now serves opening and following; `--lib lf::commands::open::` 17 passed, `work_open_tests::` in parallel 28 passed, 2 ignored; fmt and clippy pass. Fixture Rex only; real Rex rerun stays with demo.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

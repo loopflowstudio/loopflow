@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::{
-    provider_running, tool_cwd, tools, viewer_argv, wave_config, with_machine_home, Native,
+    lf_argv, provider_running, tool_cwd, tools, wave_config, with_machine_home, Native,
     Presentation, Resume, SqliteStore, TaskId, ViewContent,
 };
 use crate::work::selection::{
@@ -110,7 +110,7 @@ impl Tools<'_> {
         Ok(self.host.block(
             "Task & workflow",
             self.cwd,
-            viewer_argv(self.cwd, &["task", "view", &self.content.work.id])?,
+            lf_argv(self.cwd, &["task", "view", &self.content.work.id])?,
         ))
     }
 
@@ -135,7 +135,7 @@ impl Tools<'_> {
                 vec!["resume", "--task", &self.content.work.id]
             }
         };
-        let argv = viewer_argv(self.cwd, &words)?;
+        let argv = lf_argv(self.cwd, &words)?;
         Ok(Some(self.host.block("Conversation", self.cwd, argv)))
     }
 
@@ -187,7 +187,7 @@ impl Tools<'_> {
         }
         Ok(self
             .host
-            .block("Changes", self.cwd, viewer_argv(self.cwd, &args)?))
+            .block("Changes", self.cwd, lf_argv(self.cwd, &args)?))
     }
 
     fn render_tree(

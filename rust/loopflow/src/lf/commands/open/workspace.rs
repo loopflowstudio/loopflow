@@ -35,13 +35,6 @@ fn tool_cwd<'a>(content: &'a ViewContent, repo: &'a Path) -> &'a Path {
         .map_or(repo, |location| Path::new(&location.cwd))
 }
 
-fn selection(expression: SelectionExpression) -> Selection {
-    Selection {
-        id: SelectionId("workspace".into()),
-        expression,
-    }
-}
-
 fn label(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).take(80).collect()
 }
@@ -210,14 +203,21 @@ impl Native {
     /// Add one Task's tab with its splits; returns the tab and its new shell count.
     fn add_task_tab(
         &self,
-        store: &SqliteStore,
+        templates: &mut Templates<'_>,
         container: &mut Container,
         content: &ViewContent,
-        repo: &Path,
-        template: Option<&TaskLayoutTemplate>,
         presentation: Presentation<'_>,
     ) -> Result<(String, usize)> {
-        let (native_layout, shells) = layout(store, content, repo, template, presentation, self)?;
+        let template = templates.for_task(&TaskId::parse(&content.work.id)?)?;
+        let repo = templates.repo;
+        let (native_layout, shells) = layout(
+            templates.store,
+            content,
+            repo,
+            template.as_ref(),
+            presentation,
+            self,
+        )?;
         let tab = self.add_tab(
             container,
             &content.title,
@@ -365,41 +365,23 @@ fn open_machines(
     if place_task(store, target, &plan, &local)? {
         plan = workspace_plan(store, &repository, selected.clone())?;
     }
-    let mut local_tasks = Vec::new();
-    let mut peers = BTreeMap::<String, Vec<Candidate>>::new();
+    let explicit = target.task.is_some();
+    let routed = route(
+        store,
+        plan.contents.iter().filter(|content| {
+            args.arrive_task.is_empty() || args.arrive_task.contains(&content.work.id)
+        }),
+        &local,
+        explicit,
+    )?;
     let mut receipts = Vec::new();
     let mut unknown = plan.resolution.unavailable.clone();
-    for content in plan
-        .contents
-        .iter()
-        .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
-        .filter(|content| target.task.is_some() || !content.states.contains(&SelectionState::Done))
-        .filter(|content| {
-            args.arrive_task.is_empty() || args.arrive_task.contains(&content.work.id)
-        })
-    {
-        let task = TaskId::parse(&content.work.id)?;
-        match store.task_execution_route(&task) {
-            Ok(route) if route.machine_id == local => {
-                if eligible(content, target.task.is_some()) {
-                    local_tasks.push(content);
-                }
-            }
-            Ok(route) => peers
-                .entry(route.machine_id.to_string())
-                .or_default()
-                .push(Candidate::read(store, &task)?),
-            Err(error) => unknown.push(format!(
-                "{}: execution Machine unavailable: {error}",
-                content.title
-            )),
-        }
-    }
+    unknown.extend(routed.unknown);
     // A broad Rex launch is the one follower for every Machine it reaches.
-    let follows = host == OpenHost::Rex && target.task.is_none() && !args.local_workspace;
+    let follows = host == OpenHost::Rex && !explicit && !args.local_workspace;
     let mut remotes = Remotes::default();
     if !args.local_workspace {
-        for (peer, candidates) in peers {
+        for (peer, candidates) in routed.peers {
             let mut remote_args = args.clone();
             remote_args.session = target.session.clone();
             remote_args.diff |= target.url.diff;
@@ -430,7 +412,7 @@ fn open_machines(
             }
         }
     }
-    if !local_tasks.is_empty() || follows {
+    if !routed.local.is_empty() || follows {
         let result = Native::resolve(host, args.server.as_deref()).and_then(|native| {
             launch(
                 store,
@@ -438,7 +420,7 @@ fn open_machines(
                 target,
                 &selected,
                 args,
-                &local_tasks,
+                &routed.local,
                 follows.then_some(&remotes),
             )
         });
@@ -460,6 +442,47 @@ fn open_machines(
         ));
     }
     Ok(OpenReport { receipts, unknown })
+}
+
+/// A selection's Tasks by the Machine that runs them. Another Machine decides for
+/// itself whether its Task started; an unknown route never becomes a local tab.
+#[derive(Default)]
+struct Routed<'a> {
+    local: Vec<&'a ViewContent>,
+    peers: BTreeMap<String, Vec<Candidate>>,
+    unknown: Vec<String>,
+}
+
+fn route<'a>(
+    store: &SqliteStore,
+    contents: impl Iterator<Item = &'a ViewContent>,
+    local: &MachineId,
+    explicit: bool,
+) -> Result<Routed<'a>> {
+    let mut routed = Routed::default();
+    for content in contents
+        .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
+        .filter(|content| explicit || !content.states.contains(&SelectionState::Done))
+    {
+        let task = TaskId::parse(&content.work.id)?;
+        match store.task_execution_route(&task) {
+            Ok(route) if route.machine_id == *local => {
+                if explicit || started(content) {
+                    routed.local.push(content);
+                }
+            }
+            Ok(route) => routed
+                .peers
+                .entry(route.machine_id.to_string())
+                .or_default()
+                .push(Candidate::read(store, &task)?),
+            Err(error) => routed.unknown.push(format!(
+                "{}: execution Machine unavailable: {error}",
+                content.title
+            )),
+        }
+    }
+    Ok(routed)
 }
 
 /// A Task another Machine may open, with the identifier its receipts name.
@@ -620,7 +643,7 @@ fn remote_open(
 }
 
 fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
-    Ok(selection(if let Some(task) = &target.task {
+    let expression = if let Some(task) = &target.task {
         SelectionExpression::Work {
             work: WorkWorkspaceKey {
                 repository: task.repository_id.to_string(),
@@ -636,7 +659,11 @@ fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
         }
     } else {
         SelectionExpression::Repository
-    }))
+    };
+    Ok(Selection {
+        id: SelectionId("workspace".into()),
+        expression,
+    })
 }
 
 /// Settings that apply to a Task in this Wave.
@@ -736,7 +763,7 @@ fn launch(
             Some(session) if !arriving && provider_running(store, session.id.as_str())? => {
                 let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
                 receipt.label = "Wave conversation".into();
-                let opened = viewer_argv(repo, &["resume", session.id.as_str()])
+                let opened = lf_argv(repo, &["resume", session.id.as_str()])
                     .map(|argv| native.block("Conversation", repo, argv))
                     .and_then(|layout| {
                         native.add_tab(&mut container, "Conversation", repo, layout)
@@ -779,28 +806,20 @@ fn launch(
             crate::work::link::WorkTarget::Task(task.identifier.clone()),
         )
         .to_string();
-        let opened = templates.for_task(&task.id).and_then(|template| {
-            native.add_task_tab(
-                store,
-                &mut container,
-                content,
-                repo,
-                template.as_ref(),
-                presentation,
-            )
-        });
-        let opened = opened.map(|(tab, shells)| {
-            let showing = if focused {
-                "Focus preserved".into()
-            } else {
-                focused = true;
-                native.focus(&container, &tab)
-            };
-            receipt.reason = Some(format!(
-                "Created a new Task tab; {shells} new shells; {showing}"
-            ));
-            tab
-        });
+        let opened = native
+            .add_task_tab(&mut templates, &mut container, content, presentation)
+            .map(|(tab, shells)| {
+                let showing = if focused {
+                    "Focus preserved".into()
+                } else {
+                    focused = true;
+                    native.focus(&container, &tab)
+                };
+                receipt.reason = Some(format!(
+                    "Created a new Task tab; {shells} new shells; {showing}"
+                ));
+                tab
+            });
         settle_receipt(&mut receipt, opened);
         receipts.push(receipt);
     }
@@ -857,18 +876,16 @@ fn settle_receipt(receipt: &mut OpenReceipt, opened: Result<String>) {
     }
 }
 
-fn eligible(content: &ViewContent, explicit: bool) -> bool {
-    content.work.kind == WorkWorkspaceKind::Task
-        && (explicit
-            || content.states.iter().any(|state| {
-                matches!(
-                    state,
-                    SelectionState::Idle
-                        | SelectionState::Active
-                        | SelectionState::Moving
-                        | SelectionState::Shipping
-                )
-            }))
+fn started(content: &ViewContent) -> bool {
+    content.states.iter().any(|state| {
+        matches!(
+            state,
+            SelectionState::Idle
+                | SelectionState::Active
+                | SelectionState::Moving
+                | SelectionState::Shipping
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -906,15 +923,14 @@ fn start_follower(
     rex.create_window(
         session,
         "Workspace",
-        rex.block("Workspace", repo, viewer_argv(repo, &words)?),
+        rex.block("Workspace", repo, lf_argv(repo, &words)?),
     )?;
     Ok(())
 }
 
-fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
-    // Tools belong to this opening. Keep an
-    // explicit private-Machine runtime, but never hand a dev build's real-Machine
-    // panes to the installed release.
+fn lf_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
+    // Tools belong to this opening. Keep an explicit private-Machine runtime, but
+    // never hand a dev build's real-Machine panes to the installed release.
     let binary = if crate::store::custom_home_selected() {
         crate::os_process::resolve_lf_binary()?
     } else {
@@ -1013,51 +1029,28 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                 continue;
             }
             let plan: ViewPlan = serde_json::from_value(frame["body"].clone())?;
-            let mut arriving = BTreeMap::<String, Vec<Candidate>>::new();
-            for content in plan
-                .contents
-                .iter()
-                .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
-                .filter(|content| !content.states.contains(&SelectionState::Done))
-            {
-                if seen.contains(&content.work.id) {
-                    continue;
-                }
-                let task_id = TaskId::parse(&content.work.id)?;
-                match store.task_execution_route(&task_id) {
-                    Ok(route) if route.machine_id == local => {}
-                    // Remote checkout state is not in this plan; its Machine decides.
-                    Ok(route) => {
-                        arriving
-                            .entry(route.machine_id.to_string())
-                            .or_default()
-                            .push(Candidate::read(&store, &task_id)?);
-                        continue;
-                    }
-                    // Unknown routes never fall back to a local tab.
-                    Err(_) => continue,
-                }
-                if !eligible(content, false) {
-                    continue;
-                }
+            let arriving = route(
+                &store,
+                plan.contents
+                    .iter()
+                    .filter(|content| !seen.contains(&content.work.id)),
+                &local,
+                false,
+            )?;
+            for content in arriving.local {
                 // Mark before creating: an uncertain create is never retried.
                 seen.insert(content.work.id.clone());
-                let arrived = templates.for_task(&task_id).and_then(|template| {
-                    native.add_task_tab(
-                        &store,
-                        &mut container,
-                        content,
-                        &repo,
-                        template.as_ref(),
-                        Presentation::default(),
-                    )
-                });
-                match arrived {
+                match native.add_task_tab(
+                    &mut templates,
+                    &mut container,
+                    content,
+                    Presentation::default(),
+                ) {
                     Ok(_) => println!("Added {}", content.title),
                     Err(error) => eprintln!("{}: {error:#}; not retried", content.title),
                 }
             }
-            for (machine, candidates) in arriving {
+            for (machine, candidates) in arriving.peers {
                 let placement = remotes
                     .entry(machine.clone())
                     .or_insert(Placement::Unopened);
@@ -1159,7 +1152,7 @@ fn arrive_remote(
 
 #[cfg(test)]
 mod tests {
-    use super::{eligible, settle_remote, Candidate, Placement};
+    use super::{settle_remote, started, Candidate, Placement};
     use crate::lf::commands::open::{OpenHost, OpenReceipt, OpenReport, OpenStatus};
     use crate::work::selection::{
         SelectionState, ViewContent, WorkWorkspaceKey, WorkWorkspaceKind,
@@ -1171,7 +1164,7 @@ mod tests {
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         std::env::set_var("LF_BIN", "/old/installed/lf");
         let cwd = std::env::current_dir().unwrap();
-        let argv = super::viewer_argv(&cwd, &["resume", "existing"]).unwrap();
+        let argv = super::lf_argv(&cwd, &["resume", "existing"]).unwrap();
         assert_eq!(argv[0], std::env::current_exe().unwrap().to_string_lossy());
         assert_eq!(&argv[3..], &["resume", "existing"]);
     }
@@ -1200,8 +1193,7 @@ mod tests {
             (SelectionState::Done, false),
         ] {
             content.states = std::collections::BTreeSet::from([state]);
-            assert_eq!(eligible(&content, false), expected);
-            assert!(eligible(&content, true));
+            assert_eq!(started(&content), expected);
         }
     }
 

@@ -1205,17 +1205,14 @@ struct Opening(std::fs::File);
 
 impl Opening {
     fn lock(target: &Resolved) -> Result<Self> {
-        Self::lock_key(&format!(
-            "{}\n{}",
-            target.url,
-            target.session.as_deref().unwrap_or("")
-        ))
-    }
-
-    fn lock_key(key: &str) -> Result<Self> {
         use fs2::FileExt;
         let directory = crate::store::lf_home_dir().join("open");
         std::fs::create_dir_all(&directory).context("create the opening directory")?;
+        let key = format!(
+            "{}\n{}",
+            target.url,
+            target.session.as_deref().unwrap_or("")
+        );
         let name = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
         let file = std::fs::OpenOptions::new()
             .read(true)

@@ -86,16 +86,22 @@ Direct launch verification: opening unit tests 17 passed; opening integration te
 passed. The direct-shell regression executes the generated shell command and
 opens back into its Rex session with the private Machine context preserved.
 
-## Status at 4b4c78b24
+## Status at b321745bd
 
-Exists: fresh-conversation startup through bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime. Real Claude and five native tests passed on 4b4c78b24. Results and limits: [workspace-demo.md](workspace-demo.md).
+Exists, seen in real Rex with real Claude on 8a8ae78ef ([workspace-demo.md](workspace-demo.md)): bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime; a Task with no checkout is placed and starts its conversation, with no second Session, worktree or replay on reopening.
+
+Exists, fixture Rex only (b321745bd):
+- Broad `lf open` starts no agents. Explicit Task or Session: `Resume::Any`. Repository or Wave: `Resume::Running`, for Task panes and the Wave's own conversation. Remote Machines receive the repository or Wave expression and judge their own providers.
+- A Task with no conversation and no resolvable harness fails its receipt and creates no tab.
+- `docs/workspaces.md` says a fresh conversation takes its first turn.
 
 Remains:
+- Rerun the three-Task broad open in real Rex, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched.
 - Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
-- Task with no checkout: explicit `lf open --task` places it, then opens the usual layout; see [questions.md](questions.md).
-- Broad `lf open` must stop starting agents: Tasks with no running provider show Task & workflow; see [questions.md](questions.md). Correct the “send a message” line in `docs/workspaces.md`, and make a Conversation pane that fails at start visible instead of vanishing behind an `opening` receipt.
-- Check, November 7: `cargo test -p loopflow --test integration work_open_tests::` passed 5 of 6 runs; the other had 2 failures, names not captured, right after clippy at load ~15. Gate reruns it and keeps failure output. `--lib commands::open::`, fmt and clippy pass.
-- Shipping coverage of this tree: open in [questions.md](questions.md).
+- `work_open_tests::` passed 5 of 6 parallel runs on November 7; the other had 2 failures, names not captured, right after clippy at load ~15. Gate reruns it in parallel and keeps failure output.
+- Open choices in [questions.md](questions.md): shipping coverage of this tree, and whether a broad open moves input from a live conversation.
+
+Check, November 7: `cargo test -p loopflow --test integration -- --test-threads=1 work_open_tests::` 28 passed, 2 ignored; the new Wave test fails with the `provider_running` guard removed; fmt and clippy pass.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

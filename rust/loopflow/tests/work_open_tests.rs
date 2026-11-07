@@ -1209,16 +1209,25 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     assert_eq!(sessions(home.path()), 0);
 }
 
+/// A stand-in provider process, gone with its test.
+struct Provider(std::process::Child);
+
+impl Provider {
+    fn start() -> Self {
+        Self(Command::new("/bin/sleep").arg("3600").spawn().unwrap())
+    }
+}
+
+impl Drop for Provider {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 #[test]
 fn repository_open_resumes_running_providers_and_starts_none() {
-    struct Child(std::process::Child);
-    impl Drop for Child {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -1336,6 +1345,67 @@ fn repository_open_resumes_running_providers_and_starts_none() {
     let created = open();
     assert!(created.contains("Task & workflow"), "{created}");
     assert!(!created.contains("resume"), "{created}");
+}
+
+#[test]
+fn wave_open_reconnects_its_running_conversation_and_starts_none() {
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let open = || {
+        let report = json(&lf(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &[
+                "open",
+                "--wave",
+                "task-pr-tests",
+                "--host",
+                "rex",
+                "--no-focus",
+                "--json",
+            ],
+        ));
+        let requests = bin.path().join("session.new_window.requests");
+        let created = std::fs::read_to_string(&requests).unwrap();
+        std::fs::remove_file(requests).unwrap();
+        (report, created)
+    };
+    let conversation = |report: &serde_json::Value| {
+        report["receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|receipt| receipt["label"] == "Wave conversation")
+    };
+
+    let session = live_conversation(home.path(), &provider.0, started, repo.path(), "Wave", 0, 1);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET primary_scope='wave',wave_id=?2 WHERE id=?1",
+        rusqlite::params![session, registered.task.wave_id.as_ref().unwrap().as_str()],
+    )
+    .unwrap();
+    let (report, created) = open();
+    assert!(conversation(&report), "{report}");
+    assert!(created.contains(&session), "{created}");
+
+    // The provider is gone: the Session stays primary and is not relaunched.
+    db.execute(
+        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
+        [&session],
+    )
+    .unwrap();
+    let (report, created) = open();
+    assert!(!conversation(&report), "{report}");
+    assert!(!created.contains(&session), "{created}");
+    assert!(created.contains("Task & workflow"), "{created}");
 }
 
 #[test]

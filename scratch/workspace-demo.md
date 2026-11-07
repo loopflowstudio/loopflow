@@ -310,4 +310,4 @@ Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261107-unplaced`. Se
 
 Stand-in decision: iterate to implement. Rule to build is in [questions.md](questions.md).
 
-Built after that demo, not yet seen in Rex: broad gating, doc correction, harness failure. Fixture Rex only: `cargo test -p loopflow --test integration -- --test-threads=1 work_open_tests::` 27 passed, 2 ignored; `cargo test -p loopflow --lib lf::commands::open::` 17 passed. Rerun the three-Task broad open in the demo.
+Built after that demo, not yet seen in Rex: broad gating, doc correction, harness failure. Fixture Rex results are in [rex-workspace.md](rex-workspace.md). Rerun the three-Task broad open in the demo.

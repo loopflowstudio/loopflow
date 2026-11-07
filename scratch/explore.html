@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-673 · Session tile hover controls · explore</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --text: #1d1b18; --muted: #6b665d; --rule: #ddd8cc;
+    --pane: #fffdf8; --pane-border: #d6d0c3; --strip-rule: #e6e1d6; --glyph: #6b665d;
+    --guide: #d0473a; --pill: rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17161a; --text: #ece8df; --muted: #9a958b; --rule: #2e2c31;
+      --pane: #1f1e23; --pane-border: #3a3840; --strip-rule: #2c2a30; --glyph: #a29d93;
+      --guide: #ff7a6b; --pill: rgba(255,255,255,.08);
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "Lato", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font: 500 28px/1.2 "Cormorant Garamond", Georgia, serif; margin: 0 0 6px; }
+  h2 { font: 500 22px/1.25 "Cormorant Garamond", Georgia, serif; margin: 48px 0 4px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .decision { border-left: 3px solid var(--guide); padding: 4px 0 4px 14px; margin: 24px 0; }
+  code, pre { font: 12.5px/1.5 "JetBrains Mono", ui-monospace, monospace; }
+  pre { background: var(--pane); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+  .tag { font-size: 13px; color: var(--muted); }
+  .stage { display: flex; gap: 20px; flex-wrap: wrap; margin: 16px 0; }
+  figure { margin: 0; flex: 1 1 300px; }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  /* Mock pane at 2x scale: 28pt strip, 8pt corner radius */
+  .pane { position: relative; height: 150px; background: var(--pane);
+    border: 2px solid var(--pane-border); border-radius: 16px; overflow: hidden; }
+  .strip { position: relative; height: 56px; border-bottom: 2px solid var(--strip-rule);
+    display: flex; align-items: center; font-size: 22px; color: var(--muted); }
+  .strip .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btns { display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+  .pane:hover .btns, .pane.pinned .btns { opacity: 1; }
+  .btn { width: 44px; height: 40px; display: grid; place-items: center; color: var(--glyph); border-radius: 8px; }
+  .btn svg { width: 22px; height: 22px; }
+  .btn.outline { outline: 1px dashed var(--guide); outline-offset: -1px; }
+  .body { padding: 20px 24px; color: var(--muted); font-size: 22px; }
+  .guide { position: absolute; border-color: var(--guide); pointer-events: none; }
+  /* A: today — leading 12, trailing 4 */
+  .a .strip { padding: 0 8px 0 24px; }
+  /* B: shared inset = corner radius (8) both sides */
+  .b .strip { padding: 0 16px; }
+  /* C: floating pill inside the corner, concentric radius */
+  .c .strip { padding: 0 16px; }
+  .c .btns { position: absolute; top: 8px; right: 8px; background: var(--pill);
+    border-radius: 8px; padding: 0 2px; gap: 0; }
+  .c .btn { height: 40px; }
+  .c .strip .title { padding-right: 110px; }
+  ol.q li { margin: 8px 0; }
+  .proposed { color: var(--guide); font-size: 13px; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 40px 0; }
+  label { font-size: 13px; color: var(--muted); cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+<h1>Session tile hover controls: inset from the corner</h1>
+<div class="meta">LOO-673 Desktop polish · explore step · 2026-11-06 · built from
+<code>swift/LoopflowMac/Views/WorkspacePanesView.swift</code> (strip, <code>PaneGeometry</code>),
+<code>swift/Loopflow/Design/DesignSystem.swift</code>, Jack Heart's Oct 28 feedback comment.</div>
+
+<div class="decision">
+<strong>Decision needed:</strong> how far the fix reaches. One-line padding change, one shared pane inset, or
+re-shaped hover chrome. Recommended: <strong>B</strong>.
+</div>
+
+<p>Mocks are drawn at 2× from the real numbers: strip 28pt, buttons 22×20pt, corner radius 8pt.
+Hover a tile to reveal its controls, or <label><input type="checkbox" id="pin" checked> pin them visible</label>.
+Dashed outlines are the buttons' hit frames.</p>
+
+<h2>A · Existing behavior</h2>
+<p class="tag">Existing. <code>.padding(.leading, 12).padding(.trailing, 4)</code>; 4pt above the 20pt button inside a 28pt strip.</p>
+<div class="stage">
+  <figure>
+    <div class="pane a pinned" data-mock></div>
+    <figcaption>Hide's hit frame starts 4pt from the border, inside the 8pt corner arc. The glyph reads as touching the curve.</figcaption>
+  </figure>
+</div>
+
+<h2>B · One pane inset, everywhere <span class="proposed">proposed · recommended</span></h2>
+<p>What's true: every pane edge — strip leading, strip trailing, terminal reserve, tab rows — sits one
+<code>PaneGeometry.inset</code> (= corner radius, 8pt) from the border, so nothing ever enters the corner arc.</p>
+<div class="stage">
+  <figure>
+    <div class="pane b pinned" data-mock></div>
+    <figcaption>Buttons clear the arc; left and right margins match. The title moves 4pt left.</figcaption>
+  </figure>
+</div>
+<pre>enum PaneGeometry {
+    static let cornerRadius = CornerRadius.md
+    /// Chrome stays outside the corner arc on every edge.
+    static let inset = cornerRadius
+}
+
+// strip
+.padding(.horizontal, PaneGeometry.inset)      // was leading 12, trailing 4
+// content reserve (already cornerRadius) and the stripless tab rows (.padding(4))
+.padding(PaneGeometry.inset)</pre>
+<p>Cost: a handful of magic numbers become one token; the title loses 4pt of left margin (the trade
+against 12 on both sides, which costs 8pt of strip width). Risk: low; the stripless shell/browser tab
+rows move 4pt inward, worth eyeballing. A view test pins the strip's trailing inset ≥ corner radius.</p>
+
+<h2>C · Floating corner pill <span class="proposed">proposed</span></h2>
+<p>What's true: hover controls stop being part of the strip's row and become an overlay cluster that
+nests concentrically in the tile's corner, like window controls — and can appear on single-pane tiles,
+which have no strip today.</p>
+<div class="stage">
+  <figure>
+    <div class="pane c pinned" data-mock></div>
+    <figcaption>Pill sits 4pt in with a 4pt radius (8 − 4), concentric with the tile. Reads as one control group.</figcaption>
+  </figure>
+</div>
+<p>Cost: new overlay, a tinted background that must work in light and dark, title truncation must reserve
+the pill's width, and the hover region moves. It changes what the chrome <em>is</em>, which belongs in a split Task,
+not this bucket. Appeal: zoom/hide reachable even when a Wave shows one Session.</p>
+
+<hr>
+<h2>Questions</h2>
+<ol class="q">
+  <li>Which world? <b>a</b> leave as is · <b>b</b> one 8pt pane inset (recommended) · <b>c</b> floating corner pill (split Task)</li>
+  <li>Inset value for B: <b>a</b> 8pt, the corner radius · <b>b</b> 12pt on both sides (matches today's leading)</li>
+  <li>If C is wanted later: <b>a</b> file it now as its own Task · <b>b</b> drop it</li>
+</ol>
+</main>
+<script>
+  const title = "LOO-673 · claude";
+  const icon = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${d}</svg>`;
+  const zoom = icon('<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>');
+  const hide = icon('<path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4Z"/><path d="M3 13 13 3"/>');
+  for (const pane of document.querySelectorAll('[data-mock]')) {
+    pane.innerHTML = `
+      <div class="strip"><span class="title">${title}</span>
+        <div class="btns"><span class="btn outline" title="Zoom pane">${zoom}</span><span class="btn outline" title="Hide pane">${hide}</span></div>
+      </div>
+      <div class="body">Not running here · Resume</div>`;
+  }
+  const pin = document.getElementById('pin');
+  const sync = () => document.querySelectorAll('[data-mock]').forEach(p => p.classList.toggle('pinned', pin.checked));
+  pin.addEventListener('change', sync); sync();
+</script>
+</body>
+</html>

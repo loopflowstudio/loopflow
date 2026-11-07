@@ -289,7 +289,7 @@ enum MockWaveFixture {
                     "merge_commit": null,
                     "abandoned_at": null
                   },
-                "section": "waiting"
+                "section": "working"
               },
               {
                 "task": {
@@ -336,7 +336,7 @@ enum MockWaveFixture {
                   "reason": "Task is ready to start"
                 },
                 "pr": null,
-                "section": "not_started"
+                "section": "backlog"
               }
             ],
             "truncated": false

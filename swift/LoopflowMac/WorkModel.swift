@@ -2919,8 +2919,7 @@ extension WorkModel {
 
     /// The sidebar and the Working Tasks grid write the same order; both read the
     /// repository plan, so each shows the other's move.
-    /// The row moves on drop; the written order replaces it, and a failed write re-reads it.
-    /// The row moves now; the returned write follows.
+    /// The row moves now; the returned write replaces it, and a failed write re-reads it.
     @discardableResult
     func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
         guard task != target, let repoPath else { return Task {} }

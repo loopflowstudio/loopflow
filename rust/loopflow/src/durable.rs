@@ -573,6 +573,8 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
+    use super::{TaskSection, TaskState, WorkStatus};
+
     #[test]
     fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {
         let of = TaskSection::of;
@@ -595,8 +597,6 @@ mod tests {
         );
         assert_eq!(of(TaskState::Abandoned, true, None), TaskSection::Abandoned);
     }
-
-    use super::{TaskSection, TaskState, WorkStatus};
 
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {

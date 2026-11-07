@@ -796,8 +796,9 @@ extension TaskOrderDrag {
         func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
             source = row
             offset = translation
-            let over = order.first { $0 != row && frames[$0]?.minY ?? .infinity <= y && y < frames[$0]?.maxY ?? -.infinity }
-            if let over { target = over } else if frames[row]?.contains(CGPoint(x: frames[row]?.midX ?? 0, y: y)) == true { target = nil }
+            let under = { (id: String) in self.frames[id].map { $0.minY <= y && y < $0.maxY } == true }
+            // Another row under the pointer is the target; back over its own row, none.
+            if let over = order.first(where: { $0 != row && under($0) }) { target = over } else if under(row) { target = nil }
             if let target {
                 below = (order.firstIndex(of: row) ?? 0) < (order.firstIndex(of: target) ?? 0)
             }

@@ -3049,7 +3049,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
     }
 }
 
-/// Who owns a Task, for text lists: their name, else their key, or "—".
 /// A started Task nobody owns: nothing moves it until someone claims it.
 fn unassigned(runtime: &TaskRuntimeSnapshot) -> bool {
     runtime.owner.is_none()
@@ -3057,6 +3056,7 @@ fn unassigned(runtime: &TaskRuntimeSnapshot) -> bool {
         && runtime.status != TaskState::Unstarted
 }
 
+/// Who owns a Task, for text lists: their name, else their key, or "—".
 fn owner_text(runtime: Option<&TaskRuntimeSnapshot>) -> &str {
     match runtime.and_then(|runtime| runtime.owner.as_ref()) {
         Some(owner) => owner.who(),

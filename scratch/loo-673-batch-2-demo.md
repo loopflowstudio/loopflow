@@ -26,6 +26,27 @@ Jack's 14:05 screenshot of that build: "Invalid selections watch frame ... WorkS
 
 (pending)
 
+## November 2 evening exit investigation
+
+Jack Heart reported another apparent crash. The polish Dev process (pid 483,
+launched 14:11 PST) recorded `reason: quit` at 16:02:32. The shared Dev bundle
+was subsequently replaced for LOO-500's Wave lifecycle demo; its executable was
+modified at 18:21:13. That checkout's `scratch/wave-lifecycle-demo.md` records
+failed private-world launches and LLDB evidence at 18:25:58: EXC_BAD_ACCESS in
+`Commands::augment_subcommands` on a Swift cooperative worker. Its
+`LoopflowLibrary.swift` still uses `Task.detached` and lacks this branch's
+8 MB thread fix (`e6a8273bc6`). This matches the earlier stack-exhaustion failure;
+the fix has not yet been verified in the LOO-500 build.
+
+Later launches against the shared home failed the unmerged `wave_removal`
+migration guard. That is separate from the private-world crash; the guard
+refused access and no migration was applied by this investigation. The final
+shared-home attempt recorded SIGTERM at 18:25:42. No Dev process was running
+when checked at 18:28. Do not equate dump file modification time with crash time:
+Ghostty exports previous crashes on the next launch. The intended demo (polish
+on real data or Wave lifecycle on its private world) needs resolving before
+replacing this shared app again.
+
 ## Next action
 
 Jack tries the three runbook steps in the Dev build; failures go back to LOO-673 as batch 2 rework, acceptance lets #1791 land (15 of 17 CI jobs skip on the PR; recheck before landing).

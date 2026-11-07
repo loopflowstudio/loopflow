@@ -83,7 +83,7 @@ Remains:
 - Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task. Jack Heart's acceptance: two Tasks in one Wave session, a new native split beside Conversation, Shell, Files, Changes and Task & workflow lands in that tab's Task worktree on its Machine, checked with `pwd` in the new shell, after reopening too; a gap in the host's scoped defaults is recorded exactly. Two-Machine behavior was not rerun.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
 - `work_open_tests::` flake, cause now seen (November 7, load ~28, 1 of 3 parallel runs): `rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones` failed its receipt with “Rex did not answer within 2s”. The shell stand-in missed the production reply deadline. Unrelated to this diff, and no test knob exists. Real Rex under load could report the same failure after creating the tab; the receipt says to inspect the host before retrying. Gate reruns it in parallel.
-- Open choices in [questions.md](questions.md): shipping coverage of this tree, and whether a broad open moves input from a live conversation.
+- Open choices in [questions.md](questions.md): whether a broad open moves input from a live conversation, shipping coverage of this tree, and whether Task & workflow keeps a worktree.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.
 
@@ -123,3 +123,5 @@ Checked and left alone:
 - Followers from two broad opens each add an arrival tab. Each is a separate view of the same Work, as fresh tabs accepted on November 5 imply.
 
 Check: `documented_commands::` 4 passed. Compress: `called_from_task` replaces `calling_conversation`; `--lib lf::commands::open::` 17 passed, `work_open_tests::` 32 passed single-threaded, clippy clean. Next proof is unchanged: the demo rerun under Remains. The parallel `work_open_tests::` flake stays with gate.
+
+Realign on 8b841cfb3: `docs/workspaces.md` retention wording read against `task_retirement.rs` and `retirement.rs`, and it agrees; no test rerun, PR #1814 head is this commit's parent.

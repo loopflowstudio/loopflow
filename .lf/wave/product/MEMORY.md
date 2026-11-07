@@ -268,13 +268,14 @@ checks do not replace affected suites.
 
 ## Native shell lifetimes (LOO-717, accepted November 3–6, 2026)
 
-Jack Heart's November 6 revision removes `lf task shell`. Desktop owns shell
-receipts, startup and Close through its private cross-platform runtime, independent
-of GUI control. Shared transport owns PTYs and Machine routing; Task retirement
-delegates Desktop shell settlement. Rex owns shells/layouts; LOO-498 owns native
-layout creation. LF never closes Rex shells. Close ends Desktop jobs;
-hide/switch/quit retain execution until eligible cleanup. Undo restores history.
-No deleted-checkout restoration. Publication through demo is authorized, not ship.
+Jack Heart's November 6 revision removes `lf task shell`. Desktop owns receipts,
+startup and Close through a private cross-platform runtime, independent of GUI
+control. Terminal bytes/Close status need no GUI schema or registry action;
+namespace misclassified the runtime.
+Shared transport owns PTYs/Machine routing; retirement delegates shell settlement.
+Rex owns shells/layouts; LOO-498 owns native layout creation. LF never closes Rex
+shells. Close ends Desktop jobs; hide/switch/quit retain execution until cleanup.
+Undo restores history, never execution or deleted checkouts.
 
 Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
 Return cancels cleanup. Work, drafts and pending requests delay cleanup

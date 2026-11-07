@@ -349,7 +349,18 @@ their native behavior is not established by this branch's transport tests.
 
 ## Concept review — November 6
 
-**Design refinement; no open product choice.** At `e8385db949`,
+**Current outcome at `57e0eb180`: nothing further to change; no open product
+choice.** Source review follows New Shell through Desktop receipts, local/SSH
+attachment, lost acknowledgement, Close/Undo and scheduled retirement. The
+accepted model needs no additional API or lifecycle: Desktop owns shell policy,
+Session viewers own retention, and the shared transport carries both locally and
+across SSH. Returning viewing revokes automatic Close; explicit Close and already
+settled execution remain distinct. The repaired metadata matches this model.
+Usage docs and skill guidance need no further revision. Next proof remains the
+affected publication checks and native/physical-remote demo listed below; this
+review ran no execution suite and makes no new runtime claim.
+
+**Earlier refinement, now implemented.** At `e8385db949`,
 `desktop::result_schema` classified the private runtime as a GUI action, exposed
 by exact hidden-command inspection. The registry test made the same assumption.
 Lifecycle source inspection found no further mismatch.
@@ -358,8 +369,9 @@ Delete — do not maintain: the runtime's GUI result-schema classification and
 its inclusion in GUI action-registry validation. Keep the hidden runtime and
 dispatch; add no stream DTO, GUI action or public shell API.
 
-The working repair returns no runtime result schema, limits registry validation
-to GUI verbs and documents terminal bytes/Close status in `desktop/README.md`.
+The repair committed at `57e0eb180` returns no runtime result schema, limits
+registry validation to GUI verbs and documents terminal bytes/Close status in
+`desktop/README.md`.
 Regression coverage checks exact JSON inspection and exclusion from public
 listings alongside existing ordinary-action schemas. Linux/no-app execution,
 no-replay reconnect and between-sweep cancellation paths/tests are unchanged.
@@ -515,22 +527,25 @@ Git references to the superseded handoff and external-host design.
 
 ## Checks and remaining proof
 
-November 6 reconciliation at `e8385db949` confirms the private Desktop runtime,
-Swift launch/Close callers, GUI-independent dispatch and shared SSH viewer path.
-The removed Task command/module/table have no surviving production references.
-`ViewerHold` now carries dated viewing or absence through the shared retirement
-reader. Renewed Session viewing and close cancellation remain one transaction;
-owners recheck current Task retention before automatic closure. No bounded code
-mismatch was found. Existing compression logs confirm 16 retirement, three shell
-policy/CLI, two real transport and four headless Swift checks passed; no execution
-suite was rerun for this prose reconciliation.
+November 6 reconciliation at `57e0eb180` confirms the concept-review repair is
+committed: exact inspection returns no shell result schema, public listings omit
+the runtime, and GUI registry validation covers GUI verbs. Ordinary GUI schemas
+retain their regression coverage. The README matches terminal bytes/Close status.
+The receipt lookup rename and narrower retirement read model do not change
+GUI-independent dispatch, no-replay reconnect or between-sweep cancellation.
+No further bounded code mismatch was found. The compression logs listed under
+**Concept review** confirm 23 selected checks passed, the registry check's clean
+isolated rerun and passing Clippy. No execution suite was rerun for this prose
+reconciliation; the earlier local/SSH and Swift checks remain scoped to the
+ownership cut.
 
 The local `origin/main` remains `c8d7a7f4a8`; this pass did not fetch upstream.
-Product memory now includes the Desktop ownership revision as well as scheduled
-cleanup and one viewer protocol. Filesystem inspection found no Product child
-memory directories. `lf task status LOO-717 --json` returned no result before it
-was stopped; current remote Work state was unavailable, so no new Task/PR state
-is inferred. The supplied feature/refresh context still defines this pass.
+Product memory includes the runtime/GUI metadata distinction alongside Desktop
+ownership, scheduled cleanup and one viewer protocol. Filesystem inspection found
+no Product child memory directories. The earlier `lf task status LOO-717 --json`
+attempt returned no result before it was stopped; this pass made no new Work
+service query or Task/PR state claim. The supplied feature/refresh context defines
+this reconciliation.
 
 Reconciliation check: `git diff --check`; `lf context` — passed; memory and scratch fit both size targets.
 
@@ -572,7 +587,8 @@ scheduler registration, credential change or live-store migration occurred.
 Remaining work:
 
 - Review publication: update PR #1811 for the Desktop shell ownership
-  revision after concept review, Clippy and affected suites. The gate selection
+  revision and committed metadata repair after affected suites. Metadata
+  regressions and Clippy passed at `57e0eb180`. The gate selection
   includes `desktop::shells::` and
   `desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed` in place of the
   removed `store::sqlite::task_shells::` filter, plus the Desktop command and

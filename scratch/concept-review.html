@@ -29,12 +29,12 @@
     <a href="questions.md">decisions</a>, <code>desktop/shells.rs</code>,
     <code>lf/commands/desktop.rs</code>, <code>lf/navigation.rs</code>,
     <code>ops/task/retirement.rs</code>, <code>store/sqlite/task_retirement.rs</code>
-    and <code>SessionsView.swift</code>. Source: <code>e8385db949</code>.
+    and <code>SessionsView.swift</code>. Source: <code>57e0eb180</code>.
   </header>
-  <h1>Keep the shell runtime outside GUI actions.</h1>
-  <p><strong>Design refinement; no open product choice.</strong> Desktop owns shell
-    execution through its private destination runtime. The working repair removes
-    the GUI response promise from its metadata without changing the experience.</p>
+  <h1>Desktop owns execution. Session viewing retains the checkout.</h1>
+  <p><strong>Nothing further to change; no open product choice.</strong> The current
+    implementation follows the accepted model. The earlier GUI metadata mismatch
+    is repaired. Publication checks and native demonstration remain outstanding.</p>
 
   <h2>The repaired mismatch</h2>
   <blockquote>
@@ -42,7 +42,7 @@
     <code>DesktopVerbResult</code> with required window, pane and action fields.
     The command carries terminal bytes and can run on Linux without the app.
   </blockquote>
-  <p><strong>Working repair:</strong> exact runtime inspection returns
+  <p><strong>Implemented at <code>57e0eb180</code>:</strong> exact runtime inspection returns
     <code>result_schema: null</code>. The GUI action-registry check covers actual
     GUI actions. No new <code>shell</code> action, public API or stream DTO.</p>
 
@@ -56,7 +56,8 @@
     <dd>Implemented: <code>record_owner_viewer_hold</code> records viewing and revokes
       queued retirement together. Passive viewers count; shell tabs add no hold.</dd>
     <dt>Complete and leave → retirement record → scheduled sweep</dt>
-    <dd>Implemented: the minute-based Machine sweep checks the fifteen-minute
+    <dd>Before the scheduling revision: one sleeping worker per Task.
+      Implemented: the minute-based Machine sweep checks the fifteen-minute
       absence deadline, protects requested work and delegates Desktop job settlement.
       SQLite keeps interrupted progress and retry state. Rex shells remain native.</dd>
   </dl>
@@ -72,17 +73,17 @@
     Desktop action-result schema.” Existing usage and skill guidance need no change.</p>
 
   <footer>
-    <strong>Review outcome — metadata repaired; publication and demo remain</strong>
+    <strong>Review outcome — no further design change</strong>
     <ol>
-      <li>Before repair: <code>every_verb_names_a_registry_action</code> failed
-        with “shell is not a registry action.” Exact CLI inspection reproduces
-        the inappropriate GUI result schema.</li>
-      <li>Three focused checks passed: GUI registry validation, null runtime schema
-        and public-list exclusion, and ordinary action schemas. Native Desktop/Rex and
-        physical remote-Machine demonstration remain unproved.</li>
-      <li>Open product questions: none. This correction follows the accepted
-        Desktop ownership decision. Broader checks and publication remain with
-        the Graph; native demonstration stays at interactive demo.</li>
+      <li><strong>Is another product decision needed?</strong> No. Shell ownership,
+        viewer retention, Close and recovery follow the accepted decisions.</li>
+      <li><strong>What could invalidate the implementation?</strong> Replayed startup,
+        a local prompt after remote failure, or a queued automatic Close surviving
+        renewed Session viewing. Existing focused checks cover these paths; this
+        review inspected source and did not rerun execution suites.</li>
+      <li><strong>What remains unproved?</strong> Native Desktop/Rex and physical
+        remote-Machine behavior. Broader checks and publication remain with the
+        Graph; demonstration stays at interactive demo.</li>
     </ol>
   </footer>
 </main>

@@ -70,10 +70,12 @@ passing repairs; they do not validate this later cut. The design retains command
 counts, warnings and logs, including initial failures.
 
 November 6 concept review found the hidden runtime incorrectly advertised a GUI
-result schema. The working repair returns no schema, excludes the runtime from
-GUI action validation and documents terminal bytes/Close status. Three focused
-tests passed, covering exact inspection, public-list exclusion and ordinary GUI
-schemas. Compression then passed 23 selected checks and Clippy; the design records
+result schema. The repair committed at `57e0eb180` returns no schema, excludes
+the runtime from GUI action validation and documents terminal bytes/Close status.
+Three focused tests passed, covering exact inspection, public-list exclusion and ordinary GUI
+schemas. Reconciliation confirmed the source, README and saved logs agree.
+Concept review at `57e0eb180` found nothing further to change and no open product choice.
+Compression passed 23 selected checks and Clippy; the design records
 the nextest leak warning and clean isolated rerun. Broader checks and PR #1811
 publication remain in the Graph.
 Native Desktop/Rex and physical remote-Machine proof remain at interactive demo.
@@ -82,9 +84,9 @@ LF-owned SSH heartbeat tests do not establish external hosts' loss detection.
 The private demo app/provider has not launched. Rebuild the old candidate and keep
 its history/runtime roots and input-release contract in [the demo record](loo-717-demo.md).
 The local upstream inspected during reconciliation was `c8d7a7f4a8`, without a
-fresh fetch. `lf task status LOO-717 --json` produced no result before it was
-stopped; remote Work state was unavailable. Use the supplied Graph context without
-inferring publication or completion. Product memory includes Desktop ownership;
+fresh fetch. An earlier `lf task status LOO-717 --json` produced no result before
+it was stopped; this pass made no new Work query or publication/completion claim.
+Product memory includes Desktop ownership and the runtime/GUI metadata distinction;
 no child Product memories were found.
 
 History: `e8385db949:scratch/questions.md` retains earlier implementation choices;

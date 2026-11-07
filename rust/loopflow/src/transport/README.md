@@ -102,6 +102,8 @@ acknowledged, the attachment has no time limit.
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
 attachments keep their PTY open; the running program interprets terminal EOF keys.
+Keystrokes a viewer sent before it closed reach the program in order, even when
+the viewer quits in the same instant, as long as it still held control.
 
 The owner keeps a libghostty-vt terminal (the Ghostty revision pinned in
 `rust/loopflow/ghostty-vt.json`, 8 MiB of scrollback) and answers the program's

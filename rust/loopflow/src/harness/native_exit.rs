@@ -117,7 +117,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     if let Some((store, _, attachment)) = &owner {
         let recorded = (|| -> Result<()> {
             let mut process = store
-                .process(&attachment.provider_lf_process_id)?
+                .lf_process(&attachment.provider_lf_process_id)?
                 .context("handed-off launcher is not recorded")?;
             process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
             process.outcome = Some(
@@ -154,7 +154,7 @@ pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
         Err(error) => return Err(error.into()),
     }
     Ok(store
-        .process(&attachment.agent_process_id)?
+        .agent_process(&attachment.agent_process_id)?
         .is_some_and(|process| {
             process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
         }))
@@ -351,7 +351,10 @@ mod tests {
                     true,
                 )
                 .unwrap();
-            let before = store.process(&next.agent_process_id).unwrap().unwrap();
+            let before = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
             assert_eq!(settled.code, 0);
             assert!(settled
@@ -362,10 +365,13 @@ mod tests {
                 store.session_attachment(&session.id).unwrap(),
                 Some(next.clone())
             );
-            let after = store.process(&next.agent_process_id).unwrap().unwrap();
+            let after = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
             assert_eq!(after.outcome, before.outcome);
-            let launcher = store.process(&launcher).unwrap().unwrap();
+            let launcher = store.lf_process(&launcher).unwrap().unwrap();
             assert_eq!(launcher.exit_code, Some(0));
             assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));
             let terminal: serde_json::Value = serde_json::from_slice(

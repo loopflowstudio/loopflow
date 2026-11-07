@@ -7,6 +7,22 @@ public struct AgentSessionId: RawRepresentable, Codable, Sendable, Hashable {
     public init(rawValue: String) { self.rawValue = rawValue }
 }
 
+/// One provider OS process Loopflow launched; never an LfProcess identity.
+public struct AgentProcessId: RawRepresentable, Codable, Sendable, Hashable {
+    public let rawValue: String
+
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    public init(from decoder: Decoder) throws {
+        rawValue = StructuredIdentity.uuid(try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(rawValue)
+    }
+}
+
 /// Native receipts retain missing attribution and provider-specific evidence.
 public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let seq: Int64
@@ -14,7 +30,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let agentSession: AgentSessionId?
     public let providerTurn: String?
     public let kind: Kind
-    public let agentProcessId: String?
+    public let agentProcessId: AgentProcessId?
     public let lfProcessId: String?
     public let taskID: String?
     public let waveID: String?

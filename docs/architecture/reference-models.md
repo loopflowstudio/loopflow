@@ -138,15 +138,17 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | Task | Worktree, optional PR and every associated Session, Graph and Process; no Graph is privileged |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
-| AgentProcess | The provider OS process Loopflow started: a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
+| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |
 | Task ownership | (person, Machine) or unowned, read from the Task's append-only ownership log; no authority over merely observed processes |
 | Steer publication | Immutable authored direction with independent Session delivery |
 
-The LOO-441 names are integrated. The common `LfProcess` wire projection
-still carries both lf and agent rows during the AgentProcess cutover.
+The LOO-441 names are integrated. Process inventory readers return
+`ProcessEntry`, tagged by `kind`: `lf` rows are `LfProcess`, `agent` rows are
+`AgentProcess`. Both IDs are UUID text in the one `processes.id` column; only
+the row's `kind` decides which type it reads as.
 
 ## Definition and execution projections
 

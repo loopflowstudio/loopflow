@@ -150,8 +150,10 @@ A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.
 Only `lf task run` and `lf ship` move that position. `interactive:` steps are
 where a person takes part. Task state (`unstarted · idle · active · moving ·
-shipping · done · abandoned`) is derived, not stored. A stopped Graph is
-history; nothing resumes it. Started Tasks keep their identity, worktree and PR
+shipping · done · abandoned`) is derived, not stored. `TaskSection` is the
+one board bucketing every surface reads: Backlog (unstarted or unassigned),
+Working (owned idle, active or moving), Autonomous (owned shipping), Done,
+Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
 across replanning, and unreviewed backlog stays until someone decides.
 
 The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,

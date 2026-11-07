@@ -196,9 +196,12 @@ pub fn run(
         }) if !preview => Some(connection),
         _ => None,
     };
+    // Only a person at a terminal views the remote Session; scripts and pipes
+    // keep the plain SSH command, whose stdin reaches the provider directly.
+    let attended = !cli.batch && std::io::stdin().is_terminal();
     if let Some(connection) = connection.filter(|connection| {
         connection.prepare
-            || ((connection.json || cli.json) && !cli.batch && connection.message.is_none())
+            || ((connection.json || cli.json) && attended && connection.message.is_none())
     }) {
         if !connection.prepare {
             cmd.push("--prepare".into());
@@ -268,15 +271,15 @@ pub fn run(
         }
         return Ok(());
     }
-    let viewer = connection.is_some_and(|connection| {
-        !connection.prepare && connection.message.is_none() && !cli.batch
-    }) || (!preview
-        && matches!(
-            &cli.command,
-            Some(crate::lf::Commands::Desktop {
-                cmd: crate::lf::DesktopCommand::Shell { args },
-            }) if !args.close
-        ));
+    let viewer = connection
+        .is_some_and(|connection| !connection.prepare && connection.message.is_none() && attended)
+        || (!preview
+            && matches!(
+                &cli.command,
+                Some(crate::lf::Commands::Desktop {
+                    cmd: crate::lf::DesktopCommand::Shell { args },
+                }) if !args.close
+            ));
     if viewer {
         extra_env.push((crate::transport::STREAM_ENV, "1"));
     }

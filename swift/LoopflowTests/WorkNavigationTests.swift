@@ -214,7 +214,7 @@ struct WorkNavigationTests {
     func waveRowCountsStartedTasks() throws {
         let model = try dashboardModel(claimed: true)
         // wave-1: shipping issue-now counts; unstarted, never-started and completed Tasks don't.
-        #expect(model.startedTaskCount(try #require(model.visibleRoadmaps.first { $0.wave.id == "wave-1" })) == 1)
+        #expect(model.startedTaskCount(.wave("wave-1")) == 1)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         let row = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
         #expect(try row.find(text: "1").string() == "1")
@@ -225,7 +225,7 @@ struct WorkNavigationTests {
     func autonomousSectionListsShippingTasks(scheme: ColorScheme) throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try claimedRoadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        // Rust's Working Tasks leave shipping issue-now out; the board's Autonomous rule finds it.
+        // Rust's Working Tasks leave shipping issue-now out; its Autonomous section holds it.
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
             members: [fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "issue-review"), title: "issue-review")])],
             reason: "")
@@ -251,11 +251,53 @@ struct WorkNavigationTests {
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                                                    members: [task("issue-review"), task("issue-now")])], reason: "")
         #expect(model.workingTaskIDs == ["issue-review", "issue-now"])
-        let write = Task { await model.reorderWorkingTask("issue-now", to: "issue-review") }
-        for _ in 0..<20 where model.workingTaskIDs != ["issue-now", "issue-review"] { await Task.yield() }
+        let write = model.reorderWorkingTask("issue-now", to: "issue-review")
         #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
         write.cancel()
         await write.value
+    }
+
+    @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
+    func abandonLeavesTheSidebarAtOnce() async throws {
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            if args.contains("abandon") {
+                try await Task.sleep(for: .milliseconds(50))
+                throw RegistryQueryError("Task has unpushed commits")
+            }
+            throw RegistryQueryError("unused")
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        func task(_ id: String) -> WorkViewPlan.Content {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+        }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
+        model.select(.task(id: "issue-review"))
+        let abandoned = try #require(model.task(id: "issue-review")?.task)
+        let abandon = Task { await model.abandonTask(abandoned) }
+        for _ in 0..<20 where !model.abandoningTaskIDs.contains("issue-review") { await Task.yield() }
+        #expect(model.sidebarTaskIDs == ["issue-now"])
+        #expect(model.selection == .task(id: "issue-now"))
+        await abandon.value
+        #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
+        #expect(model.dashboardError == "Task has unpushed commits")
+    }
+
+    @Test("A row dragged over another lands there on release and leaves no drag behind")
+    func draggedRowLandsOnRelease() {
+        let drag = TaskOrderDrag.State()
+        drag.frames = ["a": CGRect(x: 0, y: 0, width: 200, height: 60),
+                       "b": CGRect(x: 0, y: 65, width: 200, height: 60),
+                       "c": CGRect(x: 0, y: 130, width: 200, height: 60)]
+        drag.move("a", by: 10, at: 40, order: ["a", "b", "c"])
+        #expect(drag.target == nil)
+        drag.move("a", by: 120, at: 150, order: ["a", "b", "c"])
+        #expect(drag.landing(on: "c") == .bottom)
+        drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
+        #expect(drag.landing(on: "b") == .bottom)
+        let landed = drag.end()
+        #expect(landed?.0 == "a" && landed?.1 == "b")
+        #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 
     @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
@@ -1109,7 +1151,8 @@ struct WorkNavigationTests {
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
     }
-    /// The fixture with shipping issue-now claimed, as `lf ship` leaves it; unowned Tasks are backlog.
+    /// The fixture with shipping issue-now claimed, as `lf ship` leaves it, and so in Rust's
+    /// Autonomous section; unowned Tasks are backlog.
     private func claimedRoadmap() throws -> RoadmapSnapshot {
         var planning = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var inventory = try #require(planning["tasks"] as? [String: Any])
@@ -1119,6 +1162,7 @@ struct WorkNavigationTests {
         runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
                             "machine": ["id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b", "label": "mini"]]
         tasks[index]["runtime"] = runtime
+        tasks[index]["section"] = "autonomous"
         inventory["items"] = tasks
         planning["tasks"] = inventory
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))

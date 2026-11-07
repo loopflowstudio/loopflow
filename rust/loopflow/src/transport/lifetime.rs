@@ -2,10 +2,11 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn, pending request, running Graph or headless Run). Nothing
-//! else ends an owner on its own: a removed, rebuilt or superseded lf executable
-//! leaves it serving (Jack Heart, 2026-11-05), and `lf resume` or
-//! `lf monitor rollover` move it when a person or operator decides to. Ending
+//! holding it (a turn, pending request, running Graph or headless Run). Completed
+//! Task retirement can also end eligible owners after its absence grace. Desktop
+//! shells use Close and retirement policy instead of idle-agent ending.
+//! A removed, rebuilt or superseded lf executable leaves its owner serving;
+//! `lf resume` or `lf monitor rollover` move it when a person or operator decides to. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history.
 //!
@@ -220,7 +221,7 @@ fn watch(
             grace.limit = report_result(
                 &mut repository_failure,
                 "Session repository",
-                store.process(owner),
+                store.lf_process(owner),
             )
             .flatten()
             .map(|process| limit(process.repo.as_deref()));

@@ -891,18 +891,17 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ## Model (design invariants)
 
-- `lf` and durable store projections define the product API; Mac and iOS
-  consume that model rather than inventing a parallel lifecycle.
+- `lf` and store projections define the product API; Mac and iOS consume it,
+  never a parallel lifecycle.
 - **Terminal-only and agent-embedded Loopflow are normal primary modes.** Chat
   is an optional shared steering and observation surface, never a prerequisite
   for operating Loopflow or an onboarding funnel every user must enter.
 - **Wave Chat is asynchronous steering, not a low-latency support chat.**
-  Durable inputs preserve order and may wait behind existing Wave work; surfaces
-  show delivered, queued, and working state instead of implying an immediate
-  conversational reply.
-- App surfaces navigate, present, and Steer Work. A view, terminal, provider
+  Inputs keep order and may wait behind Wave work; surfaces show delivered,
+  queued and working state, never an implied immediate reply.
+- App surfaces navigate, present and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or review-playhead truth.
-- AgentSessionId identifies opaque provider history, not Work or process authority.
+- AgentSessionId names opaque provider history, not Work or process authority.
 - Machine-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
   `docs/architecture/{execution,planning,machines}.md`; earlier topology questions
@@ -932,10 +931,9 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;
   retain the draft and report the uncertainty instead of asserting nothing changed.
-- Repository Team migration uses the supported `lf pm reteam` operation and its
-  complete ownership preview, reconciliation and receipts. July's pending PRD-44
-  migration was a dated state, not standing permission to modify a live store.
-  Retain old completed/canceled Work and original provenance across migrations.
+- Team migration uses `lf pm reteam` (ownership preview, reconciliation, receipts).
+  July's pending PRD-44 state never permitted modifying a live store; migrations
+  retain completed/canceled Work and provenance.
 
 ### The `lf` / Machine spine
 
@@ -1138,8 +1136,7 @@ snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes
 
 - Adapt proven components; rewriting the sidebar lost established behavior
   (`37205c3fb6:wave/product/MEMORY.md`, Learnings).
-- **`loopflow-dev.py` builds from the worktree it runs in.** Repository
-  discovery collapses linked worktrees to the canonical main checkout.
-- **Released migrations are immutable.** The Product/Intelligence `061` collision
-  left existing databases missing a column. Test upgrades from the released frontier;
-  AGENTS.md owns one draft per Task.
+- **`loopflow-dev.py` builds from its own worktree**; repository discovery
+  collapses linked worktrees to the main checkout.
+- **Released migrations are immutable** (AGENTS.md): the Product/Intelligence
+  `061` collision left databases missing a column.

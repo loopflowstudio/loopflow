@@ -11,7 +11,7 @@ use crate::id::{AgentSessionId, LfSessionId, WaveId};
 pub(crate) struct SessionTurnOrigin {
     pub session_id: LfSessionId,
     pub lf_process_id: crate::id::LfProcessId,
-    pub agent_process_id: crate::id::LfProcessId,
+    pub agent_process_id: crate::id::AgentProcessId,
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
@@ -261,7 +261,7 @@ pub(crate) struct SessionSummary {
     pub available: bool,
     pub program_status: Option<crate::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
-    pub agent_process_id: Option<crate::id::LfProcessId>,
+    pub agent_process_id: Option<crate::id::AgentProcessId>,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,

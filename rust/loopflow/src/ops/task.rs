@@ -223,6 +223,7 @@ pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
+    pub head_commit: Option<String>,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
@@ -273,6 +274,7 @@ impl<'a> From<&'a TaskCheckout> for TaskWorkspace<'a> {
 struct TaskComparison<'a> {
     checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
+    head_commit: Option<&'a str>,
 }
 
 impl<'a> TaskComparison<'a> {
@@ -284,6 +286,7 @@ impl<'a> TaskComparison<'a> {
                 worktree: task.worktree()?,
             },
             base_commit: &task.base_commit,
+            head_commit: None,
         })
     }
 }
@@ -301,7 +304,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
 }
 
 // File access reads recorded checkout location without reconciling PR or execution state.
-fn file_store() -> OpsResult<SqliteStore> {
+pub(crate) fn file_store() -> OpsResult<SqliteStore> {
     #[cfg(test)]
     let test_path = super::linear::LINEAR_TEST_CONTEXT
         .try_with(|context| context.path.clone())
@@ -322,7 +325,7 @@ fn file_store() -> OpsResult<SqliteStore> {
         .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
 }
 
-fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
+pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
     let task_id = store
         .resolve_task_id(issue, None)
         .map_err(task_error)?

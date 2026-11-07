@@ -505,7 +505,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
         .unwrap();
     assert!(result.success());
     fs::write(worktree.join("draft.md"), "Keep this draft.\n").unwrap();
-    let changes = loopflow::ops::task::task_changes("INF-124", "parent").unwrap();
+    let changes = loopflow::ops::task::task_changes("INF-124", "parent", None).unwrap();
     assert!(changes
         .files
         .iter()

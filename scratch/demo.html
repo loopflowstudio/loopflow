@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-498 · Fresh conversation startup</title><style>:root{color-scheme:light dark}body{font:18px/1.6 system-ui;margin:3rem auto;padding:0 1.2rem;max-width:48rem}h1{line-height:1.15}h2{margin-top:2.5rem}code,pre{font-size:.85em}pre{white-space:pre-wrap;padding:1rem;background:color-mix(in srgb,CanvasText 7%,Canvas)}table{border-collapse:collapse;width:100%}td,th{text-align:left;vertical-align:top;padding:.4rem .8rem .4rem 0;border-bottom:1px solid color-mix(in srgb,CanvasText 15%,Canvas)}textarea{box-sizing:border-box;width:100%;min-height:6rem;font:inherit;padding:.6rem}small{opacity:.7}a{color:inherit}li{margin:.7rem 0}</style><body>
+<small>LOO-498 · demo · November 6, 2026 · headless, no person watched<br>Sources: workspace-demo.md, rex-workspace.md, loo498-20261106-head evidence</small>
+<h1>A fresh Task conversation now starts in Rex.</h1>
+<p>Bare <code>lf open --task</code>, typed in a Rex shell on a Task with no conversation, started real Claude in the Task worktree. Claude answered what was typed, and opening again reattached to the same provider. This ran on 4b4c78b24, on an isolated Rex server and a private Machine, with one pinned branch binary. It did not run on your real Machine, and nothing touched this Task's panes.</p>
+<h2>What happened</h2>
+<pre>lf task checkout a6d291
+lf open --task a6d291 --json      # in a Rex shell, no host flag
+
+Nothing to resume here; starting a new conversation.
+… Claude's folder-trust dialog, answered Yes …
+❯ Reply with exactly the word quince-4 and nothing else, and run no tools.
+⏺ quince-4</pre>
+<table><tr><th>Check</th><th>Result on 4b4c78b24</th></tr>
+<tr><td>Provider cwd, from <code>lsof</code></td><td>The Task worktree, <code>repo.a6d291-head-conversation-demo</code>; Rex reported the same path</td></tr>
+<tr><td>Open again</td><td>New tab, same Session, same PID 85253, earlier reply on screen, no replay; a typed message in the new pane was answered</td></tr>
+<tr><td><code>rex_native_fresh</code></td><td>Passed</td></tr>
+<tr><td><code>rex_workspace_resumes</code></td><td>Passed</td></tr>
+<tr><td><code>rex_manual_resume_elsewhere</code></td><td>Passed</td></tr>
+<tr><td><code>herdr_native</code></td><td>Passed</td></tr>
+<tr><td><code>rex_open_starts_a_fresh</code> (new)</td><td>Passed; linked worktree, stand-in provider, typed input</td></tr></table>
+<h2>Still open</h2>
+<ul><li><strong>November 6 cause.</strong> The provider ended 38 ms after opening, so Claude's trust dialog was not the cause. The exact cause is unknown. That run mixed the branch and installed runtimes; this one did not. The mix was not reproduced, and it can recur on a dev build on the real Machine until <code>lf</code> is installed.</li><li><strong>No checkout.</strong> A Task without a checkout opens only Task &amp; workflow, with no conversation.</li><li><strong>Needs the Rex app.</strong> The Split shortcut and resize could not be checked headless. <code>rex split</code> started in <code>$HOME</code>, but it passes no cwd and is not the shortcut's path, so that result says nothing about the shortcut. The OSC 7 reports the shortcut inherits from name the worktree.</li><li><strong>Restored since the last demo.</strong> Merge <code>94cb745eb</code> had dropped main's #1834, so this PR would have reverted 82 files of builtin skills, Graph and prompt code. They were restored in 623855b89. The native tests above passed again on 4b4c78b24.</li><li><strong>Six local test failures.</strong> <code>session_lifecycle_tests</code> fails six tests with “No agent selected” on this Machine, with or without the restore. All 41 pass when no harness is on PATH.</li><li><strong>CI.</strong> rust-test, rust-lint, macos and e2e-smoke are skipped on 4b4c78b24 because a PR head with scratch defers tests to the merge queue. CI has no test result for this tree.</li></ul>
+<h2>Try it</h2>
+<ol><li>In a separate Task with a checkout, not LOO-498, run <code>lf open --task &lt;id&gt;</code> from a Rex shell. Expected: a tab with Conversation, Task &amp; workflow and shell. A dev build may hit the mixed runtime above.</li><li>Type a short message. Expected: an ordinary Claude reply.</li><li>Use Rex Split Right from the conversation and run <code>pwd -P</code>. Expected: the Task worktree.</li><li>Resize the panes. Expected: readable text and normal input.</li></ol>
+<label for="notes">What you saw</label><textarea id="notes" placeholder="Reply in the conversation; text on this page is not sent or saved."></textarea>
+<h2>Review</h2>
+<ol><li>Did Split start in the Task worktree, and did text stay readable on resize? (a) yes; (b) no, give the step and path.</li><li>For a Task with no checkout, should <code>lf open --task</code>: (a) keep showing Task &amp; workflow only; (b) place the Task and start its conversation?</li><li>Your “otherwise lg2m ship it” came before the LOO-717 merge. Auto-Ship shows approved at 06:08:38Z, after it, and what set it is unknown. For this tree: (a) it stands; (b) hold for review, with <code>lf ship --stop</code>.</li><li>Retained demo resources: (a) keep them and any input; (b) all demo input is settled. None have been removed.</li></ol>
+<p><a href="workspace-demo.md">Full record and evidence paths</a></p></body></html>

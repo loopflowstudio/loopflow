@@ -66,6 +66,12 @@ struct WorkSelectionTests {
         #expect(layout.focused == "pane-0")
         #expect(layout.zoomed == "pane-2")
         #expect(layout.hidden == ["pane-1"])
+        if case .split(_, _, _, let second) = layout.tree,
+           case .split(_, _, _, let browser) = second,
+           case .pane(_, .browser(_, let tabs, _)) = browser {
+            #expect(tabs.contains(.task(id: "task")))
+            #expect(tabs.contains(.changes(id: "changes-parent", comparison: .workingTree(base: "parent"))))
+        } else { Issue.record("Expected retained browser tools") }
         let encoded = try JSONEncoder().encode(layout)
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
     }

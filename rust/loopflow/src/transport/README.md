@@ -215,6 +215,14 @@ provider output retains its original terminal; OpenCode keeps its separate
 provider stderr log. Ordinary CLI output resumes when the client exits or the
 viewer detaches. Read these logs from another terminal while editing a draft.
 
+Terminal hosts inherit a split's directory from a report (OSC 7) or the foreground
+process's cwd. The owner publishes one directory, the connected provider's, then
+the Session's selected directory on each later attachment. It reports that
+through the stream and tells each viewer to enter it with a `directory` event.
+Viewer and owner share a Machine, so both sources agree even when a person launched
+from elsewhere. A viewer that took over a caller's terminal sends an empty report
+when it leaves, returning the terminal to its shell.
+
 Native providers own their Program Status (OSC 7501) reports, which pass through
 unchanged. Claude's native title updates stay enabled because disabling them also
 disables its status reports. Loopflow reports activity for structured Runs and Graph progress, and

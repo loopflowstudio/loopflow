@@ -286,6 +286,8 @@ pub struct DesktopCommandStatus {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopTabKind {
+    Task,
+    Changes,
     Shell,
     Files,
     GraphLog,
@@ -792,6 +794,14 @@ fn view_plan(
             return super::open::run(
                 cli,
                 &super::open::OpenArgs {
+                    server: None,
+                    no_focus: false,
+                    follow: None,
+                    seen: Vec::new(),
+                    local_workspace: false,
+                    arrive_task: Vec::new(),
+                    into: None,
+                    remote: Vec::new(),
                     files: Vec::new(),
                     url: None,
                     host: super::open::OpenHost::Desktop,

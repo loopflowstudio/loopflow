@@ -11,9 +11,10 @@ splits. Conversation panes run `lf resume` in the Task's worktree. Return to exi
 terminal app; use its controls to rearrange, rename, close and restore them.
 
 Opening a Task starts its conversation. Opening a repository or Wave starts no
-agents: it reconnects conversations that are still running and shows Task & workflow
-for the rest. Run `lf open --task <task>` to pick one up. A conversation running
-the command stays where it is. A conversation with no Task opens by itself:
+agents: it reconnects running conversations no terminal is showing and shows Task &
+workflow for the rest. Run `lf open --task <task>` to pick one up. That moves a
+conversation open in another terminal here; text you typed there and didn't send
+stays behind. A conversation running the command stays where it is. A conversation with no Task opens by itself:
 `lf open --session <id>` adds one Conversation tab where you are, and
 `lf open --available` does the same for each such conversation.
 
@@ -49,8 +50,7 @@ recorded Machine. Use `--server <endpoint>` to select a Rex Unix socket.
 
 If the selected host is unavailable, LF reports the error instead of opening
 somewhere else. `--no-focus` preserves the selected tab; a Conversation pane still
-runs normal resume, which moves conversation input to the new terminal. That
-includes a running conversation reconnected by a repository or Wave open.
+runs normal resume, which moves conversation input to the new terminal.
 
 ## Choose a layout
 
@@ -118,7 +118,7 @@ Changing a template affects future launches; existing tabs stay as you arranged 
 
 | Pane | What opens in a terminal host |
 | --- | --- |
-| Conversation | `lf resume <session>` in the Task worktree, or Task & workflow when a repository or Wave open finds no running conversation |
+| Conversation | `lf resume <session>` in the Task worktree, or Task & workflow when a repository or Wave open finds no conversation to reconnect |
 | Shell | A fresh shell in the Task worktree |
 | Files | Your file browser or editor |
 | Changes | Git's pager or your diff tool |

@@ -123,14 +123,16 @@ impl Tools<'_> {
             return Ok(None);
         }
         let task = &self.content.work.id;
-        let argv = match session {
-            Some(session) => lf_argv(self.cwd, &["resume", session])?,
+        let pane = match session {
+            Some(session) => self.host.conversation(self.cwd, &[session])?,
             None => match self.ensure_harness()? {
-                Some(agent) => lf_argv(self.cwd, &["resume", "--task", task, "--agent", &agent])?,
-                None => lf_argv(self.cwd, &["resume", "--task", task])?,
+                Some(agent) => self
+                    .host
+                    .conversation(self.cwd, &["--task", task, "--agent", &agent])?,
+                None => self.host.conversation(self.cwd, &["--task", task])?,
             },
         };
-        Ok(Some(self.host.block("Conversation", self.cwd, argv)))
+        Ok(Some(pane))
     }
 
     /// With nothing named, `lf resume --task` ranks the Task's conversations,

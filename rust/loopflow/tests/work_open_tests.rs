@@ -701,6 +701,33 @@ fn live_conversation(
     id
 }
 
+/// Its terminal closed: an execution owner runs the provider and nothing views it.
+fn detach(home: &Path, session: &str) {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let owner = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
+        [&owner],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![session, owner],
+    )
+    .unwrap();
+}
+
+/// A terminal holds it again, as `live_conversation` seeds one.
+fn attach(home: &Path, session: &str) {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET transport_lf_process_id=NULL WHERE id=?1",
+            [session],
+        )
+        .unwrap();
+}
+
 #[test]
 fn available_conversations_need_no_question_and_are_never_taken_over() {
     struct Child(std::process::Child);
@@ -1228,7 +1255,7 @@ impl Drop for Provider {
 }
 
 #[test]
-fn repository_open_resumes_running_providers_and_starts_none() {
+fn repository_open_reconnects_detached_conversations_and_starts_none() {
     let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
@@ -1271,7 +1298,33 @@ fn repository_open_resumes_running_providers_and_starts_none() {
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
+    // Open in another terminal: it stays there, however often this runs.
+    for _ in 0..2 {
+        let created = open();
+        assert!(created.contains("Task & workflow"), "{created}");
+        assert!(!created.contains("resume"), "{created}");
+    }
+
+    // No terminal shows it: the first open reconnects it, the second leaves it there.
+    detach(home.path(), &primary);
     let created = open();
+    assert!(
+        created.contains("resume") && created.contains(&primary),
+        "{created}"
+    );
+    attach(home.path(), &primary);
+    let created = open();
+    assert!(created.contains("Task & workflow"), "{created}");
+    assert!(!created.contains("resume"), "{created}");
+
+    // Selecting the Task moves it.
+    let (_, created) = rex_open(
+        home.path(),
+        repo.path(),
+        bin.path(),
+        &[],
+        &["open", "--task", "INF-123", "--host", "rex", "--no-focus"],
+    );
     assert!(
         created.contains("resume") && created.contains(&primary),
         "{created}"
@@ -1299,6 +1352,7 @@ fn repository_open_resumes_running_providers_and_starts_none() {
 
     // A saved pane answers for its own Session, whatever the primary is doing.
     set_primary(&primary);
+    detach(home.path(), &primary);
     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
         .unwrap()
         .save_pane_layout(
@@ -1348,7 +1402,7 @@ fn repository_open_resumes_running_providers_and_starts_none() {
 }
 
 #[test]
-fn wave_open_reconnects_its_running_conversation_and_starts_none() {
+fn wave_open_reconnects_its_detached_conversation_and_starts_none() {
     let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
@@ -1387,6 +1441,12 @@ fn wave_open_reconnects_its_running_conversation_and_starts_none() {
         &session,
         registered.task.wave_id.as_ref().unwrap().as_str(),
     );
+    // Open in another terminal: it stays there.
+    let (report, created) = open();
+    assert!(!conversation(&report), "{report}");
+    assert!(!created.contains(&session), "{created}");
+
+    detach(home.path(), &session);
     let (report, created) = open();
     assert!(conversation(&report), "{report}");
     assert!(created.contains(&session), "{created}");
@@ -2010,6 +2070,7 @@ fn a_conversation_running_lf_open_stays_where_it_is() {
         "{report}"
     );
     assert!(!created.contains(&wave_session), "{created}");
+    detach(home.path(), &wave_session);
     let (report, created) = open(&step, &wave_open);
     assert!(report.to_string().contains("Wave conversation"), "{report}");
     assert!(created.contains(&wave_session), "{created}");

@@ -21,6 +21,7 @@ use super::{
 };
 use crate::durable::{MachineId, RepositoryId, TaskId};
 use crate::id::WaveId;
+use crate::ops::human_session::{session_state, viewed_summary, SessionState};
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
@@ -108,6 +109,12 @@ impl Native {
             Self::Herdr(_) => OpenHost::Herdr,
             Self::Cmux(_) => OpenHost::Cmux,
         }
+    }
+
+    /// A Conversation pane. `lf resume` selects the conversation and its harness.
+    fn conversation(&self, cwd: &Path, resume: &[&str]) -> Result<Value> {
+        let argv = lf_argv(cwd, &[&["resume"], resume].concat())?;
+        Ok(self.block("Conversation", cwd, argv))
     }
 
     fn block(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
@@ -245,14 +252,15 @@ impl Native {
 // ---------------------------------------------------------------------------
 
 /// Which conversations a pane shows; Task & workflow takes the place of the rest.
-/// Resuming anything but a running provider starts one.
+/// Resuming anything but a detached Session starts a provider or takes its input.
 #[derive(Clone, Copy, Default)]
 enum Resume {
     /// Background arrivals do not take input from an existing terminal.
     #[default]
     None,
-    /// A repository or Wave opening reattaches and starts nothing.
-    Running,
+    /// A repository or Wave opening reconnects what no terminal shows and
+    /// starts nothing, as `session_actions` offers Reconnect only then.
+    Detached,
     /// A selected Task or Session.
     Any,
 }
@@ -266,8 +274,9 @@ impl Resume {
         };
         Ok(match (self, session) {
             (_, Some(session)) if is_caller(session) => false,
-            (Self::None, _) | (Self::Running, None) => false,
-            (Self::Running, Some(session)) => provider_running(store, session)?,
+            (Self::None, _) | (Self::Detached, None) => false,
+            (Self::Detached, Some(session)) => viewed_summary(store, session)?
+                .is_some_and(|summary| session_state(&summary) == SessionState::Detached),
             (Self::Any, _) => true,
         })
     }
@@ -790,8 +799,8 @@ fn conversation_tab(
     cwd: &Path,
 ) -> OpenReceipt {
     let mut receipt = target.receipt(Some(native.open_host()), None, OpenStatus::Opening, None);
-    let opened = lf_argv(cwd, &["resume", session])
-        .map(|argv| native.block("Conversation", cwd, argv))
+    let opened = native
+        .conversation(cwd, &[session])
         .and_then(|layout| native.add_tab(container, "Conversation", cwd, layout));
     settle_receipt(&mut receipt, opened);
     receipt
@@ -826,7 +835,7 @@ fn launch(
             resume: if explicit {
                 Resume::Any
             } else {
-                Resume::Running
+                Resume::Detached
             },
         }
     } else {
@@ -909,14 +918,6 @@ fn launch(
         receipt.container = container.id.clone();
     }
     Ok(receipts)
-}
-
-fn provider_running(store: &SqliteStore, session: &str) -> Result<bool> {
-    Ok(store
-        .session_summary(session, crate::store::rows::now_unix())?
-        .is_some_and(|summary| {
-            summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
-        }))
 }
 
 /// Record a tab's native result. A lost reply is reported, never retried.

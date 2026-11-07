@@ -20,8 +20,8 @@ Use isolated fixtures for validation; future hands-on demos need separate work.
   and existing input ownership: show Task/workflow in the conversation slot until
   explicitly opened. This is the minimal implementation choice needed to avoid
   background `resume` moving somebody's input.
-- Repository and Wave openings start no agents: only a Session with a running
-  provider resumes; other Tasks show Task/workflow in the conversation slot.
+- Repository and Wave openings start no agents and take no input: only a
+  `detached` Session resumes; other Tasks show Task/workflow in the conversation slot.
 - Actual working-directory reporting/inheritance for native splits and manually
   resumed conversations. No changes to normal resume's screen protocol.
 
@@ -74,16 +74,15 @@ manipulate its native panes; retained demo resources have no cleanup release.
 Exists, seen in real Rex with real Claude on 8a8ae78ef ([workspace-demo.md](workspace-demo.md)): bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime; a Task with no checkout is placed and starts its conversation, with no second Session, worktree or replay on reopening.
 
 Exists, fixture Rex only (built in b321745bd, Wave test 554cdc476, one `route` for opening and following 702935727):
-- Broad `lf open` starts no agents. Explicit Task or Session: `Resume::Any`. Repository or Wave: `Resume::Running`, for Task panes and the Wave's own conversation. Remote Machines receive the repository or Wave expression and judge their own providers.
+- Broad `lf open` starts no agents. Explicit Task or Session: `Resume::Any`. Repository or Wave: `Resume::Detached`, for Task panes and the Wave's own conversation. Remote Machines receive the repository or Wave expression and judge their own Sessions.
 - A Task with no conversation and no resolvable harness fails its receipt and creates no tab.
 - `docs/workspaces.md` says a fresh conversation takes its first turn.
 
 Remains:
-- Demo, real Rex, isolated server, pinned branch binary: rerun the three-Task broad `lf open` from the repository, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched, Tasks without a running provider showing Task & workflow, a live Session reconnected. Then confirm explicit `lf open --task` still resumes and starts its conversation. Add an agent-tool `lf open` of its own Task. Whether Auto-Ship covers this tree stays open in [questions.md](questions.md); nothing here ships or merges it.
+- Demo, real Rex, isolated server, pinned branch binary: rerun the three-Task broad `lf open` from the repository, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched, Tasks without a detached Session showing Task & workflow, a detached Session reconnected, and a Session attached in another terminal left there with its typed text intact. Then confirm explicit `lf open --task` still resumes and starts its conversation. Add an agent-tool `lf open` of its own Task.
 - Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task. Jack Heart's acceptance: two Tasks in one Wave session, a new native split beside Conversation, Shell, Files, Changes and Task & workflow lands in that tab's Task worktree on its Machine, checked with `pwd` in the new shell, after reopening too; a gap in the host's scoped defaults is recorded exactly. Two-Machine behavior was not rerun.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
 - `work_open_tests::` flake, cause now seen (November 7, load ~28, 1 of 3 parallel runs): `rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones` failed its receipt with “Rex did not answer within 2s”. The shell stand-in missed the production reply deadline. Unrelated to this diff, and no test knob exists. Real Rex under load could report the same failure after creating the tab; the receipt says to inspect the host before retrying. Gate reruns it in parallel.
-- Open choices in [questions.md](questions.md): whether a broad open moves input from a live conversation, shipping coverage of this tree, and whether Task & workflow keeps a worktree.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.
 
@@ -99,16 +98,12 @@ Built from the November 7 concept review (`work_open_tests::a_conversation_runni
 4. `docs/workspaces.md` says Task & workflow and that a conversation running the command stays where it is.
 
 Kept after challenge:
-- `Resume` has three values because three actors exist: a background arrival, a broad opening, a selected Task or Session. If question 1 in [questions.md](questions.md) lands on (b), `Running` goes and it becomes a bool.
+- `Resume` has three values because three actors exist: a background arrival, a broad opening, a selected Task or Session.
 - The follower and its `--seen`, `--remote`, `--into` and `--arrive-task` flags stay. Arrivals are accepted, and holding this state in argv is why LF records no host inventory.
 - Each `lf open` creates fresh tabs, as accepted on November 5, so the Task text's “reuse/focus existing panes” no longer applies.
 - Scope stays on `lf open`, with no membership record: the selection is recomputed on each opening.
 
-Next proof: the demo rerun under Remains, adding an agent-tool `lf open` of its own Task.
-
 Compress: `Resume::admits` is the one rule for what a pane runs, including the caller and the Wave tab; `Resolved::current_conversation` is the one caller check. `--agent` trails the argv like other optional flags. `lf -a claude open` no longer prints "--agent has no effect" (exempted in `bin/lf.rs`, not `may_launch_agent`, which also feeds `reads_work`).
-
-Checks, November 7, 746bb5fca plus the realign fix, fixture Rex only: `work_open_tests::` 32 passed, `--lib lf::commands::open::` 17 passed, fmt and clippy clean; the flake above did not recur in the 2 runs here (load ~12). Gate runs the affected suites and repeats `work_open_tests::` in parallel; demo owns real Rex.
 
 ## Concept review, November 7, second pass, on 746bb5fca plus the realign fix
 
@@ -116,12 +111,22 @@ The three rules from the first pass hold on this tree. Host routing also holds: 
 
 One mismatch, found by reading and not run. Only a Task Session viewer keeps a checkout (`task_viewer_holds`, `transport/README.md`). The removed passive viewer counted (“passive ones too”). Its replacement, Task & workflow in the Conversation slot, is `lf task view`, which holds nothing. So a tab from a broad open, an arrival, or an agent opening its own Task can sit open on a completed Task with no hold. About 15 minutes later, a merged Task's checkout and uncommitted files go, under a shell someone may be using.
 
-`docs/workspaces.md` now says this under “Keep a completed Task's worktree”. Timing as the code has it: the deadline is 15 minutes from the later of completion and the last viewer leaving, a stalled owner counts as gone 30 seconds after its last report, and the once-a-minute sweep deletes in 15–16 minutes. Change it only if question 3 in [questions.md](questions.md) lands on (b).
+`docs/workspaces.md` now says this under “Keep a completed Task's worktree”. Timing as the code has it: the deadline is 15 minutes from the later of completion and the last viewer leaving, a stalled owner counts as gone 30 seconds after its last report, and the once-a-minute sweep deletes in 15–16 minutes.
 
 Checked and left alone:
-- A running conversation that is not the Task's primary shows Task & workflow on a broad open. `Resume::Running` judges the Session a pane names; the first pass kept this.
+- A running conversation that is not the Task's primary shows Task & workflow on a broad open. `Resume::Detached` judges the Session a pane names; the first pass kept this.
 - Followers from two broad opens each add an arrival tab. Each is a separate view of the same Work, as fresh tabs accepted on November 5 imply.
 
-Check: `documented_commands::` 4 passed. Compress: `called_from_task` replaces `calling_conversation`; `--lib lf::commands::open::` 17 passed, `work_open_tests::` 32 passed single-threaded, clippy clean. Next proof is unchanged: the demo rerun under Remains. The parallel `work_open_tests::` flake stays with gate.
-
 Realign on 8b841cfb3: `docs/workspaces.md` retention wording read against `task_retirement.rs` and `retirement.rs`, and it agrees; no test rerun, PR #1814 head is this commit's parent.
+
+## Concept review, November 7, third pass, on 2a26d37d3
+
+`lf open` had its own idea of a live conversation. `Resume::Running` asked only whether the provider was alive, so a broad open performed Take back on every conversation; `session_actions` says an active Session's Open is unavailable, “use Take back to transfer it”, and “unsent text in the previous terminal is not transferred”.
+
+Built: `Resume::Detached` asks `session_state(viewed_summary(...)) == Detached`, the read `elsewhere` and Desktop use, for Task panes and the Wave's own conversation. `provider_running` is gone; `docs/workspaces.md` updated. `repository_open_reconnects_detached_conversations_and_starts_none` and `wave_open_reconnects_its_detached_conversation_and_starts_none` failed first on the old predicate. They cover detached gets `lf resume`, an attached one gets Task & workflow, a broad open twice leaves it in the first terminal, and `lf open --task` still moves it. Fixture limit: `attach` clears the transport owner rather than running a viewer; demo owns the real one.
+
+Consequences: opening a Wave to pull everything into Rex leaves conversations attached in Desktop there; `lf open --task` moves each. An owner that never answers reads `detached` and reattaches, same as Desktop. A viewer that lost its connection reads `active` until expiry, so nothing moves on doubt.
+
+`lf open` and `lf resume` sharing, checked November 7 for comment d7ce2ccd: every pane runs `lf resume` through `Native::conversation`, now the one builder. `lf open` names only `session.or(primary)` and otherwise hands `--task` to resume's own ranking. `ensure_harness` launches nothing: it calls the same `Config::agent()` so a Task with no harness fails its receipt instead of opening an empty pane.
+
+Check: `work_open_tests::` 32 passed single-threaded, `--lib lf::commands::open::` 17 passed, clippy clean. Parallel flake stays with gate.

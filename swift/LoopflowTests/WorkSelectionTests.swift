@@ -25,6 +25,12 @@ struct WorkSelectionTests {
         #expect(restored == plan)
     }
 
+    @Test func everyStateRustSendsDecodes() throws {
+        let states = try JSONDecoder().decode(
+            [WorkSelectionState].self, from: loadFixtureData("selection_states.json"))
+        #expect(states.contains(.working) && states.contains(.autonomous))
+    }
+
     @Test func queryPlansArriveFromTheirWatch() throws {
         let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
             as? [[String: Any]])

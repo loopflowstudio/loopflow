@@ -51,7 +51,7 @@ rather than the connection. The root accepts any message either side sends;
 `$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
-on the wire, and `x-result` beside it names what `response.result` carries. A
+on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
 watch frame's `body` refers to `$defs/Untyped`, because its shape is the
 `x-result` of the read that opened it. The serialize contract keeps a nullable
 field required, as both sides send it.

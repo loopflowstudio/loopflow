@@ -20,15 +20,237 @@ pub fn describe() -> Value {
     let server = generator.subschema_for::<ServerMessage>();
     generator.subschema_for::<Hello>();
     generator.subschema_for::<Welcome>();
-    json!({
+    let mut schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Loopflow server protocol",
         "x-revision": REVISION,
         "x-min-revision": MIN_REVISION,
         "oneOf": [client, server],
         "$defs": generator.take_definitions(true),
-    })
+    });
+    add_examples(&mut schema);
+    schema
 }
+
+/// Put each recorded exchange beside its operation: the request's operation
+/// in `examples`, what it answered in `x-result-example`.
+fn add_examples(schema: &mut Value) {
+    let parse =
+        |text: &str| -> Value { serde_json::from_str(text).expect("embedded fixtures are JSON") };
+    let mut requests: std::collections::BTreeMap<String, Vec<Value>> = Default::default();
+    for text in REQUESTS {
+        let operation = parse(text)["operation"].clone();
+        let kind = operation["kind"]
+            .as_str()
+            .expect("an operation names its kind");
+        requests.entry(kind.to_owned()).or_default().push(operation);
+    }
+    let mut results: std::collections::BTreeMap<&str, Value> = Default::default();
+    for (_, kind, text) in RESPONSES {
+        results
+            .entry(kind)
+            .or_insert_with(|| parse(text)["result"].clone());
+    }
+    for group in ["Read", "Write", "ServerOperation"] {
+        let Some(arms) = schema["$defs"][group]["oneOf"].as_array_mut() else {
+            continue;
+        };
+        for arm in arms {
+            let Some(kind) = arm["properties"]["kind"]["const"]
+                .as_str()
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            if let Some(examples) = requests.remove(&kind) {
+                arm["examples"] = Value::Array(examples);
+            }
+            if let Some(result) = results.get(kind.as_str()) {
+                arm["x-result-example"] = result.clone();
+            }
+        }
+    }
+}
+
+/// Recorded requests, embedded so `describe` needs no source tree. Each
+/// names its operation; a test fails when a request fixture is missing here.
+const REQUESTS: &[&str] = &[
+    include_str!("../../../../tests/fixtures/dto/server/account_connect.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_disconnect.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_list.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_redeem_reset.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_route.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_set.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_token.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_use.json"),
+    include_str!("../../../../tests/fixtures/dto/server/attach.json"),
+    include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
+    include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
+    include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
+    include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
+    include_str!("../../../../tests/fixtures/dto/server/graph_run.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_abandon.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_arm.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_checks.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_land.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_open.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_publish.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_reconcile.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_request_review.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_reviews.json"),
+    include_str!("../../../../tests/fixtures/dto/server/pr_submit.json"),
+    include_str!("../../../../tests/fixtures/dto/server/repo_ci.json"),
+    include_str!("../../../../tests/fixtures/dto/server/repo_release.json"),
+    include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
+    include_str!("../../../../tests/fixtures/dto/server/skill_list.json"),
+    include_str!("../../../../tests/fixtures/dto/server/skill_run.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_hold.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_report.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_run.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_ship.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_steer.json"),
+    include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
+    include_str!("../../../../tests/fixtures/dto/server/wave_plan_bind.json"),
+    include_str!("../../../../tests/fixtures/dto/server/wave_plan_connect.json"),
+    include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+];
+
+/// Recorded answers and the operation each answers. A new `response`
+/// fixture must be named here; subscriptions answer null.
+const RESPONSES: &[(&str, &str, &str)] = &[
+    (
+        "account",
+        "account.disconnect",
+        include_str!("../../../../tests/fixtures/dto/server/account.json"),
+    ),
+    (
+        "account_redeemed",
+        "account.redeem_reset",
+        include_str!("../../../../tests/fixtures/dto/server/account_redeemed.json"),
+    ),
+    (
+        "account_report",
+        "account.list",
+        include_str!("../../../../tests/fixtures/dto/server/account_report.json"),
+    ),
+    (
+        "account_routes",
+        "account.route",
+        include_str!("../../../../tests/fixtures/dto/server/account_routes.json"),
+    ),
+    (
+        "checkout_committed",
+        "checkout.commit",
+        include_str!("../../../../tests/fixtures/dto/server/checkout_committed.json"),
+    ),
+    (
+        "checkout_created",
+        "checkout.create",
+        include_str!("../../../../tests/fixtures/dto/server/checkout_created.json"),
+    ),
+    (
+        "checkout_sync_planned",
+        "checkout.sync",
+        include_str!("../../../../tests/fixtures/dto/server/checkout_sync_planned.json"),
+    ),
+    (
+        "checkout_syncing",
+        "checkout.sync",
+        include_str!("../../../../tests/fixtures/dto/server/checkout_syncing.json"),
+    ),
+    (
+        "launched",
+        "repo.release",
+        include_str!("../../../../tests/fixtures/dto/server/launched.json"),
+    ),
+    (
+        "attached",
+        "session.attach",
+        include_str!("../../../../tests/fixtures/dto/server/attached.json"),
+    ),
+    (
+        "pr_abandoned",
+        "pr.abandon",
+        include_str!("../../../../tests/fixtures/dto/server/pr_abandoned.json"),
+    ),
+    (
+        "pr_checks_report",
+        "pr.checks",
+        include_str!("../../../../tests/fixtures/dto/server/pr_checks_report.json"),
+    ),
+    (
+        "pr_delivery_check",
+        "pr.reconcile",
+        include_str!("../../../../tests/fixtures/dto/server/pr_delivery_check.json"),
+    ),
+    (
+        "pr_prepared",
+        "pr.submit",
+        include_str!("../../../../tests/fixtures/dto/server/pr_prepared.json"),
+    ),
+    (
+        "pr_published",
+        "pr.publish",
+        include_str!("../../../../tests/fixtures/dto/server/pr_published.json"),
+    ),
+    (
+        "pr_review_requested",
+        "pr.request_review",
+        include_str!("../../../../tests/fixtures/dto/server/pr_review_requested.json"),
+    ),
+    (
+        "pr_reviews_report",
+        "pr.reviews",
+        include_str!("../../../../tests/fixtures/dto/server/pr_reviews_report.json"),
+    ),
+    (
+        "repo_ci_report",
+        "repo.ci",
+        include_str!("../../../../tests/fixtures/dto/server/repo_ci_report.json"),
+    ),
+    (
+        "response",
+        "session.rename",
+        include_str!("../../../../tests/fixtures/dto/server/response.json"),
+    ),
+    (
+        "session_steered",
+        "session.steer",
+        include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
+    ),
+    (
+        "skill_entries",
+        "skill.list",
+        include_str!("../../../../tests/fixtures/dto/server/skill_entries.json"),
+    ),
+    (
+        "task_held",
+        "task.hold",
+        include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
+    ),
+    (
+        "task_running",
+        "task.run",
+        include_str!("../../../../tests/fixtures/dto/server/task_running.json"),
+    ),
+    (
+        "task_shipping",
+        "task.ship",
+        include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
+    ),
+    (
+        "wave_plan_connected",
+        "wave.plan.connect",
+        include_str!("../../../../tests/fixtures/dto/server/wave_plan_connected.json"),
+    ),
+    (
+        "wave_plan_reteamed",
+        "wave.plan.reteam",
+        include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+    ),
+];
 
 /// What bare `lf server describe` prints.
 pub fn summary() -> String {
@@ -86,42 +308,11 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{describe, TimeTuple};
+    use super::{describe, TimeTuple, REQUESTS, RESPONSES};
     use crate::lf::commands::{read::Read, write::Write};
 
     const REGENERATE: &str =
         "cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json";
-
-    /// The `response` fixtures and the operation each answers. A new one must
-    /// name its operation here; subscriptions answer null.
-    const RESPONSES: &[(&str, &str)] = &[
-        ("account", "account.disconnect"),
-        ("account_redeemed", "account.redeem_reset"),
-        ("account_report", "account.list"),
-        ("account_routes", "account.route"),
-        ("checkout_committed", "checkout.commit"),
-        ("checkout_created", "checkout.create"),
-        ("checkout_sync_planned", "checkout.sync"),
-        ("checkout_syncing", "checkout.sync"),
-        ("launched", "repo.release"),
-        ("attached", "session.attach"),
-        ("pr_abandoned", "pr.abandon"),
-        ("pr_checks_report", "pr.checks"),
-        ("pr_delivery_check", "pr.reconcile"),
-        ("pr_prepared", "pr.submit"),
-        ("pr_published", "pr.publish"),
-        ("pr_review_requested", "pr.request_review"),
-        ("pr_reviews_report", "pr.reviews"),
-        ("repo_ci_report", "repo.ci"),
-        ("response", "session.rename"),
-        ("session_steered", "session.steer"),
-        ("skill_entries", "skill.list"),
-        ("task_held", "task.hold"),
-        ("task_running", "task.run"),
-        ("task_shipping", "task.ship"),
-        ("wave_plan_connected", "wave.plan.connect"),
-        ("wave_plan_reteamed", "wave.plan.reteam"),
-    ];
 
     fn fixtures_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/dto")
@@ -205,7 +396,10 @@ mod tests {
     fn every_response_fixture_validates_against_its_operations_result() {
         let schema = describe();
         let operations = operations(&schema);
-        let responses: BTreeMap<_, _> = RESPONSES.iter().copied().collect();
+        let responses: BTreeMap<_, _> = RESPONSES
+            .iter()
+            .map(|(name, kind, _)| (*name, *kind))
+            .collect();
         let mut failed = BTreeMap::new();
         for (name, fixture) in fixtures() {
             if fixture["type"] != "response" {
@@ -221,6 +415,20 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    #[test]
+    fn every_recorded_exchange_is_an_example() {
+        for (name, fixture) in fixtures() {
+            let embedded = match fixture["type"].as_str() {
+                Some("request") => REQUESTS
+                    .iter()
+                    .any(|text| serde_json::from_str::<Value>(text).unwrap() == fixture),
+                Some("response") => RESPONSES.iter().any(|(listed, _, _)| *listed == name),
+                _ => true,
+            };
+            assert!(embedded, "{name} is not embedded in server::schema");
+        }
     }
 
     #[test]

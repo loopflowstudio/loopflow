@@ -7059,6 +7059,13 @@
         {
           "additionalProperties": false,
           "description": "`lf --cwd <directory> desktop view show [expression]`: what a view\nshows; no expression is the repository's own.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "expression": "task:INF-123",
+              "kind": "desktop.view.get"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -7555,6 +7562,14 @@
         {
           "additionalProperties": false,
           "description": "`lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:\nhow failed CI was detected, repaired and landed on this Machine.",
+          "examples": [
+            {
+              "kind": "repo.ci",
+              "repo": null,
+              "since": "7d",
+              "wave": "product"
+            }
+          ],
           "properties": {
             "kind": {
               "const": "repo.ci",
@@ -7585,11 +7600,75 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/CiReportDto"
+          },
+          "x-result-example": {
+            "generated_at": "2026-11-05T18:00:00Z",
+            "incidents": [
+              {
+                "attempt": 1,
+                "blocked_at": null,
+                "blocked_reason": null,
+                "claimed_landing_generation": 2,
+                "detection_seconds": 42.0,
+                "failed_head_sha": "0123abc",
+                "failure_set": [
+                  "rust-lint"
+                ],
+                "fixes_for_pr": 1,
+                "green_at": "2026-11-05T16:30:42Z",
+                "green_seconds": 1800.0,
+                "human_assisted": false,
+                "identity": "ci-7f3a",
+                "landing_id": "land-1",
+                "merge_seconds": 2400.0,
+                "merged_at": "2026-11-05T16:40:42Z",
+                "observed_at": "2026-11-05T16:00:42Z",
+                "observer": "pr_landing",
+                "outcome": "merged",
+                "pr_number": 1813,
+                "provider_completed_at": "2026-11-05T16:00:00Z",
+                "repaired_head_sha": "4567def",
+                "repo": "jack-heart/loopflow",
+                "responded_at": "2026-11-05T16:05:42Z",
+                "response_seconds": 300.0,
+                "task": "LOO-1",
+                "task_cycle_seconds": 9000.0,
+                "task_status": "done",
+                "wave": "product"
+              }
+            ],
+            "repo": null,
+            "since": "2026-10-29T18:00:00Z",
+            "summary": {
+              "autonomous": 1,
+              "blocked": 0,
+              "human_assisted": 0,
+              "incidents": 1,
+              "median_detection_seconds": 42.0,
+              "median_green_seconds": 1800.0,
+              "median_merge_seconds": 2400.0,
+              "median_response_seconds": 300.0,
+              "p95_detection_seconds": 42.0,
+              "p95_green_seconds": 1800.0,
+              "p95_merge_seconds": 2400.0,
+              "p95_response_seconds": 300.0,
+              "pull_requests": 1,
+              "unresolved": 0
+            },
+            "wave": "product"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf account [<provider>] [--cached] [--details] --json`: every login's\nstate on this Machine.",
+          "examples": [
+            {
+              "cached": true,
+              "details": false,
+              "kind": "account.list",
+              "provider": "claude"
+            }
+          ],
           "properties": {
             "cached": {
               "type": "boolean"
@@ -7621,11 +7700,55 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/AccountReport"
+          },
+          "x-result-example": {
+            "accounts": [
+              {
+                "account_id": "claude:maya@example.com",
+                "cached_credential_state": "valid",
+                "configured_plan": null,
+                "cooldown_until": null,
+                "diagnostic": null,
+                "expires_at": 1794614400,
+                "login": "maya@example.com",
+                "long_lived_token_expires_at": null,
+                "observed_plan": "max",
+                "provider": "claude",
+                "recovery": null,
+                "reset_credits": null,
+                "routing": "active",
+                "scope": "managed",
+                "source": "managed home",
+                "verification": "not_checked",
+                "verified_windows": [],
+                "windows": [
+                  {
+                    "account_id": "claude:maya@example.com",
+                    "observed_at": 1794009600,
+                    "plan": "max",
+                    "provider": "claude",
+                    "resets_at": 1794027600,
+                    "source": "poll",
+                    "used_percent": 12,
+                    "window": "session"
+                  }
+                ]
+              }
+            ],
+            "browser": null
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf --cwd <directory> account route [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
+          "examples": [
+            {
+              "default": false,
+              "directory": "/repo",
+              "kind": "account.route",
+              "repo": null
+            }
+          ],
           "properties": {
             "default": {
               "type": "boolean"
@@ -7656,11 +7779,47 @@
               "$ref": "#/$defs/RouteReport"
             },
             "type": "array"
-          }
+          },
+          "x-result-example": [
+            {
+              "active_account": null,
+              "ambient": false,
+              "candidates": [
+                {
+                  "account_id": "claude:maya@example.com",
+                  "cooldown_until": null,
+                  "credential_state": "valid",
+                  "login": "maya@example.com",
+                  "routing": "active",
+                  "tightest": "weekly 40% used"
+                }
+              ],
+              "diagnostic": null,
+              "isolated": true,
+              "provider": "claude",
+              "scope": "default"
+            },
+            {
+              "active_account": null,
+              "ambient": true,
+              "candidates": [],
+              "diagnostic": null,
+              "isolated": false,
+              "provider": "codex",
+              "scope": "automatic"
+            }
+          ]
         },
         {
           "additionalProperties": false,
           "description": "`lf --cwd <directory> list [<path>…] --json`: the commands, skills,\ngraphs and Waves under `path`.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "skill.list",
+              "path": []
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -7687,11 +7846,34 @@
               "$ref": "#/$defs/Entry"
             },
             "type": "array"
-          }
+          },
+          "x-result-example": [
+            {
+              "description": "Find why the code misbehaves, fix the cause, and verify the original workflow.",
+              "invocation": "lf debug [message]",
+              "kind": "skill",
+              "name": "debug",
+              "source": "builtin"
+            },
+            {
+              "description": "design, implement, gate, land",
+              "invocation": "lf code [message]",
+              "kind": "graph",
+              "name": "code",
+              "source": ".lf/graphs/code.yaml"
+            }
+          ]
         },
         {
           "additionalProperties": false,
           "description": "`lf --cwd <directory> pr checks [--required] --json`: the branch's\ncheck report as the provider prints it, with its state.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "pr.checks",
+              "required": true
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -7712,11 +7894,23 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Checks"
+          },
+          "x-result-example": {
+            "branch": "jack/loo-593-decide-the-desktop",
+            "report": "build\tpending\t0\thttps://github.com/jack-heart/loopflow/actions/runs/1\n",
+            "state": "pending"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf --cwd <directory> pr reviews [<pr>] --json`: requested reviews\nand review submissions, each with the commit it reviewed.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "pr.reviews",
+              "pr": null
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -7740,6 +7934,31 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Reviews"
+          },
+          "x-result-example": {
+            "decision": "REVIEW_REQUIRED",
+            "draft": false,
+            "head": "81524350d4",
+            "number": 1813,
+            "requested": [
+              {
+                "login": "alice",
+                "name": null
+              }
+            ],
+            "reviews": [
+              {
+                "author": {
+                  "login": "maya"
+                },
+                "body": "Keep the API small",
+                "commit": {
+                  "oid": "9036fb7839"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "url": "https://github.com/jack-heart/loopflow/pull/1813"
           }
         },
         {
@@ -8942,6 +9161,13 @@
         {
           "additionalProperties": false,
           "description": "Attach this connection to the Session's terminal: the server resolves\nthe Session's current owner LfProcess, answers `{owner_lf_process_id}`, and the\nconnection then speaks the owner protocol. When that owner ends, the\nconnection closes; attaching again by the same Session reaches its\nnext owner. With `owner_lf_process_id`, the Session must still be owned by\nexactly that LfProcess, for a client that reconnects only to the owner it had.",
+          "examples": [
+            {
+              "kind": "session.attach",
+              "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
           "properties": {
             "kind": {
               "const": "session.attach",
@@ -8969,6 +9195,9 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionAttached"
+          },
+          "x-result-example": {
+            "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46"
           }
         }
       ]
@@ -14062,6 +14291,14 @@
         {
           "additionalProperties": false,
           "description": "`lf task create --session <id> --title <title> --json`, without launching.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "id": "session_5e55105e000040008000000000000001",
+              "kind": "task.create",
+              "title": "Keep the conversation"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14245,6 +14482,16 @@
         {
           "additionalProperties": false,
           "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, approving Auto-Ship.",
+          "examples": [
+            {
+              "agent": "claude",
+              "approve": false,
+              "directory": "/repo",
+              "from": "implement",
+              "issue": "LOO-1",
+              "kind": "task.run"
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -14283,11 +14530,25 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskRun"
+          },
+          "x-result-example": {
+            "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "issue": "LOO-1",
+            "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "run": "code from implement",
+            "state": "running"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf --task <issue> ship --json`, started detached: approves Auto-Ship.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.ship"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14308,11 +14569,24 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskShip"
+          },
+          "x-result-example": {
+            "issue": "LOO-1",
+            "lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "log": "/Users/maya/.lf/logs/ship-LOO-1.log",
+            "state": "shipping"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.hold"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14333,11 +14607,23 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Hold"
+          },
+          "x-result-example": {
+            "issue": "LOO-1",
+            "stopped": true
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf task steer <issue> <message> --json`: direction for the Task's\nruns, whoever writes it.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.steer",
+              "message": "Keep the API small"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14367,6 +14653,14 @@
         {
           "additionalProperties": false,
           "description": "`lf task report <issue> <message> --json`: progress for the Task's\nthread; an agent's carries its Session's provenance.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.report",
+              "message": "Demo recorded"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14396,6 +14690,13 @@
         {
           "additionalProperties": false,
           "description": "`lf task interrupt <issue> --json`.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.interrupt"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14490,6 +14791,15 @@
         {
           "additionalProperties": false,
           "description": "`lf [--wave <wave>] session steer [<id>] <message> --json`: a steer\none Session, every Session of the Wave or, with neither, every Session\nof the repository reads at its next boundary.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "session.steer",
+              "message": "Ship the smallest slice first",
+              "session": null,
+              "wave": "product"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14524,6 +14834,17 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Steer"
+          },
+          "x-result-example": {
+            "author": {
+              "id": "Maya",
+              "kind": "named"
+            },
+            "id": "9d2b7c3e-5a41-4f0e-8c6d-1b2a3c4d5e6f",
+            "revision": "1",
+            "sequence": 12,
+            "source": "c0ffee00-1111-4222-8333-444455556666",
+            "text": "Ship the smallest slice first"
           }
         },
         {
@@ -14553,6 +14874,65 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionRecord"
+          },
+          "x-result-example": {
+            "account": "work",
+            "actions": [
+              {
+                "help": "Open this Session in a terminal",
+                "kind": "open",
+                "label": "Open here",
+                "unavailable_reason": null
+              }
+            ],
+            "agent_process_id": "44444444-4444-4444-8444-444444444444",
+            "availability": "available",
+            "cwd": "/src/loopflow.task",
+            "detail": "review-design",
+            "graph_membership": {
+              "graph": "task-design",
+              "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w",
+              "iterations": [
+                []
+              ],
+              "kind": "step",
+              "node": 1,
+              "occurrence": "current",
+              "step": "review-design"
+            },
+            "id": "session_5e55105e000040008000000000000001",
+            "interactive": true,
+            "open_argv": [
+              "lf",
+              "session",
+              "resume",
+              "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+            ],
+            "preview": null,
+            "primary_scope": null,
+            "program_status": null,
+            "provider": "codex",
+            "ready_summary": "The design now reflects Jack's requested changes.",
+            "state": "unknown",
+            "task_ids": [
+              "task_00000000000000000000000000000001"
+            ],
+            "task_primary": false,
+            "terminal_ids": [],
+            "title": "Served name",
+            "title_source": "generated",
+            "wave_id": "00000000-0000-0000-0000-000000000001",
+            "work": {
+              "id": "task_00000000000000000000000000000001",
+              "kind": "task"
+            },
+            "work_path": "product / LOO-291",
+            "workspace": {
+              "machine_id": "home_00000000000000000000000000000001",
+              "task_id": "task_00000000000000000000000000000001",
+              "unavailable": null,
+              "worktree": "/src/loopflow.task"
+            }
           }
         },
         {
@@ -14743,6 +15123,14 @@
         {
           "additionalProperties": false,
           "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "wave.plan.bind",
+              "project": "5e55105e-0000-4000-8000-000000000042",
+              "wave": "product"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14772,6 +15160,16 @@
         {
           "additionalProperties": false,
           "description": "`lf wave plan connect [<wave>|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
+          "examples": [
+            {
+              "all": false,
+              "directory": "/repo",
+              "kind": "wave.plan.connect",
+              "team_key": "LOO",
+              "team_name": null,
+              "wave": "product"
+            }
+          ],
           "properties": {
             "all": {
               "type": "boolean"
@@ -14816,11 +15214,31 @@
               "$ref": "#/$defs/LinearInitResult"
             },
             "type": "array"
-          }
+          },
+          "x-result-example": [
+            {
+              "created": false,
+              "files": {
+                "state": "unchanged"
+              },
+              "initiative_id": "init_7f3a",
+              "team_created": false,
+              "team_id": "team_01",
+              "team_key": "LOO",
+              "wave": "product"
+            }
+          ]
         },
         {
           "additionalProperties": false,
           "description": "`lf wave plan reteam [--apply] --json`: the moves onto the\nrepository's Team; a plan without `apply`.",
+          "examples": [
+            {
+              "apply": false,
+              "directory": "/repo",
+              "kind": "wave.plan.reteam"
+            }
+          ],
           "properties": {
             "apply": {
               "type": "boolean"
@@ -14841,6 +15259,37 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/LinearReteamResult"
+          },
+          "x-result-example": {
+            "already": 2,
+            "applied": false,
+            "moves": [
+              {
+                "id": "issue_3",
+                "new_identifier": null,
+                "old_identifier": "OLD-3",
+                "project_id": "proj_9",
+                "title": "Serve every namespace",
+                "wave": "product"
+              }
+            ],
+            "project_moves": [
+              {
+                "from_teams": [
+                  "legacy"
+                ],
+                "id": "proj_9",
+                "name": "Desktop server",
+                "wave": "product"
+              }
+            ],
+            "repo": "loopflow",
+            "task_updates": 0,
+            "team_id": "team_01",
+            "team_key": "LOO",
+            "waves": [
+              "product"
+            ]
           }
         },
         {
@@ -14871,6 +15320,14 @@
         {
           "additionalProperties": false,
           "description": "`lf repo release run [<version>] [-t <target>] --json`, started\ndetached: the Process carrying the release.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "repo.release",
+              "target": null,
+              "version": "minor"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -14901,11 +15358,28 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Launched"
+          },
+          "x-result-example": {
+            "lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "log": "/Users/maya/.lf/logs/graph-repository-release-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "operation": "repo.release",
+            "run": "release minor (the default target)"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.",
+          "examples": [
+            {
+              "agent": null,
+              "directory": "/repo",
+              "kind": "checkout.commit",
+              "message": "Serve the checkout namespace",
+              "no_add": false,
+              "paths": [],
+              "push": false
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -14951,11 +15425,29 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Committed"
+          },
+          "x-result-example": {
+            "branch": "maya/serve-checkout",
+            "committed": true,
+            "head": "4567def4567def4567def4567def4567def45678",
+            "pushed": false
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf sync [<onto>] [--plan|--manual|--continue|--abort] [--adopt]\n--json`: the plan, a finished continue or abort, or the Process\ncarrying a sync started detached.",
+          "examples": [
+            {
+              "abort": false,
+              "adopt": false,
+              "continue": false,
+              "directory": "/repo",
+              "kind": "checkout.sync",
+              "manual": false,
+              "onto": null,
+              "preview": true
+            }
+          ],
           "properties": {
             "abort": {
               "type": "boolean"
@@ -14999,11 +15491,36 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Sync"
+          },
+          "x-result-example": {
+            "plan": {
+              "base_ref": "origin/main",
+              "branch": "maya/serve-checkout",
+              "changed_files": [
+                "rust/loopflow/src/engine/checkout.rs"
+              ],
+              "class": "clean_authored",
+              "fork_base": null,
+              "head": "4567def4567def4567def4567def4567def45678",
+              "scratch_stashed": false,
+              "strategy": "merge_target",
+              "unique_commits": 3
+            },
+            "state": "planned"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf wt create <name> [--plan] [--persistent] --json`.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "checkout.create",
+              "name": "spike",
+              "persistent": false,
+              "preview": false
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -15032,11 +15549,25 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Checkout"
+          },
+          "x-result-example": {
+            "base": "origin/main",
+            "branch": "maya/spike",
+            "created": true,
+            "path": "/Users/maya/src/loopflow.spike",
+            "strategy": "create"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf account disconnect <provider> [<email>]`: forget the provider's\nlocal credentials, or one managed login's.",
+          "examples": [
+            {
+              "email": "maya@example.com",
+              "kind": "account.disconnect",
+              "provider": "claude"
+            }
+          ],
           "properties": {
             "email": {
               "type": [
@@ -15060,11 +15591,25 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Account"
+          },
+          "x-result-example": {
+            "login": "maya@example.com",
+            "provider": "claude"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf account connect <provider> [<email>] [--chrome-profile] [--import]\n[--api-key]`. Served, no profile is chosen interactively: a login with\nno remembered profile needs `chrome_profile`.",
+          "examples": [
+            {
+              "api_key": false,
+              "chrome_profile": "Profile 1",
+              "email": "maya@example.com",
+              "import": false,
+              "kind": "account.connect",
+              "provider": "codex"
+            }
+          ],
           "properties": {
             "api_key": {
               "type": "boolean"
@@ -15108,6 +15653,22 @@
         {
           "additionalProperties": false,
           "description": "`lf account set <provider> [<email>] …`: a managed login's lifecycle,\ncooldown and browser choices, or the local credentials' browser choices.",
+          "examples": [
+            {
+              "chrome_profiles": [],
+              "clear_chrome_profiles": false,
+              "clear_cooldown": true,
+              "clear_paid_through": false,
+              "clear_plan": false,
+              "email": "maya@example.com",
+              "kind": "account.set",
+              "login_email": null,
+              "paid_through": null,
+              "plan": null,
+              "provider": "codex",
+              "routing": "active"
+            }
+          ],
           "properties": {
             "chrome_profiles": {
               "items": {
@@ -15187,6 +15748,15 @@
         {
           "additionalProperties": false,
           "description": "`lf account token <provider> <email> [--file] [--chrome-profile]`: a\nlong-lived Claude token for a managed login. `file` is a path on this\nMachine; the token itself never travels in the request.",
+          "examples": [
+            {
+              "chrome_profile": null,
+              "email": "maya@example.com",
+              "file": "/Users/maya/.lf/tmp/token",
+              "kind": "account.token",
+              "provider": "claude"
+            }
+          ],
           "properties": {
             "chrome_profile": {
               "type": [
@@ -15226,6 +15796,15 @@
         {
           "additionalProperties": false,
           "description": "`lf account redeem-reset <provider> <email> [--idempotency-key]\n[--credit-id] --json`: spend one banked Codex reset.",
+          "examples": [
+            {
+              "credit_id": null,
+              "email": "maya@example.com",
+              "idempotency_key": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
+              "kind": "account.redeem_reset",
+              "provider": "codex"
+            }
+          ],
           "properties": {
             "credit_id": {
               "type": [
@@ -15260,11 +15839,41 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Redemption"
+          },
+          "x-result-example": {
+            "account_id": "codex:maya@example.com",
+            "after": null,
+            "before": {
+              "reset_credits": {
+                "availableCount": 1,
+                "credits": null
+              },
+              "windows": [
+                {
+                  "plan": "pro",
+                  "resets_at": 1794614400,
+                  "used_percent": 92,
+                  "window": "weekly"
+                }
+              ]
+            },
+            "idempotency_key": "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
+            "login": "maya@example.com",
+            "outcome": "redeemed",
+            "provider": "codex",
+            "refresh_error": "rate limits unavailable after the spend"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf account <provider> use <email>`: sign the provider's ordinary home\nin as a stored login.",
+          "examples": [
+            {
+              "email": "maya@example.com",
+              "kind": "account.use",
+              "provider": "claude"
+            }
+          ],
           "properties": {
             "email": {
               "type": "string"
@@ -15290,6 +15899,15 @@
         {
           "additionalProperties": false,
           "description": "`lf -b [--agent <agent>] graph <name> [message]`, started detached: the\nProcess carrying the Graph.",
+          "examples": [
+            {
+              "agent": "claude",
+              "directory": "/repo",
+              "kind": "graph.run",
+              "message": "Serve the graph namespace",
+              "name": "code"
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15329,6 +15947,15 @@
         {
           "additionalProperties": false,
           "description": "`lf -b [--agent <agent>] skill <name> [message]`, started detached: the\nProcess carrying the skill's headless run.",
+          "examples": [
+            {
+              "agent": null,
+              "directory": "/repo",
+              "kind": "skill.run",
+              "message": null,
+              "name": "debug"
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15368,6 +15995,15 @@
         {
           "additionalProperties": false,
           "description": "`lf [--agent <agent>] pr publish [--title] [--body] --json`: push and\ncreate or refresh the checkout's ready PR.",
+          "examples": [
+            {
+              "agent": null,
+              "body": null,
+              "directory": "/repo",
+              "kind": "pr.publish",
+              "title": "Serve the pr namespace"
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15405,11 +16041,34 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Published"
+          },
+          "x-result-example": {
+            "created": false,
+            "pr": {
+              "branch": "jack/loo-593-decide-the-desktop",
+              "head_sha": "81524350d4",
+              "merge_commit": null,
+              "merge_state": "CLEAN",
+              "merged_at": null,
+              "number": 1813,
+              "state": "OPEN",
+              "url": "https://github.com/jack-heart/loopflow/pull/1813"
+            },
+            "url": "https://github.com/jack-heart/loopflow/pull/1813"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf [--agent <agent>] pr open [--title] [--body] --json`: push and\ncreate or refresh the checkout's draft PR; served, no review surface\nopens.",
+          "examples": [
+            {
+              "agent": "claude",
+              "body": null,
+              "directory": "/repo",
+              "kind": "pr.open",
+              "title": null
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15452,6 +16111,18 @@
         {
           "additionalProperties": false,
           "description": "`lf [--agent <agent>] pr submit [--strict] [--worktree] [--message]\n[--title] [--body] --json`: prepare the PR for a teammate's merge.",
+          "examples": [
+            {
+              "agent": null,
+              "body": null,
+              "directory": "/repo",
+              "kind": "pr.submit",
+              "message": null,
+              "strict": false,
+              "title": null,
+              "worktree": null
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15507,11 +16178,36 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Prepared"
+          },
+          "x-result-example": {
+            "pr": {
+              "branch": "jack/loo-593-decide-the-desktop",
+              "head_sha": "81524350d4",
+              "merge_commit": null,
+              "merge_state": null,
+              "merged_at": null,
+              "number": 1813,
+              "state": "OPEN",
+              "url": "https://github.com/jack-heart/loopflow/pull/1813"
+            }
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf [--agent <agent>] pr arm [--strict] [--local] [--worktree]\n[--message] [--title] [--body] --json`: arm exact-head auto-merge and\nreturn.",
+          "examples": [
+            {
+              "agent": null,
+              "body": null,
+              "directory": "/repo",
+              "kind": "pr.arm",
+              "local": false,
+              "message": null,
+              "strict": true,
+              "title": null,
+              "worktree": null
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15576,6 +16272,20 @@
         {
           "additionalProperties": false,
           "description": "`lf [--agent <agent>] pr land [--wait-and-fix] [--strict] [--local]\n[--worktree] [--message] [--title] [--body] --json`, started\ndetached: the Process carrying the landing.",
+          "examples": [
+            {
+              "agent": null,
+              "body": null,
+              "directory": "/repo",
+              "kind": "pr.land",
+              "local": false,
+              "message": null,
+              "strict": false,
+              "title": "Serve the pr namespace",
+              "wait_and_fix": true,
+              "worktree": null
+            }
+          ],
           "properties": {
             "agent": {
               "type": [
@@ -15644,6 +16354,14 @@
         {
           "additionalProperties": false,
           "description": "`lf pr abandon [<branch>] [--force] --json`: close the PR and delete\nits worktree and branches. Served, unpublished work is deleted only\nwith `force`.",
+          "examples": [
+            {
+              "branch": "spike",
+              "directory": "/repo",
+              "force": true,
+              "kind": "pr.abandon"
+            }
+          ],
           "properties": {
             "branch": {
               "type": [
@@ -15671,11 +16389,20 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Abandoned"
+          },
+          "x-result-example": {
+            "branch": "spike"
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf pr reconcile --json`: check recorded landings once and settle\nverified merges.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "pr.reconcile"
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -15692,11 +16419,26 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/DeliveryCheck"
+          },
+          "x-result-example": {
+            "checked_at": 1794009600,
+            "errors": []
           }
         },
         {
           "additionalProperties": false,
           "description": "`lf pr request-review [<pr>] -r <reviewer>… --json`.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "kind": "pr.request_review",
+              "pr": "1813",
+              "reviewers": [
+                "alice",
+                "org/platform"
+              ]
+            }
+          ],
           "properties": {
             "directory": {
               "type": "string"
@@ -15727,6 +16469,13 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/ReviewRequested"
+          },
+          "x-result-example": {
+            "pr": "1813",
+            "reviewers": [
+              "alice",
+              "org/platform"
+            ]
           }
         },
         {
@@ -16038,6 +16787,16 @@
         {
           "additionalProperties": false,
           "description": "`lf config set <key> <value> <destination flags> --json`: declare a\nsetting in the destination's file; `value` is YAML.",
+          "examples": [
+            {
+              "destination": {
+                "kind": "personal_global"
+              },
+              "key": "theme",
+              "kind": "config.set",
+              "value": "Hearth"
+            }
+          ],
           "properties": {
             "destination": {
               "$ref": "#/$defs/Destination"

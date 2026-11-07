@@ -285,7 +285,7 @@ Jack Heart's `2d140be4` replaces per-agent polling with team deltas at turn, Flo
 planning-read and write boundaries; only watchers retain a slow clock. No daemon,
 webhook or pub/sub. Shared attempt freshness (10 s while Linear's budget is healthy,
 longer as it falls: LOO-649) differs from the successful watermark: failed/interrupted ingestion retains the latter. Exclude terminal Tasks
-and teams without live Tasks; pagination may require multiple requests. Successful
+and teams without live Tasks; pagination may need several requests. Successful
 mutations settle captured receipts directly; uncertain effects retain identity.
 Home-wide reset cooldown handles HTTP 400 limits as well as rate-limit headers.
 
@@ -293,23 +293,25 @@ Home-wide reset cooldown handles HTTP 400 limits as well as rate-limit headers.
 or watcher-only Linear checks; removing Linear timers must not remove Git lifetime.
 Release's operation-entry lesson applies: generated Stop-hook child processes,
 Flow launches, watcher backoff/shutdown and populated migration fixtures prove their
-boundaries, not installed behavior. Idle providers issue no timed Linear requests.
+boundaries, not installed behavior.
 
-October 12 source checks repaired stale acquisition timestamps, slow bulk
-fixture seeding and Linux reconnect peers. Network-isolated Linux proofs cover
-concurrent hooks, no idle-agent requests, watcher backoff, lost replies and
-rate-limit recovery; formatting, Clippy and architecture checks pass. A scheduled
-release child signal did not recur; cause unknown. Hosted candidate CI, live
-request counts and installed acceptance remain unproved. `rust/loopflow/tests/README.md` retains
-Linux HTTPS reconnect as CI's obligation. Exact failures, commands and counts:
-`6935bfbadb:wave/infrastructure/MEMORY.md`,
+Network-isolated Linux proofs cover concurrent hooks, no idle-agent requests,
+watcher backoff, lost replies and rate-limit recovery; `rust/loopflow/tests/README.md`
+retains Linux HTTPS reconnect as CI's obligation. October 12 repairs, exact
+failures, commands and counts: `6935bfbadb:wave/infrastructure/MEMORY.md`,
 On-demand Linear acquisition.
 
-Jack authorized landing after checks. His `6d169dc1` permits publication before live
-measurement while Linear is paused. Live request counts, rejected-request quota
-accounting and installed pending-write recovery remain unproved. After installing,
-manual restoration of `linear.team` with `planning.provider: linear` in loopflow,
-etude, kata and fantasia precedes measurement; rollout notes belong in the PR.
+Jack authorized landing after checks (`6d169dc1`). Live counts arrived
+2026-11-05 (Task 647863): 23 uncertain exports and ~11 lf processes sent
+~4,000 requests an hour (`ListTeams` every pass,
+`FindExportIssue` per export) while a `check_before_write` nested in
+`LinearClient::graphql` consumed each creation's five-second deadline, so no
+creation reached Linear. Lessons: no freshness check inside a write; validate the
+Team claim once per process; look for an uncertain creation once per window
+(`max(600 s, delta_fresh_secs())`) and re-send it with its saved id when absent;
+policy in `ops/README.md`. Hosted candidate CI,
+rejected-request quota accounting and installed pending-write recovery remain
+unproved; the 19 unmapped Tasks are the installed check.
 
 ## Session titles (LOO-439, 2026-10-08)
 
@@ -1070,12 +1072,10 @@ telemetry red; fresh failures join existing work.
   installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
   firings remain LOO-645's evidence.
 - **Release orchestration, publication and caller edits are separate evidence**
-  (August 2026): an unpublished v0.12.14 despite cron/workflow success, and a
-  scheduled retry that removed two pre-run memory edits, remain at
-  `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas. Judge product state; keep
-  same-tag recovery singular; LOO-261 owns clean-host candidate validation and
-  LOO-266 preserving caller branch, index and working bytes across every release
-  exit.
+  (August 2026, `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge
+  product state; keep same-tag recovery singular; LOO-261 owns clean-host
+  candidate validation and LOO-266 preserving caller branch, index and working
+  bytes across every release exit.
 
 ## Durable model lessons (curated 2026-10-02)
 
@@ -1103,7 +1103,7 @@ was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this h
 
 ## Archived pointers
 
-Installed worker recovery is under Shipped history.
+Installed worker recovery: Shipped history.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths” referent:
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.

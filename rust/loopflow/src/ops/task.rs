@@ -1970,7 +1970,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsResult<String> {
+pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -1986,23 +1986,14 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             ));
         };
         if task.linear_id.is_none() {
-            if let Some(project) = &task.project_id {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Project(project.clone()),
-                )
-                .await?;
-            }
-            if retry_creation {
-                super::planning_export::retry_task_export(&store, repo, &task.id).await?;
-            } else {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Task(task.id.clone()),
-                )
-                .await?;
+            let project = task
+                .project_id
+                .clone()
+                .map(crate::durable::WorkRef::Project);
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            // The person's explicit look: ahead of the pass window if need be.
+            for work in project.iter().chain([&work]) {
+                super::planning_export::export(&store, repo, work, true).await?;
             }
         }
         let task = store

@@ -1989,9 +1989,6 @@ pub enum TaskCommand {
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
-        /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
-        #[arg(long)]
-        retry_creation: bool,
         /// Retry uncertain saved field/state updates after observing current Linear values
         #[arg(long)]
         retry_updates: bool,

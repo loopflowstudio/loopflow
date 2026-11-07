@@ -1131,7 +1131,7 @@ async fn select_route(
         let Some(account) = accounts.iter().find(|account| account.account_id == *id) else {
             continue;
         };
-        match identity::check_current_identity(account, &accounts).await {
+        match identity::check_routable_identity(&store, account, &accounts).await {
             Ok(()) => eligible.push(id.clone()),
             Err(error) => {
                 let reason = error.to_string();
@@ -1225,7 +1225,7 @@ async fn held_login<'a>(
         hold::end_when_full(provider, accounts, &limits, now)?;
         return Ok(None);
     };
-    if let Err(error) = identity::check_current_identity(account, accounts).await {
+    if let Err(error) = identity::check_routable_identity(store, account, accounts).await {
         tracing::warn!("skipping held account: {error}");
         return Ok(None);
     }
@@ -1338,7 +1338,7 @@ async fn ordered_selected_candidates(
             .filter(|account| account.provider == provider.as_str())
         {
             let identity = if verify_identity {
-                identity::check_current_identity(account, &catalog)
+                identity::check_routable_identity(store, account, &catalog)
                     .await
                     .map_err(|error| error.to_string())
             } else {
@@ -3445,6 +3445,194 @@ mod account_first_tests {
         assert_eq!(
             activation::claude_credential_home(&temp.path().join("first")),
             native
+        );
+    }
+
+    /// Leave `id`'s stored Claude login with an expired access token and a
+    /// refresh token, its identity observed on those bytes: a login parked
+    /// for longer than a token lasts.
+    async fn expire_claude_login(store: &SharedStore, temp: &Path, id: &str) -> String {
+        let credential = serde_json::json!({"claudeAiOauth": {
+            "accessToken": format!("expired-{id}"),
+            "refreshToken": format!("refresh-{id}"),
+            "expiresAt": 1000
+        }})
+        .to_string();
+        fs::write(temp.join(id).join(".credentials.json"), &credential).unwrap();
+        store
+            .record_provider_account_identity(
+                "claude",
+                &parse_account_id(id).unwrap(),
+                &format!("{id}@example.com"),
+                id,
+                None,
+                Some(&identity::credential_digest(&credential)),
+            )
+            .await
+            .unwrap();
+        credential
+    }
+
+    async fn credential_state(store: &SharedStore, id: &str) -> CredentialState {
+        store
+            .get_provider_account("claude", &parse_account_id(id).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .credential_state
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rejected_grant_takes_a_parked_login_out_of_routing() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let signed_in = claude_credential(&native);
+        let dead = expire_claude_login(&store, temp.path(), "first").await;
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![(400, r#"{"error":"invalid_grant"}"#.into())],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+        let switched = route.launch_as(&mut Command::new("claude")).await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(switched.is_none());
+        assert_eq!(claude_credential(&native), signed_in);
+        assert_eq!(claude_credential(&temp.path().join("first")), dead);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Missing
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_parked_login_with_a_live_grant_stays_on_top_and_pays_once() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        expire_claude_login(&store, temp.path(), "first").await;
+        let install_lock = native.join(".oauth_refresh.lock");
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            // An `activate` now would copy the grant this refresh spends.
+            move |_| assert!(install_lock.is_dir()),
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+        route.launch_as(&mut Command::new("claude")).await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "first");
+        assert!(claude_credential(&temp.path().join("first")).contains("rotated"));
+        assert!(claude_credential(&native).contains("rotated"));
+        // No endpoint answers now: the next launch needs none.
+        let next = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.account_id().as_str(), "first");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unreachable_token_endpoint_skips_a_parked_login_for_this_launch() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let parked = expire_claude_login(&store, temp.path(), "first").await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(claude_credential(&temp.path().join("first")), parked);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn routing_leaves_the_active_logins_refresh_to_claude() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let profile = temp.path().join("first");
+        let due = expire_claude_login(&store, temp.path(), "first").await;
+        fs::write(native.join(".credentials.json"), &due).unwrap();
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "first");
+        assert_eq!(claude_credential(&native), due);
+        assert_eq!(claude_credential(&profile), due);
+
+        // Claude rotated both tokens, so the stored copy holds a spent grant
+        // and matches nothing until the provider places the native login.
+        let rotated = serde_json::json!({"claudeAiOauth": {
+            "accessToken": "rotated-access",
+            "refreshToken": "rotated-refresh",
+            "expiresAt": 4102444800000i64
+        }})
+        .to_string();
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        // Placing the login, then each candidate's check on this launch's
+        // catalog, which predates the placement. No token request is served.
+        let first = serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}});
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![(200, first.to_string()); 3],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "first");
+        assert_eq!(claude_credential(&profile), rotated);
+        assert_eq!(claude_credential(&native), rotated);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
         );
     }
 

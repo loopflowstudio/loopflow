@@ -271,6 +271,35 @@ pub(crate) async fn claude_access_token(
     })
 }
 
+/// Whether the Claude login in `home` has an access token past its expiry.
+/// With no recorded expiry the server judges it, so nothing is due.
+pub(crate) fn claude_token_due(home: &Path) -> bool {
+    let expiry = crate::provider_auth::read_claude_login(home)
+        .ok()
+        .flatten()
+        .and_then(|login| claude_access(login.expose_secret()).ok())
+        .and_then(|(_, expiry)| expiry);
+    expiry.is_some_and(claude_token_expired)
+}
+
+fn claude_token_expired(expires_at_ms: i64) -> bool {
+    expires_at_ms <= now_ms() + 60_000
+}
+
+fn now_ms() -> i64 {
+    OffsetDateTime::now_utc().unix_timestamp() * 1000
+}
+
+pub(crate) async fn acquire_claude_refresh_lock(
+    home: &Path,
+) -> Result<ClaudeRefreshLock, SubscriptionError> {
+    let home = home.to_path_buf();
+    tokio::task::spawn_blocking(move || ClaudeRefreshLock::acquire(&home))
+        .await
+        .expect("refresh lock wait does not panic")
+        .map_err(|error| SubscriptionError::Unavailable(error.to_string()))
+}
+
 /// A refresh and its write-back hold Claude's own refresh lock on `home`
 /// (`held` when the caller already does), so neither lf nor a running Claude
 /// rotates the refresh token while the other is mid-refresh. Comparisons
@@ -291,22 +320,13 @@ async fn fresh_claude_token(
     };
     let raw = read()?;
     let (access_token, expires_at_ms) = claude_access(&raw)?;
-    let now_ms = OffsetDateTime::now_utc().unix_timestamp() * 1000;
     // Missing expiry is unknown; let the server judge the token.
-    if !force_refresh && expires_at_ms.is_none_or(|expiry| expiry > now_ms + 60_000) {
+    if !force_refresh && !expires_at_ms.is_some_and(claude_token_expired) {
         return Ok((access_token, SecretString::new(raw), false));
     }
     let _lock = match held {
         Some(_) => None,
-        None => {
-            let home = home.to_path_buf();
-            Some(
-                tokio::task::spawn_blocking(move || ClaudeRefreshLock::acquire(&home))
-                    .await
-                    .expect("refresh lock wait does not panic")
-                    .map_err(|error| SubscriptionError::Unavailable(error.to_string()))?,
-            )
-        }
+        None => Some(acquire_claude_refresh_lock(home).await?),
     };
     // Another holder may have refreshed while this one waited.
     let current = read()?;
@@ -378,7 +398,7 @@ async fn fresh_claude_token(
         .and_then(Value::as_i64)
         .filter(|seconds| *seconds > 0)
         .and_then(|seconds| seconds.checked_mul(1000))
-        .and_then(|duration| now_ms.checked_add(duration))
+        .and_then(|duration| now_ms().checked_add(duration))
     {
         oauth["expiresAt"] = json!(expiry);
     }

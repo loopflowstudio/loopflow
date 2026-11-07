@@ -1142,7 +1142,7 @@ fn exhausted_access_profiles_error(
     failures: &[String],
 ) -> anyhow::Error {
     anyhow!(
-        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf account connect {provider} {} --chrome-profile <profile>",
+        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf account connect {provider}={} --chrome-profile <profile>",
         account_login(account), failures.join("; "), account_login(account)
     )
 }
@@ -2769,7 +2769,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
 
         assert_eq!(
             error.to_string(),
-            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf account connect claude jackstah@gmail.com --chrome-profile <profile>"
+            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf account connect claude=jackstah@gmail.com --chrome-profile <profile>"
         );
     }
 }

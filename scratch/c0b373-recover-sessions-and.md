@@ -58,12 +58,12 @@ All eight decisions are in the diff. Corrections made while building:
 - A thread with no transcript cannot move, so failover falls back once to a fresh thread with the whole task. `retry_agent_process` allows exactly that.
 - Interrupting a step ends its wait, so the sweep does not restart it.
 - Failovers are capped at `MAX_ACCOUNT_FAILOVERS` per wait: a named account skips cooldown checks, so it could otherwise spin.
-- The restart sweep starts from due recovery rows and `task_of_process`, so a stale row costs one Task lookup and idle reads scan nothing. A restarted run leaves its old row until the Process is pruned.
+- A restarted run leaves its old recovery row until the Process is pruned.
 - A provider's words cool an account only on a failed exit; stderr from a turn that succeeded proves no limit.
 
 ## Coordination
 - Open PR #1656 (LOO-312) edits `agent/mod.rs` near `format_timeout`/`check_cli_available` and `bin/lf.rs`; the retry loop, pinning and the `limit` hook arm are elsewhere, so the merge is textual, not semantic.
-- `restart_held_runs` and `restart_ships` share `start_lf_in`; a shipping Task's held wait goes through ship's own restart.
+- `restart_waiting_runs` and `restart_ships` share `restart_lf_in`; a shipping Task's wait goes through ship's own restart.
 
 
 ## Accepted at demo (Jack Heart, November 5, 2026)
@@ -97,9 +97,9 @@ Owners, one each. Routine choices are recorded in `scratch/questions.md` 6–10.
 
 ## Built: items 7–9 (November 5, 2026)
 - **Isolation deleted.** `RouteHome` is gone: a stored login (`AccountLogin::Stored`) always launches in the shared home; only replay (`AccountLogin::Replayed`) runs in a recorded capture's profile, so this Machine's login never switches to another catalog's account. `--isolate`/`--shared`, `LF_ACCOUNT_ISOLATION`, `launch_isolated`, `prepare_isolated_codex`, `provider_session_isolated`, and the restart-based move are deleted (`names_another_account` and `Departure::Account` came back for Codex on November 7). `isolate:` stays in the catalog as Inactive (read, ignored) until Task e1f359.
-- **Legacy isolated conversations.** `provider_session_accounts.isolated = 1` now means only "its transcript is still in that account's home". `adopt` copies it into the shared home on resume; `pin_provider_session_route` always writes `isolated = 0`, so readers (`transcript::conversation_home`) switch to the shared home once it ran there. `lf connect` of a conversation found in an account home copies it first.
+- **Legacy isolated conversations.** `provider_session_accounts.isolated = 1` now means only "its transcript is still in that account's home"; `adopt` copies it into the shared home on resume.
 - **Remote logins.** Owned Machine: `lf machine connect <m> claude <email>` sends a fresh full login (`fresh_machine_login`, as Codex), installed through `install_managed`. Rental (`rental_for_machine`): the laptop keeps one Claude login per account under `~/.lf/accounts/rental-logins/claude/<id>/`, refreshes it through `subscription::claude_access_token` when within `ACCESS_RENEW_SECS` (2h) of expiry, and sends only `Credential::ClaudeAccess`; after a refresh it resends to every live rental. The rental replaces an older access token and, when its shared home was on it, that too (`activation::renew_claude_login`, mtime marker). `installed` reports an access token stale within 2h, so any connect or launch prefix renews it. `lf --machine <m> account` shows `access token until <time>` (`expires_at`).
-- **Long-lived tokens deleted.** `lf account token`, `mint_long_lived_token`, `claude setup-token` parsing and its PTY auth path, `LongLivedToken` and the store accessors. The migration clears the two columns; dropping them is Task e1f359.
+- **Long-lived tokens deleted.** The migration clears the two columns; dropping them is Task e1f359.
 
 
 ## Concept review (November 5, 2026, headless, after merging #1831)
@@ -113,7 +113,7 @@ Accepted (Jack Heart, November 6, 2026), supersedes the matching parts of items 
 - **Delete `lf session move --account` (3a) and `lf account <provider> drain`.** Keeping a login out (now `lf account pause`) switches away when that login is active; `lf account use` is the manual switch.
 Unverified: whether a different account misses Claude's prompt cache for a moved conversation, making each switch cost quota.
 
-Built (Nov 6, implement): `route_rank`/`urgency`/`order_accounts_by_urgency`; the active-first reorder (`select_shared_account`, `active_candidate`) deleted; `SWITCH_SETTLE_SECS` 120 → 15 (questions 17); `MoveTarget`, `follow_login`, `switch_login`, `drain_account`, `AccountCommand::Drain` and `Write::SessionMove.account` deleted (Swift `sessionMove` too); `provider_account::replacement_login` backs explicit-only switch-away (questions 18); docs updated.
+Built (Nov 6): `route_rank`/`urgency`/`order_accounts_by_urgency`; the active-first reorder and the drain and `--account` move paths deleted; `SWITCH_SETTLE_SECS` 120 → 15 (questions 17); `provider_account::replacement_login` backs explicit-only switch-away (questions 18).
 
 ## Demo answer (Jack Heart, November 6, 2026)
 Ranking fix accepted: "ok i guess. or just poll if necessary?" A window past its reset, and a login with no observed weekly window, score as a full week (100% over 168 hours) instead of ranking last. Built in the CLI pass (item 1 below).
@@ -143,10 +143,10 @@ Built (Nov 6, implement), choices in `scratch/questions.md` 19–26:
 Outstanding demo questions (bare login names, `pause` with no "disabled", Anthropic's terms, overage, open-ended waits), Jack Heart, November 7: "none of this concersn me". They stay as built.
 
 ## Built: November 7 pass
-- **Failing integration tests.** Cause was this branch: merge 0f71d266c8 (#1831) kept the older `tests/support/native_codex.py` and undid main's `session_launch_contract.rs` expectations, so the stand-in had no stdio `app-server` ("disconnected before auth completed"). Both restored from the merge base; the other conflicted files of all six merges keep main's lines (audited). origin/main 81a79796f passed the same suites but for `native_background_watches_survive_until_settlement` (transport_tests, which passes here).
-- **Fixtures.** `support`'s ctor moves `HOME` into the temp directory for every test binary, keeping `CARGO_HOME`/`RUSTUP_HOME` (questions 27). `settings_launch_tests::command` sets its own `CODEX_HOME`; `auth_tests::cached_auth_leaves_no_process_or_account_state` sets `HOME`. Checked with a stand-in real home holding sentinels: `settings_launch_tests::`, `auth_tests::` left it untouched.
+- **Failing integration tests.** Merge 0f71d266c8 (#1831) kept the older `tests/support/native_codex.py` and undid main's `session_launch_contract.rs` expectations; both restored from the merge base, other conflicted files audited.
+- **Fixtures.** `support`'s ctor moves `HOME` into the temp directory for every test binary, keeping `CARGO_HOME`/`RUSTUP_HOME` (questions 27).
 - **Resume naming another login.** `Departure::Account` (Codex only), `names_another_account` and `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went` are back; `provider_session_account` replaces `provider_session_routed`.
-Test binaries all compile `tests/support` but for the ignored `codex_live_smoke`; every `env_clear` spawn of `lf` sets `HOME`, lib fixtures too. Gate owns the full suites the ctor reaches.
+Gate owns the full suites the ctor reaches.
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none). `--owned` is likewise unexercised on a real rental: it takes a browser approval, so tests cover it with a stand-in `ssh`.
@@ -169,7 +169,17 @@ Still true from the first pass:
 3. **Old spelling.** `lf help account claude use` and `lf account codex use --help` fail as unknown; `lf account codex --help`, `--cached` work. `lf ops account` is the only command with a positional beside subcommands.
 4. **`--blocked` and `--on` read the login the Session uses.** `LaunchCapacity::login`: a running Codex reads its recorded account, everything else the shared home.
 5. **`--on` takes a login as every command does.** `SessionOn::resolve` runs once before filtering, through `account::resolve_on`; unknown or ambiguous is an error. A harness name keeps its meaning in any case. An account ID matches only a login with no email.
-6. **A restarted wait keeps its `-a`.** `agent_limit_recoveries.agent` records `config::agent_override()`, the step's own `--agent` (Graph steps get it through `step_args`) or inherited override. `waiting_on_limit` returns a `LimitWait`. `ship::restart_lf_in`, used by the sweep and `restart_ships`, passes `--agent` and clears the reader's `LF_AGENT_OVERRIDE`/`LF_SETTINGS`. `may_launch_agent` now includes `lf ship`, which forwards `--agent` but printed that it had no effect. A ship process that dies outside a wait restarts with no `-a`: no wait row holds it, and it no longer takes the reader's either.
-7. **An owned rental.** `lf machine connect <rental> claude <email> --owned` takes the `fresh_machine_login` branch, judged by `inspect --full` because a current access token counts as connected otherwise. `install_managed` replaces an access token with the full login (it used to keep the file and report success), and the shared home follows. `renew_other_rentals` skips a rental holding a full login for that account; `renew_rentals` already stops at `installed`; `install_access` refuses a full login. A second account's token still reaches an owned rental, in its own profile.
+6. **A restarted wait keeps its `-a`.** `agent_limit_recoveries.agent` records the step's override; `ship::restart_lf_in` passes `--agent` and clears the reader's `LF_AGENT_OVERRIDE`/`LF_SETTINGS`. A ship process that dies outside a wait restarts with no `-a`: no wait row holds it.
+7. **An owned rental.** `lf machine connect <rental> claude <email> --owned` takes `fresh_machine_login`, judged by `inspect --full`; `install_managed` replaces an access token with the full login. Renewal leaves a rental holding a full login alone, and asks the rental before skipping an account the laptop holds no rental login for.
 
-Checks (empty cwd, isolated `HOME`, `LF_*` unset, stdin /dev/null): lib `machine_credentials:: lf::tests:: ops::task_execution ops::task::ship store::sqlite::graph_inventory restarted_wait` 68; `agent_tests` 3; integration `cli_discovery:: documented_commands:: machine_credentials:: machine_commands::` 80 of 81; fmt, clippy clean. The failure, `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`, is a file-watch test with `fseventsd` at 100% CPU (`scripts/testing.md`); gate reruns it.
+Proposed for Wave memory (read-only outside a Graph that maintains it): a restarted wait keeps its recorded `-a` and clears the reader's; `--owned` gives one rental its own Claude login, which renewal leaves alone.
+
+## Concept review (November 7, 2026, headless, after items 6–7), built
+8. **A dead parked login is out of rotation before a switch.** An unchanged digest says nothing about a revoked grant, and a window past its reset scores a full week, so such a login ranked first and took every open Claude with it. `identity::check_routable_identity`, called by `select_route`, `held_login` and `ordered_selected_candidates`, refreshes a Connected parked login whose token is due: `NeedsLogin` sets `Missing`, `Unavailable` skips it this launch and leaves it Connected, success records the identity on the new bytes, so a parked login pays once per ~8h. `check_current_identity` stays network-only-on-missing-evidence for readiness.
+   The active login is never refreshed here. `observe_active_account` runs first, because a fully rotated active login matches no stored copy and its spent grant would read as rejected; `claude_credential_home` then tells it apart. Missing evidence on an active login now reads through that home too, in `check_current_identity` and the peer loop in `validate_observed_identity`, where the stored profile used to be refreshed.
+   Known limits: when the native login cannot be placed (dead, or the profile endpoint down with the token endpoint up), the parked check proceeds, since a dead native login is exactly when a parked one is needed; a false `Missing` clears at the next `lf account`. The refresh holds the native refresh lock, so `activate` cannot install the bytes it spends.
+9. **Fix-it text parses.** Every printed `lf account connect|disconnect|set|use` is `provider=login`. `account_commands_printed_by_errors_parse` scans the sources that print them and runs each through `normalize_args` and Clap. `docs/subscriptions.md` corrected.
+
+Checked, no change: a per-minute 429 stays `AgentFailure::RateLimit` (same login, same thread, no cooldown); items 6–7 and the renewal repair hold on a normal path, a death mid-wait and an owned rental; `require_unattended_logins` only gates a new paid rental.
+
+Checks (empty cwd, isolated `HOME`, `LF_*` unset, stdin /dev/null): lib `provider_account::` 60, `subscription::` 12, `machine_credentials::` 19, `lf::commands::account` 34, Clap test pass; fmt, clippy clean. Gate reruns `remote_file_observer_keeps_the_recorded_owner_and_streams_changes` (failed once under `fseventsd` load) and owns the integration suites.

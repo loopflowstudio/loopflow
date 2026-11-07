@@ -126,7 +126,7 @@ pub(super) async fn connect(
                     account.observed_email.clone(),
                     account.observed_subject.clone(),
                 ) else {
-                    bail!("Claude account {login} has no verified identity on this laptop; `lf account connect claude {login}` first");
+                    bail!("Claude account {login} has no verified identity on this laptop; `lf account connect claude={login}` first");
                 };
                 let (credential, refreshed) =
                     rental_access(&store, &account, chrome_profile, batch).await?;
@@ -274,13 +274,15 @@ fn send(machine: &Machine, credential: &Credential) -> Result<()> {
 
 /// Every connected Claude account, so account selection on a rental falls
 /// through an exhausted account as on any other. A background run skips an
-/// account whose rental login still needs a browser approval.
+/// account whose rental login still needs a browser approval, unless the
+/// Machine already has it, as an `--owned` rental does.
 pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> Result<()> {
     let store = open_account_store().await?;
     let mut connected = 0;
     for account in connected_claude_accounts(&store).await? {
         let login = account_login(&account);
-        if !foreground(batch) && !rental_login_held(&account.account_id)? {
+        let needs_approval = !foreground(batch) && !rental_login_held(&account.account_id)?;
+        if needs_approval && !remote_has(machine, Provider::Claude, login)? {
             eprintln!("Skipping Claude {login}: the laptop holds no rental login for it (`lf machine connect <rental> claude {login}` in a foreground terminal approves one)");
             continue;
         }
@@ -1911,6 +1913,33 @@ esac
         assert!(!fs::read_to_string(calls).unwrap().contains("receive"));
     }
 
+    /// An `--owned` rental needs nothing from the laptop, so scheduled renewal
+    /// finds no fault with it even when the laptop holds no rental login.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn renewal_is_content_with_an_owned_rental_the_laptop_holds_no_login_for() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let calls = fake_ssh(root.path());
+        let opened = crate::provider_account::open_account_store().await.unwrap();
+        let mut account = super::managed_account(&opened, Provider::Claude, "person@example.com")
+            .await
+            .unwrap();
+        account.credential_state = crate::store::CredentialState::Connected;
+        opened.upsert_provider_account(&account).await.unwrap();
+
+        let owned = live_rental(&opened, "owned-rental");
+        super::connect_claude_accounts(&owned, true).await.unwrap();
+
+        let rental = live_rental(&opened, "other-rental");
+        let error = super::connect_claude_accounts(&rental, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("no Claude account to install"));
+        assert!(!fs::read_to_string(calls).unwrap().contains("receive"));
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn a_full_login_replaces_a_rentals_access_token_and_renewal_cannot_undo_it() {
@@ -1974,6 +2003,7 @@ esac
             .unwrap_err()
             .to_string();
         assert!(error.contains("no Claude rental login"), "{error}");
+        fake_ssh(root.path());
         let error = super::connect_claude_accounts(&mini(), true)
             .await
             .unwrap_err();

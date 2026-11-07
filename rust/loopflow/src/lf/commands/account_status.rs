@@ -744,7 +744,7 @@ fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String
         .filter(|row| row.scope == Scope::Managed)
         .collect();
     if rows.is_empty() {
-        return "No stored logins. lf account connect claude=<email> adds one\n".into();
+        return "No stored logins. `lf account connect claude=<email>` adds one\n".into();
     }
     let names: Vec<String> = rows
         .iter()

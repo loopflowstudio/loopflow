@@ -161,7 +161,7 @@ pub(crate) async fn activate(
         return Err(ProviderAccountError::NoAuthenticatedAccount {
             provider,
             accounts: format!(
-                "lf account connect {provider} {} (its stored profile has no usable credential)",
+                "lf account connect {provider}={} (its stored profile has no usable credential)",
                 account_login(selected)
             ),
         });

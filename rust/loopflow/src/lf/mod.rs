@@ -3231,6 +3231,50 @@ mod tests {
     }
 
     #[test]
+    fn account_commands_printed_by_errors_parse() {
+        let sources = [
+            include_str!("commands/account.rs"),
+            include_str!("commands/account_status.rs"),
+            include_str!("commands/machine_credentials.rs"),
+            include_str!("../provider_account.rs"),
+            include_str!("../provider_account/activation.rs"),
+            include_str!("../provider_account/identity.rs"),
+        ];
+        let printed =
+            regex::Regex::new(r#"lf account (?:connect|disconnect|set|use) [^`"\n;(),…]+"#)
+                .unwrap();
+        let placeholder = regex::Regex::new(r"\{[^}]*\}|<[^>]*>").unwrap();
+        let commands = sources
+            .iter()
+            .flat_map(|source| printed.find_iter(source))
+            .map(|command| {
+                let command = command.as_str().replace("{provider}{login}", "claude=a@");
+                placeholder
+                    .replace_all(&command, |found: &regex::Captures| {
+                        let end = found.get(0).unwrap().end();
+                        match &found[0] {
+                            _ if command[end..].starts_with('=') => "claude",
+                            "{provider}" | "<provider>" => "claude",
+                            "<profile>" => "Work",
+                            _ => "a@example.com",
+                        }
+                    })
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        let parse = |command: &str| {
+            let args = command.split_whitespace().map(String::from).collect();
+            Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?)
+        };
+        assert!(commands.len() > 10, "{commands:?}");
+        for command in commands {
+            let parsed = parse(&command);
+            assert!(parsed.is_ok(), "{command}: {:?}", parsed.err());
+        }
+        assert!(parse("lf account connect claude a@").is_err());
+    }
+
+    #[test]
     fn consolidated_commands_parse_without_old_namespaces() {
         use clap::CommandFactory;
         let command = Cli::command();

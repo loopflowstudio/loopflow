@@ -148,19 +148,21 @@ lf account --json                # every login and local service as one document
 
 Naming a login or a provider asks the provider about each one shown.
 
-Status lists stable account IDs beside full usable logins. Codex rows show the
-credential's observed login, and report mismatches or shared
-logins with a reconnect command even during cached inspection. Verification only
-accepts usage after the server and native identity agree. Managed accounts and
-local service credentials have separate sections: an expired local token says
-nothing about a managed account. Missing local tokens leave ambient auth
-uninspected. Cached inspection reads account state without starting a provider,
-decrypting local tokens or creating an encryption key. The CLI records the
-command's Process in its Machine; this can initialize an empty store, but creates no
-account, route or conversation. Local token metadata is cached evidence, not server acceptance;
-live status reports local server verification unavailable.
+`lf account` shows one row per login, then a line per thing to fix with the
+command that fixes it. Naming a login or provider shows stable account IDs
+beside full logins. Codex rows show the credential's observed login, and report mismatches
+or shared logins with a reconnect command even during cached inspection.
+Verification only accepts usage after the server and native identity agree.
+That long form lists managed accounts and local service credentials in
+separate sections: an expired local token says nothing about a managed account.
+Missing local tokens leave ambient auth uninspected. Cached inspection reads
+account state without starting a provider, decrypting local tokens or creating
+an encryption key. The CLI records the command's Process in its Machine; this
+can initialize an empty store, but creates no account, route or conversation.
+Local token metadata is cached evidence, not server acceptance; live status
+reports local server verification unavailable.
 
-`auth status` persists recognized managed subscription windows before
+`lf account` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
@@ -446,6 +448,9 @@ unrecognized login beside the stored accounts rather than discarding it.
 
 A shared launch moves the home to the eligible account that ranks first, even
 when the active account could take it.
+A parked Claude login whose access token has expired must refresh first: a
+rejected grant leaves it needing a login, and an unreachable token endpoint
+skips it for that launch. Open Claudes stay where they are either way.
 `--account codex=work@` makes that account active before launching.
 These launch-time switches do not restart Codex's shared daemon. If plain
 `codex` keeps the old login, run `lf account use codex=<login>` with the selected account.

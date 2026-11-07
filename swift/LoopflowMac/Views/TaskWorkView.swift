@@ -854,8 +854,8 @@ struct TaskWorkView: View {
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.processes) { process in
-                    row("Process", id: process.id, name: process.command ?? "Unknown command",
-                        state: process.outcome ?? "unknown")
+                    row(process.isAgent ? "Agent" : "Process", id: process.id,
+                        name: process.command ?? "Unknown command", state: process.outcome ?? "unknown")
                 }
                 if work.sessions.isEmpty && work.processes.isEmpty {
                     Text("No recorded work.")

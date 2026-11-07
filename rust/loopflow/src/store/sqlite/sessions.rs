@@ -328,7 +328,7 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<crate::id::LfProcessId> = row.get(31)?;
+        let agent_process_id: Option<crate::id::AgentProcessId> = row.get(31)?;
         let agent_process_evidence = crate::journal::agent_process_evidence(
             row.get(32)?,
             row.get(33)?,

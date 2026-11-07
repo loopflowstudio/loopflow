@@ -189,7 +189,7 @@ fn watch(
             grace.limit = report_result(
                 &mut repository_failure,
                 "Session repository",
-                store.process(owner),
+                store.lf_process(owner),
             )
             .flatten()
             .map(|process| limit(process.repo.as_deref()));

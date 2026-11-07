@@ -156,7 +156,10 @@ mod tests {
             serde_json::to_value(store.session_steers("resume", 0, 100).unwrap()).unwrap();
         let before = store.session("resume").unwrap().unwrap();
         let history = store.session_history("resume", 0, 0).unwrap();
-        let agent = store.process(&attached.agent_process_id).unwrap().unwrap();
+        let agent = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
         let test = if exits {
             "resume_waits_for_a_dead_owners_helpers_without_lifeline_authority"
@@ -200,7 +203,7 @@ mod tests {
             assert_ne!(next.agent_process_id, attached.agent_process_id);
             assert_ne!(next.token, detached.token);
             assert!(store
-                .process(&attached.agent_process_id)
+                .agent_process(&attached.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .completed_at
@@ -219,7 +222,7 @@ mod tests {
             assert!(helper.0.try_wait().unwrap().is_none());
             assert_eq!(store.session_attachment("resume").unwrap(), Some(detached));
             assert_eq!(
-                store.process(&attached.agent_process_id).unwrap(),
+                store.agent_process(&attached.agent_process_id).unwrap(),
                 Some(agent)
             );
         }
@@ -261,7 +264,10 @@ mod tests {
             [],
         )
         .unwrap();
-        let before = store.process(&attached.agent_process_id).unwrap().unwrap();
+        let before = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
 
         // A live foreground provider must not be stopped or launched twice.
         assert!(crate::session_record::resume_session_agent_process(
@@ -272,7 +278,7 @@ mod tests {
         .is_err());
         assert!(child.0.try_wait().unwrap().is_none());
         assert_eq!(
-            store.process(&attached.agent_process_id).unwrap(),
+            store.agent_process(&attached.agent_process_id).unwrap(),
             Some(before.clone())
         );
         assert_eq!(
@@ -311,7 +317,10 @@ mod tests {
             store.session_thread("resume").unwrap(),
             Some("saved-native".into())
         );
-        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
+        let ended = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(ended.pid, before.pid);
         assert_eq!(ended.os_started_at, before.os_started_at);
         assert!(ended.completed_at.is_some());
@@ -362,7 +371,10 @@ mod tests {
             crate::journal::process_identity_evidence(pid, birth),
             crate::journal::ProcessIdentityEvidence::Dead
         );
-        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
+        let ended = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert!(ended.completed_at.is_some());
         assert!(ended.outcome.is_none());
         assert_eq!(ended.pid, Some(pid));
@@ -391,7 +403,7 @@ mod tests {
         let detached = store
             .release_session_attachment("resume", &attached)
             .unwrap();
-        let before = store.process(&detached.agent_process_id).unwrap();
+        let before = store.agent_process(&detached.agent_process_id).unwrap();
         let session = store.session("resume").unwrap().unwrap();
         let mut next = session.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
@@ -407,7 +419,10 @@ mod tests {
             &store.test_lf_process()
         )
         .is_err());
-        assert_eq!(store.process(&detached.agent_process_id).unwrap(), before);
+        assert_eq!(
+            store.agent_process(&detached.agent_process_id).unwrap(),
+            before
+        );
         assert_eq!(store.session_attachment("resume").unwrap(), Some(detached));
         assert_eq!(store.session("resume").unwrap(), Some(session));
     }
@@ -498,7 +513,10 @@ mod tests {
         )
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
-        let ended = store.process(&attached.agent_process_id).unwrap().unwrap();
+        let ended = store
+            .agent_process(&attached.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert!(ended.completed_at.is_some());
         assert!(ended.outcome.is_none());
     }
@@ -562,7 +580,7 @@ mod tests {
             );
             assert_ne!(next.agent_process_id, detached.agent_process_id);
             assert!(store
-                .process(&detached.agent_process_id)
+                .agent_process(&detached.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .completed_at
@@ -651,7 +669,7 @@ mod tests {
                 crate::journal::ProcessIdentityEvidence::Dead
             );
             assert!(store
-                .process(&first.agent_process_id)
+                .agent_process(&first.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .completed_at
@@ -700,13 +718,16 @@ mod tests {
             );
             child.0.kill().unwrap();
             child.0.wait().unwrap();
-            let before = store.process(&attachment.agent_process_id).unwrap();
+            let before = store.agent_process(&attachment.agent_process_id).unwrap();
             assert!(store
                 .with_session_attachment("resume", &attachment, || {
                     super::close_session_agent_process(&store, "resume")
                 })
                 .unwrap());
-            assert_eq!(store.process(&attachment.agent_process_id).unwrap(), before);
+            assert_eq!(
+                store.agent_process(&attachment.agent_process_id).unwrap(),
+                before
+            );
             assert_eq!(
                 store.session_attachment("resume").unwrap(),
                 Some(attachment)
@@ -775,13 +796,13 @@ mod tests {
             crate::journal::ProcessIdentityEvidence::Dead
         );
         assert!(store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap()
             .completed_at
             .is_some());
         assert!(store
-            .process(&next.agent_process_id)
+            .agent_process(&next.agent_process_id)
             .unwrap()
             .unwrap()
             .pid

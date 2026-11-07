@@ -15,7 +15,7 @@ pub(crate) fn latest_marker(home: &Path) -> PathBuf {
     home.join("steers").join("latest")
 }
 
-pub(crate) fn seen_marker(home: &Path, process: &crate::id::LfProcessId) -> PathBuf {
+pub(crate) fn seen_marker(home: &Path, process: &crate::id::AgentProcessId) -> PathBuf {
     home.join("steers").join("seen").join(process.as_str())
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SteerAdapter {
     pub session: String,
-    pub agent_process_id: crate::id::LfProcessId,
+    pub agent_process_id: crate::id::AgentProcessId,
     pub capability: String,
 }
 

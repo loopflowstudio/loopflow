@@ -704,10 +704,10 @@ fn print_task_snapshot(
         for process in &snapshot.work.processes {
             println!(
                 "  Process: {}  {}  {}{}",
-                process.id,
-                process.command.as_deref().unwrap_or("unknown command"),
-                process.outcome.as_deref().unwrap_or("unknown"),
-                log(process.id.as_str()),
+                process.id(),
+                process.command().unwrap_or("unknown command"),
+                process.outcome().unwrap_or("unknown"),
+                log(process.id()),
             );
         }
         if let Some(project) = &snapshot.project_id {

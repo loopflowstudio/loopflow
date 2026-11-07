@@ -444,7 +444,7 @@ struct DTOFixtureTests {
         let data = try Data(contentsOf: url)
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
-        #expect(page.entries[0].agentProcessId == "44444444-4444-4444-8444-444444444444")
+        #expect(page.entries[0].agentProcessId == AgentProcessId(rawValue: "44444444-4444-4444-8444-444444444444"))
         #expect(page.entries[0].account == "work")
         #expect(page.entries[0].programStatus?.summary?.state == .blocked)
         #expect(page.entries[0].programStatus?.summary?.kind == .question)
@@ -458,20 +458,23 @@ struct DTOFixtureTests {
     @Test("Process pages retain command outcomes, caller evidence and continuation")
     func processPageFixture() throws {
         let data = try loadFixtureData("process_page.json")
-        let page = try JSONDecoder().decode(LfProcessPage.self, from: data)
-        #expect(page.entries[0].exitCode == 42)
-        #expect(page.entries[0].viaAgent == nil)
-        #expect(page.entries[0].pid == nil)
-        #expect(page.entries[1].pid == 4242)
-        #expect(page.entries[1].kind == .agent)
-        #expect(page.entries[1].agentSessionID == "conversation")
-        #expect(page.entries[1].osStartedAt == 1790640000)
-        #expect(page.entries[1].parentLfProcessId == page.entries[0].id)
-        #expect(page.entries[1].outcome == nil)
-        #expect(page.next?.id == page.entries[1].id)
-        #expect(try JSONDecoder().decode(LfProcessPage.self, from: JSONEncoder().encode(page)) == page)
+        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
+        guard case .lf(let lf) = page.entries[0], case .agent(let agent) = page.entries[1] else {
+            Issue.record("expected an lf entry then an agent entry")
+            return
+        }
+        #expect(lf.exitCode == 42)
+        #expect(lf.viaAgent == nil)
+        #expect(lf.pid == nil)
+        #expect(agent.pid == 4242)
+        #expect(agent.agentSessionID == "conversation")
+        #expect(agent.osStartedAt == 1790640000)
+        #expect(agent.parentLfProcessId == lf.id)
+        #expect(agent.outcome == nil)
+        #expect(page.next?.id == agent.id.rawValue)
+        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(LfProcessPage.self, from: Data("{}".utf8))
+            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
         }
     }
 
@@ -840,7 +843,7 @@ struct DTOFixtureTests {
         #expect(session.id == "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         #expect(session.taskIds == ["task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
         #expect(session.waveId == "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
-        #expect(session.agentProcessId == "ffffffff-ffff-4fff-8fff-ffffffffffff")
+        #expect(session.agentProcessId == AgentProcessId(rawValue: "ffffffff-ffff-4fff-8fff-ffffffffffff"))
         #expect(session.work?.id == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         #expect(session.workspace?.machineId == "home_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
         #expect(session.workspace?.taskId == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")

@@ -88,5 +88,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 
 ## Item 12 (November 7, 2026, headless)
 - Assumption: the matcher takes only the three openers named for item 12. `xAo`'s other spent lines (`You're out of extra usage`, `Your org is out of usage · …`, `Your group's usage limit is set to $0`) move nothing, which fails toward no switch. Adding them is one line each in `subscription_limit_text`.
-- `You've reached your Fable limit.` matches through its opener, though Claude types it `model_requires_usage_credits`. It cools the whole account for 15 minutes, as a terminal Claude limit already does (no model field).
+- `You've reached your Fable limit.` matches through its opener, though Claude types it `model_requires_usage_credits`; item 13 scopes it to Fable.
 - Open: `classify_retryable_agent_failure` does not match `Request rejected (429) · this may be a temporary capacity issue`, so that line in a step's stderr classifies as nothing rather than `RateLimit`. Outside item 12, left as is.
+
+- **Codex stated limits are not polled (item 14, November 7).** `record_stated_limit` polls only Claude accounts after a text-only limit. Codex's poll is a `codex app-server` exchange of up to 60s and its stream already reports `rate_limits` windows, so a Codex Graph step whose limit only stderr reported keeps the 15-minute cooldown. Reverse by dropping the provider check if Codex steps are seen cycling back onto a spent account.

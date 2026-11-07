@@ -1400,7 +1400,7 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
 /// or the line a native Claude displayed. Claude's openers are its own list of
 /// usage-limit messages; its capacity, per-model and seat-type lines name no
 /// spent window.
-pub(crate) fn subscription_limit_text(line: &str) -> Option<String> {
+pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
     let text = line.to_ascii_lowercase();
     (text.contains("you've hit your")
         || text.contains("you've reached your")
@@ -1413,7 +1413,28 @@ pub(crate) fn subscription_limit_text(line: &str) -> Option<String> {
         || text.contains("quota exceeded")
         || text.contains("insufficient_quota")
         || text.contains("rate_limit_reached"))
-    .then(|| line.to_string())
+    .then(|| SpentLimit {
+        reason: line.to_string(),
+        model: _limited_model(&text),
+    })
+}
+
+/// Spent quota a provider reported in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpentLimit {
+    pub reason: String,
+    /// The model family the line names ("You've reached your Fable limit"),
+    /// as limit scopes spell it; `None` when the whole account is spent.
+    pub model: Option<String>,
+}
+
+/// The model family named between "your" and "limit" in a lowercased line.
+fn _limited_model(text: &str) -> Option<String> {
+    let named = text.split_once("your ")?.1.split_once("limit")?.0;
+    named
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .find(|word| matches!(*word, "opus" | "sonnet" | "haiku" | "fable"))
+        .map(str::to_string)
 }
 
 fn _begin_implicit_capture(
@@ -1670,9 +1691,9 @@ fn _run_harness_once(
             // A limit only the provider's words reported has no stream
             // observation: cool the account so the next choice can differ.
             if result.exit_code != 0 && result.failure.is_none() {
-                if let Some(reason) = _find_provider_error(result, subscription_limit_text) {
+                if let Some(limit) = _find_provider_error(result, subscription_limit_text) {
                     route
-                        .record_limit_blocking(reason)
+                        .record_limit_blocking(limit)
                         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                 }
             }
@@ -2835,6 +2856,27 @@ trust_level = "trusted"
         ] {
             assert!(subscription_limit_text(line).is_some(), "{line}");
         }
+    }
+
+    #[test]
+    fn a_spent_line_naming_a_model_scopes_its_limit() {
+        let model = |line: &str| subscription_limit_text(line).unwrap().model;
+        assert_eq!(
+            model("You've reached your Fable limit. Switch to another model to continue."),
+            Some("fable".to_string())
+        );
+        assert_eq!(
+            model("You've hit your weekly Opus limit \u{b7} resets Wed 12:00"),
+            Some("opus".to_string())
+        );
+        assert_eq!(
+            model("You've hit your weekly limit \u{b7} resets Wed 12:00"),
+            None
+        );
+        assert_eq!(
+            model("You're out of usage credits. /model to switch models."),
+            None
+        );
     }
 
     #[test]

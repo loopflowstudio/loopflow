@@ -358,6 +358,10 @@ Commit messages and PR text fail at once, because someone is waiting for them.
 A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
 limit, holds back only launches of that model: Sonnet on the same account keeps
 going, and a launch that names no model waits for every scope on the account.
+A limit Claude only states in words ("You've reached your Fable limit") is
+scoped the same way. Loopflow then reads that account's usage once, and when
+the read fails the account rests for 15 minutes. Any usage read that finds a
+window spent holds that window's launches back until it resets.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

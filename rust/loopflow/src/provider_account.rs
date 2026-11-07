@@ -27,7 +27,7 @@ use crate::store::{
 use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
-const RESET_GRACE_SECS: i64 = 5;
+pub(crate) const RESET_GRACE_SECS: i64 = 5;
 /// A limit reported this soon after a switch belongs to the account before it.
 /// Running Claude picks a switched login up within seconds (its credentials
 /// file's mtime), and launches switch often, so the window stays short.
@@ -331,14 +331,14 @@ pub(crate) struct RateLimitSignal {
 
 impl RateLimitSignal {
     /// A limit reached with nothing more said: no reset time, no windows.
-    fn stated(reason: String) -> Self {
+    fn stated(limit: crate::agent::SpentLimit) -> Self {
         Self {
             utilization_percent: None,
             resets_at: None,
             limited: true,
-            reason,
+            reason: limit.reason,
             windows: Vec::new(),
-            model: None,
+            model: limit.model,
         }
     }
 }
@@ -655,11 +655,21 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    /// Cool this route's account on a limit the provider stated in words,
-    /// with no reset time.
-    pub(crate) fn record_limit_blocking(&self, reason: String) -> Result<(), ProviderAccountError> {
+    /// Hold this route's account back on a limit the provider stated in words.
+    pub(crate) fn record_limit_blocking(
+        &self,
+        limit: crate::agent::SpentLimit,
+    ) -> Result<(), ProviderAccountError> {
         _run_blocking_account(self.provider, "record", move |runtime| {
-            runtime.block_on(self.record_rate_limit(&RateLimitSignal::stated(reason)))
+            runtime.block_on(async {
+                match &self.login {
+                    AccountLogin::Stored { store, .. } => {
+                        let account_id = self.used_account().await?;
+                        record_stated_limit(store, self.provider, &account_id, limit).await
+                    }
+                    AccountLogin::Replayed { .. } => Ok(()),
+                }
+            })
         })
     }
 
@@ -762,6 +772,36 @@ async fn record_rate_limit_signal(
     if !windows.is_empty() {
         store
             .upsert_provider_account_limits(provider.as_str(), account_id, &windows, "stream")
+            .await?;
+    }
+    Ok(())
+}
+
+/// Record a limit the provider stated in words, which carries no reset time.
+/// A Claude account's windows are then read once, so a spent one holds the
+/// account back until it resets instead of for the default cooldown. A poll
+/// that fails leaves the default.
+async fn record_stated_limit(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+    limit: crate::agent::SpentLimit,
+) -> Result<(), ProviderAccountError> {
+    record_rate_limit_signal(store, provider, account_id, &RateLimitSignal::stated(limit)).await?;
+    // Codex reports its windows on the stream; its poll is a whole app-server
+    // exchange.
+    if provider != Provider::Claude {
+        return Ok(());
+    }
+    let Some(account) = store
+        .get_provider_account(provider.as_str(), account_id)
+        .await?
+    else {
+        return Ok(());
+    };
+    if let Ok(usage) = crate::subscription::poll_account(&account).await {
+        store
+            .upsert_provider_account_limits(provider.as_str(), account_id, &usage.windows, "poll")
             .await?;
     }
     Ok(())
@@ -966,11 +1006,11 @@ pub fn observe_native_limit() {
 fn start_limit_recording(input: &str) -> anyhow::Result<()> {
     // Anything else, a capacity blip included, records nothing: the person
     // still sees Claude's own message.
-    let Some(reason) = spent_limit_reason(input) else {
+    let Some(limit) = spent_limit_reason(input) else {
         return Ok(());
     };
     crate::os_process::detached_context_block("record-limit")?
-        .env(LIMIT_REASON_ENV, reason)
+        .env(LIMIT_REASON_ENV, limit.reason)
         .spawn()?;
     Ok(())
 }
@@ -978,7 +1018,7 @@ fn start_limit_recording(input: &str) -> anyhow::Result<()> {
 /// The spent quota a `StopFailure` reports. Every 429 reaches the hook as
 /// `rate_limit` and Claude keeps the cause to itself, so only the line it
 /// displayed tells spent quota from a capacity blip.
-fn spent_limit_reason(input: &str) -> Option<String> {
+fn spent_limit_reason(input: &str) -> Option<crate::agent::SpentLimit> {
     let details: serde_json::Value = serde_json::from_str(input).ok()?;
     crate::agent::subscription_limit_text(details["last_assistant_message"].as_str()?)
 }
@@ -988,9 +1028,14 @@ fn spent_limit_reason(input: &str) -> Option<String> {
 /// follows. Their next message runs there, with no input of ours. Other
 /// Sessions reporting the same limit find the login already moved.
 pub fn record_limit() {
-    let reason = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    // The hook passes the displayed line it matched; the recorder reads its
+    // scope from it.
+    let line = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    let Some(limit) = crate::agent::subscription_limit_text(&line) else {
+        return;
+    };
     let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
-        runtime.block_on(record_native_limit(Provider::Claude, reason))
+        runtime.block_on(record_native_limit(Provider::Claude, limit))
     });
     if let Err(error) = recorded {
         RecordingGap::default().note("usage limit", &error);
@@ -999,12 +1044,11 @@ pub fn record_limit() {
 
 async fn record_native_limit(
     provider: Provider,
-    reason: String,
+    limit: crate::agent::SpentLimit,
 ) -> Result<(), ProviderAccountError> {
     let Some(store) = route_store().await? else {
         return Ok(());
     };
-    let signal = RateLimitSignal::stated(reason);
     let settled = now_unix() - SWITCH_SETTLE_SECS;
     if store
         .provider_account_switched_since(provider, settled)
@@ -1017,7 +1061,8 @@ async fn record_native_limit(
     let Some(active) = activation::observe_active_account(&store, provider, &native).await? else {
         return Ok(());
     };
-    record_rate_limit_signal(&store, provider, &active, &signal).await?;
+    // Read before the switch, while the spent login is still the active home.
+    record_stated_limit(&store, provider, &active, limit).await?;
     // A Session a person pinned to accounts keeps to them.
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(());
@@ -4016,18 +4061,112 @@ mod account_first_tests {
             }
         };
 
-        record_native_limit(Provider::Codex, "usage limit".into())
+        record_native_limit(Provider::Codex, stated("usage limit reached"))
             .await
             .unwrap();
         assert_eq!(active().await, "second");
         assert!(cooling("first").await.is_some());
 
         // Every other open Session reports the same limit moments later.
-        record_native_limit(Provider::Codex, "usage limit".into())
+        record_native_limit(Provider::Codex, stated("usage limit reached"))
             .await
             .unwrap();
         assert_eq!(active().await, "second");
         assert_eq!(cooling("second").await, None);
+    }
+
+    fn stated(line: &str) -> crate::agent::SpentLimit {
+        crate::agent::subscription_limit_text(line).unwrap()
+    }
+
+    async fn held_back(store: &SharedStore, id: &str, model: Option<&str>, at: i64) -> bool {
+        let account = store
+            .get_provider_account("claude", &parse_account_id(id).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+        !account_route_eligible(&account, &limits, model, at)
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_stated_limit_holds_the_account_until_its_spent_window_resets() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let reset = now_unix() + 3 * 24 * 3600;
+        let resets_at = time::OffsetDateTime::from_unix_timestamp(reset)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"limits": [
+                        {"group": "session", "percent": 40},
+                        {"group": "weekly", "percent": 100, "resets_at": resets_at},
+                    ]})
+                    .to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated(SPENT_LINE),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+
+        let after_default = now_unix() + DEFAULT_COOLDOWN_SECS + 60;
+        assert!(held_back(&store, "first", None, after_default).await);
+        assert!(!held_back(&store, "first", None, reset + RESET_GRACE_SECS + 1).await);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_fable_limit_leaves_other_models_on_the_account() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+
+        // No usage endpoint answers: the stated scope alone holds.
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated("You've reached your Fable limit. Switch to another model to continue."),
+        )
+        .await
+        .unwrap();
+
+        let now = now_unix();
+        assert!(!held_back(&store, "first", Some("claude-opus-5-5"), now).await);
+        assert!(held_back(&store, "first", Some("claude-fable-5-1"), now).await);
+        assert!(
+            !held_back(
+                &store,
+                "first",
+                Some("claude-fable-5-1"),
+                now + DEFAULT_COOLDOWN_SECS + 60
+            )
+            .await
+        );
     }
 
     const SPENT_LINE: &str = "You've hit your weekly limit \u{b7} resets Wed 12:00";
@@ -4101,8 +4240,15 @@ mod account_first_tests {
         std::env::set_var("LF_BIN", &recorder);
         let (asked, token_requested) = std::sync::mpsc::channel();
         let (answer, answered) = std::sync::mpsc::channel::<()>();
+        // The spent login's usage is read first, then the parked login refreshes.
         let (_endpoints, server) = crate::subscription::observation_tests::serve(
             vec![
+                (200, serde_json::json!({"limits": []}).to_string()),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
                 (
                     200,
                     serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
@@ -4114,7 +4260,7 @@ mod account_first_tests {
                 ),
             ],
             move |request| {
-                if request == 0 {
+                if request == 2 {
                     asked.send(()).unwrap();
                     answered.recv().unwrap();
                 }

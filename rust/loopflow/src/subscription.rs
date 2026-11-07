@@ -19,6 +19,7 @@ use crate::provider_account::activation::{claude_credential_home, ClaudeRefreshL
 use crate::provider_account::identity::{credential_digest, AccountIdentity};
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
+#[cfg(not(test))]
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 #[cfg(not(test))]
 const CLAUDE_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
@@ -53,17 +54,29 @@ pub async fn poll_account(
     let home = account.home.as_deref().ok_or_else(|| {
         SubscriptionError::Unavailable("account has no managed credential home".to_string())
     })?;
-    match account.provider.as_str() {
-        "claude" => poll_claude(&claude_credential_home(home)).await,
-        "codex" => Ok(
+    let mut usage = match account.provider.as_str() {
+        "claude" => poll_claude(&claude_credential_home(home)).await?,
+        "codex" => {
             crate::provider_account::codex_access::resolve(account, None)
                 .await?
-                .usage,
-        ),
-        other => Err(SubscriptionError::Unavailable(format!(
-            "no subscription poll for provider '{other}'"
-        ))),
+                .usage
+        }
+        other => {
+            return Err(SubscriptionError::Unavailable(format!(
+                "no subscription poll for provider '{other}'"
+            )))
+        }
+    };
+    // A spent window holds its account back until it resets, whichever read
+    // saw it; a hold the stream set survives a later poll.
+    for window in &mut usage.windows {
+        if window.used_percent >= 100 {
+            window.limited_until = window
+                .resets_at
+                .map(|reset| reset + crate::provider_account::RESET_GRACE_SECS);
+        }
     }
+    Ok(usage)
 }
 
 // -- Claude ------------------------------------------------------------------
@@ -171,7 +184,7 @@ async fn request_claude_usage(
             #[cfg(test)]
             {
                 std::env::var("LF_TEST_CLAUDE_USAGE_URL")
-                    .unwrap_or_else(|_| CLAUDE_USAGE_URL.to_string())
+                    .unwrap_or_else(|_| "http://127.0.0.1:1/usage".into())
             }
             #[cfg(not(test))]
             {

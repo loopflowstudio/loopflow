@@ -51,6 +51,43 @@ The repository and Wave panes were not captured (`-p` needs a Task); their trans
 Not checked here: whether a stuck dialog showed as waiting in Desktop; the session list
 read `active`, and the rendered indicator can't be seen in this environment.
 
-Stale: `.lf/wave/product/MEMORY.md:968` still says eight warm; realign owns it.
-Fixture left behind: `~/.lf/demos/loo672-12923a08ac/durable` and `~/.lf/demos/loo672-21be4cca92/durable`,
+Launch path: both `accept_created_worktree` callers wait before spawning Claude, inside the
+served child. The 5s `ATTACH_TIMEOUT` is the viewer's handshake with the owner, so nothing
+shorter covers the 30s wait. A live holder past 30s still falls back to the dialog.
+
+Known gap: two waiters behind a dead holder can both pass `_stale`, and the later `remove_dir`
+can drop the earlier one's fresh lock. One trust entry can then be lost with no warning, and
+that conversation shows the dialog. Not seen in a run; proper-lockfile has the same window.
+
+Remaining: gate runs the affected suites; the fix publishes as a new PR with #1816 as history.
+Follow-ups: 634c19 (memory budget), d0071b (Wave links), 85c699 (first launch, no default agent).
+Fixture left behind: `durable/` under `~/.lf/demos/loo672-12923a08ac`, `-21be4cca92` and `-8f72197490`,
 plus their entries in `~/.claude.json`. Runtime removed, all fixture processes stopped.
+
+## Warm bound, November 7
+
+Accepted: sixteen recent unfinished Task conversations, panes on screen excepted; a load spends
+"up to sixteen Task turns plus one per primary". Load opened all 21, because `visibleWork` was the
+whole board, so off-page tiles counted as on screen.
+
+Now `openWork` stays the board's members and `visibleWork` is the current page plus a selection a
+turn left behind. `navigation.boardPages` holds every board's page (nil key: the unsaved view) and
+`turnPage` re-presents. `prefetch` admits a tile on or off its page unless `releasedTasks` says the
+bound or a window Close let it go, and counts tiles on screen against sixteen, so a refresh admits
+nothing past the bound.
+`releasedTasks` stays: `RepositoryWorkspaces` evicts across repositories, and an off-page tile keeps
+its workspace, so a refresh would otherwise readmit what that bound just evicted.
+
+Native, same fixture, real Claude, candidate with this diff: 18 providers at load, stable a minute
+(16 + 2 primaries; was 23). Repository page, 3 slots, 7 pages: page 7 → 21, page 6 → 23, pages 5–1
+stay 23. `open_work` stayed 22 throughout. Stopped Task kept its 3 Graph processes.
+
+Departing tiles release their viewer; their providers keep running. Tiles in a hidden strip (the
+default) count as on screen; the bound holds, at most one page early.
+
+Memory budget not reopened: eviction stopping no provider matches the design ("protected work and
+other hosts may keep the provider running"); memory cost was accepted November 4 and "no byte
+budget" was disclosed before “ok lg2m ship it”. 634c19 holds the budget. LOO-672's text still lists
+that acceptance, so finishing the Task means reading it against that Task.
+
+Checks: `swift test --filter 'WorkspaceRetentionTests|WorkNavigationTests|WorkDestinationTests|WorkCacheTests|DashboardWorkspaceTests|DesktopPaneControlTests|DesktopActions'`: 195 pass. Gate runs the affected suites.

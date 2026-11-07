@@ -247,8 +247,8 @@ final class WorkNavigation {
         if case .saved(let id) = trailBoard { return .dashboard(id) }
         return sidebarWaveID.map(SidebarScope.wave) ?? .repository
     }
-    /// Each Wave view's footer page; it outlives entering a tile and coming back.
-    var wavePages: [Board: Int] = [:]
+    /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
+    var boardPages: [Board?: Int] = [:]
     /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
     /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.

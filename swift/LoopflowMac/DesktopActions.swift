@@ -304,7 +304,7 @@ struct DesktopAction {
             guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
                 throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
             }
-            model.navigation.wavePages[wave] = page - 1
+            model.turnPage(wave, to: page - 1)
             return nil
         },
         DesktopAction("section", "Show Wave Board Section", arguments: [.init(name: "section", kind: .string, required: true)],

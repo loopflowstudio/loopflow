@@ -109,7 +109,8 @@ struct DashboardView: View {
                 DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible,
                                   focused: workspaces.selectedWork, layout: plan.slots,
                                   editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
-                                      ? DashboardSlotEditing { writeSlots(plan, $0) } : nil) { member in
+                                      ? DashboardSlotEditing { writeSlots(plan, $0) } : nil,
+                                  page: model.page(of: model.navigation.trailBoard)) { member in
                     DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
                                   workingTasks: workingTasks, focused: workspaces.selectedWork == member.work)
                 }
@@ -146,6 +147,12 @@ struct DashboardView: View {
     }
 }
 
+extension WorkModel {
+    fileprivate func page(of board: WorkNavigation.Board?) -> Binding<Int> {
+        Binding(get: { self.navigation.boardPages[board] ?? 0 }, set: { self.turnPage(board, to: $0) })
+    }
+}
+
 /// A Wave view's footer: its Tasks as tiles filling the Wave plan's strip in the shared
 /// order; the repository page's are its Working Tasks. `lf desktop move -p N` reorders
 /// them. The page lives in navigation, so it follows an entered tile and survives back.
@@ -165,9 +172,7 @@ struct WaveTiles: View {
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
                 DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
-                                  heldPage: Binding(get: { model.navigation.wavePages[view] ?? 0 },
-                                                    set: { model.navigation.wavePages[view] = $0 }),
-                                  pagerKeys: false) { member in
+                                  page: model.page(of: view), pagerKeys: false) { member in
                     DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
                                   workingTasks: false, focused: false, takesFocus: false)
                 }.padding(8).accessibilityIdentifier("wave-tiles")

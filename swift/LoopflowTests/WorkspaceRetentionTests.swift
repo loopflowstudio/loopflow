@@ -108,13 +108,53 @@ struct WorkspaceRetentionTests {
         let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
         _ = registry.workspace(for: repository, title: "repo", location: nil)
         let tile = registry.workspace(for: tiled, title: "Tiled", location: location)
-        registry.present(open: [repository, tiled])
+        registry.present(open: [repository, tiled], shown: [repository, tiled])
         #expect(tile.presented)
         registry.prefetch(tiled, title: "Tiled", location: location, completed: false)
         #expect(registry.recentTasks == [tiled])
         #expect(!tile.requiresLocationValidation)
         registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "visited"), title: "Visited", location: location)
         #expect(tile.presented)
+    }
+
+    @Test("A board larger than its page warms sixteen Tasks and the page; a turn opens the next page")
+    func offPageTilesWaitForTheirPage() {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let registry = application.registry(for: "repo")
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        let board = (0..<limit + 5).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        let slots = 4
+        for key in board { _ = registry.workspace(for: key, title: key.id, location: location) }
+        registry.present(open: board, shown: Array(board.prefix(slots)))
+        // Load admits in recency order, which need not match slot order.
+        for key in board.reversed() { registry.prefetch(key, title: key.id, location: location, completed: false) }
+        #expect(registry.openWork == board)
+        #expect(registry.warmWork.count == limit)
+        #expect(Set(board.prefix(slots)).isSubset(of: registry.warmWork))
+        let warm = registry.warmWork
+        for key in board.reversed() { registry.prefetch(key, title: key.id, location: location, completed: false) }
+        #expect(registry.warmWork == warm, "a refresh admits nothing past the bound")
+        let evicted = warm.last!
+        registry.evict(evicted)
+        registry.prefetch(evicted, title: evicted.id, location: location, completed: false)
+        #expect(!registry.warmWork.contains(evicted), "a refresh does not undo the cross-repository bound")
+
+        let cold = board.filter { !warm.contains($0) }
+        let page = Array(cold.prefix(slots))
+        registry.present(open: board, shown: page)
+        #expect(registry.openWork == board)
+        #expect(Set(page).isSubset(of: registry.warmWork))
+        #expect(page.allSatisfy { registry.retained($0)?.presented == true })
+        #expect(registry.warmWork.count <= limit + 1, "the selection a turn leaves behind")
+
+        let departed = page[0]
+        let next = board.first { !page.contains($0) && !registry.warmWork.contains($0) }!
+        registry.present(open: board, shown: [next])
+        #expect(registry.retained(departed)?.presented == false)
+        registry.focus(departed)
+        #expect(registry.warmWork.first == departed)
+        #expect(registry.retained(departed)?.presented == true)
     }
 
     @Test("Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit")

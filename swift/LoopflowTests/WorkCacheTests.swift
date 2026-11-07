@@ -344,7 +344,36 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
-    @Test("Every working tile on the board opens with no click, two preparations at a time")
+    @Test("A board past the bound opens its page; a turn opens the arriving tile and no other")
+    func pageTurnOpensArrivingTiles() async throws {
+        let source = try Source()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        await spin(for: .seconds(5)) { await source.preparedTasks.count < limit }
+        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+
+        func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
+        model.applySelectionPlans([fixtureViewPlan(
+            owner: .init(repository: repository, kind: .repository, id: repository),
+            members: Prefetch.working.map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
+        model.selectWorkingTasksDashboard()
+        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        let atLoad = await source.preparedTasks
+        #expect(atLoad.count <= limit + 1) // Sixteen and a one-slot page, not the whole board.
+        #expect(registry.openWork.count == Prefetch.working.count)
+
+        let tiles = model.workingTaskMembers.map(\.work.id)
+        let page = try #require(tiles.firstIndex { !atLoad.contains($0) })
+        model.turnPage(.workingTasks, to: page)
+        await spin(for: .seconds(5)) { await !source.preparedTasks.contains(tiles[page]) }
+        await spin(for: .seconds(5)) { registry.preparationCount > 0 }
+        #expect(await source.preparedTasks.count == atLoad.count + 1)
+        registry.prepareForQuit()
+    }
+
+    @Test("Every working tile on the page opens with no click, two preparations at a time")
     func visibleTilesOpenWithoutSavedVisits() async throws {
         let source = try Source()
         let repository = "repo_" + UUID().uuidString
@@ -358,9 +387,11 @@ struct WorkCacheTests {
         await source.holdPreparations()
         let working = Prefetch.working, unstarted = Prefetch.unstarted
         func key(_ id: String) -> WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: id) }
+        let tiles = working + [unstarted]
         model.applySelectionPlans([fixtureViewPlan(
             owner: .init(repository: repository, kind: .repository, id: repository),
-            members: (working + [unstarted]).map { fixtureViewContent(work: key($0), title: $0) })], reason: "")
+            members: tiles.map { fixtureViewContent(work: key($0), title: $0) },
+            slots: DashboardSlotLayout(root: .split(.vertical, tiles.map { _ in 1 }, tiles.indices.map { .slot($0) })))], reason: "")
         model.selectWorkingTasksDashboard()
         await spin(for: .seconds(5)) { await source.preparedTasks.count < limit + 2 }
         #expect(registry.preparationCount == 2)

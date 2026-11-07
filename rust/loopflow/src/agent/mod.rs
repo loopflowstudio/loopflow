@@ -1332,7 +1332,7 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
     if _find_provider_error(result, credential_invalidated_failure).is_some() {
         return Some(AgentFailure::AccountCredentialInvalidated);
     }
-    if _find_provider_error(result, _subscription_limit_text).is_some() {
+    if _find_provider_error(result, subscription_limit_text).is_some() {
         return Some(AgentFailure::AccountSubscriptionLimit);
     }
     _find_provider_error(result, classify_retryable_agent_failure)
@@ -1396,9 +1396,15 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _subscription_limit_text(line: &str) -> Option<String> {
+/// A provider's line saying the account's quota is spent, from a step's stderr
+/// or the line a native Claude displayed. Claude's openers are its own list of
+/// usage-limit messages; its capacity, per-model and seat-type lines name no
+/// spent window.
+pub(crate) fn subscription_limit_text(line: &str) -> Option<String> {
     let text = line.to_ascii_lowercase();
-    (text.contains("you've hit your usage limit")
+    (text.contains("you've hit your")
+        || text.contains("you've reached your")
+        || text.contains("you're out of usage credits")
         || text.contains("you have hit your usage limit")
         || text.contains("usage limit reached")
         || text.contains("usage limit has been reached")
@@ -1664,7 +1670,7 @@ fn _run_harness_once(
             // A limit only the provider's words reported has no stream
             // observation: cool the account so the next choice can differ.
             if result.exit_code != 0 && result.failure.is_none() {
-                if let Some(reason) = _find_provider_error(result, _subscription_limit_text) {
+                if let Some(reason) = _find_provider_error(result, subscription_limit_text) {
                     route
                         .record_limit_blocking(reason)
                         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
@@ -2817,6 +2823,31 @@ trust_level = "trusted"
             result.failure,
             Some(AgentFailure::AccountSubscriptionLimit)
         ));
+    }
+
+    #[test]
+    fn claude_spent_lines_read_as_subscription_limits() {
+        for line in [
+            "You've hit your session limit \u{b7} resets 3pm",
+            "You've hit your weekly limit \u{b7} resets Wed 12:00",
+            "You've reached your Fable limit. Switch to another model to continue.",
+            "You're out of usage credits. /model to switch models.",
+        ] {
+            assert!(subscription_limit_text(line).is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn claude_lines_naming_no_spent_window_are_not_subscription_limits() {
+        for line in [
+            "API Error: Request rejected (429) \u{b7} this may be a temporary capacity issue.",
+            "API Error: Usage credits required for 1M context \u{b7} run /model to switch to standard context",
+            "Fable 5 is currently unavailable. Learn more: https://www.anthropic.com/news/",
+            "Fable 5 requires usage credits. Switch to another model to continue.",
+            "Your seat type doesn't include usage credits",
+        ] {
+            assert_eq!(subscription_limit_text(line), None, "{line}");
+        }
     }
 
     #[test]

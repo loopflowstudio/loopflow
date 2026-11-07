@@ -154,7 +154,7 @@ Merge 0f71d266c8 (#1831) undid main's `native_codex.py` and `session_launch_cont
 Still true from the first pass:
 - A step restarted after dying mid-wait runs in a new Run: checkout and completed steps kept, the step's own conversation not (LOO-435 owns resuming it).
 - `limit_recovery::waiting_on_limit` names the step by label, so a skill repeated in a Graph restarts at its first occurrence.
-- Native Claude limits cool for the 15-minute default: `StopFailure` carries no reset time, and it was confirmed from Claude 2.1.318's schema, not a live limit. Codex terminal limits are seen only through the relay's stream.
+- Native Claude limits cool for the 15-minute default: `StopFailure` has no reset field, only the displayed line (item 12), and this comes from reading Claude's source, not a live limit. Codex terminal limits are seen only through the relay's stream.
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
 - Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, `pause` switch-away), a hold beating an order, and `lf resume --account` restarting a running Codex or switching a running Claude's login have not been shown on the configured path; no paid quota may be spent.
 - Open at demo: the mock as build target (answer 5).
@@ -163,13 +163,13 @@ Still true from the first pass:
 ## Concept reviews (November 7, 2026, headless), all built
 1. **`lf account use` beats scoped orders** (questions 30). `held_login` runs before the order in `select_route`; `inspect_provider_route` puts the held login first, so `next`, pause's replacement and the rental pick agree. Naming the held login counts as the hold. Counterexample, accepted as reversible: a repository order keeping a client's work on its login is overridden while a hold stands.
 2. **`lf --account claude=b@ resume <running Claude>` switches, then attaches** (questions 28).
-3. **Old spelling.** `lf help account claude use` and `lf account codex use --help` fail as unknown. `lf ops account` is the only command with a positional beside subcommands.
-4. **`--blocked` and `--on` read the login the Session uses.** A running Codex reads its recorded account, everything else the shared home.
-5. **`--on` takes a login as every command does,** through `account::resolve_on`; unknown or ambiguous is an error.
+3. **Old spelling fails as unknown;** `lf ops account` is the only command with a positional beside subcommands.
+4. **`--blocked` and `--on` read the login the Session uses:** a running Codex its recorded account, everything else the shared home.
+5. **`--on` takes a login as every command does,** through `account::resolve_on`.
 6. **A restarted wait keeps its `-a`.** `agent_limit_recoveries.agent` records the step's override; `ship::restart_lf_in` passes `--agent` and clears the reader's `LF_AGENT_OVERRIDE`/`LF_SETTINGS`. A ship process that dies outside a wait restarts with no `-a`: no wait row holds it.
 7. **An owned rental.** `lf machine connect <rental> claude <email> --owned` takes `fresh_machine_login`, judged by `inspect --full`; `install_managed` replaces an access token with the full login. Renewal leaves a rental holding a full login alone, and asks the rental before skipping an account the laptop holds no rental login for.
 
-Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gives one rental its own Claude login, which renewal leaves alone.
+Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gives one rental its own Claude login, which renewal leaves alone; `StopFailure` recording runs in its own OS session.
 
 ## Concept review (November 7, 2026, headless, after items 6–7), built
 8. **A dead parked login is out of rotation before a switch.** An unchanged digest says nothing about a revoked grant, and a window past its reset scores a full week, so such a login ranked first and took every open Claude with it. `identity::check_routable_identity`, called by `select_route`, `held_login` and `ordered_selected_candidates`, refreshes a Connected parked login whose token is due: `NeedsLogin` sets `Missing`, `Unavailable` skips it this launch and leaves it Connected, success records the identity on the new bytes, so a parked login pays once per ~8h. `check_current_identity` stays network-only-on-missing-evidence for readiness.
@@ -179,10 +179,16 @@ Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gi
 ## Concept review (November 7, 2026, headless, after item 9), built
 10. **The limit hook cannot be killed mid-refresh.** `lf __context-block --moment limit` reads stdin, starts `--moment record-limit` through `os_process::detached_context_block` (shared with the Stop hook's move) and exits 0; the recorder runs `record_native_limit` unchanged and notes a `RecordingGap` on failure.
     Accepted cost: a message sent before the recorder finishes can hit the old login and fail once; its own `StopFailure` lands inside `SWITCH_SETTLE_SECS` or finds the login already moved.
+    Still lost: a limit when the active login matches no stored copy and Claude's refresh lock stays held past its 65s wait. `observe_active_account` fails before the signal is written; the gap names it, and the next limit records.
 11. **The deleted spellings left the tests.** `global_commands` uses `account next`; the isolated e2e cases, their `results` keys and the `--shared` launches are gone (`--shared-provider-home` is the fixture's own flag and stays). `tests/README.md` and `docs/subscriptions.md` say one mode.
 
-A terminal Claude limit stays unscoped: `StopFailure` carries no model, so a Fable limit cools the whole account for 15 minutes and moves the login, and that is safe.
+A terminal Claude limit stays unscoped: `StopFailure` has no model field, so a Fable limit cools the whole account for 15 minutes and moves the login, and that is safe.
 
-Found running these: `context_block`'s `tool_hook_starts_lf_only_after_a_newer_steer` and `moves_bulk`'s `a_failed_apply_leaves_the_move_for_the_next_stop` changed `LF_HOME` without the env lock. Under libtest a neighbour fell through to `/Users/jack/.lf/loopflow.db` despite an isolated `HOME`; the ordinary open refused it before any write. Both now take the lock: 3 of 3 runs failed before, 3 of 3 pass after.
+Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --shared-provider-home`, `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`.
 
-Checks (isolated, empty cwd): lib `provider_account:: context_block:: human_session::moves os_process::` 109 pass; `global_commands` 45 pass; `binary(lf)` 24 pass; fmt, clippy clean; `ruff --select F` on the e2e scripts clean. `claude_shared_home.py` and `codex_connect.py --shared-provider-home` were not run (the Claude one writes a Keychain item): gate/CI. Gate also reruns `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`.
+## Concept review (November 7, 2026, headless, after #1842), built
+12. **Only spent quota moves the login, in terminals as in Graph steps.** `StopFailure`'s `rate_limit` covers every 429, and `apiError` never reaches the hook: its input is `error`, `error_details` (unset on a spent window) and `last_assistant_message`, the displayed line. Read in the installed 2.1.319 source, not seen live. Before this, a capacity blip past `SWITCH_SETTLE_SECS` cooled each login in turn and left Graph steps Waiting on full accounts.
+    `start_limit_recording` passes `last_assistant_message`; `record_native_limit` cools and moves only when `agent::subscription_limit_text` reads it as spent, the matcher Graph steps use. Anything else, or no line, records nothing, since the person still sees Claude's own message. The matcher takes "You've hit your", "You've reached your" and "You're out of usage credits" from Claude's `xAo` list, and leaves out `Fable 5 requires usage credits` and the seat-type lines.
+    The line also names the window and reset (`You've hit your weekly limit · resets Wed 12:00`). Not parsed: a display string in a person's time format is a poor source for a cooldown, and the 15-minute default is safe.
+
+Check, isolated (empty cwd, isolated HOME, CARGO_HOME kept, LF_* unset, stdin /dev/null): `provider_account::` 63 pass, `agent::` 44 pass, `context_block::` 10 pass. Live spent-limit behaviour stays with demo.

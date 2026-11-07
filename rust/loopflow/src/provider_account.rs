@@ -964,35 +964,42 @@ pub fn observe_native_limit() {
 }
 
 fn start_limit_recording(input: &str) -> anyhow::Result<()> {
-    let details: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
-    let reason = details["error_details"]
-        .as_str()
-        .or(details["error"].as_str())
-        .unwrap_or("usage limit");
     crate::os_process::detached_context_block("record-limit")?
-        .env(LIMIT_REASON_ENV, reason)
+        .env(LIMIT_REASON_ENV, displayed_limit_line(input))
         .spawn()?;
     Ok(())
 }
 
-/// The recorder a limit hook started: the account cools and a shared login
-/// moves to the eligible account that ranks first, which every open Claude
-/// follows. Their next message runs there, with no input of ours. Other
-/// Sessions reporting the same limit find the login already moved.
+/// The line Claude showed. Every 429 reaches the hook as `rate_limit`, and the
+/// cause Claude knows stays out of the hook's input, so this line alone tells
+/// spent quota from a capacity blip.
+fn displayed_limit_line(input: &str) -> String {
+    let details: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    details["last_assistant_message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The recorder a limit hook started: on spent quota the account cools and a
+/// shared login moves to the eligible account that ranks first, which every
+/// open Claude follows. Their next message runs there, with no input of ours.
+/// Other Sessions reporting the same limit find the login already moved.
 pub fn record_limit() {
-    let reason = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    let line = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
     let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
-        runtime.block_on(record_native_limit(Provider::Claude, reason))
+        runtime.block_on(record_native_limit(Provider::Claude, line))
     });
     if let Err(error) = recorded {
         RecordingGap::default().note("usage limit", &error);
     }
 }
 
-async fn record_native_limit(
-    provider: Provider,
-    reason: String,
-) -> Result<(), ProviderAccountError> {
+async fn record_native_limit(provider: Provider, line: String) -> Result<(), ProviderAccountError> {
+    // A line lf cannot read moves nothing: the person still sees Claude's own.
+    let Some(reason) = crate::agent::subscription_limit_text(&line) else {
+        return Ok(());
+    };
     let Some(store) = route_store().await? else {
         return Ok(());
     };
@@ -4008,18 +4015,99 @@ mod account_first_tests {
             }
         };
 
-        record_native_limit(Provider::Codex, "usage limit".into())
+        record_native_limit(Provider::Codex, "You've hit your usage limit".into())
             .await
             .unwrap();
         assert_eq!(active().await, "second");
         assert!(cooling("first").await.is_some());
 
         // Every other open Session reports the same limit moments later.
-        record_native_limit(Provider::Codex, "usage limit".into())
+        record_native_limit(Provider::Codex, "You've hit your usage limit".into())
             .await
             .unwrap();
         assert_eq!(active().await, "second");
         assert_eq!(cooling("second").await, None);
+    }
+
+    const SPENT_LINE: &str = "You've hit your weekly limit \u{b7} resets Wed 12:00";
+
+    /// `StopFailure`'s input as Claude 2.1.319 writes it: every 429 is `rate_limit`.
+    fn stop_failure(line: &str, details: Option<&str>) -> String {
+        let mut input = serde_json::json!({
+            "hook_event_name": "StopFailure",
+            "error": "rate_limit",
+            "last_assistant_message": line,
+        });
+        if let Some(details) = details {
+            input["error_details"] = details.into();
+        }
+        input.to_string()
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn only_spent_quota_cools_and_moves_a_native_login() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let first = parse_account_id("first").unwrap();
+        let cooldown = || {
+            let store = Arc::clone(&store);
+            let first = first.clone();
+            async move {
+                store
+                    .get_provider_account("claude", &first)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .cooldown_until
+            }
+        };
+        let active = || {
+            let store = Arc::clone(&store);
+            let native = native.clone();
+            async move {
+                activation::observe_active_account(&store, Provider::Claude, &native)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .as_str()
+                    .to_string()
+            }
+        };
+
+        for input in [
+            stop_failure(
+                "API Error: Request rejected (429) \u{b7} this may be a temporary capacity issue.",
+                None,
+            ),
+            stop_failure(
+                "API Error: Usage credits required for 1M context \u{b7} run /model to switch to standard context",
+                Some("429 long context requires usage credits"),
+            ),
+            stop_failure(
+                "Fable 5 is currently unavailable. Learn more: https://www.anthropic.com/news/",
+                None,
+            ),
+            serde_json::json!({"hook_event_name":"StopFailure","error":"rate_limit"}).to_string(),
+        ] {
+            record_native_limit(Provider::Claude, displayed_limit_line(&input))
+                .await
+                .unwrap();
+            assert_eq!(active().await, "first", "{input}");
+            assert_eq!(cooldown().await, None, "{input}");
+        }
+
+        record_native_limit(
+            Provider::Claude,
+            displayed_limit_line(&stop_failure(SPENT_LINE, None)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(active().await, "second");
+        assert!(cooldown().await.is_some());
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -4078,7 +4166,7 @@ mod account_first_tests {
         .await;
 
         // Run inline, this would sit on the token request the endpoint holds.
-        start_limit_recording(r#"{"error_details":"usage limit"}"#).unwrap();
+        start_limit_recording(&stop_failure(SPENT_LINE, None)).unwrap();
         tokio::task::spawn_blocking(move || {
             token_requested
                 .recv_timeout(std::time::Duration::from_secs(30))

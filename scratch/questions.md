@@ -16,11 +16,10 @@ readiness protocol are superseded.
   not accepted. Retain all demo roots and owners; no input settlement or teardown
   authorization has been received.
 
-Jack Heart approved shipping LOO-498 after removal of `Task::Tool`. LOO-717
-remains the stack parent; its current Desktop ownership and shared stream
+LOO-717 merged through PR #1811; its Desktop ownership and shared stream
 transport are incorporated. Parent review history remains at
-`5f4ee78ee9:scratch/questions.md` and in [its design](loo-717-shell-lifetimes.md).
+`5f4ee78ee9:scratch/questions.md` and `5f4ee78ee9:scratch/loo-717-shell-lifetimes.md`.
 Keep this Task’s walkthroughs; parent scratch filenames are independent reviews.
 
-- `lf open --task` on a Task with no checkout shows only Task & workflow, and `lf task checkout` must come first for a conversation. Jack Heart rejected a Task & workflow-only view on November 6 (“some weird thing that isnt just a task session”). Open choice: (a) keep it, opening prepares nothing; (b) opening places the Task, then starts the conversation. Left at (a), unchanged.
-- Jack Heart's “otherwise lg2m ship it” predates the LOO-717 merge; its coverage of this tree is unconfirmed.
+- `lf open --task` on a Task with no checkout: Jack Heart chose “start the task” (November 7) over keeping Task & workflow. Opening now places an open local Task, which claims it like any checkout, then launches the usual layout and `lf resume`. No Graph starts. Repository and Wave openings still place nothing; done and abandoned Tasks keep Task & workflow.
+- Jack Heart's “otherwise lg2m ship it” predates the LOO-717 merge (04:51Z, November 7); its coverage of this tree is unconfirmed. `lf task status` shows Auto-Ship approved at 06:08:38Z, after that merge, by Session “LOO-498 Rex workspace” for Jack Heart. What set it is not recorded where this pass looked, and launches can set it, so it is not read as a decision. Open choice: (a) the approval stands; (b) hold for review, with `lf ship --stop`. Left unchanged.

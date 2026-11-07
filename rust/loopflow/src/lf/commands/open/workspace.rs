@@ -19,7 +19,7 @@ use super::{
     rex::{self, Rex},
     OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved,
 };
-use crate::durable::{RepositoryId, TaskId};
+use crate::durable::{MachineId, RepositoryId, TaskId};
 use crate::id::WaveId;
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
@@ -310,6 +310,32 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
     Ok(())
 }
 
+/// Opening a Task starts it, so one without a checkout is placed before its
+/// tools launch. Broad openings never create worktrees, a finished or abandoned
+/// Task's checkout is not rebuilt, and a remote Task is placed by its own Machine.
+fn place_task(
+    store: &SqliteStore,
+    target: &Resolved,
+    plan: &ViewPlan,
+    local: &MachineId,
+) -> Result<bool> {
+    let Some(task) = &target.task else {
+        return Ok(false);
+    };
+    let unplaced = plan.contents.iter().any(|content| {
+        content.location.is_none() && !content.states.contains(&SelectionState::Done)
+    });
+    if !unplaced || store.task_execution_route(&task.id)?.machine_id != *local {
+        return Ok(false);
+    }
+    crate::ops::task::task_checkout(
+        &target.repository_path,
+        task.id.as_str(),
+        Default::default(),
+    )?;
+    Ok(true)
+}
+
 fn open_machines(
     store: &SqliteStore,
     host: OpenHost,
@@ -320,9 +346,13 @@ fn open_machines(
         .repository_id
         .as_deref()
         .context("Repository has no Work identity")?;
+    let repository = RepositoryId::parse(repository)?;
     let selected = scope(store, target)?;
-    let plan = workspace_plan(store, &RepositoryId::parse(repository)?, selected.clone())?;
     let local = store.local_machine()?.id;
+    let mut plan = workspace_plan(store, &repository, selected.clone())?;
+    if place_task(store, target, &plan, &local)? {
+        plan = workspace_plan(store, &repository, selected.clone())?;
+    }
     let mut local_tasks = Vec::new();
     let mut peers = BTreeMap::<String, Vec<Candidate>>::new();
     let mut receipts = Vec::new();
@@ -365,7 +395,7 @@ fn open_machines(
                 store,
                 host,
                 peer.as_str(),
-                repository,
+                repository.as_str(),
                 &selected,
                 &remote_args,
             );

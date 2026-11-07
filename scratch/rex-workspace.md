@@ -44,12 +44,10 @@ ownership remain in scratch/PR evidence instead of the guide.
 Jack Heart rejected the November 6 demo showing only Task & workflow. The immediate demo must be one ordinary Task conversation in a Rex tab. A status tool is not a substitute for working agent input; do not present partial layout creation as that experience. This does not remove the previously requested optional Task/workflow tool.
 
 Jack then confirmed “okworked” after the single ordinary Claude conversation was
-opened. Use that experience as the target; the branch's fresh-start failure remains
-unresolved. This feedback approves neither shipping nor demo cleanup.
+opened. Use that experience as the target. This feedback approves neither shipping nor
+demo cleanup.
 
-Jack Heart requested the PR against LOO-717. LOO-498 now selects LOO-717 / PR #1811 as its stack parent. Keep shell lifetime and retirement in that parent; review native opening and cwd additions in #1814 above it. The failed branch fresh-start demo remains unresolved.
-
-Stack validation against LOO-717 a1067c99: isolated Rex resume/cwd tests 2 passed; last-viewer/disconnect retention test 1 passed; formatting and all-targets clippy passed. No live demo was relaunched during stacking.
+LOO-717 / PR #1811, this work's stack parent at Jack Heart's request, merged on November 7 at 04:51Z. PR #1814 now targets main and carries native opening and cwd additions only; shell lifetime and retirement arrived with #1811.
 
 Jack Heart requested sibling host adapters for Rex, cmux, Herdr and tmux, and one
 Task diff command. Changes panes invoke `lf task diff`; that command owns Git
@@ -77,15 +75,23 @@ Jack Heart selected internal launch code: remove `TaskCommand::Tool` and the
 `lf task tool` command entirely, with no `desktop tool` replacement. Native
 workspace opening builds shell/editor argv directly on the selected Machine.
 Preserve configured editor/browser selection, literal file paths and checkout cwd.
-Jack then approved shipping after this removal (“otherwise lg2m ship it”).
-This supersedes the earlier shipping hold. Do not reopen the active conversation
-or manipulate its native panes; retained demo resources still have no cleanup release.
+Jack then wrote “otherwise lg2m ship it” after this removal, before the LOO-717
+merge; see [questions.md](questions.md). Do not reopen the active conversation or
+manipulate its native panes; retained demo resources have no cleanup release.
 
 Direct launch verification: opening unit tests 17 passed; opening integration tests
 24 passed, 2 opt-in native-host tests ignored; formatting and all-targets Clippy
 passed. The direct-shell regression executes the generated shell command and
 opens back into its Rex session with the private Machine context preserved.
 
-Fresh-conversation startup is proven on a private Machine with one pinned runtime, including real Claude; the four native tests pass on 502a14596. Results and limits: [workspace-demo.md](workspace-demo.md). This approves no shipping.
+## Status at 4b4c78b24
 
-Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped; details in [workspace-demo.md](workspace-demo.md). Task-branch syncs against a stack parent that lacks a main commit can repeat this: check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.
+Exists: fresh-conversation startup through bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime. Real Claude and five native tests passed on 4b4c78b24. Results and limits: [workspace-demo.md](workspace-demo.md).
+
+Remains:
+- Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task.
+- A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
+- Task with no checkout: explicit `lf open --task` places it, then opens the usual layout; see [questions.md](questions.md).
+- Shipping coverage of this tree: open in [questions.md](questions.md).
+
+Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

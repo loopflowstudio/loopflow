@@ -68,13 +68,6 @@ fresh ownership evidence and input settlement before use. Never delete durable
 history or stop processes by name. User's current instruction is to leave the
 active Task and its native panes alone.
 
-## Remaining proof
-
-Use isolated host/config/Machine fixtures to establish native tab creation,
-ordinary resume, provider/draft continuity and cwd. Keep generic resume screen
-logic unchanged. Update [demo.html](demo.html) last with the resulting evidence;
-no new live demo, installation, Graph launch or merge is selected here.
-
 ## Simplification proof
 
 `441ed217fd` removed the observer path (916 net Rust lines); `8c77f061a4`
@@ -209,42 +202,15 @@ input has not been released for cleanup; leave the conversation and roots intact
 Branch fresh-conversation startup was verified later; see the November 6 native proof below.
 
 
-## November 6 headless demo decision: advance
+## November 6 headless passes and gate
 
-Headless decision pass standing in for Jack Heart after the `Task::Tool` removal
-(882dc43cf). No live Rex demo was run: the active Task's panes stay untouched and
-no separate demo was requested. Checks on eaf36a5d3:
-- `cargo test -p loopflow --lib lf::commands::open::`: 17 passed.
-- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 23 passed, 2 ignored; `cmux_task_joins_the_group_its_caller_is_in_now` failed in the suite and passed alone (`--exact`), the same two-second host deadline recorded earlier.
-- No `task_tool`/`Task::Tool` references remain in `rust/` or `docs/`.
-Decision: advance, on Jack's “otherwise lg2m ship it” after the removal. Branch
-fresh-conversation startup is still unproven in a live Rex demo; retained demo
-resources still have no cleanup release.
+Headless demo decisions on eaf36a5d3, 6b3818bc5 and 3b5061b18 ran no live demo and advanced on “otherwise lg2m ship it”. Their “not proven live” notes are superseded below.
 
-## November 6 gate (eaf36a5d3 + architecture map fix)
-
-- `scripts/test.py --reuse-passing --rust-filter '<open, work_open, transport, ops::task, desktop, config, selection, task_diff, served_reads, golden_prompt, graph, binary(lf) …>'`: website 72 passed; rustfmt passed; Rust 639/640 (only `served_reads` failed); architecture failed on unmapped `process:rex`, now mapped under User in `docs/architecture-reference.md` (`check_architecture.py` passes).
-- `served_reads::what_an_app_serves_in_process_matches_its_lf_command`: fails identically on origin/main 12d897b6b (macOS `/var` vs `/private/var` in `config show` locators). Predates this branch; Linux CI cannot see it.
-- `scripts/test_desktop.sh`: the process dies in `ThemeTests.defaultConfigurationLoadsAfterInitialAppearance` (libghostty Breakpad, `~/.cache/ghostty/sentry`). Same death on origin/main; passes alone and alongside every Ghostty-touching suite. Predates this branch; CI owns the Swift result.
-- `cargo clippy --all-targets -- -D warnings`: passed. `check_swift_multiplatform_boundaries.py`: passed.
-- `cmux_task_joins_the_group_its_caller_is_in_now` passed in this run.
-
-## November 6 headless demo decision pass (6b3818bc5): advance
-
-Since the last advance, the only change is 6b3818bc5: a one-line architecture map entry plus gate notes. `check_architecture.py` passes. There is no Rust change, so the earlier opening tests (17 unit, 23 integration) and the gate's Rust run still describe the code. No live Rex demo was run: the active Task's panes stay untouched, and the retained demo resources still have no cleanup release. Still open: branch fresh-conversation startup has not been proven live. Shipping rests on Jack's “otherwise lg2m ship it”.
-
-## November 6 gate (6b3818bc5)
-
-- Only `docs/architecture-reference.md` and scratch changed since the eaf36a5d3 gate; Rust and Swift results above stand (CI owns `served_reads` and the Desktop Breakpad death, both identical on origin/main).
-- `scripts/check_architecture.py`: passed. `website/dev.py test` with the branch `lf` on PATH: 72 passed.
-
-## November 6 headless demo decision pass (3b5061b18): advance
-
-Since 6b3818bc5, only scratch gate notes changed (3b5061b18); no code changed, so the earlier opening tests and gate results still apply. No live Rex demo was run. The active Task's panes stay untouched, and the retained demo resources still have no cleanup release. Still open: branch fresh-conversation startup has not been proven live. Shipping rests on Jack's “otherwise lg2m ship it”.
-
-## November 6 gate (fb810b8e4)
-
-- Since the eaf36a5d3 gate, non-scratch changes are only the one-line `docs/architecture-reference.md` map entry, already checked by `check_architecture.py` and `website/dev.py test` (72 passed). No suite inputs changed, so no rerun; earlier results stand, with CI owning `served_reads` and the Desktop Breakpad death (both identical on origin/main 12d897b6b). Added Rust/Swift/Python lines carry no TODO or debug output.
+Gate on eaf36a5d3 and the architecture map fix, final at fb810b8e4:
+- `scripts/test.py --reuse-passing` with the Task filter: website 72 passed; rustfmt passed; Rust 639/640. `check_architecture.py` failed on unmapped `process:rex`, then passed once it was mapped.
+- `served_reads::what_an_app_serves_in_process_matches_its_lf_command` fails identically on origin/main 12d897b6b (macOS `/var` vs `/private/var`). Linux CI cannot see it.
+- `scripts/test_desktop.sh`: the process dies in `ThemeTests.defaultConfigurationLoadsAfterInitialAppearance` (libghostty Breakpad), the same on origin/main; it passes alone. CI owns the Swift result.
+- `cmux_task_joins_the_group_its_caller_is_in_now` failed once in a suite run on the two-second host deadline and passed alone and in the gate.
 
 ## November 6 native proof (tree 502a14596 plus the new test)
 
@@ -291,3 +257,31 @@ Checks on the final tree, `LF_*` unset:
 - `--lib builtins:: prompt:: graph:: lf::commands::open::`: 225 passed. `golden_prompt`: 1 passed. `documented_commands`: 4 passed. `world_recipes` selection: 7 passed. `work_open_tests`: 24 passed, 2 ignored.
 - Native, one at a time, after the `isolated_rex` helper: `rex_workspace_resumes`, `rex_open_starts_a_fresh`, `rex_manual_resume_elsewhere`, `rex_native_fresh`, `herdr_native`: 1 passed each. A final binding rename touched only `rex_manual_resume_elsewhere`, which was rerun after it.
 - `session_lifecycle_tests`: 35 passed, 6 failed with “No agent selected”; committed HEAD fails the same six, measured in a throwaway worktree. The fixture installs a stand-in `opencode` and assumes no ambient harness. With none on PATH, 41 passed. Not fixed here.
+
+## November 6 realign: native tests on 4b4c78b24
+
+Commit 4b4c78b24 is the compress edits plus main 81a79796f; `623855b89..HEAD` adds only an SSH test, `scripts/testing.md` and Wave memory. Isolated servers, `LF_*` unset, one at a time, herdr 0.9.3: `rex_native_fresh`, `rex_workspace_resumes`, `rex_open_starts_a_fresh`, `rex_manual_resume_elsewhere`, `herdr_native` each 1 passed. Real Claude was rerun on this commit; see the next section.
+
+CI on 4b4c78b24: the run succeeded with rust-test, rust-lint, macos and e2e-smoke skipped. `.github/CI.md` calls this deferred, not passing: a PR head with scratch defers its tests to the merge queue. No CI test result exists for this tree.
+
+## November 6 headless demo: real Claude on 4b4c78b24
+
+Isolated Rex server, private LF_HOME, one pinned copy of the branch binary (`lf 0.15.1+4b4c78b24`), real Claude with ambient credentials. The tree outside `scratch/` is unchanged from 4b4c78b24. LOO-498's conversation, its panes and the retained roots were not touched. No person watched this run, so nothing here is Jack Heart's acceptance.
+
+Task a6d291, placed with `lf task checkout`, no conversation. The launcher was a shell in the Rex session:
+- `"$LF_BIN" open --task a6d291 --json`, with no host or server flag and `REX_SERVER` empty: exit 0. Rex was found from inside the shell, and the tab landed in the caller's session with Conversation, Task & workflow and shell. Earlier real-Claude runs passed `--host rex --server`.
+- Pane printed “Nothing to resume here; starting a new conversation.”, then the trust dialog. After Yes, Claude ran its first turn.
+- `lsof` on provider PID 85253: cwd is the Task worktree. OSC 7 on Conversation and Task & workflow names the same path, before and after reopening.
+- Typed “Reply with exactly the word quince-4 and nothing else, and run no tools.”; Claude answered `quince-4`.
+- Same command again: exit 0, new tab, one Session, same PID 85253, `quince-4` on screen with no replay. The Conversation pane moved to the new tab; the first tab kept its Task & workflow and shell. Each opening adds those two, as `docs/workspaces.md` says.
+- Typed into the reopened pane; Claude answered `pear-9`.
+- `/exit`: PID gone, Session closed, `lf ps` empty.
+
+Not proven:
+- `rex split -b <Conversation>` started in `/Users/jack`, and so did a split from a shell that had run `cd /tmp`. This is the omitted-cwd path: `rex split` does not inherit, and it is not the app's `pane.split`. It says nothing about the Split shortcut either way. The OSC 7 reports Split inherits from are correct.
+- Split shortcut and resize need the Rex app in focus, by hand, in a separate Task.
+- A branch build on the real Machine still hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
+
+Evidence: `/Users/jack/.local/share/loopflow/demos/loo498-20261106-head`. Rex server 53061 stopped by its recorded group and `/tmp/loo498-head-tYqw` removed. Provider transcripts and the `~/.claude.json` project entry for that path remain.
+
+Stand-in decision: advance to deliver. The accepted target, an ordinary Task conversation from `lf open`, held on this tree, and what remains needs a person or an install, which another implement pass cannot supply. The two choices in [questions.md](questions.md) stay open.

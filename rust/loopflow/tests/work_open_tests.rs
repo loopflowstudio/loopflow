@@ -387,6 +387,44 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
 }
 
 #[test]
+fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let created = json(&lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["task", "create", "--title", "Fresh work", "--json"],
+    ));
+    let id = created["id"].as_str().unwrap();
+    let log = host(bin.path(), "cmux", "OK workspace:7", 0);
+    let report = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", "--task", id, "--host", "cmux", "--json"],
+    ));
+    assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+    let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT worktree FROM tasks WHERE worktree IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(Path::new(&worktree).is_dir(), "{worktree}");
+    let calls = std::fs::read_to_string(log).unwrap();
+    assert!(calls.contains("resume"), "{calls}");
+    assert!(
+        calls.contains(&worktree),
+        "tools start in the checkout: {calls}"
+    );
+}
+
+#[test]
 fn cmux_task_joins_the_group_its_caller_is_in_now() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

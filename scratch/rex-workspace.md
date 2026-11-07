@@ -69,24 +69,23 @@ Jack then wrote “otherwise lg2m ship it” after this removal, before the LOO-
 merge; see [questions.md](questions.md). Do not reopen the active conversation or
 manipulate its native panes; retained demo resources have no cleanup release.
 
-## Status at b321745bd
+## Status at 702935727
 
 Exists, seen in real Rex with real Claude on 8a8ae78ef ([workspace-demo.md](workspace-demo.md)): bare `lf open --task` inside a Rex shell, on a private Machine with one pinned runtime; a Task with no checkout is placed and starts its conversation, with no second Session, worktree or replay on reopening.
 
-Exists, fixture Rex only (b321745bd):
+Exists, fixture Rex only (built in b321745bd, Wave test 554cdc476, one `route` for opening and following 702935727):
 - Broad `lf open` starts no agents. Explicit Task or Session: `Resume::Any`. Repository or Wave: `Resume::Running`, for Task panes and the Wave's own conversation. Remote Machines receive the repository or Wave expression and judge their own providers.
 - A Task with no conversation and no resolvable harness fails its receipt and creates no tab.
 - `docs/workspaces.md` says a fresh conversation takes its first turn.
 
 Remains:
-- Rerun the three-Task broad open in real Rex, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched.
-- Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task.
+- Demo, real Rex, isolated server, pinned branch binary: rerun the three-Task broad `lf open` from the repository, the case that failed on November 7. Expected: no new providers, no transcript growth, the ended Session not relaunched, Tasks without a running provider showing Task & workflow, a live Session reconnected. Then confirm explicit `lf open --task` still resumes and starts its conversation. Auto-Ship is approved, so this tree can ship without that run; see [questions.md](questions.md).
+- `lf -a` is not forwarded to panes: `lf -a claude open` fails although the error names `-a`. Unbuilt; `lf set --global default_agent` works. Detail in [questions.md](questions.md).
+- Native Split shortcut cwd and resize: Rex app, by hand, in a separate Task. Two-Machine behavior was not rerun.
 - A dev build on the real Machine hands its child to the installed runtime until `lf install`. The cause of the November 6 exit stays unknown.
 - `work_open_tests::` passed 5 of 6 parallel runs on November 7; the other had 2 failures, names not captured, right after clippy at load ~15. Gate reruns it in parallel and keeps failure output.
 - Open choices in [questions.md](questions.md): shipping coverage of this tree, and whether a broad open moves input from a live conversation.
 
-Check, November 7: `cargo test -p loopflow --test integration -- --test-threads=1 work_open_tests::` 28 passed, 2 ignored; the new Wave test fails with the `provider_running` guard removed; fmt and clippy pass.
-
-Check after compress, November 7: one `route` now serves opening and following; `--lib lf::commands::open::` 17 passed, `work_open_tests::` in parallel 28 passed, 2 ignored; fmt and clippy pass. Fixture Rex only; real Rex rerun stays with demo.
+Check, November 7, on 702935727's code: `--lib lf::commands::open::` 17 passed, `work_open_tests::` in parallel 28 passed, 2 ignored, fmt and clippy pass; fixture Rex only, real Rex stays with demo.
 
 Compress restored main's #1834 (82 files) that merge `94cb745eb` dropped. Before any sync, check `git diff $(git merge-base HEAD origin/main) --stat` for files the Task never touched.

@@ -10,8 +10,6 @@ readiness protocol are superseded.
   input ownership; explicit opening runs resume. This is a reversible implementation
   choice, not a request for another review ceremony.
 - Native cmux interaction and two-Machine behavior retain only fixture proof.
-- LOO-717 owns cleanup/lifetime integration. The earlier handoff describes a
-  superseded lease implementation; read current 717 evidence before integrating.
 - New hands-on proof must use separate work. Earlier rendering was visibly broken,
   not accepted. Retain all demo roots and owners; no input settlement or teardown
   authorization has been received.

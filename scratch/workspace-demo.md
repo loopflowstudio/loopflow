@@ -242,3 +242,7 @@ Since the last advance, the only change is 6b3818bc5: a one-line architecture ma
 ## November 6 headless demo decision pass (3b5061b18): advance
 
 Since 6b3818bc5, only scratch gate notes changed (3b5061b18); no code changed, so the earlier opening tests and gate results still apply. No live Rex demo was run. The active Task's panes stay untouched, and the retained demo resources still have no cleanup release. Still open: branch fresh-conversation startup has not been proven live. Shipping rests on Jack's “otherwise lg2m ship it”.
+
+## November 6 gate (fb810b8e4)
+
+- Since the eaf36a5d3 gate, non-scratch changes are only the one-line `docs/architecture-reference.md` map entry, already checked by `check_architecture.py` and `website/dev.py test` (72 passed). No suite inputs changed, so no rerun; earlier results stand, with CI owning `served_reads` and the Desktop Breakpad death (both identical on origin/main 12d897b6b). Added Rust/Swift/Python lines carry no TODO or debug output.

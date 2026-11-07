@@ -229,3 +229,12 @@ resources still have no cleanup release.
 - `scripts/test_desktop.sh`: the process dies in `ThemeTests.defaultConfigurationLoadsAfterInitialAppearance` (libghostty Breakpad, `~/.cache/ghostty/sentry`). Same death on origin/main; passes alone and alongside every Ghostty-touching suite. Predates this branch; CI owns the Swift result.
 - `cargo clippy --all-targets -- -D warnings`: passed. `check_swift_multiplatform_boundaries.py`: passed.
 - `cmux_task_joins_the_group_its_caller_is_in_now` passed in this run.
+
+## November 6 headless demo decision pass (6b3818bc5): advance
+
+Since the last advance, the only change is 6b3818bc5: a one-line architecture map entry plus gate notes. `check_architecture.py` passes. There is no Rust change, so the earlier opening tests (17 unit, 23 integration) and the gate's Rust run still describe the code. No live Rex demo was run: the active Task's panes stay untouched, and the retained demo resources still have no cleanup release. Still open: branch fresh-conversation startup has not been proven live. Shipping rests on Jack's “otherwise lg2m ship it”.
+
+## November 6 gate (6b3818bc5)
+
+- Only `docs/architecture-reference.md` and scratch changed since the eaf36a5d3 gate; Rust and Swift results above stand (CI owns `served_reads` and the Desktop Breakpad death, both identical on origin/main).
+- `scripts/check_architecture.py`: passed. `website/dev.py test` with the branch `lf` on PATH: 72 passed.

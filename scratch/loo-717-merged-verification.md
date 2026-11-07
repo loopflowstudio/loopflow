@@ -124,3 +124,9 @@ real configured path is the loopback-SSH acceptance suite.
 (LF_* cleared, stdin closed) — 3 passed in 68.59 s; log `/tmp/loo717-demo-ssh.log`.
 The prepared-viewer test ran through healthy idle, resize, Leave and return.
 Decision: advance. Native Desktop/Rex observations stay with Task `a0dff7`.
+
+## Gate (2026-11-06, headless)
+
+- `scripts/test.py --reuse-passing --rust-filter 'test(ssh_shells::)'` — architecture, inventory, rustfmt and CLI build passed; nextest failed with `no tests to run` because every `ssh_shells::` test is `#[ignore]`. Not a product failure; the trap is now in `scripts/testing.md`.
+- `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` — 3 passed in 69.35 s; log `/tmp/loo717-gate-ssh.log`.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed; `git diff --check` — passed.

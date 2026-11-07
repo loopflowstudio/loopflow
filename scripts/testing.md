@@ -68,6 +68,10 @@ unless the diff reaches them; together they exceed the 1200 s Rust budget, and
 CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
 the union first: `(test(a::) | test(b::)) - test(slow)`; without the
 parentheses the subtraction applies only to the last term.
+A filter matching only `#[ignore]` tests (the loopback-SSH `ssh_shells::`
+suite) runs nothing and fails with `no tests to run`; run those by name with
+`cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`, then
+clippy.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 `rust-test` failure; CI's eight partitions own the full Rust matrix.
 

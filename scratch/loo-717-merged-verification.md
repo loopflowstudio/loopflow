@@ -100,8 +100,12 @@ No implementation iteration is identified. The next checks remain the gate
 below and the separately recorded native observations; this review supplies
 no new runtime demonstration or shipping action.
 
-The correction still needs gate and a follow-up PR through the current Graph's
-delivery steps. `cargo clippy --all-targets -- -D warnings` remains with gate.
+Publication review: `lf sync` completed without conflicts. The only code change
+against `origin/main` is the five-line SSH inventory repair; its contents are
+unchanged from the passing three-test SSH run above. No runtime code changed.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (36.67 s), and
+`git diff --check` passed. The correction is ready for a follow-up review PR;
+publication does not merge it or complete the Task.
 The native demonstration follow-up `a0dff7` and its pending Linear sync remain
 separate from this test repair. No acceptance requirement was removed.
 

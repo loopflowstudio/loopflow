@@ -12,10 +12,10 @@ environment, so results come from `lf desktop capture/state`, `lf ps` and logs.
 
 | Claim | Result |
 |---|---|
-| Load opens conversations, nothing selected | 23 providers in 8s (15:13:20–28), no click |
+| Load opens conversations, nothing selected | 23 providers in 8s (15:13:20–28), no click; past the accepted bound, see Warm bound |
 | Conversations ready when you reach them | Failed on main (14 of 23 checkouts untrusted); repaired below |
 | No unrequested work | Stopped run's 3 Graph IDs unchanged, no Graph nodes, no branch commits; 22 commits are planning refs |
-| Warm limit 16 | After walking all 21: 18 active (16 + 2 primaries), 5 detached |
+| Warm limit 16 | After walking all 21: 18 active (16 + 2 primaries), 5 detached; at load, see Warm bound |
 | Cold return | Warm 01: same provider PID, history shown, no new turn |
 | Input | `lf desktop send` reaches the prompt after selection |
 | Takeover | `lf session resume` from a second pty: Desktop's surface goes, action reads "open in another terminal", Take back offered, Desktop stays passive through re-selection |
@@ -59,7 +59,6 @@ Known gap: two waiters behind a dead holder can both pass `_stale`, and the late
 can drop the earlier one's fresh lock. One trust entry can then be lost with no warning, and
 that conversation shows the dialog. Not seen in a run; proper-lockfile has the same window.
 
-Remaining: gate runs the affected suites; the fix publishes as a new PR with #1816 as history.
 Follow-ups: 634c19 (memory budget), d0071b (Wave links), 85c699 (first launch, no default agent).
 Fixture left behind: `durable/` under `~/.lf/demos/loo672-12923a08ac`, `-21be4cca92` and `-8f72197490`,
 plus their entries in `~/.claude.json`. Runtime removed, all fixture processes stopped.
@@ -90,4 +89,36 @@ other hosts may keep the provider running"); memory cost was accepted November 4
 budget" was disclosed before “ok lg2m ship it”. 634c19 holds the budget. LOO-672's text still lists
 that acceptance, so finishing the Task means reading it against that Task.
 
-Checks: `swift test --filter 'WorkspaceRetentionTests|WorkNavigationTests|WorkDestinationTests|WorkCacheTests|DashboardWorkspaceTests|DesktopPaneControlTests|DesktopActions'`: 195 pass. Gate runs the affected suites.
+`openWarmConversations` refreshes intent, location and completion for every open tile, not just
+warm ones. Narrowing `visibleWork` had dropped off-page tiles from that loop, so `lf desktop focus`
+on a tile past the bound never opened it in the test fixture, whose tiles have no location until
+that loop sets one. A tile with a plan location would have opened with the default reveal intent (read, not run).
+`focusedOffPageTileStarts` failed before this and passes. Selection and page turns already re-presented.
+
+## Concept review, November 7 (second pass)
+
+The accepted design holds and no product choice is open: load, selection and Close follow it,
+and sixteen against "prefetch everything" is settled in `questions.md`.
+
+One defect, repaired: a page turn let go of the freshest unvisited Tasks. Every prefetched Task
+ties at `distantPast` in `RepositoryWorkspaces.reconcileWarmth`, so `recentTasks` order survived
+and the head went first; `evict` marks a Task released, so refresh would not readmit it.
+The design orders that set "selected Task, visible tiles, saved recent working Tasks, other working
+Tasks by shared update time"; ties now give up its tail through an explicit rank.
+
+21-Task board, `task-0` selected, turn to the last 5 tiles. Warm before: `task-0`…`task-15`.
+Old order kept `task-0`, `task-6`…`task-15`; now `task-0`…`task-10`. `pageTurnEvictsStalestUnvisitedTasks`
+fails without the rank. Return costs a reconnect, not a click, and the provider keeps running.
+
+Read and left alone: `pages` returns `[[]]` for an empty board, so `presentBoard` can't index -1;
+after a window Close only a visit readmits a Task, as on #1816, and the comment on `releasedTasks`
+says so.
+
+## Remaining
+
+- Gate runs the affected suites.
+- `lf desktop focus` on an off-page tile is covered by the Swift test only; the native run above predates that repair. Demo checks it.
+- The trust-lock, warm-bound and eviction-order fixes publish as a new PR with #1816 as history.
+- Proposed `.lf/wave/product/MEMORY.md` change (memory is at its token limit, and this pass leaves it unedited): in the November 7 note, after "no click or Graph", add "before the page bound (now sixteen Tasks, page included, plus primaries: 18 at load)".
+
+Checks: `swift test --filter 'WorkspaceRetentionTests|WorkNavigationTests|WorkDestinationTests|WorkCacheTests|DashboardWorkspaceTests|DesktopPaneControlTests|DesktopActions'`: 197 pass.

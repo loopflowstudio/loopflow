@@ -157,6 +157,26 @@ struct WorkspaceRetentionTests {
         #expect(registry.retained(departed)?.presented == true)
     }
 
+    @Test("A page turn lets go of the last-ranked unvisited Tasks, never the freshest")
+    func pageTurnEvictsStalestUnvisitedTasks() {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let registry = application.registry(for: "repo")
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        let board = (0..<limit + 5).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        let page = Array(board.suffix(5))
+        for key in board { _ = registry.workspace(for: key, title: key.id, location: location) }
+        registry.present(open: board, shown: Array(board.prefix(5)))
+        for key in board { registry.prefetch(key, title: key.id, location: location, completed: false) }
+        registry.focus(board[0])
+        #expect(registry.recentTasks == Array(board.prefix(limit)))
+
+        registry.present(open: board, shown: page)
+
+        #expect(registry.recentTasks == Array(board.prefix(limit - page.count)))
+        #expect(page.allSatisfy { registry.retained($0)?.presented == true })
+    }
+
     @Test("Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit")
     func primariesStayWarmBesideTheTaskBound() {
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")

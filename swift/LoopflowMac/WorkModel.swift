@@ -231,19 +231,21 @@ final class WorkModel {
                               primaries: WorkspaceIdentity(machineId: machine, worktree: repoPath))
         let store = registry.sessionStore(repository: repository, repoPath: repoPath, query: query)
         store.reconcile(records)
-        for key in registry.warmWork {
-            guard let workspace = registry.retained(key) else { continue }
-            if key.kind == .task, let task = task(id: key.id)?.task {
-                // A refused reveal does not outlive the Task that can now start.
-                if workspace.conversationIntent == .reveal, task.conversationIntent == .start {
-                    workspace.conversationError = nil
-                    workspace.conversationStart = nil
-                }
-                workspace.conversationIntent = task.conversationIntent
-                workspace.location = taskWorkspaceIdentity(task)
-                registry.updateCompletion(key, completed: task.isCompleted)
+        let warm = registry.warmWork
+        // Off-page tiles too: focusing one opens it from this state, with no refresh between.
+        for key in Set(warm + registry.openWork) where key.kind == .task {
+            guard let workspace = registry.retained(key), let task = task(id: key.id)?.task else { continue }
+            // A refused reveal does not outlive the Task that can now start.
+            if workspace.conversationIntent == .reveal, task.conversationIntent == .start {
+                workspace.conversationError = nil
+                workspace.conversationStart = nil
             }
-            guard !workspace.conversationClosed else { continue }
+            workspace.conversationIntent = task.conversationIntent
+            workspace.location = taskWorkspaceIdentity(task)
+            registry.updateCompletion(key, completed: task.isCompleted)
+        }
+        for key in warm {
+            guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
             workspace.startPersistence(query: query, repoPath: repoPath)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
                let record = records.first(where: { record in

@@ -75,11 +75,15 @@ final class RepositoryWorkspaces {
             Logger(subsystem: "studio.loopflow", category: "sessions-latency")
                 .info("metric=visible_warm_exceptions count=\(exceptions)")
         }
+        // Stalest first. Prefetched Tasks share a never-visited date, so the tail
+        // of `recentTasks` goes before its head, as in the registry's own bound.
         let candidates = repositories.values.flatMap { registry in
-            registry.recentTasks.map { (registry: registry, key: $0, visited: registry.retained($0)?.lastVisit ?? .distantPast) }
-        }.sorted { $0.visited < $1.visited }
+            registry.recentTasks.enumerated().map { rank, key in
+                (registry: registry, key: key, visited: registry.retained(key)?.lastVisit ?? .distantPast, rank: rank)
+            }
+        }.sorted { ($0.visited, $1.rank) < ($1.visited, $0.rank) }
         var excess = Set(candidates.map(\.key)).union(visible).count - SessionsWorkspaceRegistry.warmConversationLimit
-        for (registry, key, _) in candidates where excess > 0 && !visible.contains(key) {
+        for (registry, key, _, _) in candidates where excess > 0 && !visible.contains(key) {
             registry.evict(key)
             excess -= 1
         }

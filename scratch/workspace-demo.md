@@ -208,3 +208,24 @@ input has not been released for cleanup; leave the conversation and roots intact
 
 Remaining work: repair and verify branch fresh-conversation startup against this
 accepted ordinary-conversation experience before claiming PR acceptance.
+
+
+## November 6 headless demo decision: advance
+
+Headless decision pass standing in for Jack Heart after the `Task::Tool` removal
+(882dc43cf). No live Rex demo was run: the active Task's panes stay untouched and
+no separate demo was requested. Checks on eaf36a5d3:
+- `cargo test -p loopflow --lib lf::commands::open::`: 17 passed.
+- `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 23 passed, 2 ignored; `cmux_task_joins_the_group_its_caller_is_in_now` failed in the suite and passed alone (`--exact`), the same two-second host deadline recorded earlier.
+- No `task_tool`/`Task::Tool` references remain in `rust/` or `docs/`.
+Decision: advance, on Jack's “otherwise lg2m ship it” after the removal. Branch
+fresh-conversation startup is still unproven in a live Rex demo; retained demo
+resources still have no cleanup release.
+
+## November 6 gate (eaf36a5d3 + architecture map fix)
+
+- `scripts/test.py --reuse-passing --rust-filter '<open, work_open, transport, ops::task, desktop, config, selection, task_diff, served_reads, golden_prompt, graph, binary(lf) …>'`: website 72 passed; rustfmt passed; Rust 639/640 (only `served_reads` failed); architecture failed on unmapped `process:rex`, now mapped under User in `docs/architecture-reference.md` (`check_architecture.py` passes).
+- `served_reads::what_an_app_serves_in_process_matches_its_lf_command`: fails identically on origin/main 12d897b6b (macOS `/var` vs `/private/var` in `config show` locators). Predates this branch; Linux CI cannot see it.
+- `scripts/test_desktop.sh`: the process dies in `ThemeTests.defaultConfigurationLoadsAfterInitialAppearance` (libghostty Breakpad, `~/.cache/ghostty/sentry`). Same death on origin/main; passes alone and alongside every Ghostty-touching suite. Predates this branch; CI owns the Swift result.
+- `cargo clippy --all-targets -- -D warnings`: passed. `check_swift_multiplatform_boundaries.py`: passed.
+- `cmux_task_joins_the_group_its_caller_is_in_now` passed in this run.

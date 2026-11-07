@@ -2,10 +2,11 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn, pending request, running Graph or headless Run). Nothing
-//! else ends an owner on its own: a removed, rebuilt or superseded lf executable
-//! leaves it serving (Jack Heart, 2026-11-05), and `lf resume` or
-//! `lf monitor rollover` move it when a person or operator decides to. Ending
+//! holding it (a turn, pending request, running Graph or headless Run). Completed
+//! Task retirement can also end eligible owners after its absence grace. Desktop
+//! shells use Close and retirement policy instead of idle-agent ending.
+//! A removed, rebuilt or superseded lf executable leaves its owner serving;
+//! `lf resume` or `lf monitor rollover` move it when a person or operator decides to. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history.
 //!
@@ -24,8 +25,9 @@ use anyhow::Result;
 use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
+use crate::ops::task::retirement::owner_retiring;
 use crate::store::sqlite::sessions::OwnerRetention;
-use crate::store::sqlite::{SqliteStore, ViewerHold};
+use crate::store::sqlite::ViewerHold;
 use crate::store::RecordingGap;
 
 /// How often an owner looks at the clock.
@@ -38,8 +40,7 @@ pub(super) struct Activity {
     pub viewed: bool,
     pub viewers: u64,
     pub output: u64,
-    /// Whether this owner's viewers retain its Task checkout. Separate from
-    /// `viewed`: a lost SSH viewer is unknown and never keeps the agent alive.
+    /// Dated viewing evidence; a disconnected viewer enters the absence window.
     pub hold: Option<ViewerHold>,
 }
 
@@ -88,13 +89,8 @@ impl Ending {
         input_queued: bool,
     ) -> Result<Option<Event>> {
         let store = crate::journal::process_ledger()?;
-        if let Some(close) = store.shell_owner(owner)? {
-            let settled =
-                !store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none();
-            let may_close = settled
-                && !input_queued
-                && (close == 1
-                    || (close == 2 && !activity.viewed && store.owner_retiring(owner)?));
+        if let Some(may_close) = crate::desktop::shells::close_allowed(&store, owner, input_queued)?
+        {
             return Ok(may_close.then_some(Event::Control {
                 held: false,
                 notice: Some("Shell closed".into()),
@@ -103,7 +99,7 @@ impl Ending {
         if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
             return Ok(None);
         }
-        if store.owner_retiring(owner)? {
+        if owner_retiring(&store, owner)? {
             return Ok(Some(Event::Control {
                 held: false,
                 notice: Some("Completed Task workspace retired".into()),
@@ -166,19 +162,6 @@ impl Grace {
     }
 }
 
-/// Record this owner's checkout hold; a release wakes waiting Task cleanup.
-pub(super) fn record_hold(
-    store: &SqliteStore,
-    owner: &LfProcessId,
-    hold: Option<ViewerHold>,
-) -> Result<()> {
-    store.record_owner_viewer_hold(owner, hold)?;
-    if hold.is_none() {
-        crate::ops::task::retirement::wake_released(store, owner)?;
-    }
-    Ok(())
-}
-
 fn watch(
     owner: &LfProcessId,
     terminal: bool,
@@ -188,9 +171,7 @@ fn watch(
 ) {
     let mut store = None;
     let mut store_failure = RecordingGap::default();
-    let mut recorded_viewed = None;
-    let mut viewer_failure = RecordingGap::default();
-    // A fresh owner Process records no hold.
+    // None means no observation has been committed, including initial absence.
     let mut recorded_hold = None;
     let mut hold_failure = RecordingGap::default();
     let mut shell_failure = RecordingGap::default();
@@ -225,40 +206,33 @@ fn watch(
         let Some(store) = store.as_ref() else {
             continue;
         };
-        let viewed = grace.activity.viewed;
-        if recorded_viewed != Some(viewed)
-            && report_result(
-                &mut viewer_failure,
-                "Session viewers",
-                store.record_owner_viewers(owner, viewed),
-            )
-            .is_some()
-        {
-            recorded_viewed = Some(viewed);
-        }
         let hold = grace.activity.hold;
-        if recorded_hold != hold
+        if recorded_hold != Some(hold)
             && report_result(
                 &mut hold_failure,
                 "Session viewer hold",
-                record_hold(store, owner, hold),
+                store.record_owner_viewer_hold(owner, hold),
             )
             .is_some()
         {
-            recorded_hold = hold;
+            recorded_hold = Some(hold);
         }
         if terminal && grace.limit.is_none() {
             grace.limit = report_result(
                 &mut repository_failure,
                 "Session repository",
-                store.process(owner),
+                store.lf_process(owner),
             )
             .flatten()
             .map(|process| limit(process.repo.as_deref()));
         }
         // Shell purpose is fixed at creation. Running lf inside an ordinary
         // shell must never enroll it in the idle-agent policy.
-        match report_result(&mut shell_failure, "Shell owner", store.shell_owner(owner)) {
+        match report_result(
+            &mut shell_failure,
+            "Shell close request",
+            store.shell_close_request(owner),
+        ) {
             Some(Some(1 | 2)) => {
                 if end
                     .send(Ending {
@@ -275,7 +249,7 @@ fn watch(
             Some(None) => {}
         }
         let now = SystemTime::now();
-        let retiring = store.owner_retiring(owner).unwrap_or(false);
+        let retiring = owner_retiring(store, owner).unwrap_or(false);
         if !retiring && !grace.expired(now) {
             continue;
         }
@@ -435,22 +409,24 @@ mod tests {
         );
         // Explicit Close of a shell also respects a nested requested turn.
         store
-            .create_task_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap();
-        store.bind_task_shell("shell", &owner).unwrap();
-        store.close_task_shell("shell").unwrap();
-        conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
-        conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_some());
+        store.bind_desktop_shell("shell", &owner).unwrap();
+        for close in [1, 2] {
+            conn.execute("UPDATE desktop_shells SET close_requested=?1", [close])
+                .unwrap();
+            // A shell view adds no retention, for explicit or retirement Close.
+            let viewed = Activity {
+                viewed: true,
+                ..Activity::default()
+            };
+            conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
+                .unwrap();
+            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_none());
+            conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
+                .unwrap();
+            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_some());
+        }
     }
 
     #[test]
@@ -506,6 +482,81 @@ mod tests {
             !viewed,
             "a recovered store must not retain stale viewer state"
         );
+    }
+
+    #[test]
+    fn automatic_shell_close_rechecks_task_viewing_before_consuming_stale_intent() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,'/repo.task','task',1,'completed')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
+        let shell = store.test_lf_process();
+        store
+            .create_desktop_shell("shell", &task, "/repo.task")
+            .unwrap();
+        store.bind_desktop_shell("shell", &shell).unwrap();
+        let viewer = store.test_lf_process();
+        let live = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        conn.execute(
+            "UPDATE processes SET pid=?2,started_at=?3,os_started_at=?3 WHERE id=?1",
+            rusqlite::params![viewer, live.pid, live.started_at],
+        )
+        .unwrap();
+        store.test_session("passive", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='passive'",
+            rusqlite::params![task.as_str(),viewer]).unwrap();
+        let intent = store
+            .reconcile_task_retirement(&task, 0, None)
+            .unwrap()
+            .unwrap();
+        store.retirement_progress(&intent, "closing", None).unwrap();
+        crate::desktop::shells::request_retirement(&store, &task).unwrap();
+        let candidate = Ending {
+            activity: Activity::default(),
+        };
+        // A shell's own viewer adds no Task retention, and output cannot keep
+        // an ordinary shell past an eligible automatic close.
+        store
+            .record_owner_viewer_hold(
+                &shell,
+                Some(crate::store::sqlite::ViewerHold::Viewed(
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                )),
+            )
+            .unwrap();
+        let viewed = Activity {
+            viewed: true,
+            output: 1,
+            ..Activity::default()
+        };
+        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        // Seed stale intent directly: the final check must protect even if a
+        // writer did not atomically cancel it. No sweep runs in this test.
+        for hold in ["viewed", "absent"] {
+            conn.execute(
+                "UPDATE processes SET viewer_hold=?2,viewer_hold_at=unixepoch() WHERE id=?1",
+                rusqlite::params![viewer, hold],
+            )
+            .unwrap();
+            assert!(candidate.confirm(&shell, viewed, false).unwrap().is_none());
+        }
+        store.close_desktop_shell("shell").unwrap();
+        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        // Unreadable retirement state cannot authorize automatic closure.
+        conn.execute("UPDATE desktop_shells SET close_requested=2", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1",
+            [&viewer],
+        )
+        .unwrap();
+        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        conn.execute_batch("DROP TABLE task_retirements").unwrap();
+        assert!(candidate.confirm(&shell, viewed, false).is_err());
     }
 
     #[test]

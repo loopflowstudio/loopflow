@@ -4,11 +4,8 @@
 import Loopflow
 import SwiftUI
 
-/// A Wave's Tasks bucketed for standup by Task state. The one bucketing rule; the
-/// board only renders it. Backlog holds unstarted and unassigned Tasks; Working the
-/// assigned idle, active and moving ones (the sidebar's Working Tasks); Autonomous the
-/// shipping ones, a Graph running to merge that stops for no one; Done the Tasks
-/// completed in the last `doneDays` days (0 = all ages).
+/// A Wave's Tasks in the columns of Rust's `TaskSection`; the board only renders
+/// them. Done shows the Tasks completed in the last `doneDays` days (0 = all ages).
 struct WaveStandup: Equatable {
     struct Row: Equatable, Identifiable {
         let task: RoadmapTask
@@ -65,29 +62,24 @@ struct WaveStandup: Equatable {
             return Person(key: key, name: user?.name ?? owner.person ?? user?.login ?? key, github: user)
         }
         done = closed.filter { task in
-            guard task.task.isSuccessful, !task.condition.unresolvedExecution else { return false }
+            guard task.section == .done else { return false }
             if doneDays == 0 { return true }
             guard let date = task.task.completedAt.flatMap(Self.date) else { return false }
             return date <= now && date >= since
         }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
-        func started(_ states: Set<TaskState>) -> [Row] {
-            ranked.filter { states.contains(Self.state($0)) && !$0.isUnassigned }.map { task in
+        func started(_ section: TaskSection) -> [Row] {
+            ranked.filter { $0.section == section }.map { task in
                 let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
                 return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
                            session: sessions[task.id])
             }
         }
-        working = started([.idle, .active, .moving])
-        autonomous = started([.shipping])
-        backlog = ranked.filter { Self.state($0) == .unstarted || $0.isUnassigned }
+        working = started(.working)
+        autonomous = started(.autonomous)
+        backlog = ranked.filter { $0.section == .backlog }
             .map { Row(task: $0, person: nil, note: nil, session: nil) }
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
-    }
-
-    /// A Task's state; a Task with no runtime has no checkout, unless planning closed it.
-    private static func state(_ task: RoadmapTask) -> TaskState {
-        task.runtime?.status ?? (task.task.isTerminal ? .done : .unstarted)
     }
 
     func rows(_ section: WaveBoardSection) -> [Row] {

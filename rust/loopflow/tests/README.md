@@ -77,15 +77,26 @@ server package. On macOS, run that command directly with `-- --ignored`:
 Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
 tests are explicitly ignored in its default suite. Linux runs them normally
 inside network isolation. No system SSH configuration, keys or installed lf are used.
-Twenty cycles exercise the public Machine route, abrupt transport loss,
+Twenty cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
 Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
-holds, unknown viewers, cancellation, unconfirmed job cleanup and retry after
-partial Git deletion with disposable worktrees and a bare remote.
-`session_viewers_retain_until_the_last_leaves_and_a_lost_ssh_viewer_stays_unknown`
-records a real owner's hold through leave, reconnect grace and SSH loss.
+holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and
+scheduled retry after partial Git deletion with disposable worktrees and a bare
+remote. Scheduled-pass tests cover interrupted closing, retry/backoff, an empty
+queue and failure isolation across Tasks. Installation schedule fixtures use fake
+launchctl and disposable files; never register a real cleanup job for a test.
+Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
+private Desktop runtime, then reattach without replay. The generic local case has no Ghostty
+resources or environment.
+`session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
+records a real owner's hold through leave, reconnect grace and connection loss.
+`viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under
+continuous output, with a healthy passive viewer and resumed stream. The SSH
+prepared-viewer case exercises the returned production launch command, healthy
+idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
+its process inventory rejects an additional remote PTY.
 
 `transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
 holds a SQLite writer while typing and returning to the viewer. Control stays
@@ -279,8 +290,7 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 ```
 
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
-`replace` proves a failed turn decides nothing. `--public-connect` covers a
-live headless-to-terminal handoff.
+`replace` proves a failed turn decides nothing.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.
@@ -320,7 +330,8 @@ Exchange preserves Workflow/placement, live driver, Session/native identity and
 append-only history without starting an engine or provider turn. After imported
 completion, the current client explicitly starts and completes another turn on the
 same engine. The controlled protocol client is headless, not a rendered TUI or
-running Workflow-edge proof. Prepare the script's uv dependencies before
+running Workflow-edge proof. It needs re-authoring before it runs again: it seeds the
+renamed `task_workflows` table and resumes a Run, which `lf resume` refuses. Prepare the script's uv dependencies before
 running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead

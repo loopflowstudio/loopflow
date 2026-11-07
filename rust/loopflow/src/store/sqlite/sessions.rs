@@ -338,7 +338,7 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<crate::id::LfProcessId> = row.get(31)?;
+        let agent_process_id: Option<crate::id::AgentProcessId> = row.get(31)?;
         let agent_process_evidence = crate::journal::agent_process_evidence(
             row.get(32)?,
             row.get(33)?,
@@ -666,20 +666,6 @@ impl SqliteStore {
             [session],
             |row| row.get(0),
         )?)
-    }
-
-    /// Record whether a viewer is attached to execution owner `owner`.
-    pub(crate) fn record_owner_viewers(
-        &self,
-        owner: &crate::id::LfProcessId,
-        viewed: bool,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE processes SET viewed=?2 WHERE id=?1",
-            params![owner.as_str(), viewed],
-        )?;
-        Ok(())
     }
 
     /// What keeps execution owner `owner` running. None means its standalone

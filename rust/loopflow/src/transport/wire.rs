@@ -137,9 +137,6 @@ pub(super) enum Request {
         name: Option<String>,
         /// What a controlling viewer this attachment replaces prints as it leaves.
         moved: Option<String>,
-        /// The viewer runs under SSH: losing its connection without `leave`
-        /// does not show that its LF viewer exited. Absent reads as local.
-        ssh: Option<bool>,
     },
     /// Continue a dropped viewer's stream, no snapshot.
     Resume(Resume),
@@ -189,6 +186,7 @@ pub(super) enum Request {
         hint: String,
     },
     /// Whether some viewer holds input control, asked before opening another.
+    /// On an attached connection this also refreshes the viewer's liveness.
     Controlled,
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {

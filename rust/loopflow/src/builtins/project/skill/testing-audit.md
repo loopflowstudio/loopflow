@@ -1,78 +1,69 @@
 ---
-description: Audit whether a repository tests valuable behavior at the right rigor and cost, then improve its testing workflow, monitoring, and guidance.
+description: Audit whether a repository's tests catch what people would notice breaking, at a fair cost, then fix its test workflow and guidance.
 requires: repository with tests or verification workflows
 produces: scratch/testing-audit.md, testing infrastructure and guidance improvements
 action_style: procedural
 ---
-Audit the repository's testing system as an evidence portfolio, not a coverage
-contest. Find what earns confidence, what tests implementation accidents, and
-where agents or developers repeatedly pay for the same proof.
+Make the repository's tests catch what people would notice breaking, and stop
+paying for the ones that don't. Coverage numbers are not the goal.
 
-## Orientation
-
-Read the repository guidance, test entrypoints, CI workflows, release gates,
-realign/production checks, and any local run or trace ledger. Keep raw prompts,
-commands, output, credentials, and customer data private; reports contain only
-aggregates and named repository artifacts.
-
-Write findings and the change design to `scratch/testing-audit.md`.
+Read the repository guidance, test entry points, CI workflows, release gates and
+any local run or timing log. Keep raw prompts, commands, output, credentials and
+customer data out of the report; it holds totals and named files only. Write
+findings and the planned changes to `scratch/testing-audit.md`.
 
 ## Workflow
 
-1. **Inventory the proof surfaces**
-   - Count suites and tests by language/component.
-   - Map local runners, CI jobs, release/host gates, production smoke/canaries,
-     and demos.
-   - Record wall time, parallelism, failure frequency, flake/retry evidence,
-     and the slowest useful boundaries.
+1. **Inventory the checks.** Count suites and tests per language and component.
+   List local runners, CI jobs, release gates, production smoke checks and demos.
+   Note wall time, parallelism, failure rate, flakes and retries, and the
+   slowest suites worth keeping.
 
-2. **Map behavior to proof**
-   For each important user or operational behavior, name its cheapest credible
-   proof: focused test, affected suite, integration boundary, real product
-   path, production observation, or release gate. Mark unproved behavior and
-   proofs with no behavior attached.
+2. **Map behavior to tests.** For each behavior people rely on, name the
+   cheapest check that would catch it breaking: a focused test, an affected
+   suite, an integration test, a run through the real product, a production
+   check, or a release gate. List behaviors nothing catches, and tests that
+   catch nothing anyone would notice.
 
-3. **Read representative tests**
-   Sample hotspots, slow tests, mock-heavy tests, fixtures, workflow-string
-   assertions, and cross-language contracts. Judge assertions by observable
-   result. Mocks may block side effects; mock call wiring is not a result.
+3. **Read representative tests.** Sample hotspots, slow tests, mock-heavy tests,
+   fixtures, tests that assert on prompt or workflow text, and cross-language
+   wire tests. A good test asserts on a result someone would see. Mocks may
+   block side effects; checking that a mock was called is not a result.
 
-4. **Measure lifecycle cost**
-   Attribute test/check intervals to skills or phases. Merge overlapping
-   intervals before comparing them with agent wall time. Separate full/broad,
-   focused/selected, and static/build work. Look for distinct commands that
-   repeatedly recompile the same graph, not only exact retries.
+4. **Measure what it costs.** Attribute test and check time to skills or phases.
+   Merge overlapping intervals before comparing with agent wall time. Separate
+   full runs, focused runs, and build or lint time. Look for different commands
+   that keep recompiling the same thing, not just exact retries.
 
-5. **Delete and redesign**
-   - Delete tests that only freeze prose, duplicated configuration, mock calls,
-     or implementation structure unless they protect a concrete safety rule.
-   - Replace broad inner-loop runs with focused behavior, affected-suite gates,
-     and exact-tree evidence reuse.
-   - Give implement, compress, sync, gate, CI/release, and realign distinct
-     proof ownership so a phase transition does not trigger a redundant run.
-   - Prefer real configured/deployed product proof when it is safe and
-     observable. Never mutate production solely for an audit or review.
+5. **Delete and redesign.**
+   - Delete tests that only freeze prose, duplicate config, check mock calls or
+     pin implementation structure, unless they guard a real safety rule.
+   - Replace broad inner-loop runs with focused tests, affected-suite gates, and
+     reuse of passing results for an unchanged tree.
+   - Give implement, compress, sync, gate, CI/release and realign separate jobs
+     so moving to the next phase doesn't rerun the same suite.
+   - Prefer checking the real configured or deployed product when that is safe.
+     Never change production just for an audit.
 
-6. **Change the system**
-   Implement the highest-leverage safe improvements: runner selection/reuse,
-   privacy-preserving timing, CI or package smoke, lifecycle skills, test
-   deletion, and user guidance. Keep timeouts as hang guards, not performance
-   verdicts.
+6. **Change the system.** Make the highest-leverage safe improvements: runner
+   selection and reuse, timing that keeps data private, CI or package smoke
+   tests, lifecycle skills, test deletion and guidance. Timeouts catch hangs;
+   they don't judge speed.
 
-7. **Verify the audit**
-   Run focused tests for the infrastructure changed. Exercise timing/reporting
-   against a safe real or copied ledger. Exercise one real path. Review the diff for
-   privacy, false confidence, and whether each new test asserts behavior.
+7. **Check your changes.** Run focused tests for what you changed. Run the
+   timing or reporting against a safe real or copied log. Run one real path
+   end to end. Reread the diff for privacy leaks, false confidence, and new
+   tests that don't assert on behavior.
 
 ## Output
 
-`scratch/testing-audit.md` should contain:
+`scratch/testing-audit.md` holds:
 
-- the proof map and important gaps;
-- measured local and CI cost, with capture limitations;
-- keep/delete/redesign findings with concrete examples;
-- changes made and focused validation results;
-- follow-up tasks only where more evidence is required.
+- behaviors and the tests that catch them, plus the important gaps;
+- measured local and CI cost, and what the measurements missed;
+- keep, delete and redesign findings with concrete examples;
+- changes made and the focused test results;
+- follow-up Tasks only where a question needs more runs to answer.
 
-Stop when the workflow is cheaper and more truthful, not when every test has
-been cataloged.
+Stop when the tests are cheaper and catch more of what matters, not when every
+test is cataloged.

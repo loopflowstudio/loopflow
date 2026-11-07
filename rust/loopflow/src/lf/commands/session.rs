@@ -42,7 +42,9 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
+        SessionCommand::Serve { .. } => {
+            unreachable!("serve owns its process before any runtime")
+        }
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
             let author = crate::config::participant_name()?
@@ -120,7 +122,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let store = open_shared_store().await?;
             let agent_process = agent_process
                 .as_deref()
-                .map(crate::id::LfProcessId::parse)
+                .map(crate::id::AgentProcessId::parse)
                 .transpose()?;
             crate::ops::human_session::observe_program_status(
                 &store,
@@ -290,7 +292,7 @@ pub struct SessionFacts {
     pub available: bool,
     pub cwd: String,
     /// The provider's current AgentProcess, as `lf ps` lists it.
-    pub agent_process_id: Option<crate::id::LfProcessId>,
+    pub agent_process_id: Option<crate::id::AgentProcessId>,
 }
 
 impl SessionRow {

@@ -446,8 +446,8 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let preview = fixture.json(&["skill", "repo/session", "--context", "--json"]);
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
-    assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
-    assert!(prompt.contains("When Work exists, apply it"));
+    assert!(prompt.contains("no setup checklist first"));
+    assert!(prompt.contains("When there is work, run it without waiting for a greeting"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);
@@ -588,10 +588,10 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
     let config: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(fixture.home.path().join("native-config.json")).unwrap(),
+        &std::fs::read(fixture.home.path().join("native-server-config.json")).unwrap(),
     )
     .unwrap();
-    let roots = config["config"]["sandbox_workspace_write.writable_roots"]
+    let roots = config["sandbox_workspace_write.writable_roots"]
         .as_array()
         .unwrap();
     assert!(

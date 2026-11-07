@@ -9,7 +9,6 @@ use std::path::Path;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::LfProcessId;
 use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
@@ -84,7 +83,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .release_session_attachment("orphan", &attachment)
         .unwrap();
     let before = store
-        .process(&attachment.agent_process_id)
+        .agent_process(&attachment.agent_process_id)
         .unwrap()
         .unwrap();
     let history = store.session_history("orphan", 0, 0).unwrap();
@@ -138,7 +137,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
             );
             assert!(agent.0.try_wait().unwrap().is_none());
             assert_eq!(
-                store.process(&attachment.agent_process_id).unwrap(),
+                store.agent_process(&attachment.agent_process_id).unwrap(),
                 Some(before.clone())
             );
             assert_eq!(
@@ -162,7 +161,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .success());
     assert!(snapshot().nodes.iter().all(|row| row.id != id));
     let ended = store
-        .process(&attachment.agent_process_id)
+        .agent_process(&attachment.agent_process_id)
         .unwrap()
         .unwrap();
     assert!(ended.completed_at.is_some());
@@ -315,7 +314,7 @@ async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
 
 #[tokio::test]
 async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
-    use loopflow::process::{LfProcess, LfProcessPage};
+    use loopflow::process::{ProcessEntry, ProcessPage};
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -341,7 +340,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         assert!(result.status.success(), "{result:?}");
         result.stdout
     };
-    let first: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let first: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -356,12 +355,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(first.entries[0].id, ids[0]);
-    assert_eq!(first.entries[0].via_agent, Some(false));
-    assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
-    assert_eq!(first.entries[0].outcome, None);
+    let entry = first.entries[0].as_lf().unwrap();
+    assert_eq!(entry.id, ids[0]);
+    assert_eq!(entry.via_agent, Some(false));
+    assert_eq!(entry.command.as_ref(), Some(&raw));
+    assert_eq!(entry.outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
-    let second: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let second: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -378,13 +378,17 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(second.entries[0].id, ids[1]);
+    assert_eq!(second.entries[0].id(), ids[1].as_str());
     assert_eq!(
-        second.entries[0].caller_session_id.as_deref(),
+        second.entries[0]
+            .as_lf()
+            .unwrap()
+            .caller_session_id
+            .as_deref(),
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: LfProcess = serde_json::from_slice(&invoke(&[
+    let detail: ProcessEntry = serde_json::from_slice(&invoke(&[
         "history",
         "show",
         &ids[1].as_str()[..20],
@@ -409,7 +413,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
             );
         }
     }
-    let caller: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let caller: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -461,13 +465,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         ],
         vec!["history", "list", "--all", "--wave", "historical", "--json"],
     ] {
-        let page: LfProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
+        let page: ProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            vec![&ids[1]]
+            vec![ids[1].as_str()]
         );
     }
 
@@ -518,13 +522,13 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .output()
         .unwrap();
         assert!(result.status.success(), "{result:?}");
-        let page: LfProcessPage = serde_json::from_slice(&result.stdout).unwrap();
+        let page: ProcessPage = serde_json::from_slice(&result.stdout).unwrap();
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            vec![expected]
+            vec![expected.as_str()]
         );
     }
     let ambiguous = command(
@@ -536,7 +540,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
-    let explicit: LfProcessPage = serde_json::from_slice(&invoke(&[
+    let explicit: ProcessPage = serde_json::from_slice(&invoke(&[
         "history",
         "list",
         "--all",
@@ -545,7 +549,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(explicit.entries[0].id, ids[0]);
+    assert_eq!(explicit.entries[0].id(), ids[0].as_str());
     let zero = command(
         home.path(),
         home.path(),
@@ -1199,132 +1203,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
             None,
         )
         .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires actual Codex and uv; private Machines and synthetic Responses only"]
-async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let store = SqliteStore::new(&database).unwrap();
-    write_attached_script(repo.path());
-    let original = Attached::start(home.path(), repo.path(), "original");
-    let replacement = Attached::start(home.path(), repo.path(), "replacement");
-    let session = "native-client-transfer";
-    reserve_session(&store, session, repo.path());
-    let first = store
-        .claim_session_attachment(session, None, &original.id, false)
-        .unwrap();
-    let control = home.path().join("gate");
-    std::fs::create_dir(&control).unwrap();
-    std::fs::write(
-        control.join("caller.json"),
-        serde_json::to_vec(&first.caller(session.into())).unwrap(),
-    )
-    .unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut probe = Command::new("uv")
-        .current_dir(root)
-        .args(["run", "tests/e2e/codex_connect.py", "--gated", "--codex"])
-        .arg(std::env::var("CODEX_TEST_BIN").expect("set CODEX_TEST_BIN"))
-        .arg("--output")
-        .arg(control.join("evidence"))
-        .arg("--control")
-        .arg(&control)
-        .arg("--lf")
-        .arg(env!("CARGO_BIN_EXE_lf"))
-        .arg("--lf-home")
-        .arg(home.path())
-        .spawn()
-        .unwrap();
-    wait_file(&control.join("native.done"), &mut probe);
-    let agent_process: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(control.join("agent_process.json")).unwrap())
-            .unwrap();
-    let connection = CodexConnection::new(
-        store.clone(),
-        session.into(),
-        Some(agent_process["thread"].as_str().unwrap().into()),
-        Some(first.clone()),
-    );
-    let endpoint = Path::new(agent_process["endpoint"].as_str().unwrap());
-    let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
-    let mut passive = connection.clone();
-    passive.attachment = None;
-    let observer = serve_gate(&control.join("observer.sock"), endpoint, passive);
-    std::fs::write(control.join("sockets.go"), "").unwrap();
-    wait_file(&control.join("attached.done"), &mut probe);
-    assert_eq!(
-        store.session_attachment(session).unwrap(),
-        Some(first.clone()),
-        "passive display must not claim the conversation"
-    );
-    let second = store
-        .claim_session_attachment(session, Some(&first), &replacement.id, false)
-        .unwrap();
-    let mut current = connection;
-    current.attachment = Some(second.clone());
-    let current = serve_gate(&control.join("current.sock"), endpoint, current);
-    std::fs::write(control.join("transfer.go"), "").unwrap();
-    assert!(probe.wait().unwrap().success());
-    let result: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(control.join("evidence/results.json")).unwrap())
-            .unwrap();
-    assert_eq!(result["old_client_still_receives_completion"], true);
-    assert_eq!(result["current_attachment_continued"], true);
-    assert_eq!(result["agent_process_alive"], true);
-    assert_eq!(
-        result["rejected_old_client_writes"]
-            .as_array()
-            .unwrap()
-            .len(),
-        4
-    );
-    assert_eq!(store.session_attachment(session).unwrap(), Some(second));
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let parents: Vec<String> = conn.prepare(
-        "SELECT parent_lf_process_id FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"
-    ).unwrap().query_map([session], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
-    assert_eq!(parents.first(), Some(&original.id.to_string()));
-    assert!(
-        parents.len() >= 3,
-        "initial, continuing and subsequent turns must invoke lf"
-    );
-    assert!(
-        parents[1..]
-            .iter()
-            .all(|parent| *parent == replacement.id.to_string()),
-        "{parents:?}"
-    );
-    for task in [old, observer, current] {
-        task.abort();
-    }
-}
-
-fn serve_gate(
-    socket: &Path,
-    endpoint: &Path,
-    connection: CodexConnection,
-) -> tokio::task::JoinHandle<()> {
-    let listener = tokio::net::UnixListener::bind(socket).unwrap();
-    let endpoint = endpoint.to_path_buf();
-    tokio::spawn(async move {
-        let mut clients = tokio::task::JoinSet::new();
-        loop {
-            let (socket, _) = listener.accept().await.unwrap();
-            let connection = connection.clone();
-            let endpoint = endpoint.clone();
-            clients.spawn(async move {
-                if let Err(error) = connection.serve(socket, &endpoint).await {
-                    eprintln!("native fixture client closed: {error}");
-                }
-            });
-        }
-    })
 }
 
 #[tokio::test]

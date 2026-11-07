@@ -11,12 +11,31 @@ private func enrichProcessPathForGUILaunch() {
     }
 }
 
+@MainActor
+final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
+    let workspaces = RepositoryWorkspaces(
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
+        runtime: .shared)
+    private var quitting = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !quitting else { return .terminateLater }
+        quitting = true
+        workspaces.prepareForQuit()
+        Task { @MainActor in
+            await workspaces.releaseViewersForQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct LoopflowApp: App {
+    @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var delegate
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
-    @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var appDelegate
-    private var workspaces: RepositoryWorkspaces { appDelegate.workspaces }
+    private var workspaces: RepositoryWorkspaces { delegate.workspaces }
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false

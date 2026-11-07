@@ -19,16 +19,14 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
-/// Codex runs thread-configured hooks only when that configuration also trusts
-/// them, and its review screen lists only launch layers. Trust exactly these
-/// declarations for this thread; host entries and persisted decisions stay as found.
-/// Hash protocol: codex-rs/hooks/src/engine/discovery.rs (0.164.0).
-pub(crate) fn codex_config(
+/// The app-server's session-flags `hooks`: a wrapper's declarations, then lf's,
+/// each of lf's trusted so Codex runs it without review. Wrapper declarations keep
+/// their indices so their trust IDs survive; host entries and persisted decisions
+/// stay as found. Hash protocol: codex-rs/hooks/src/engine/discovery.rs (0.164.0).
+pub(crate) fn codex_hooks(
     context: &ContextDelivery,
     session_hooks: Option<&Value>,
 ) -> Result<Value> {
-    // Thread configuration replaces the app-server's session-flags layer. Keep
-    // wrapper declarations at their original indices so their trust IDs survive.
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
     let additions = context.hook_settings()?;
     let mut states = hooks
@@ -51,27 +49,36 @@ pub(crate) fn codex_config(
             .cloned()
             .unwrap_or_default();
         for group in groups {
-            let mut handler = group["hooks"][0].clone();
-            handler["async"] = json!(false);
-            let mut identity = json!({"event_name":event_name, "hooks":[handler]});
-            if let Some(matcher) = group.get("matcher") {
-                identity["matcher"] = matcher.clone();
+            // Codex trusts each handler on its own, with its defaults filled in
+            // (verified with `hooks/list` on 0.166.0).
+            let handlers = group["hooks"].as_array().into_iter().flatten();
+            for (index, handler) in handlers.enumerate() {
+                let mut handler = handler.clone();
+                for (field, default) in [("async", json!(false)), ("timeout", json!(600))] {
+                    if handler.get(field).is_none() {
+                        handler[field] = default;
+                    }
+                }
+                let mut identity = json!({"event_name":event_name, "hooks":[handler]});
+                if let Some(matcher) = group.get("matcher") {
+                    identity["matcher"] = matcher.clone();
+                }
+                identity.sort_all_objects();
+                let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity)?));
+                states.insert(
+                    format!(
+                        "/<session-flags>/config.toml:{event_name}:{}:{index}",
+                        combined.len()
+                    ),
+                    json!({"trusted_hash":format!("sha256:{hash}")}),
+                );
             }
-            identity.sort_all_objects();
-            let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity)?));
-            states.insert(
-                format!(
-                    "/<session-flags>/config.toml:{event_name}:{}:0",
-                    combined.len()
-                ),
-                json!({"trusted_hash":format!("sha256:{hash}")}),
-            );
             combined.push(group.clone());
         }
         hooks[event] = json!(combined);
     }
     hooks["state"] = Value::Object(states);
-    Ok(json!({"hooks":hooks}))
+    Ok(hooks)
 }
 
 pub(crate) fn add_opencode_context(
@@ -152,6 +159,7 @@ fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Resu
 mod tests {
     use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions() {
@@ -174,8 +182,8 @@ mod tests {
                 references: vec![repo.path().join("task-reference.md")],
             })
             .collect();
-        let first = super::codex_config(&contexts[0], None).unwrap();
-        assert_eq!(first, super::codex_config(&contexts[1], None).unwrap());
+        let first = super::codex_hooks(&contexts[0], None).unwrap();
+        assert_eq!(first, super::codex_hooks(&contexts[1], None).unwrap());
         assert_eq!(
             super::claude_args(&contexts[0]).unwrap(),
             super::claude_args(&contexts[1]).unwrap()
@@ -225,7 +233,7 @@ mod tests {
                 "/<session-flags>/config.toml:session_start:0:0": {"trusted_hash": "host"},
             },
         });
-        let hooks = &super::codex_config(&context, Some(&host)).unwrap()["hooks"];
+        let hooks = &super::codex_hooks(&context, Some(&host)).unwrap();
         assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
         let state = hooks["state"].as_object().unwrap();
         assert_eq!(state["host-trust"]["trusted_hash"], "unchanged");
@@ -245,10 +253,23 @@ mod tests {
                 "/<session-flags>/config.toml:post_tool_use:0:0",
                 "/<session-flags>/config.toml:session_start:0:0",
                 "/<session-flags>/config.toml:session_start:1:0",
+                "/<session-flags>/config.toml:session_start:1:1",
                 "/<session-flags>/config.toml:session_start:2:0",
                 "/<session-flags>/config.toml:stop:0:0",
+                "/<session-flags>/config.toml:stop:0:1",
                 "/<session-flags>/config.toml:user_prompt_submit:0:0",
             ]
+        );
+        // Codex hashes a handler with its defaults filled in (codex-cli 0.166.0
+        // `hooks/list`), so an async handler without a timeout is trusted too.
+        let handler = &hooks["Stop"][0]["hooks"][1];
+        let mut identity = serde_json::json!({"event_name":"stop", "hooks":[{
+            "type":"command", "command":handler["command"], "async":true, "timeout":600}]});
+        identity.sort_all_objects();
+        let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity).unwrap()));
+        assert_eq!(
+            state["/<session-flags>/config.toml:stop:0:1"]["trusted_hash"],
+            format!("sha256:{hash}")
         );
         // Each Loopflow entry trusts the exact declaration at its own index.
         assert_ne!(

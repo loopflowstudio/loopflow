@@ -371,8 +371,8 @@ final class GhosttySurfacePool {
     }
 
     /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
-    /// so the Session owner records a deliberate leave. Through SSH a hangup
-    /// alone cannot show that the viewer exited and keeps the Task checkout.
+    /// so the Session owner records a deliberate leave without waiting for
+    /// connection-loss detection across SSH.
     func release(_ id: TerminalIdentity) {
         guard let view = views.removeValue(forKey: id) else { return }
         guard view.detachRelay() else {
@@ -382,6 +382,18 @@ final class GhosttySurfacePool {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(500))
             view.destroySurface()
+        }
+    }
+
+    /// Begin ordinary leave for every attached relay before the app exits.
+    func detachForQuit() {
+        for view in views.values { _ = view.detachRelay() }
+    }
+
+    var hasRunningRelays: Bool {
+        views.values.contains { view in
+            guard let surface = view.surface else { return false }
+            return !ghostty_surface_process_exited(surface)
         }
     }
 
@@ -1663,6 +1675,8 @@ final class GhosttySurfacePool {
     func scrollToBottom(_ id: TerminalIdentity) {}
     func screen(_ id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func detachForQuit() {}
+    var hasRunningRelays: Bool { false }
     func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }
@@ -1724,8 +1738,8 @@ struct GhosttyTerminalView: View {
 
 #endif
 
-// Block geometry and the header format stay outside the Ghostty build: the
-// shell bootstrap below names the header marker in every configuration.
+// Block geometry and the header format stay outside the Ghostty build.
+// GhosttyResources/task-zshenv prints the same marker in the shell prompt.
 
 /// The directory line above a command. The Loopflow prompt prints it as
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;

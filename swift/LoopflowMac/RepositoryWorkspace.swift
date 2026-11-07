@@ -14,20 +14,6 @@ struct RepositoryWorkspace: Codable, Hashable, Sendable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// Quit fences window teardown so closing windows cannot erase saved warm intent.
-/// Terminal viewers end with the app; no departure is reported.
-@MainActor
-final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
-    let workspaces = RepositoryWorkspaces(
-        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
-        runtime: .shared)
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        workspaces.prepareForQuit()
-        return .terminateNow
-    }
-}
-
 /// Application lifetime, keyed by the stable repository scene resolved by WorkLinkRouter.
 /// Closing a window releases its mounts, not its Work, drafts or terminal surfaces.
 @MainActor
@@ -44,6 +30,17 @@ final class RepositoryWorkspaces {
     init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
         self.localMachineId = localMachineId
         self.runtime = runtime
+    }
+
+    func releaseViewersForQuit() async {
+        let pools = repositories.values.map(\.surfaces)
+        for pool in pools { pool.detachForQuit() }
+        // Let leave cross SSH before AppKit tears down the PTYs. If delivery
+        // fails, the remote connection's bounded absence policy owns cleanup.
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline && pools.contains(where: \.hasRunningRelays) {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     func registry(for repository: String) -> SessionsWorkspaceRegistry {

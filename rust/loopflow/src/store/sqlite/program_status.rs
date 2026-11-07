@@ -3,7 +3,6 @@
 //! is the witness, and a later launch replaces it like any other provider.
 use rusqlite::params;
 
-use crate::id::LfProcessId;
 use crate::program_status::Records;
 use crate::store::{StoreError, StoreResult};
 
@@ -13,7 +12,7 @@ impl SqliteStore {
     pub(crate) fn begin_program_status(
         &self,
         session: &str,
-        agent_process: Option<&LfProcessId>,
+        agent_process: Option<&crate::id::AgentProcessId>,
         stream: &str,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -33,7 +32,7 @@ impl SqliteStore {
     pub(crate) fn record_program_status(
         &self,
         session: &str,
-        agent_process: Option<&LfProcessId>,
+        agent_process: Option<&crate::id::AgentProcessId>,
         stream: &str,
         sequence: i64,
         records: &Records,

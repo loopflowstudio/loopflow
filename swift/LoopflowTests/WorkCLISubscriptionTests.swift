@@ -167,6 +167,9 @@ struct WorkCLISubscriptionTests {
 
         model.select(.wave(id: wave.wave.id))
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
+        #if canImport(GhosttyKit)
+        #expect(registry.surfaces.programStatus(for: surfaceID) == nil)
+        #endif
         // A closed Task left the plan; an edit made while it is not shown
         // reaches it when it is shown again, without restoring the old selection.
         _ = try await fixture.run(["task", "edit", id, "--title", "Updated after navigation"])
@@ -296,6 +299,7 @@ private struct WorkCLIFixture: Sendable {
     }
 
     func prepare() async throws {
+        _ = try await run(["set", "--global", "default_agent", "claude"])
         let graphs = repo.appendingPathComponent(".lf/graphs")
         try FileManager.default.createDirectory(at: graphs, withIntermediateDirectories: true)
         try Data("- cmd: graph show proof\n- interactive: {name: demo, id: review}\n".utf8)

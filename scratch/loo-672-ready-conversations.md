@@ -1,5 +1,23 @@
 # LOO-672 — Ready Task conversations
 
+## November 7 sync and delivery
+
+Jack Heart approved landing after the November 5 demo, then requested sixteen
+warm Tasks. That approval supersedes the earlier review-only boundary below.
+LOO-717 / #1811 merged on November 7; #1816 now targets main. Jack requested this
+sync. Preserve automatic opening, the sixteen-Task warm set, two preparation
+slots, explicit Close and Take back, and reading-only automatic first turns.
+
+The sync combines main's remote stream transport with non-replacing automatic
+claims, including prepared remote commands. One application delegate preserves
+warm intent before sending Leave and waiting for viewer exit on Quit. Main owns
+shell recovery and bounded viewer retention. Formatting and Clippy pass. The focused Rust selection passed 49 tests.
+Desktop passed 45 cache, retention and polish tests; four CLI subscription tests
+failed because their fixture did not select a provider after main changed that
+default. Setting the fixture’s default_agent to claude fixed all four; the
+affected suite passed on rerun. No live provider was launched by those tests. Existing native
+demo evidence and its unverified limits remain in `loo-672-demo.md`.
+
 Accepted design, reconciled November 4, 2026; Jack Heart approved the revised
 November 4 design: “ok, proceed.” Implementation and review publication are
 authorized through interactive demo; shipping, merging and installation are not.

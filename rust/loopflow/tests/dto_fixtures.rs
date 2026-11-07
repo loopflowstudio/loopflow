@@ -313,28 +313,27 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 #[test]
 fn process_page_retains_outcomes_unknowns_and_continuation() {
     let json = include_str!("../../../tests/fixtures/dto/process_page.json");
-    let page: loopflow::process::LfProcessPage = serde_json::from_str(json).unwrap();
-    assert_eq!(page.entries[0].exit_code, Some(42));
-    assert_eq!(page.entries[0].via_agent, None);
-    assert_eq!(page.entries[0].pid, None);
-    assert_eq!(page.entries[1].pid, Some(4242));
-    assert_eq!(page.entries[1].kind, loopflow::process::ProcessKind::Agent);
-    assert_eq!(
-        page.entries[1].agent_session_id.as_deref(),
-        Some("conversation")
-    );
-    assert_eq!(page.entries[1].os_started_at, Some(1790640000));
-    assert_eq!(
-        page.entries[1].parent_lf_process_id.as_ref(),
-        Some(&page.entries[0].id)
-    );
-    assert_eq!(page.entries[1].outcome, None);
-    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
+    let loopflow::process::ProcessEntry::Lf(lf) = &page.entries[0] else {
+        panic!("first entry is an lf Process")
+    };
+    let loopflow::process::ProcessEntry::Agent(agent) = &page.entries[1] else {
+        panic!("second entry is an AgentProcess")
+    };
+    assert_eq!(lf.exit_code, Some(42));
+    assert_eq!(lf.via_agent, None);
+    assert_eq!(lf.pid, None);
+    assert_eq!(agent.pid, Some(4242));
+    assert_eq!(agent.agent_session_id.as_deref(), Some("conversation"));
+    assert_eq!(agent.os_started_at, Some(1790640000));
+    assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&lf.id));
+    assert_eq!(agent.outcome, None);
+    assert_eq!(page.next.as_ref().unwrap().id, agent.id.as_str());
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::process::LfProcessPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
 }
 
 #[test]
@@ -530,6 +529,40 @@ fn graph_detail_keeps_its_launched_graph_and_every_step() {
         serde_json::to_value(detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
+}
+
+/// Every state Rust can send, so Swift's decoder is tested against all of them.
+#[test]
+fn selection_states_fixture_lists_every_state() {
+    use loopflow::work::selection::SelectionState;
+    fn collect(schema: &serde_json::Value, names: &mut Vec<String>) {
+        match schema {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    match (key.as_str(), value) {
+                        ("const", serde_json::Value::String(name)) => names.push(name.clone()),
+                        ("enum", serde_json::Value::Array(values)) => names
+                            .extend(values.iter().filter_map(|v| v.as_str().map(str::to_owned))),
+                        _ => collect(value, names),
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => values.iter().for_each(|v| collect(v, names)),
+            _ => {}
+        }
+    }
+    let mut sent = Vec::new();
+    collect(
+        &serde_json::to_value(schemars::schema_for!(SelectionState)).unwrap(),
+        &mut sent,
+    );
+    sent.sort();
+    let mut fixture: Vec<String> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/selection_states.json"
+    ))
+    .unwrap();
+    fixture.sort();
+    assert_eq!(fixture, sent);
 }
 
 #[test]

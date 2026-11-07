@@ -201,7 +201,7 @@ struct ProgramStatusTests {
             }
             try? FileManager.default.removeItem(at: directory)
         }
-        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "agent"))
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "agent")))
         surface.receive(.report(report(.working, msg: "First turn")), incarnation: surface.incarnation)
         try await eventually { surface.observationError != nil }
         #expect(surface.sessionId == "retained")
@@ -255,9 +255,9 @@ struct ProgramStatusTests {
         }
         surface.receive(.report(report(.blocked, msg: "Original question")), incarnation: surface.incarnation)
         try await eventually { surface.snapshot.summary?.state == .blocked }
-        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "first"))
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "first")))
         try await eventually { received()?.summary?.msg == "Original question" }
-        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "replacement"))
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: AgentProcessId(rawValue: "replacement")))
         surface.receive(.report(report(.idle, id: "new")), incarnation: surface.incarnation)
         try await eventually { received()?.summary?.state == .idle }
         #expect(received()?.records.count == 1)

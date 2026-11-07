@@ -283,7 +283,8 @@ arranged freely by dragging, zoom and hide; Wave and repository workspaces hold
 only the session pane. The session pane shows one conversation and switches when
 another opens. ⌘T adds a shell tab. The browser's tabs are the Task's Files, its
 Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pane.
-⇧⌘T puts the last closed tab back where it was, its shell still running.
+⇧⌘T restores the last closed tab's identity and history. Close ends its shell
+and jobs; New Shell starts fresh execution.
 
 **View → Toggle Files** shows a Task's checkout in the browser pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
@@ -1142,16 +1143,27 @@ intent retains its identity without initial commands: opening it attaches to the
 same owner and never replays startup or creates replacement execution.
 
 Task shell views attach to a retained owner on the Task's recorded Machine.
+Desktop supplies its existing Ghostty startup script and resource bytes when
+creating the shell; destination creation installs those resources, while reconnect
+only attaches. Desktop owns the shell runtime and execution receipts; shared transport has no Ghostty dependency.
+Its private destination runtime works without the GUI, including on Linux.
 Hide, switching Work and app exit detach presentation. Close ends that shell and
 its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a
 local prompt.
 
-Keep a Task Session viewer open to retain its worktree; the selected Task's
-panes are viewers. Switching Work, closing the window or quitting ends Desktop's
-viewers but leaves shells and agents running. Once a completed Task has no open
-viewer, its checkout and Desktop shells stay fifteen minutes, after requested
-work finishes; eligible idle agents end under the two-minute policy. Cleanup
-finishes without relaunching Desktop. Return before then to retain it again.
+Keep a Task Session viewer open to retain its worktree. Desktop shells accompany
+Task Sessions and add no separate hold. Switching Work, closing the window or
+quitting explicitly releases Desktop's viewers while execution stays on its
+owner. With no connected viewer, a completed Task's checkout and Desktop shells
+become eligible for cleanup after fifteen minutes. Installation's separate minute
+cleanup schedule normally starts deletion in 15–16 minutes while awake. Failed
+cleanup retries with backoff; a pending shell close continues on a later pass.
+Requested work, drafts and
+pending requests delay cleanup without restarting that clock; eligible idle
+agents follow the two-minute policy. LF's remote connection detects silent loss
+with viewer heartbeats. Reconnecting before cleanup cancels it; a longer outage
+can leave a completed Task without its checkout. Failed Quit delivery follows
+that same bounded absence policy.
 Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).

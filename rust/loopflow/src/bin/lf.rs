@@ -704,10 +704,10 @@ fn print_task_snapshot(
         for process in &snapshot.work.processes {
             println!(
                 "  Process: {}  {}  {}{}",
-                process.id,
-                process.command.as_deref().unwrap_or("unknown command"),
-                process.outcome.as_deref().unwrap_or("unknown"),
-                log(process.id.as_str()),
+                process.id(),
+                process.command().unwrap_or("unknown command"),
+                process.outcome().unwrap_or("unknown"),
+                log(process.id()),
             );
         }
         if let Some(project) = &snapshot.project_id {
@@ -1050,7 +1050,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             Ok(())
         }
         TaskCommand::Retire { .. }
-        | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
             unreachable!("workspace commands dispatch before repository binding")
@@ -1058,13 +1057,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
             issue,
-            retry_creation,
             retry_updates,
         } => {
-            println!(
-                "{}",
-                loopflow::ops::task::task_sync(issue, *retry_creation, *retry_updates)?
-            );
+            println!("{}", loopflow::ops::task::task_sync(issue, *retry_updates)?);
             Ok(())
         }
         TaskCommand::List {
@@ -1601,6 +1596,17 @@ fn run() -> anyhow::Result<()> {
     // The relay avoids the command tree. A passive reveal records its terminal
     // association only after the owner acknowledges input control.
     let mut raw_args: Vec<String> = std::env::args().collect();
+    if raw_args
+        .get(1..4)
+        .is_some_and(|args| args == ["session", "attach", "--"])
+    {
+        journal::mark_effect_free_read();
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        let replace = std::env::var_os("LF_RELAY_IF_FREE").is_none();
+        std::env::remove_var("LF_RELAY_IF_FREE");
+        return loopflow::transport::relay_over(&raw_args[4..], replace);
+    }
     if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
@@ -1794,6 +1800,11 @@ fn run() -> anyhow::Result<()> {
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
+    // The observer runs beside a conversation for days. It opens the store only
+    // to record, and failing to open it must not stop it.
+    if matches!(cli.command, Some(Commands::CodexObserve)) {
+        return loopflow::harness::codex_connection::run_observer();
+    }
     if cli.harness_callback() {
         journal::harness_issued();
     }
@@ -1929,34 +1940,15 @@ fn run() -> anyhow::Result<()> {
             cmd: TaskCommand::Retire { issue },
         }) => {
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::retirement::run(issue).map_err(Into::into);
+            return loopflow::ops::task::retirement::run(issue.as_deref()).map_err(Into::into);
         }
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Shell {
-                    issue,
-                    checkout,
-                    id,
-                    list,
-                    create,
-                    close,
-                    command,
-                },
+        Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
-            if *list {
-                return loopflow::ops::task::workspace::list_shells(issue, checkout);
-            }
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(
-                issue,
-                checkout,
-                id.as_deref().expect("Clap requires shell identity"),
-                *create,
-                *close,
-                command,
-            );
+            return loopflow::desktop::shells::run(shell);
         }
         Some(Commands::Task {
             cmd:
@@ -2895,6 +2887,7 @@ fn execute_command(
         Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
+        Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Set { .. } | Commands::Unset { .. }) => {

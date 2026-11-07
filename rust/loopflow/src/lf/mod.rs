@@ -652,6 +652,10 @@ pub enum Commands {
         #[arg(long, requires = "lifeline")]
         provider_pid: Option<u32>,
     },
+    /// Watch a Codex conversation beside its native client. Started by the
+    /// launcher, which sends the launch on stdin.
+    #[command(name = "__codex-observe", hide = true)]
+    CodexObserve,
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -744,6 +748,12 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    #[command(hide = true)]
+    Shell {
+        #[command(flatten)]
+        args: crate::desktop::shells::ShellArgs,
+    },
     /// Show a Work selection, or derive a passive plan for external hosts
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
@@ -1120,7 +1130,9 @@ impl Commands {
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
             Self::Portfolio { cmd, .. } => cmd.is_some(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
+                false
+            }
             Self::Ship { .. }
             | Self::Open(_)
             | Self::Inline { .. }
@@ -1145,7 +1157,6 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
-            Self::Shell { list, .. } => !list,
             Self::Retire { .. } => true,
             Self::Comment { message, .. } => message.is_some(),
             Self::Sweep { apply, .. } => *apply,
@@ -1225,6 +1236,7 @@ impl SkillCommand {
 impl DesktopCommand {
     pub fn changes_work(&self) -> bool {
         match self {
+            Self::Shell { .. } => true,
             Self::View { .. }
             | Self::Plans { .. }
             | Self::Plan { .. }
@@ -1994,9 +2006,6 @@ pub enum TaskCommand {
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
-        /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
-        #[arg(long)]
-        retry_creation: bool,
         /// Retry uncertain saved field/state updates after observing current Linear values
         #[arg(long)]
         retry_updates: bool,
@@ -2130,30 +2139,9 @@ until `lf ship`."
         #[arg(long)]
         json: bool,
     },
-    /// Open a shell in an existing Task checkout, without preparing work
-    Shell {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        /// Stable Desktop shell identity; attachment never creates execution
-        #[arg(long, required_unless_present = "list")]
-        id: Option<String>,
-        /// List retained shell identities, including ended shells
-        #[arg(long, conflicts_with_all = ["id", "create", "close", "command"])]
-        list: bool,
-        /// Create once, then attach; retrying the same identity never replays it
-        #[arg(long, conflicts_with = "close")]
-        create: bool,
-        /// End this shell and its ordinary jobs
-        #[arg(long)]
-        close: bool,
-        /// Initial command, followed by the destination login shell
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
-    /// Run the Task's recorded workspace retirement
+    /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
-    Retire { issue: String },
+    Retire { issue: Option<String> },
     /// Stream invalidations from an existing Task checkout (JSON lines)
     WatchFiles {
         issue: String,
@@ -2307,13 +2295,12 @@ impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Retire { issue }
-            | Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2336,13 +2323,12 @@ impl TaskCommand {
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Status { issue, .. }
+            Self::Retire { issue }
+            | Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Retire { issue }
-            | Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -3121,6 +3107,34 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
+        assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
+        let cli = Cli::try_parse_from([
+            "lf",
+            "desktop",
+            "shell",
+            "task-id",
+            "--checkout",
+            "/checkout",
+            "--id",
+            "shell-id",
+            "--create",
+        ])
+        .unwrap();
+        let Some(Commands::Desktop { cmd }) = cli.command else {
+            panic!("Desktop runtime command");
+        };
+        assert!(crate::lf::commands::desktop::runs_without_desktop(&cmd));
+        assert!(cmd.changes_work());
+        assert!(!cmd.is_read());
+        let mut command = Cli::command();
+        let task = command.find_subcommand_mut("task").unwrap();
+        assert!(task.find_subcommand("shell").is_none());
+        let desktop = command.find_subcommand_mut("desktop").unwrap();
+        assert!(!desktop.render_help().to_string().contains("shell runtime"));
+    }
+
+    #[test]
     fn only_changes_to_work_record_a_process() {
         let records = |args: &[&str]| {
             Cli::try_parse_from(["lf"].iter().chain(args))
@@ -3482,14 +3496,14 @@ mod tests {
     }
 
     #[test]
-    fn the_provider_hook_is_the_only_hidden_command_and_the_root_hides_no_flag() {
+    fn only_provider_side_commands_are_hidden_and_the_root_hides_no_flag() {
         let root = Cli::command();
         let hidden = root
             .get_subcommands()
             .filter(|command| command.is_hide_set())
             .map(|command| command.get_name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(hidden, ["__context-block"]);
+        assert_eq!(hidden, ["__context-block", "__codex-observe"]);
         fn internal(command: &clap::Command) -> Vec<String> {
             command
                 .get_subcommands()
@@ -3502,7 +3516,7 @@ mod tests {
                 })
                 .collect()
         }
-        assert_eq!(internal(&root), ["__context-block"]);
+        assert_eq!(internal(&root), ["__context-block", "__codex-observe"]);
         let hidden_flags = root
             .get_arguments()
             .filter(|arg| arg.is_hide_set())

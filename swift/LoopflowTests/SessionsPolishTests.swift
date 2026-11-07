@@ -42,7 +42,7 @@ struct SessionsPolishTests {
         #expect(local.multiplexer.focusedPane == shell)
     }
 
-    @Test("A shell exit preserves its disconnected pane while SessionsView is absent")
+    @Test("A shell attachment exit retains its pane for recovery while SessionsView is absent")
     func shellExitSurvivesNavigation() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
@@ -51,18 +51,23 @@ struct SessionsPolishTests {
         let tab = try #require(shell.content.selectedShell)
         let other = fixtureWork(registry, fixtureWorkspace("/tmp/other"))
         other.multiplexer.newShell(location: other.location)
+        let otherShell = other.multiplexer.focusedPane
 
         NotificationCenter.default.post(
             name: .ghosttySurfaceClosed, object: TerminalIdentity.session(tab.id, machineId: fixtureMachineId)
         )
         #expect(workspace.multiplexer.focusedPane == shell)
+        #expect(!workspace.disconnectedShells.contains(tab.id))
         NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId)
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId),
+            userInfo: ["output": "last shell output"]
         )
 
-        #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane == shell)
-        #expect(workspace.disconnectedShells.contains(tab.id))
-        #expect(other.multiplexer.focusedPane.content.selectedShell?.location == other.location)
+        let returned = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
+        #expect(returned.multiplexer.focusedPane == shell)
+        #expect(returned.disconnectedShells.contains(tab.id))
+        #expect(returned.shellScreens[tab.id] == "last shell output")
+        #expect(other.multiplexer.focusedPane == otherShell)
     }
 }
 #endif

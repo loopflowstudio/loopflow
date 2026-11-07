@@ -185,7 +185,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let availability: SessionAvailability?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    public let agentProcessId: String?
+    public let agentProcessId: AgentProcessId?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -291,7 +291,7 @@ extension SessionRecord {
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
-        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        agentProcessId = try values.decodeIfPresent(AgentProcessId.self, forKey: .agentProcessId)
         taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
         taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))

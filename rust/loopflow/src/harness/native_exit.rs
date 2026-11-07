@@ -23,6 +23,8 @@ pub(crate) struct NativeExit {
     /// Names the provider and its launcher Process, which completes at exit.
     pub attachment: SessionAttachment,
     pub provider: String,
+    /// A client of a provider running beside it, not the provider itself.
+    pub client: bool,
     pub resuming: bool,
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
@@ -62,9 +64,9 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             false
         })
     };
-    let interrupted = owner
-        .as_ref()
-        .is_some_and(|owner| judged("the provider's exit record", record_exit(owner)));
+    let interrupted = owner.as_ref().is_some_and(|owner| {
+        !exit.client && judged("the provider's exit record", record_exit(owner))
+    });
     let lost = owner.as_ref().is_some_and(|owner| {
         judged(
             "this launch's Session attachment",
@@ -115,7 +117,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     if let Some((store, _, attachment)) = &owner {
         let recorded = (|| -> Result<()> {
             let mut process = store
-                .process(&attachment.provider_lf_process_id)?
+                .lf_process(&attachment.provider_lf_process_id)?
                 .context("handed-off launcher is not recorded")?;
             process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
             process.outcome = Some(
@@ -152,7 +154,7 @@ pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
         Err(error) => return Err(error.into()),
     }
     Ok(store
-        .process(&attachment.agent_process_id)?
+        .agent_process(&attachment.agent_process_id)?
         .is_some_and(|process| {
             process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
         }))
@@ -258,6 +260,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment,
                 provider: "codex".into(),
+                client: false,
                 resuming: false,
                 cwd: home.into(),
                 capture: Some(capture.hand_off()),
@@ -319,6 +322,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
                 provider: "claude".into(),
+                client: false,
                 resuming: true,
                 cwd: home.into(),
                 capture: Some(capture.hand_off()),
@@ -347,7 +351,10 @@ mod tests {
                     true,
                 )
                 .unwrap();
-            let before = store.process(&next.agent_process_id).unwrap().unwrap();
+            let before = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
             assert_eq!(settled.code, 0);
             assert!(settled
@@ -358,10 +365,13 @@ mod tests {
                 store.session_attachment(&session.id).unwrap(),
                 Some(next.clone())
             );
-            let after = store.process(&next.agent_process_id).unwrap().unwrap();
+            let after = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
             assert_eq!(after.outcome, before.outcome);
-            let launcher = store.process(&launcher).unwrap().unwrap();
+            let launcher = store.lf_process(&launcher).unwrap().unwrap();
             assert_eq!(launcher.exit_code, Some(0));
             assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));
             let terminal: serde_json::Value = serde_json::from_slice(

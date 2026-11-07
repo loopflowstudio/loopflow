@@ -96,7 +96,7 @@ fn carrier_evidence(
     shipping: &TaskShipping,
 ) -> ProcessIdentityEvidence {
     match &shipping.process {
-        Some(process) => crate::journal::process_evidence(sqlite, process),
+        Some(process) => crate::journal::lf_evidence(sqlite, process),
         None => ProcessIdentityEvidence::Dead,
     }
 }
@@ -246,7 +246,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .and_then(|shipping| shipping.process)
         {
             if carrier != process
-                && crate::journal::process_evidence(&store.sqlite, &carrier)
+                && crate::journal::lf_evidence(&store.sqlite, &carrier)
                     != ProcessIdentityEvidence::Dead
             {
                 return Ok(ShipStart::AlreadyShipping {
@@ -347,12 +347,11 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
             .and_then(|shipping| shipping.process.as_ref())
             .filter(|process| current.as_ref() != Some(*process))
         {
-            if crate::journal::process_evidence(&store.sqlite, process)
-                == ProcessIdentityEvidence::Live
+            if crate::journal::lf_evidence(&store.sqlite, process) == ProcessIdentityEvidence::Live
             {
                 if let Some(pid) = store
                     .sqlite
-                    .process(process)
+                    .lf_process(process)
                     .ok()
                     .flatten()
                     .and_then(|record| record.pid)

@@ -289,7 +289,7 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
     let (store, _, attachment) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
     assert!(store
-        .process(&attachment.agent_process_id)
+        .agent_process(&attachment.agent_process_id)
         .unwrap()
         .unwrap()
         .completed_at
@@ -357,7 +357,10 @@ async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
     assert!(pi.send_input("stale direction").await.is_err());
     assert!(pi.stop().await.is_err());
     let pid = pi.pid().unwrap();
-    let process = store.process(&current.agent_process_id).unwrap().unwrap();
+    let process = store
+        .agent_process(&current.agent_process_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         crate::journal::process_identity_evidence(pid, process.os_started_at.unwrap()),
         crate::journal::ProcessIdentityEvidence::Live

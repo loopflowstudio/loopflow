@@ -230,6 +230,8 @@ enum PaneGeometry {
     static let windowInset: CGFloat = 10
     static let spacing: CGFloat = 6
     static let cornerRadius = CornerRadius.md
+    /// Pane chrome and content keep clear of the corner arc on every edge.
+    static let inset = cornerRadius
     // Nested curves share a center at the workspace's lower corners.
     static let workspaceCornerRadius = cornerRadius + spacing
     /// Square across the titlebar; rounded where the workspace nests in the window.
@@ -419,7 +421,7 @@ struct SessionPaneView: View {
             }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
-                .padding(pane.terminal == nil ? 0 : PaneGeometry.cornerRadius)
+                .padding(pane.terminal == nil ? 0 : PaneGeometry.inset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -551,8 +553,7 @@ struct SessionPaneView: View {
                 .accessibilityIdentifier("pane-actions")
             }
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 4)
+        .padding(.horizontal, PaneGeometry.inset)
         .frame(height: 28)
         .contentShape(Rectangle())
         .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { [hover] inside in
@@ -747,7 +748,7 @@ struct SessionPaneView: View {
             }
         case .shell:
             VStack(spacing: 0) {
-                if !showsStrip { shellTabs.padding(4) }
+                if !showsStrip { shellTabs.padding(PaneGeometry.inset) }
                 if let tab = pane.content.selectedShell,
                           tab.location != nil, let terminal = tab.terminal {
                     if workspace.disconnectedShells.contains(tab.id) {
@@ -778,7 +779,7 @@ struct SessionPaneView: View {
             }
         case .browser(let taskId, _, _, let location, let execution):
             VStack(spacing: 0) {
-                if !showsStrip { browserTabs.padding(4) }
+                if !showsStrip { browserTabs.padding(PaneGeometry.inset) }
                 switch pane.content.selectedBrowserTab {
                 case .graphLog:
                     GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,

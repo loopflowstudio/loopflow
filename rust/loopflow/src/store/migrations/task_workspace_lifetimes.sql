@@ -1,5 +1,5 @@
 -- Desktop shell receipts are identities, not a second process ledger.
-CREATE TABLE task_shells (
+CREATE TABLE desktop_shells (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id),
     checkout TEXT NOT NULL,
@@ -8,22 +8,22 @@ CREATE TABLE task_shells (
     jobs_settled INTEGER NOT NULL DEFAULT 0,
     close_requested INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX task_shells_task ON task_shells(task_id);
-CREATE UNIQUE INDEX task_shells_owner ON task_shells(owner);
-CREATE TRIGGER store_revision_task_shells_insert AFTER INSERT ON task_shells BEGIN
+CREATE INDEX desktop_shells_task ON desktop_shells(task_id);
+CREATE UNIQUE INDEX desktop_shells_owner ON desktop_shells(owner);
+CREATE TRIGGER store_revision_desktop_shells_insert AFTER INSERT ON desktop_shells BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;
-CREATE TRIGGER store_revision_task_shells_update AFTER UPDATE ON task_shells BEGIN
+CREATE TRIGGER store_revision_desktop_shells_update AFTER UPDATE ON desktop_shells BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;
-CREATE TRIGGER store_revision_task_shells_delete AFTER DELETE ON task_shells BEGIN
+CREATE TRIGGER store_revision_desktop_shells_delete AFTER DELETE ON desktop_shells BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';
 END;
 
--- The serving owner's own viewers retain its Task checkout. `viewed`: an
--- attached viewer has not left; `unknown`: an SSH viewer dropped without leaving.
--- Host identities are never stored.
-ALTER TABLE processes ADD COLUMN viewer_hold TEXT CHECK(viewer_hold IN ('viewed','unknown'));
+-- Session-view evidence lives on its existing serving Process. Timestamps bound
+-- retention if that owner crashes. Shell viewers never retain Task checkouts.
+ALTER TABLE processes ADD COLUMN viewer_hold TEXT CHECK(viewer_hold IN ('viewed','absent'));
+ALTER TABLE processes ADD COLUMN viewer_hold_at INTEGER;
 CREATE TABLE task_retirements (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id),
     completion TEXT NOT NULL,
@@ -31,7 +31,9 @@ CREATE TABLE task_retirements (
     branch TEXT NOT NULL,
     due_at INTEGER,
     phase TEXT NOT NULL CHECK(phase IN ('waiting','closing','retired')),
-    reason TEXT
+    reason TEXT,
+    retry_at INTEGER,
+    failures INTEGER NOT NULL DEFAULT 0
 );
 CREATE TRIGGER store_revision_task_retirements_insert AFTER INSERT ON task_retirements BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='processes';

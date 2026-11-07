@@ -287,6 +287,9 @@ leaves it in place. Nothing to change, no open product choice.
 
 ## Check results
 
+- gate (2026-11-06, HEAD `0cb8bf465`, main `12d897b6b`, #1813 still OPEN): `scripts/test.py --reuse-passing --rust-filter <id/store/journal/harness/lf::commands/ops/session_record/… + doctor_tests/dto_fixtures/session_cli_tests/store_contention/task_abandonment + binary(agent_tests|process_ownership_tests|lf)>` — architecture, rustfmt, inventory, website, Swift (`test_desktop.sh`, incl. `DTOFixtureTests`, `TaskWorkView` build), Swift boundaries PASS; Rust 1101/1113, 12 FAIL. The same 12 fail on a clean origin/main checkout (0/12): 9 `graph_tests` + `native_runner_is_quiet…_codex_foreground` see real claude/codex/opencode/pi on inherited PATH ("No agent selected … exactly one supported harness"), 2 `agent_tests` read this Machine's `manabot-eng` account. Machine fixture leaks, not this branch; CI owns them. `cargo clippy --all-targets -- -D warnings` clean (run separately; the runner skips it after a test failure).
+- Deferred: `server_schema.json` regeneration and Swift `ServerProtocolTests` wait for #1813.
+
 - compress `lf_evidence` rename + `agent_evidence` dedupe (2026-11-06): `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- journal:: store::sqlite::processes:: harness::agent_process:: harness::task_updates::` 72/72.
 - implement renames (2026-11-06): `cargo check -p loopflow --all-targets` clean; `cargo test -p loopflow --lib store::sqlite::processes::` 18/18; `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
 - realign (2026-11-06, after merging main `12d897b6b`): `cargo check -p loopflow --all-targets` — clean; Done-when greps still empty.

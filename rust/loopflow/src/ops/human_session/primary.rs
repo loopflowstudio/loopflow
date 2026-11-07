@@ -1,5 +1,5 @@
-//! The one ongoing conversation of a scope. A primary Session is an ordinary
-//! interactive conversation; its row names the scope it is primary for.
+//! The ongoing conversation of a scope. Shared scopes mark their primary
+//! Session; a Task points to one of its existing conversations.
 
 use std::path::Path;
 
@@ -90,7 +90,7 @@ pub(crate) async fn ensure_task(
             wave_id: task.wave_id.clone(),
             work_source: Some(WorkSource::Declared),
             request,
-            ..conversation(cwd, task.agent.as_deref(), "task/session", task.title)?
+            ..conversation(cwd, "task/session", task.title)?
         };
         store.ensure_primary_session(&scope, candidate).await?
     };
@@ -158,24 +158,18 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
 
 /// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
-pub(crate) async fn admit_workspace(
-    store: &SharedStore,
-    mut session: LfSession,
-) -> Result<LfSession> {
+pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    if store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .is_some_and(|summary| {
-            summary.agent_process_id.is_some()
-                && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
-        })
-    {
+    let summary = store.sqlite.session_summary(
+        &session.id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
+    if summary.as_ref().is_some_and(|summary| {
+        summary.agent_process_id.is_some()
+            && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+    }) {
         return Ok(session);
     }
     let cwd = match &scope {
@@ -188,10 +182,19 @@ pub(crate) async fn admit_workspace(
             ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
         PrimaryScope::Task(task) => {
+            // Explicit adoption and binding already selected this directory.
+            if session.work_source == Some(WorkSource::Bound) {
+                return Ok(session);
+            }
             let task = store
                 .get_task(task)
                 .await?
                 .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
+            if task.worktree.as_ref().is_some_and(|root| {
+                crate::git::worktree_root(&session.cwd).ok().as_ref() == Some(root)
+            }) {
+                return Ok(session);
+            }
             if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
                 cwd
             } else {
@@ -210,8 +213,7 @@ pub(crate) async fn admit_workspace(
         }
     };
     if session.cwd != cwd {
-        store.sqlite.move_primary_workspace(&session, &cwd)?;
-        session.cwd = cwd;
+        return Ok(store.sqlite.admit_session_workspace(&session, &cwd)?);
     }
     Ok(session)
 }
@@ -222,7 +224,6 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> Result<LfSession> {
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,
-            binding.agent.as_deref(),
             "wave/session",
             binding.wave_name.clone().expect("Wave primary has a Wave"),
         )?
@@ -237,7 +238,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
         .unwrap_or_else(|| repo.to_string());
     Ok(LfSession {
         repo: Some(repo.to_string()),
-        ..conversation(repo.as_path(), None, "repo/session", title)?
+        ..conversation(repo.as_path(), "repo/session", title)?
     })
 }
 

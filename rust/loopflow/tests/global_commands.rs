@@ -42,6 +42,7 @@ fn success(output: Output) -> String {
 #[test]
 fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     fs::create_dir_all(repo.path().join(".lf")).unwrap();
@@ -54,7 +55,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     .unwrap();
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext_budgets:\n  memory_tokens: 700\n  scratch_bytes: 10000\n",
+        "agent: not-a-launchable-harness\ndocs: [missing.md]\ncontext:\n  budgets:\n    memory_tokens: 700\n    scratch_bytes: 10000\n",
     )
     .unwrap();
     fs::write(
@@ -94,11 +95,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
     for (key, value, source) in [
-        (
-            "memory_tokens",
-            400,
-            repo.path().join(".lf/wave/local/GOAL.md"),
-        ),
+        ("memory_tokens", 500, home.path().join(".lf/config.yaml")),
         ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
         ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
     ] {
@@ -127,6 +124,7 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
 #[test]
 fn explicit_home_ignores_retired_control_home_pins() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let source = tempfile::tempdir().unwrap();
     let store_path = home.path().join(".lf/loopflow.db");
     let store = SqliteStore::new(&store_path).unwrap();
@@ -147,15 +145,11 @@ fn explicit_home_ignores_retired_control_home_pins() {
             .unwrap();
         success(output);
     }
-    let connection = rusqlite::Connection::open(&store_path).unwrap();
-    let label: String = connection
-        .query_row(
-            "SELECT label FROM machines WHERE id=?1",
-            [marker.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(label, "renamed");
+    let config: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&fs::read_to_string(home.path().join(".lf/config.yaml")).unwrap())
+            .unwrap();
+    assert_eq!(config["machines"]["renamed"]["id"], marker.as_str());
+    assert!(config["machines"].get("proof").is_none());
     assert_eq!(fs::read(source_db).unwrap(), b"source must not be opened");
     assert_eq!(fs::read_dir(source.path()).unwrap().count(), 1);
 }
@@ -164,6 +158,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     repo.create_branch("install-task");
     let task = support::register_task_with_pr(
@@ -201,6 +196,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let database = home.path().join(".lf/loopflow.db");
     fs::create_dir_all(database.parent().unwrap()).unwrap();
@@ -230,6 +226,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
 #[test]
 fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let cwd = tempfile::tempdir().unwrap();
     let no_tools = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
@@ -240,7 +237,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["account", "--cached"],
         vec!["account", "--cached", "--details"],
         vec!["account", "route"],
-        vec!["account", "route", "--repo", "example/project"],
+        vec!["account", "route", "--repo", cwd.path().to_str().unwrap()],
         vec!["wave", "list", "--json"],
         vec!["monitor", "ps", "--json"],
     ] {
@@ -266,6 +263,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 #[test]
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let cwd = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
@@ -300,14 +298,19 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     )
     .output()
     .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--global"));
+    success(output);
+    let preferences: loopflow::config::Config = serde_yaml_ng::from_str(
+        &fs::read_to_string(cwd.path().join("lf.config.local.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(preferences.account["claude"].0, vec!["person@example.com"]);
     assert!(!cwd.path().join(".lf").exists());
 }
 
 #[test]
 fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let outside = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let other = TestRepo::new();
@@ -360,6 +363,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
 #[test]
 fn broken_git_metadata_is_not_treated_as_an_ordinary_folder() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let cwd = tempfile::tempdir().unwrap();
     fs::write(
         cwd.path().join(".git"),
@@ -373,101 +377,43 @@ fn broken_git_metadata_is_not_treated_as_an_ordinary_folder() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot discover Git repository"));
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
-
+fn scheduled_install_preserves_the_account_schedule_from_a_disposable_home() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let cwd = tempfile::tempdir().unwrap();
-    let bin = home.path().join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    symlink("/usr/bin/id", bin.join("id")).unwrap();
-    fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootstrap) : > \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
-    fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
-    let run = |args: &[&str]| {
-        success(
-            command(home.path(), cwd.path(), &["self", "install", "schedule"])
-                .args(args)
-                .env("PATH", &bin)
-                .env("LF_INSTALL_DIR", home.path().join("installed & current"))
-                .output()
-                .unwrap(),
-        )
-    };
-    assert!(run(&[]).contains("weekly"));
-    let path = home
-        .path()
-        .join("Library/LaunchAgents/com.loopflow.refresh.plist");
-    let read_plist = || -> serde_json::Value {
-        let output = Command::new("/usr/bin/plutil")
-            .args(["-convert", "json", "-o", "-"])
-            .arg(&path)
-            .output()
-            .unwrap();
-        serde_json::from_str(&success(output)).unwrap()
-    };
-    let plist = read_plist();
-    assert_eq!(plist["ProgramArguments"][1], "install");
-    assert_eq!(plist["ProgramArguments"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
-        home.path().join("installed & current").to_str().unwrap()
-    );
-    assert!(plist.get("WorkingDirectory").is_none());
-    assert_eq!(plist["RunAtLoad"], true);
-    assert_eq!(
-        plist["StartCalendarInterval"],
-        serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0})
-    );
-    assert!(home.path().join("loaded").exists());
-    let modified = fs::metadata(&path).unwrap().modified().unwrap();
-    run(&[]);
-    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
-    fs::remove_file(home.path().join("loaded")).unwrap();
-    run(&[]);
-    assert!(home.path().join("loaded").exists());
-
-    for (frequency, expected) in [
-        ("daily", serde_json::json!({"Hour": 9, "Minute": 0})),
-        ("hourly", serde_json::json!({"Minute": 0})),
-        (
-            "5min",
-            serde_json::json!([
-                {"Minute": 0}, {"Minute": 5}, {"Minute": 10}, {"Minute": 15},
-                {"Minute": 20}, {"Minute": 25}, {"Minute": 30}, {"Minute": 35},
-                {"Minute": 40}, {"Minute": 45}, {"Minute": 50}, {"Minute": 55}
-            ]),
-        ),
-        (
-            "weekly",
-            serde_json::json!({"Weekday": 1, "Hour": 9, "Minute": 0}),
-        ),
+    for frequency in [
+        None,
+        Some("daily"),
+        Some("weekly"),
+        Some("hourly"),
+        Some("5min"),
     ] {
-        run(&[frequency]);
-        assert_eq!(read_plist()["StartCalendarInterval"], expected);
-        assert!(home.path().join("loaded").exists());
-        let modified = fs::metadata(&path).unwrap().modified().unwrap();
-        run(&[frequency]);
-        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        let mut args = vec!["self", "install", "schedule"];
+        args.extend(frequency);
+        let output = success(command(home.path(), cwd.path(), &args).output().unwrap());
+        assert!(
+            output.contains("Not scheduling installation: HOME"),
+            "{output}"
+        );
+        assert!(!home.path().join("Library/LaunchAgents").exists());
+        assert!(!home.path().join(".lf/logs").exists());
     }
-    let before = fs::read(&path).unwrap();
     let output = command(
         home.path(),
         cwd.path(),
         &["self", "install", "schedule", "monthly"],
     )
-    .env("PATH", &bin)
     .output()
     .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
-    assert_eq!(fs::read(&path).unwrap(), before);
 }
 
 #[test]
 fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let output = success(
         command(home.path(), home.path(), &["--explain", "--json"])
             .output()
@@ -483,6 +429,7 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 #[test]
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     for operation in [
         "state", "ls", "actions", "events", "wait", "back", "hide", "show", "focus", "move",
         "resize", "zoom", "run", "capture", "send", "send-key",
@@ -529,6 +476,7 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
 fn repo_selection_uses_machine_root_or_explicit_checkout_without_registration() {
     use std::os::unix::fs::symlink;
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let outside = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join("src")).unwrap();
@@ -575,6 +523,7 @@ fn repo_selection_uses_machine_root_or_explicit_checkout_without_registration() 
 #[test]
 fn repo_selection_reports_resolved_missing_or_non_git_path_before_effects() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let outside = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join("src/empty")).unwrap();
     for name in ["absent", "empty"] {
@@ -602,6 +551,7 @@ fn repo_selection_reports_resolved_missing_or_non_git_path_before_effects() {
 #[test]
 fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let selected = TestRepo::new();
     let other = TestRepo::new();
     let created: serde_json::Value = serde_json::from_str(&success(
@@ -666,7 +616,17 @@ fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
 #[test]
 fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let selected = TestRepo::new();
+    success(
+        command(
+            home.path(),
+            selected.path(),
+            &["set", "--global", "default_agent", "codex"],
+        )
+        .output()
+        .unwrap(),
+    );
     let other = TestRepo::new();
     let first = "task_abcd1234400080000000000000000001";
     let second = "task_abcd1235400080000000000000000002";
@@ -675,7 +635,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         (other.path(), second, "Other"),
     ] {
         success(
-            command(home.path(), repo, &["wave", "ensure", "inbox", "--json"])
+            command(home.path(), repo, &["wave", "add", "inbox", "--json"])
                 .output()
                 .unwrap(),
         );
@@ -835,11 +795,12 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
 #[test]
 fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     repo.create_file(".lf/skills/probe.md", "Inspect preview marker.");
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
+        "agent: codex\ndiff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  memory_tokens: 300\n",
     );
     let message = "Long supplied direction. ".repeat(500);
     let output = success(
@@ -901,6 +862,7 @@ fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands()
 #[test]
 fn non_agent_context_previews_reject_before_reading_stdin() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let input = tempfile::NamedTempFile::new().unwrap();
     fs::write(input.path(), [0xff]).unwrap();
@@ -927,6 +889,7 @@ fn non_agent_context_previews_reject_before_reading_stdin() {
 #[test]
 fn task_run_explain_reads_unstarted_work_without_preparing_it() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let created: serde_json::Value = serde_json::from_str(&success(
         command(
@@ -995,6 +958,7 @@ fn task_run_explain_reads_unstarted_work_without_preparing_it() {
 #[test]
 fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let run = |args: &[&str]| command(home.path(), repo.path(), args).output().unwrap();
     let plain: serde_json::Value =
@@ -1019,6 +983,7 @@ fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
 #[test]
 fn open_explain_preserves_state_and_matches_explicit_and_inferred_work() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("open-explain");
@@ -1064,6 +1029,7 @@ fn open_explain_preserves_state_and_matches_explicit_and_inferred_work() {
 fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
     use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let created: serde_json::Value = serde_json::from_str(&success(
         command(
@@ -1125,6 +1091,7 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
 #[test]
 fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("explain-proof");
@@ -1259,6 +1226,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
 #[test]
 fn task_run_explain_preserves_absent_and_unreadable_registries() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let path = home.path().join(".lf/loopflow.db");
     for corrupt in [false, true] {
@@ -1331,6 +1299,7 @@ fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::Lf
 #[test]
 fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_effects() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let session = connection_session(home.path(), repo.path());
     let db_path = home.path().join(".lf/loopflow.db");
@@ -1457,6 +1426,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
 #[test]
 fn session_resume_explain_preserves_missing_and_stale_evidence() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let read = |id: &str| -> serde_json::Value {
         serde_json::from_str(&success(
@@ -1511,6 +1481,7 @@ fn session_resume_explain_preserves_missing_and_stale_evidence() {
 fn session_resume_explain_observes_takeover_without_signaling_owned_client() {
     use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let session = connection_session(home.path(), repo.path());
     let script = home.path().join("opencode");
@@ -1580,6 +1551,7 @@ fn session_resume_explain_observes_takeover_without_signaling_owned_client() {
 fn session_resume_explain_never_probes_or_claims_a_live_endpoint() {
     use std::os::unix::net::UnixListener;
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let session = connection_session(home.path(), repo.path());
     let db_path = home.path().join(".lf/loopflow.db");
@@ -1673,6 +1645,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     );
     fs::write(nested.join("unfinished.txt"), "nested edits").unwrap();
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let wave = store
         .ensure_wave(old.to_str().unwrap(), "retained")
@@ -1687,9 +1660,13 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     };
     let before = identity(&old);
     let session: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &old, &["resume", "--prepare", "--json"])
-            .output()
-            .unwrap(),
+        command(
+            home.path(),
+            &old,
+            &["-a", "codex", "resume", "--prepare", "--json"],
+        )
+        .output()
+        .unwrap(),
     ))
     .unwrap();
     let moved = root.join("after");
@@ -1744,6 +1721,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
 fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
     let original = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let old = original.path().canonicalize().unwrap();
     let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
@@ -1799,6 +1777,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     let source = TestRepo::new();
     let target = TestRepo::new();
     let source_home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(source_home.path()));
     let target_home = tempfile::tempdir().unwrap();
     for home in [source_home.path(), target_home.path()] {
         fs::create_dir_all(home.join(".lf")).unwrap();
@@ -1912,6 +1891,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
 #[test]
 fn task_run_from_explain_reads_the_captured_graph_without_moving_the_task() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("from-proof");
@@ -2074,6 +2054,7 @@ fn task_run_from_explain_reads_the_captured_graph_without_moving_the_task() {
 #[test]
 fn task_planning_explain_validates_mutations_without_changing_checkpointed_storage() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("planning-proof");
@@ -2207,6 +2188,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
 #[test]
 fn task_planning_explain_retains_deletion_and_missing_evidence() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let read = |args: &[&str]| -> serde_json::Value {
         serde_json::from_str(&success(
@@ -2331,6 +2313,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
 #[test]
 fn task_planning_explain_create_uses_piped_input_and_current_project_validation() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("creation-proof");
@@ -2436,6 +2419,7 @@ fn task_planning_explain_create_uses_piped_input_and_current_project_validation(
 #[test]
 fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let path = home.path().join(".lf/loopflow.db");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2511,16 +2495,13 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
 #[test]
 fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     for wave in ["source", "destination"] {
         success(
-            command(
-                home.path(),
-                repo.path(),
-                &["wave", "ensure", wave, "--json"],
-            )
-            .output()
-            .unwrap(),
+            command(home.path(), repo.path(), &["wave", "add", wave, "--json"])
+                .output()
+                .unwrap(),
         );
     }
     // Setup owns these locks; preview must not recreate them.
@@ -2720,6 +2701,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
 #[test]
 fn task_planning_explain_save_validates_draft_without_changing_files_or_storage() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("save-proof");
@@ -2814,6 +2796,7 @@ fn task_planning_explain_save_validates_draft_without_changing_files_or_storage(
 #[test]
 fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("checkout-proof");
@@ -2910,6 +2893,7 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
 #[test]
 fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     let registered = support::register_task_without_pr(
@@ -3010,6 +2994,7 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
 #[test]
 fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     let path = home.path().join(".lf/loopflow.db");
     let absent: serde_json::Value = serde_json::from_str(&success(
@@ -3083,6 +3068,7 @@ fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathB
 #[test]
 fn scoped_first_task_run_prepares_with_its_own_options() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
@@ -3128,7 +3114,7 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
     let db = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let task = db.task_by_issue(id).unwrap().unwrap();
     assert_eq!(task.workspace_slug, "selected-first-checkout");
-    assert_eq!(task.agent.as_deref(), Some("codex"));
+    assert!(serde_json::to_value(&task).unwrap().get("agent").is_none());
     assert!(task.worktree.unwrap().join(".git").exists());
 }
 
@@ -3138,6 +3124,7 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
         let enrolls = matches!(condition, "retained" | "alias");
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
+        let _env = support::EnvGuard::with_home(&[], Some(home.path()));
         let root = tempfile::tempdir().unwrap();
         let main = repo.path().canonicalize().unwrap();
         let checkout = root.path().canonicalize().unwrap().join("task");
@@ -3252,6 +3239,7 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
 fn repository_reuse_before_reopening_cannot_steal_work() {
     let original = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let old = original.path().canonicalize().unwrap();
     let before = success(
         command(home.path(), &old, &["config", "repository"])
@@ -3306,6 +3294,7 @@ fn repository_reuse_before_reopening_cannot_steal_work() {
 fn repository_locators_isolate_machines_and_collapse_symlink_aliases() {
     let repo = TestRepo::new();
     let production = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(production.path()));
     let experiment = tempfile::tempdir().unwrap();
     let identify = |home: &Path, cwd: &Path| {
         success(
@@ -3331,6 +3320,7 @@ fn repository_locators_isolate_machines_and_collapse_symlink_aliases() {
 fn repository_concurrent_reconciliation_retains_one_identity() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let original = success(
         command(home.path(), repo.path(), &["config", "repository"])
             .output()
@@ -3367,6 +3357,7 @@ fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
             .unwrap(),
     );
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let identity = success(
         command(home.path(), &before, &["config", "repository"])
             .output()
@@ -3390,17 +3381,10 @@ fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
 }
 
 #[test]
-fn a_hook_left_by_an_older_lf_does_not_fail_the_provider_turn() {
+fn a_missing_skill_still_fails() {
     let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
-    // `__planning-check` was the Stop hook before 0.14.11 renamed it.
-    let output = command(home.path(), repo.path(), &["__planning-check"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
-    // A misspelled skill still fails.
     let output = command(home.path(), repo.path(), &["no-such-skill"])
         .stdin(std::process::Stdio::null())
         .output()

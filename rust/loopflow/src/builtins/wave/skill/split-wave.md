@@ -1,100 +1,84 @@
 ---
 requires: .lf/wave/<wave>/GOAL.md
-produces: .lf/wave/<child>/ directories
+produces: .lf/wave/<wave>/<child>/ directories
 ---
-Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
+Split a wave into smaller, independent waves. The children take over future
+work; the parent keeps its history and finishes its active Tasks.
 
-Writes to `.lf/wave/` belong to the selected Loopflow Graph's procedure. Outside
-that Graph, keep proposed Wave changes in scratch; Work association alone
-does not select memory maintenance.
+Edit `.lf/wave/` only when the running Graph says to; otherwise put proposed Wave
+changes in `scratch/`. Read `scratch/` first.
 
-## Orientation
+The numeric argument sets how many children to create (default 2). The parent's
+Linear Projects and dated history stay; past plans remain in Linear, and any
+missing past membership or measurements are noted as missing.
 
-Before starting, orient yourself in this branch:
+Each child gets a fresh GOAL, not a slice of the parent's prose:
 
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- If a `.lf/wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
-  PM snapshot, and live tasks (`lf wave status <name>`).
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Goal
-
-Wave mitosis. The parent's durable responsibility is distributed across N new
-Waves. Keep its existing Linear Projects and dated evidence; historical plans
-remain in Linear, with missing historical membership or measurements explicit.
-
-The numeric argument controls how many children to create (default 2).
-
-Assign new work to one child. Existing active Tasks keep their owning Wave and delivery identity until they settle. Rewrite each child’s GOAL rather than slicing prose:
-
-- **Intent**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
-- **Metrics**: move each reviewed contract to exactly one child with its owning
-  Wave. Cross-Wave consumption is explicit routing, never a duplicated
-  metric identity or observation stream.
-- **Memory**: carry forward the decisions in `MEMORY.md` that each child still needs.
+- **Intent**: written new for each child and coherent on its own.
+- **Metrics**: each metric moves to exactly one child. Another Wave that needs it
+  reads it from there; never duplicate a metric or its readings.
+- **Memory**: carry forward only the `MEMORY.md` entries a child still needs —
+  direction, exact quotes, past observations, outside facts.
+  Anything recoverable from the code or git history stays behind.
 
 ## Workflow
 
-1. Read the parent wave
-   - Use the wave passed by argument, or ask which `.lf/wave/<name>/` to split
-   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf wave status <parent> --json`)
+1. **Read the parent.** Use the wave from the argument, or ask which
+   `.lf/wave/<name>/` to split. Read `GOAL.md`, `MEMORY.md` and
+   `lf wave status <parent> --json`.
 
-2. Find split boundaries
-   - Look for thematic clusters, dependency chains, or independent workstreams
-   - Aim for the requested count (default 2)
-   - Each resulting wave should stand alone
+2. **Find the split.** Look for thematic clusters, dependency chains or
+   independent workstreams. Hit the requested count; each child must stand
+   alone.
 
-3. Allocate tasks
-   - Assign proposed new Tasks to one child. Account for every existing issue;
-     active Tasks retain the parent Wave and delivery identity until settled.
+3. **Allocate Tasks.** Assign each proposed new Task to one child. Account for
+   every existing issue; active Tasks stay in the parent Wave until they finish.
 
-4. Create the new waves
-   - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
-   - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child
-   - `lf wave connect <child>` — create each child's Linear Initiative
-   - Connection does not create a Project. Inspect each child's Linear plans:
-     one In Progress Project is current; Planned and Completed Projects retain
-     future and historical content. Preserve existing Project identities.
-   - If a current Project exists, `lf update-plan --wave <child> --plan <plan.json>`
-     replaces its complete content: `{"metric_targets":[],"krs":[]}`.
-     Supply all KRs and targets; keep the Wave's default graph.
-   - If no current Project exists, arrange its plan through the accepted
-     repository chapter process or a Linear change.
-     Future plan authoring needs an available Linear writer; `update-plan`
-     cannot write a Planned Project. Report missing access rather than inventing
-     a command or starting Tasks without a current plan.
-   - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in comments; keep current blockers and dependencies in the description even when comments are collapsed.
-   - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
+4. **Create the children.**
+   - `lf wave add <wave>/<child>` registers each child; commit its
+     `.lf/wave/<wave>/<child>/` files on the main checkout and edit them there.
+   - `GOAL.md`: fresh intent and judgment, with clear scope lines between
+     siblings. `MEMORY.md`: what this child inherits. `metrics/*.md`: the
+     metrics allocated to it.
+   - `lf wave connect <wave>/<child>` links each child's Linear Initiative. Add
+     starts the first Project; check each child's plan after connecting and keep
+     existing Project IDs and Planned/Completed history.
+   - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the
+     current Project's whole content: `{"metric_targets":[],"krs":[]}`. Supply
+     every KR and target; keep the Wave's default graph. `update-plan` can't
+     write a Planned Project; future plans need a Linear writer.
+   - File new Tasks with
+     `lf task create --wave <wave>/<child> --title "…" --notes "…"`: the problem,
+     the outcome wanted, how to tell it's done, and real constraints. Allocation
+     history goes in comments; current blockers and dependencies stay in the
+     description.
+   - Note active Tasks' dependencies in the child plans. Never move a live Task
+     across Waves or restart its worker.
 
-5. Retire the parent's future planning
-   - Chapter rotation is a separate operation from splitting a Wave. If a repository boundary is
-     also accepted, preview `lf wave new-chapter --all <name> --dry-run --json` for all
-     Waves, including the parent and children. There is no per-Wave or plan-file
-     option. Apply with `lf wave new-chapter --all <name> --json` only after the
-     direction and Task-disposition review gates.
-   - Rotation moves started unfinished Tasks within their owning Wave, retaining
-     worktrees, PRs and captured execution. Proven untouched backlog is canceled,
-     retaining issues and history; terminal Tasks stay historical. Missing
-     evidence stays unresolved. Rotation does not transfer Tasks to child Waves.
-   - Predecessor Projects become Completed; an authored Planned successor keeps
-     its content, otherwise only the predecessor's Graph is copied. New Waves
-     without Projects receive an empty `feature` plan. Retry interruption with
-     the same name. Keep the parent available while its active work finishes;
-     do not delete its Projects or imply rotation retired the Wave itself.
+5. **Retire the parent's future planning.**
+   - Chapter rotation is separate from splitting. If a repository-wide rotation
+     is also accepted, preview `lf wave new-chapter --all <name> --dry-run --json`
+     across all Waves, parent and children included; there is no per-Wave or
+     plan-file option. Apply with `lf wave new-chapter --all <name> --json` only
+     after direction and Task dispositions are reviewed.
+   - Rotation keeps started Tasks in their own Wave with worktrees, PRs and runs
+     intact. Untouched backlog is canceled with its issue and history kept;
+     finished Tasks stay as history; anything uncertain stays open. Rotation
+     doesn't move Tasks to child Waves.
+   - Predecessor Projects become Completed. A written Planned successor keeps its
+     content; otherwise only the Graph is copied. New Waves without Projects get
+     an empty `feature` plan. If interrupted, retry with the same name. Keep the
+     parent available while its active work finishes; don't delete its Projects
+     or treat rotation as retiring the Wave.
 
-6. Verify
-   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative
-   - Every metric contract belongs to exactly one child Wave
-   - No content from the parent is unaccounted for
+6. **Check.**
+   - Each child has `GOAL.md`, `MEMORY.md` and a connected Linear Initiative.
+   - Every metric belongs to exactly one child.
+   - Nothing from the parent is unaccounted for.
 
-## Guardrails
+## Rules
 
-- Carry forward the original wave's intent — don't reshape the product direction during a split
-- Concrete, domain-specific names for children
-- When a boundary is unclear, pick the simpler option and note the alternative in `scratch/questions.md`
+- Keep the parent's intent; don't change product direction during a split.
+- Give children concrete, domain-specific names.
+- When a split line is unclear, pick the simpler option and note the other in
+  `scratch/questions.md`.

@@ -29,6 +29,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     // As the children resolve it: `doctor` prints the store's path.
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
     repo.create_file("edit.txt", "before\n");
     repo.stage_all();
     repo.commit("Comparison base");
@@ -51,6 +52,14 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         None,
     ))
     .unwrap();
+    // The Wave's authored files, seeded and committed once by `lf`: the add
+    // compared below then changes nothing, in the app and again through `lf`.
+    read(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "task-pr-tests", "--json"],
+        None,
+    );
     // Prepared, not started: a Session a bind preview can name.
     let session: Value = serde_json::from_str(&read(
         repo.path(),
@@ -134,6 +143,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Read::Waves
         | Read::MachineId
         | Read::Portfolio
+        | Read::Settings { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -175,6 +185,13 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 Read::Waves,
                 Read::MachineId,
                 Read::Portfolio,
+                Read::Settings {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    skill: Some("implement".into()),
+                    graph: None,
+                    step: None,
+                },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
                     work: "repository".into(),
@@ -420,7 +437,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::SessionBind { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
-        | Write::WaveEnsure { .. }
+        | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
         | Write::NewChapter { .. }
         | Write::GraphCustomize { .. }
@@ -482,9 +499,10 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
                 },
-                Write::WaveEnsure {
+                Write::WaveAdd {
                     directory: directory.clone(),
                     wave: "task-pr-tests".into(),
+                    objective: None,
                 },
                 Write::PlanningRefresh {
                     directory: directory.clone(),

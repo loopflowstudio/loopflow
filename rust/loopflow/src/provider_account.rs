@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::id::WaveId;
 use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
-use crate::repository::RepoId;
+use crate::repository::CanonicalRepo;
 use crate::store::{
     open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, SharedStore, StoreError,
 };
@@ -192,21 +192,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
-    #[cfg(test)]
-    pub(crate) fn isolated_for_test(
-        provider: Provider,
-        account_id: &str,
-        store: SharedStore,
-        profile: PathBuf,
-    ) -> Self {
-        Self {
-            provider,
-            account_id: parse_account_id(account_id).expect("test account id"),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored { store, profile },
-        }
-    }
-
     fn shared_home(named: bool) -> RouteHome {
         RouteHome::Shared {
             // A launch that named its account switches on a person's behalf;
@@ -771,7 +756,7 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None, None).await
+    resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
 /// The `provider` login this launch's `--account` names when it differs from
@@ -807,8 +792,9 @@ pub(crate) async fn resolve_provider_account_exact(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id).await?;
+    let route = select_route(provider, agent_session, exact_account_id, wave_id, isolate).await?;
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
@@ -820,6 +806,7 @@ async fn select_route(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -833,7 +820,9 @@ async fn select_route(
         }
         _ => None,
     };
-    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
+    let isolated = recorded
+        .or(isolate)
+        .unwrap_or_else(activation::launch_isolated);
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
     let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
@@ -1094,7 +1083,7 @@ async fn ordered_selected_candidates(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
-    repo_id: Option<&RepoId>,
+    repo_id: Option<&CanonicalRepo>,
     wave_id: Option<&WaveId>,
     local_store: Option<&SharedStore>,
     verify_identity: bool,
@@ -1325,16 +1314,16 @@ pub(crate) fn match_account<'a>(
     }
 }
 
-pub(crate) fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
+pub(crate) fn current_repo_id() -> Result<Option<CanonicalRepo>, ProviderAccountError> {
     let current = std::env::current_dir()
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    Ok(RepoId::discover(&current).ok())
+    Ok(CanonicalRepo::discover(&current).ok())
 }
 
 /// Read the launch candidate order without selecting an account or acquiring credentials.
 pub(crate) async fn inspect_provider_route(
     store: Option<&SharedStore>,
-    repo_id: Option<&RepoId>,
+    repo_id: Option<&CanonicalRepo>,
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
@@ -1388,29 +1377,81 @@ pub(crate) async fn inspect_provider_route(
 /// the default.
 pub(crate) async fn nearest_provider_route(
     store: &SharedStore,
-    repo_id: Option<&RepoId>,
+    repo_id: Option<&CanonicalRepo>,
     wave_id: Option<&WaveId>,
     provider: Provider,
 ) -> Result<Option<ProviderRoute>, ProviderAccountError> {
-    let scopes = wave_id
+    let scopes: Vec<_> = wave_id
         .cloned()
         .map(RouteScope::Wave)
         .into_iter()
         .chain(repo_id.cloned().map(RouteScope::Repo))
-        .chain([RouteScope::Default]);
-    for scope in scopes {
-        if let Some(route) = store.provider_route(&scope, provider).await? {
-            return Ok(Some(route));
-        }
-    }
-    Ok(None)
+        .chain([RouteScope::Default])
+        .collect();
+    let layers = store.sqlite.account_declarations(&scopes)?;
+    let resolved = crate::config::settings::resolve_layers(&layers, None)
+        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    let Some(setting) = resolved
+        .settings
+        .get(&format!("account.{}", provider.as_str()))
+    else {
+        return Ok(None);
+    };
+    let selected = setting
+        .candidates
+        .last()
+        .expect("resolved setting has a candidate");
+    let scope = scopes
+        .into_iter()
+        .find(|scope| {
+            matches!(
+                (scope, selected.scope),
+                (
+                    RouteScope::Wave(_),
+                    crate::config::settings::SettingScope::Wave
+                ) | (
+                    RouteScope::Repo(_),
+                    crate::config::settings::SettingScope::Repository
+                ) | (
+                    RouteScope::Default,
+                    crate::config::settings::SettingScope::Global
+                )
+            )
+        })
+        .unwrap_or(RouteScope::Default);
+    let order: crate::config::placement::AccountOrder =
+        serde_yaml_ng::from_value(setting.value.clone())
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    let observed = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let candidates: Vec<_> = observed.iter().collect();
+    let accounts = order
+        .iter()
+        .map(|selector| match match_account(&candidates, selector) {
+            AccountMatch::One(account) => Ok(account.account_id.clone()),
+            AccountMatch::None => Err(ProviderAccountError::Runtime(format!(
+                "account reference {selector} has no resident login"
+            ))),
+            AccountMatch::Ambiguous(_) => Err(ProviderAccountError::Runtime(format!(
+                "account reference {selector} is ambiguous"
+            ))),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(ProviderRoute {
+        scope,
+        provider,
+        accounts,
+        created_at: 0,
+        updated_at: 0,
+    }))
 }
 
 /// The accounts a launch tries in order: the nearest route's, else every
 /// account eligible for automatic routing.
 pub(crate) async fn provider_route_account_ids(
     store: &SharedStore,
-    repo_id: Option<&RepoId>,
+    repo_id: Option<&CanonicalRepo>,
     wave_id: Option<&WaveId>,
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccountId>>, ProviderAccountError> {
@@ -1433,6 +1474,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
@@ -1440,6 +1482,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             agent_session.as_ref(),
             exact_account_id.as_ref(),
             wave_id.as_ref(),
+            isolate,
         ))
     })
 }
@@ -3349,6 +3392,7 @@ mod account_first_tests {
             Some(&"conversation".into()),
             Some(&began),
             None,
+            None,
         )
         .await
         .unwrap()
@@ -3457,6 +3501,7 @@ mod account_first_tests {
             Provider::Codex,
             Some(&conversation),
             Some(&first),
+            None,
             None,
         )
         .await
@@ -3653,7 +3698,7 @@ mod inspection_tests {
     use crate::profile::{EmailAddress, ProviderRoute, RouteScope};
     use crate::provider_account::{inspect_provider_route, new_account};
     use crate::provider_auth::Provider;
-    use crate::repository::RepoId;
+    use crate::repository::CanonicalRepo;
     use crate::store::{
         open_ephemeral_store, AccountLimitWindow, ProviderAccountId, StorageConfig,
     };
@@ -3668,7 +3713,7 @@ mod inspection_tests {
                 .await
                 .unwrap(),
         );
-        let repo = RepoId::parse("example/project").unwrap();
+        let repo = CanonicalRepo::discover(temp.path()).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         assert!(
             inspect_provider_route(Some(&store), Some(&repo), Provider::Codex)

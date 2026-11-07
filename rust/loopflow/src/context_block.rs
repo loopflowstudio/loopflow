@@ -27,6 +27,8 @@ pub enum ContextMoment {
     Tool,
     /// A turn ended: acquire Linear changes, which become steers for the next boundary.
     Stop,
+    /// Observe Task movement from the native provider’s asynchronous hook.
+    TaskUpdates,
     /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
     PiEvent,
     /// A Pi bash command is about to run: join its tool group to the watchdog
@@ -127,7 +129,8 @@ impl ContextDelivery {
         let Some((id, source)) = &self.repository else {
             return Ok(());
         };
-        let store = crate::store::sqlite::SqliteStore::new(&self.home.join("loopflow.db"))?;
+        let store =
+            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
             return Ok(());
         };
@@ -227,10 +230,10 @@ impl ContextDelivery {
         Ok(())
     }
 
-    /// App-server hooks inherit the server environment, not thread shell policy.
-    /// Bind before the first turn so sibling threads never borrow launch context.
+    /// App-server hooks inherit the server environment, not thread shell policy,
+    /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = codex_delivery_path(&self.home, session);
+        let path = native_delivery_path(&self.home, session);
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -247,7 +250,8 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
-        // Steer boundaries start lf only when a steer is newer than the last seen.
+        // Tool boundaries start lf only for new steering. Prompt boundaries
+        // always run: they also record native turn activity.
         let steer = format!(
             // dash's -nt is false when the second file is missing, so test existence first.
             "[ -n \"${seen}\" ] || exit 0; [ -e \"${seen}\" ] && {{ [ ! -e {latest} ] || [ \"${seen}\" -nt {latest} ]; }} && exit 0; {command} tool",
@@ -255,17 +259,30 @@ impl ContextDelivery {
             latest = quote(&crate::steer::latest_marker(&self.home)),
         );
         Ok(serde_json::json!({
-            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
+            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
+                {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [
-            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
+            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))
     }
 }
 
-pub(crate) fn codex_delivery_path(home: &Path, session: &str) -> PathBuf {
+/// A conversation the person starts on a Session's app-server is that Session's,
+/// so it takes the binding of the one it replaces. A Session launched without
+/// context has no binding to carry.
+pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow::Result<()> {
+    let bytes = match fs::read(native_delivery_path(home, from)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
+}
+
+pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
     // Native IDs are opaque; never interpret one as a filesystem path.
     home.join("context-deliveries")
         .join(format!("{}.json", hex::encode(Sha256::digest(session))))
@@ -486,9 +503,10 @@ mod tests {
                 name: "test".into(),
                 content: Some("Test skill".into()),
                 agent: None,
-                default_agent: None,
+                occurrence: None,
+                settings: Default::default(),
                 action_style: None,
-                docs: Vec::new(),
+                docs: None,
             }),
             message: Some("Fix this".into()),
             clipboard: Some("🦀 $reference\r\n".repeat(10_000)),

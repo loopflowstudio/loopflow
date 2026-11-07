@@ -96,6 +96,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         let machine = self.home.path().join("machine");
         if let Ok(params) = fs::read(machine.join("native-config.json")) {
             received["params"] = serde_json::from_slice(&params).unwrap();
+            received["server"] = serde_json::from_slice(
+                &fs::read(machine.join("native-server-config.json")).unwrap(),
+            )
+            .unwrap();
             received["turns"] =
                 serde_json::from_slice(&fs::read(machine.join("native-turns.json")).unwrap())
                     .unwrap();
@@ -180,18 +184,19 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             "{value}"
         ),
         "codex" => {
-            assert_eq!(
-                value["params"]["sandbox"],
-                if enabled {
-                    "danger-full-access"
-                } else {
-                    "workspace-write"
-                },
-                "{value}"
-            );
+            if enabled {
+                assert_eq!(value["params"]["sandbox"], "danger-full-access", "{value}");
+            } else {
+                assert!(value["params"].get("sandbox").is_none(), "{value}");
+            }
             assert_eq!(
                 value["params"]["approvalPolicy"],
-                if enabled { "never" } else { "on-request" },
+                // Unset leaves the person's own Codex configuration in charge.
+                if enabled {
+                    Value::from("never")
+                } else {
+                    Value::Null
+                },
                 "{value}"
             );
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
@@ -379,7 +384,12 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert!(args(&first).contains(&"--chrome"));
         }
         let session = fixture.session();
-        fixture.settings(&format!("{provider}:current-model"), false, false);
+        let current_model = if provider == "opencode" {
+            "opencode/current-model"
+        } else {
+            "current-model"
+        };
+        fixture.settings(&format!("{provider}:{current_model}"), false, false);
         let resumed = fixture.run(&["session", "resume", &session]);
         bypass(&resumed, provider, false);
         assert!(args(&resumed).contains(&token.as_str()));
@@ -411,7 +421,48 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
 }
 
 #[test]
-fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
+fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
+    let fixture = Fixture::new("claude:sonnet");
+    let first = fixture.run(&["-i", ":", "Keep this conversation"]);
+    let session = fixture.session();
+    let arguments = args(&first);
+    let token = arguments[arguments
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1];
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    let unresolved = fixture
+        .command()
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    success(&unresolved);
+    let settings: Value = serde_json::from_slice(&unresolved.stdout).unwrap();
+    assert!(settings[0]["settings"]["agent"]["value"].is_null());
+    let resumed = fixture.run(&["session", "resume", &session]);
+    pair(&resumed, "--resume", token);
+    pair(&resumed, "--model", "sonnet");
+    assert_eq!(fixture.session(), session);
+    for (fallback, expected) in [("codex", "sonnet"), ("claude:haiku", "haiku")] {
+        let resumed = fixture.run(&[
+            "--setting",
+            &format!("default_agent={fallback}"),
+            "session",
+            "resume",
+            &session,
+        ]);
+        pair(&resumed, "--resume", token);
+        pair(&resumed, "--model", expected);
+        assert_eq!(fixture.session(), session);
+    }
+}
+
+#[test]
+fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     let fixture = Fixture::new("claude");
     fs::create_dir_all(fixture.home.path().join("machine")).unwrap();
     fs::write(
@@ -425,11 +476,45 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
     );
     fixture.settings("claude", false, false);
     let configured = fixture.run(&["-i", ":", "hello"]);
-    bypass(&configured, "claude", false);
-    assert!(args(&configured).contains(&"--no-chrome"));
-    let explicit = fixture.run(&["-i", "--yolo", "--chrome", "on", ":", "hello"]);
-    bypass(&explicit, "claude", true);
-    assert!(args(&explicit).contains(&"--chrome"));
+    bypass(&configured, "claude", true);
+    assert!(args(&configured).contains(&"--chrome"));
+    let explicit = fixture.run(&[
+        "-i",
+        "--setting",
+        "yolo=false",
+        "--chrome",
+        "off",
+        ":",
+        "hello",
+    ]);
+    bypass(&explicit, "claude", false);
+    assert!(args(&explicit).contains(&"--no-chrome"));
+}
+
+#[test]
+fn unset_chrome_leaves_the_claude_setting_alone_until_a_choice_is_explicit() {
+    let fixture = Fixture::new("claude");
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agent: claude\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    fn chrome_flags(value: &Value) -> Vec<&str> {
+        args(value)
+            .into_iter()
+            .filter(|arg| *arg == "--chrome" || *arg == "--no-chrome")
+            .collect()
+    }
+    let attended = fixture.run(&["-i", ":", "hello"]);
+    assert!(chrome_flags(&attended).is_empty(), "{attended}");
+    let session = fixture.session();
+    let resumed = fixture.run(&["session", "resume", &session]);
+    assert!(chrome_flags(&resumed).is_empty(), "{resumed}");
+    let headless = fixture.run(&["-b", ":", "hello"]);
+    assert!(chrome_flags(&headless).is_empty(), "{headless}");
+    let off = fixture.run(&["-i", "--chrome", "off", ":", "hello"]);
+    assert_eq!(chrome_flags(&off), ["--no-chrome"]);
+    let on = fixture.run(&["-i", "--chrome", "on", ":", "hello"]);
+    assert_eq!(chrome_flags(&on), ["--chrome"]);
 }
 
 #[test]
@@ -613,6 +698,7 @@ mod support;
 #[test]
 fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings() {
     let fixture = Fixture::new("claude:sonnet");
+    let _env = support::EnvGuard::with_lf_home(&[], &fixture.home.path().join("machine"));
     fixture.settings("claude:sonnet", true, true);
     let base = String::from_utf8(
         Command::new("git")
@@ -735,7 +821,7 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let mut first = fixture
         .command()
         .args(["-i", "--account", "fixture@example.com", ":", "hello"])
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -767,13 +853,18 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let first = first.wait_with_output().unwrap();
-    success(&first);
-    let stderr = String::from_utf8_lossy(&first.stderr);
+    // The owner reports a client's exit in the terminal it ran in.
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(first.status.success(), "{:?}: {printed}", first.status);
     assert!(
-        stderr.contains(&format!(
+        printed.contains(&format!(
             "This conversation moved to account other@example.com: lf resume {session}"
         )),
-        "{stderr}"
+        "{printed}"
     );
     // SAFETY: signal 0 only probes whether the fixture's client still exists.
     assert_ne!(unsafe { libc::kill(client, 0) }, 0, "client still running");
@@ -866,7 +957,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         for received in [first, resumed] {
             let arguments = args(&received);
             let root = if provider == "codex" {
-                received["params"]["config"]["sandbox_workspace_write.writable_roots"]
+                received["server"]["sandbox_workspace_write.writable_roots"]
                     .as_array()
                     .unwrap()
                     .iter()

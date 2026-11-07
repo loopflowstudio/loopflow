@@ -8,12 +8,12 @@ what to run next. Every command here is complete and runnable as written.
 A crash, a reboot or a closed terminal loses less than it looks like.
 
 ```bash
-lf resume --all                  # every conversation a crash or restart interrupted; never one you left
+lf resume                       # return to this scope’s conversation
 ```
 
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
-| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume --all`, `lf resume --task <ID>` |
+| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
 | A stopped Graph | Its step Processes, as history | `lf graph list --processes --for-task <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
@@ -133,8 +133,9 @@ npm install -g @anthropic-ai/claude-code
 lf account connect claude
 ```
 
-With no `agent` configured, lf uses the first of Codex, Claude Code, OpenCode
-and Pi it finds, so one is enough.
+With no agent preference configured, lf uses the sole installed harness. If more
+than one is installed, choose with `lf set --global default_agent claude` or pass
+`-a claude` for one command. `lf config show --explain` shows the selection.
 
 ## Context too large
 
@@ -160,11 +161,11 @@ lf monitor prune                   # only lf's records: dead Process rows and re
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
-holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs
-and every database backup but the newest once untouched for a week. The
-database, account homes, Home material written in the last day and anything a
-process holds open are never removed; when `lsof` fails, neither is anything else
-that check protects.
+holds and nothing wrote for 4 hours. It removes nothing under `~/.lf`: the
+database, its pre-migration clones (lf's own, see
+`rust/loopflow/src/store/MIGRATIONS.md`), captures, logs and account homes stay.
+Anything a process holds open is never removed; when `lsof` fails, neither is
+anything else that check protects.
 
 Under cron, the `disk-cleanup` skill runs the script and reports what it freed,
 what it kept and why, and worktrees still holding unpushed work; it deletes

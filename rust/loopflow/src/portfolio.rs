@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::git::worktree_root;
 use crate::git::worktrees::main_repo_root;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PortfolioMode {
     Folder,
@@ -31,8 +31,9 @@ pub struct Portfolio {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Selection {
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
     mode: PortfolioMode,
     paths: BTreeSet<PathBuf>,
 }
@@ -171,17 +172,46 @@ fn reading(config: &serde_yaml_ng::Value) -> Result<Portfolio> {
 }
 
 pub fn read() -> Result<Portfolio> {
-    reading(&crate::config::read_global_config_at(
+    reading(&crate::config::files::read(
         &crate::store::lf_home_dir().join("config.yaml"),
     )?)
 }
 
 pub fn change(command: &PortfolioCommand) -> Result<Portfolio> {
-    change_at(&crate::store::lf_home_dir(), command)
+    let portfolio = change_at(&crate::store::lf_home_dir(), command)?;
+    if !matches!(command, PortfolioCommand::Remove { .. }) {
+        register_authored_waves(&portfolio, command)?;
+    }
+    Ok(portfolio)
+}
+
+/// Desktop lists the Waves the planning store knows, so a repository joining
+/// the portfolio brings its authored `.lf/wave/` directories into the store. A
+/// removed Wave's kept directory stays removed. Registration never undoes the
+/// membership change; a repository that cannot register is logged.
+fn register_authored_waves(portfolio: &Portfolio, command: &PortfolioCommand) -> Result<()> {
+    let mut repos: BTreeSet<PathBuf> = portfolio
+        .repos
+        .iter()
+        .filter(|repo| repo.error.is_none())
+        .map(|repo| PathBuf::from(&repo.path))
+        .collect();
+    // A manual selection saved while the folder mode shows keeps its added
+    // repositories out of the reading; they still join.
+    if let PortfolioCommand::Add { paths } | PortfolioCommand::Import { paths } = command {
+        repos.extend(paths.iter().filter_map(|path| main_repository(path).ok()));
+    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    for repo in repos {
+        if let Err(error) = runtime.block_on(crate::ops::wave_lifecycle::register_authored(&repo)) {
+            tracing::warn!(repo = %repo.display(), %error, "authored Waves were not registered");
+        }
+    }
+    Ok(())
 }
 
 fn change_at(home: &Path, command: &PortfolioCommand) -> Result<Portfolio> {
-    let config = crate::config::update_global_config_at(home, |config| {
+    let config = crate::config::files::update(&home.join("config.yaml"), |config| {
         change_config(config, command)?;
         Ok(config.clone())
     })?;
@@ -362,8 +392,7 @@ mod tests {
         );
         fs::remove_dir_all(&outside).unwrap();
         let unavailable =
-            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
-                .unwrap();
+            reading(&crate::config::files::read(&home.join("config.yaml")).unwrap()).unwrap();
         assert!(unavailable
             .repos
             .iter()
@@ -380,7 +409,7 @@ mod tests {
         );
         assert!(first.exists());
         assert_eq!(
-            crate::config::read_global_config_at(&home.join("config.yaml")).unwrap()["agent"],
+            crate::config::files::read(&home.join("config.yaml")).unwrap()["agent"],
             "codex"
         );
         assert!(!home.join("state.db").exists());
@@ -392,8 +421,7 @@ mod tests {
         let home = fixture.path().join("home");
         let missing = fixture.path().join("missing");
         let empty =
-            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
-                .unwrap();
+            reading(&crate::config::files::read(&home.join("config.yaml")).unwrap()).unwrap();
         assert!(!empty.configured);
         assert_eq!(empty.mode, PortfolioMode::Folder);
         assert!(!home.exists());

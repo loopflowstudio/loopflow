@@ -40,7 +40,7 @@ fn global_agent_help_and_no_agent_diagnostic() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     assert_eq!(help.matches("--agent").count(), 1);
-    assert!(help.contains("overrides agents in Tasks, Graphs, skills and child commands"));
+    assert!(help.contains("selects this invocation and its Graph steps; unrelated child work keeps its own preferences"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("does not start an agent"));
     assert!(!home.path().join(".lf").exists());
 }
@@ -546,6 +546,26 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
+fn help_skips_a_provider_named_before_its_subcommand() {
+    let normalized =
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
+        ["lf", "ops", "account", "codex", "use", "a@example.com"]
+    );
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "--help"]),
+        ["lf", "help", "ops", "account", "use"]
+    );
+    let tree = loopflow::lf::navigation::command_tree();
+    let path = ["account", "codex", "use"].map(String::from);
+    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &path).unwrap();
+    assert_eq!(canonical, ["ops", "account", "use"]);
+    let unknown = ["account", "codex", "nosuch"].map(String::from);
+    assert!(loopflow::lf::navigation::resolve_path(&tree, &unknown).is_err());
+}
+
+#[test]
 fn help_preserves_location_without_promoting_query_filters() {
     for (args, task) in [
         (
@@ -914,11 +934,18 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
 }
 
 #[test]
-fn command_tree_has_no_command_aliases() {
+fn command_tree_only_retains_the_running_provider_hook_alias() {
     fn check(command: &clap::Command) {
+        // Running providers keep this Stop callback across upgrades (LOO-724).
+        let expected_aliases = if command.get_name() == "__context-block" {
+            assert!(command.is_hide_set());
+            vec!["__planning-check"]
+        } else {
+            Vec::new()
+        };
         assert_eq!(
-            command.get_all_aliases().count(),
-            0,
+            command.get_all_aliases().collect::<Vec<_>>(),
+            expected_aliases,
             "{}",
             command.get_name()
         );
@@ -961,7 +988,7 @@ fn graph_help_validates_expansion_and_review_boundaries_without_effects() {
     for (definition, expected) in [
         ("- graph: absent-graph\n", "absent-graph"),
         ("- step:\n    name: solo\n    human: true\n", "retired"),
-        ("- interactive:\n    name: solo\n    id: review\n- interactive:\n    name: solo\n    id: review\n", "not unique"),
+        ("- interactive:\n    name: solo\n    id: review\n- interactive:\n    name: solo\n    id: review\n", "duplicate step id"),
     ] {
         fs::write(&graph, definition).unwrap();
         let output = run(repo.path(), home.path(), &["help", "graph", "inspection"]);

@@ -21,6 +21,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
+        | WorkValue::WaveRetired(_)
         | WorkValue::WaveProject(_)
         | WorkValue::HistoricalWaveWorkflow(_) => "waves",
         WorkValue::ProjectWave(_)
@@ -50,7 +51,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskUrl(_)
         | WorkValue::TaskBranch(_)
         | WorkValue::TaskTeam(_)
-        | WorkValue::TaskRegressedIn(_)
+        | WorkValue::HistoricalTaskRegressedIn(_)
         | WorkValue::Disposition(_) => "tasks",
         WorkValue::CommentTask(_) | WorkValue::CommentContent(_) => "task_comments",
     }
@@ -60,6 +61,7 @@ fn column(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
+        WorkValue::WaveRetired(_) => "retired_at",
         WorkValue::WaveProject(_) => "current_project_id",
         WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
@@ -86,7 +88,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskUrl(_) => "planning_url",
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
-        WorkValue::TaskRegressedIn(_) => "regressed_in",
+        WorkValue::HistoricalTaskRegressedIn(_) => "regressed_in",
         WorkValue::CommentTask(_) => "task_id",
         WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
@@ -98,12 +100,19 @@ fn column(value: &WorkValue) -> &'static str {
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
     let mut values = match table {
-        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id FROM waves WHERE id=?1", id, |row| {
-                    Ok(vec![
+        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
+                    let retired: Option<i64> = row.get(3)?;
+                    let project: Option<String> = row.get(2)?;
+                    Ok([
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
-                        WorkValue::WaveProject(row.get(2)?),
-                    ])
+                    ]
+                    .into_iter()
+                    // A clone registers authored Waves before it acquires their
+                    // planning. Missing selection is not an edit clearing a peer's.
+                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
+                    .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
+                    .collect())
         }),
         "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
                     Ok(vec![
@@ -167,7 +176,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             values.push(WorkValue::TaskShippedAt(shipped_at));
         }
         if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
-            values.push(WorkValue::TaskRegressedIn(regressed_in));
+            values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));
         }
     }
     for value in &values {
@@ -598,6 +607,87 @@ mod tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn a_released_regression_mark_round_trips_the_plan_ref_unread() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        a.bind_peer_planning("/repo", &route).unwrap();
+        b.bind_peer_planning("/repo", &route).unwrap();
+        let task = plan(&a);
+        let exchanged = |store: &SqliteStore| {
+            store
+                .export_peer_planning("/repo", &route.id())
+                .unwrap()
+                .changes
+                .into_values()
+                .filter(|change| change.edit.target == task.as_str())
+                .filter(|change| change.edit.change.field() == "task_regressed_in")
+                .map(|change| change.edit.change)
+                .collect::<Vec<_>>()
+        };
+        // Released peers refuse a Task that arrives without the field.
+        assert_eq!(exchanged(&a), [Edit::HistoricalTaskRegressedIn(None)]);
+
+        let released = Edit::HistoricalTaskRegressedIn(Some("v0.15.3".into()));
+        {
+            let mut conn = a.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            local(
+                &tx,
+                &WorkEdit::for_target(task.as_str(), std::slice::from_ref(&released)),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        b.import_peer_planning("/repo", &route.id(), "first", &journal)
+            .unwrap();
+
+        assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
+        assert!(exchanged(&b).contains(&released));
+    }
+
+    #[test]
+    fn a_stored_released_regression_row_leaves_peer_planning_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = plan(&store);
+        // The bytes every lf since v0.15.1 stores for a new Task.
+        let stored = format!(
+            r#"{{"edit":{{"target":"{task}","change":{{"field":"task_regressed_in","value":null}}}},"clock":1793827427857,"parents":[]}}"#
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE planning_peer_changes SET mutation=?1 WHERE field='task_regressed_in'",
+                [&stored],
+            )
+            .unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        store.bind_peer_planning("/repo", &route).unwrap();
+
+        let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
+
+        assert!(exported
+            .changes
+            .values()
+            .any(|change| change.clock == 1793827427857
+                && change.edit.change == Edit::HistoricalTaskRegressedIn(None)));
+        let status = store
+            .peer_planning_status("/repo", Some(&route.id()))
+            .unwrap();
+        assert_eq!(status.len(), 1);
     }
 
     #[test]

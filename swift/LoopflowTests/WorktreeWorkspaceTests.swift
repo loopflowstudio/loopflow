@@ -27,6 +27,26 @@ func fixtureWork(_ location: WorkspaceIdentity, isLocal: Bool = true, surfaces: 
 @Suite("Retained Work workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
+    @Test("Binding a visible repository conversation relocates its pane without changing terminal identity")
+    func boundConversationKeepsTerminal() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let root = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let source = registry.open(root, title: "Repository", location: fixtureWorkspace("/repo"))
+        var record = try renameFixtureRecord("conversation", title: "Prototype", work: .task(id: "task"))
+        record.workspace = SessionWorkspace(machineId: fixtureMachineId, worktree: "/repo", taskId: nil, unavailable: nil)
+        source.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
+        source.presentation.selectedSessionId = record.id
+        let terminal = try #require(source.multiplexer.sessionPane?.terminal)
+
+        #expect(registry.reconcileMembership([record]) == .task(id: "task"))
+        let target = try #require(registry.retained(WorkWorkspaceKey(repository: "repo", kind: .task, id: "task")))
+        #expect(source.multiplexer.sessionPane?.sessionId == nil)
+        #expect(target.multiplexer.sessionPane?.terminal == terminal)
+        #expect(target.presentation.selectedSessionId == record.id)
+        #expect(target.presentation.content == .terminals)
+        #expect(registry.reconcileMembership([record]) == nil)
+    }
+
     @Test("Inspection reads retained panes and drafts without allocating, focusing or opening a client")
     func inspectionIsPassive() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)

@@ -1,5 +1,16 @@
 exclude:
 - uv.lock
+skills:
+  explore:
+    agent: claude
+  kickoff:
+    agent: claude
+  prompt:
+    agent: claude
+  realign:
+    agent: claude
+  xor-route:
+    agent: claude:sonnet
 planning:
   provider: linear
 linear:

@@ -6,6 +6,16 @@ import LoopflowFFI
 /// Loopflow's reads and writes served inside the app by its Rust library
 /// (`loopflow.h`), with no `lf` process. Each returns what its `lf` command prints.
 enum LoopflowLibrary {
+    /// File preferences remain available before the Work store is compatible.
+    static func configuration(_ request: [String: Any]) throws -> Data {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
+        var error: UnsafeMutablePointer<CChar>?
+        let result = lf_config(json, &error)
+        if let error = take(error) { throw RegistryQueryError(error) }
+        guard let text = result.flatMap(take) else { throw RegistryQueryError("Settings returned no value") }
+        return Data(text.utf8)
+    }
+
     /// Serve `read` as `lf <read> --watch` streams it. Loopflow's
     /// wakeup only schedules a pull on this watch's own queue, where the
     /// reading runs; nothing reads on the caller's thread.
@@ -37,8 +47,9 @@ enum LoopflowLibrary {
     ) async throws -> String? {
         let json = String(decoding: request, as: UTF8.self)
         return try await withCheckedThrowingContinuation { continuation in
-            // The stack an `lf` process's main thread has: parsing its command
-            // line overflows a Swift task thread's 512 KB in a debug build.
+            // Rust's synchronous command parsing can exceed a cooperative
+            // executor thread's stack in debug builds. Give these blocking
+            // calls a native thread with the same stack budget as the CLI.
             let thread = Thread {
                 var error: UnsafeMutablePointer<CChar>?
                 let result = entry(json, &error)
@@ -48,8 +59,9 @@ enum LoopflowLibrary {
                     continuation.resume(returning: result.flatMap(take))
                 }
             }
-            thread.stackSize = 8 << 20
+            thread.name = "Loopflow library call"
             thread.qualityOfService = .userInitiated
+            thread.stackSize = 8 * 1024 * 1024
             thread.start()
         }
     }

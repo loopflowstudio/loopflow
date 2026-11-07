@@ -151,7 +151,7 @@ pub fn harness_issued() {
 // Library callers retain the thread-scoped with_runtime lifetime above.
 static PROCESS_CONTEXT: Mutex<Option<ProcessContext>> = Mutex::new(None);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProcessContext {
     trace_id: TraceId,
     lf_process_id: LfProcessId,
@@ -163,6 +163,7 @@ struct ProcessContext {
     cwd: PathBuf,
     ledger_path: PathBuf,
     /// Retain the first successful connection through Process completion.
+    #[serde(skip)]
     ledger: Arc<OnceLock<SqliteStore>>,
     receipt_wait: Duration,
     /// Serialized argv captured at Process start so terminal rows name their work.
@@ -172,6 +173,7 @@ struct ProcessContext {
     trace_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
+    #[serde(skip)]
     finished: Arc<AtomicBool>,
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the Process ends.
@@ -183,7 +185,7 @@ struct ProcessContext {
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptCost {
     pub waited: Duration,
     pub unrecorded: u32,
@@ -344,7 +346,8 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     result
 }
 
-/// Observe an early command without creating a Machine, migrating, or requiring Git.
+/// Observe a command without creating a Machine, migrating, or requiring Git:
+/// doctor before admission, and an install once its store has committed.
 /// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
     let wait = receipt_wait();
@@ -359,6 +362,10 @@ pub fn observe_process(command: &[String]) {
     }
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::database_path_from_env()?;
+        // A Machine without a store (a fresh or disposable home) has nothing to record into.
+        if !path.exists() {
+            return Ok(());
+        }
         let ledger = SqliteStore::open_existing_processes(&path, wait)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
@@ -371,7 +378,7 @@ pub fn observe_process(command: &[String]) {
         Ok(())
     };
     if let Err(error) = observe() {
-        debug!(%error, "early Process observation unavailable");
+        warn!(%error, "Process observation unavailable; this command is not recorded");
     }
 }
 
@@ -502,6 +509,48 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
         elapsed_ms = started.elapsed().as_millis(),
         "admitted Process"
     );
+}
+
+/// Complete this Process before it execs into another program. The image that
+/// replaces it keeps the PID but is not this command; its exit is recorded by
+/// whoever waits on it.
+pub fn finish_before_exec() {
+    if let Some(context) = current_context() {
+        finish_runtime(&context.cwd, &Ok::<(), anyhow::Error>(()));
+    }
+}
+
+const EXEC_PROCESS_ENV: &str = "LF_EXEC_PROCESS";
+
+/// Keep this command's receipt across a relay exec, without its open store.
+pub(crate) fn carry_across_exec(command: &mut Command) -> anyhow::Result<()> {
+    if let Some(context) = current_context() {
+        command.env(
+            EXEC_PROCESS_ENV,
+            serde_json::to_string(&(std::process::id(), context))?,
+        );
+    }
+    Ok(())
+}
+
+/// Restore the relay's command identity without opening its store. Its actual
+/// return or interruption writes the ordinary terminal receipt.
+pub fn continue_after_exec() -> anyhow::Result<()> {
+    let Some(value) = std::env::var_os(EXEC_PROCESS_ENV) else {
+        return Ok(());
+    };
+    std::env::remove_var(EXEC_PROCESS_ENV);
+    let (pid, context): (u32, ProcessContext) = serde_json::from_str(
+        value
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("exec process receipt is not UTF-8"))?,
+    )?;
+    // Exec keeps the PID; a child cannot adopt its parent's command receipt.
+    if pid == std::process::id() {
+        set_context(context.clone());
+        crate::agent::register_interrupt_cleanup(move || record_process_interruption(&context));
+    }
+    Ok(())
 }
 
 fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
@@ -776,14 +825,6 @@ fn first_ledger_failure() -> bool {
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
-}
-
-/// This Process's retained connection to the store at `path`, if a receipt
-/// already opened one; reusing it skips another read of the whole schema.
-pub(crate) fn retained_ledger(path: &Path) -> Option<SqliteStore> {
-    current_context()
-        .filter(|context| context.ledger_path == path)
-        .and_then(|context| context.ledger.get().cloned())
 }
 
 /// This Process's retained ledger connection, opening one only when no receipt
@@ -1193,6 +1234,22 @@ pub(crate) fn process_evidence(
         &recorded_process_receipt(store, &record),
         process_identity_evidence,
     )
+}
+
+/// The OS PID a recorded Process runs under now; `None` unless its recorded
+/// identity proves it live.
+pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Option<u32> {
+    let record = store.process(process).ok()??;
+    let receipt = recorded_process_receipt(store, &record);
+    let mut live = None;
+    recorded_process_evidence(&record, &receipt, |pid, started_at| {
+        let evidence = process_identity_evidence(pid, started_at);
+        if evidence == ProcessIdentityEvidence::Live {
+            live = Some(pid);
+        }
+        evidence
+    });
+    live
 }
 
 /// The recorded Process's own receipt, read by its locator without listing others.

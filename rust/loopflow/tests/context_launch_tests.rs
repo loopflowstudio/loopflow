@@ -28,6 +28,26 @@ fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[
     command
 }
 
+/// Live agent Processes once a quit owner has finished its exit records. The
+/// terminal gets the provider's exit after a short wait; the owner lingers to
+/// settle its provider, so a reader waits for it.
+fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let live: i64 = database
+            .query_row(
+                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if live == 0 || std::time::Instant::now() >= deadline {
+            return live;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 #[test]
 fn codex_startup_failures_preserve_input_and_allow_reconnect() {
     for failure in [
@@ -63,11 +83,25 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             start.elapsed() < std::time::Duration::from_secs(30),
             "{failure} must fail before the opener's deadline"
         );
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // A terminal's exit reads as the terminal's own output, on stdout.
+        let stderr = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // A quit owner still writing its records returns the terminal's own
+        // exit (the fixture's 24 or 25) instead of its own message.
+        let terminal_exit = match failure {
+            "fail-terminal" => Some(24),
+            "fail-after-submit" => Some(25),
+            _ => None,
+        };
         assert!(
-            (failure == "fail-after-submit" && stderr.contains("native terminal connection"))
+            (terminal_exit.is_some() && output.status.code() == terminal_exit)
+                || (failure == "fail-after-submit"
+                    && stderr.contains("native terminal connection"))
                 || stderr.contains(if failure == "fail-terminal" {
-                    "before submitting"
+                    "exited with"
                 } else if failure == "fail-after-submit" {
                     "status"
                 } else {
@@ -76,14 +110,11 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             "{failure}: {stderr}"
         );
         let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let live: i64 = database
-            .query_row(
-                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(live, 0, "{failure} must settle the owned provider");
+        assert_eq!(
+            settled_live_agents(&database),
+            0,
+            "{failure} must settle the owned provider"
+        );
         assert_eq!(
             fs::read_to_string(native.join("config.toml")).unwrap(),
             config
@@ -118,12 +149,15 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         let turns: serde_json::Value =
             serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
                 .unwrap();
+        // The first turn goes in before the terminal opens, so a terminal that
+        // fails leaves it in history, sent once, and the next one follows it.
+        let submitted = failure.starts_with("fail-") && failure != "fail-server";
         assert_eq!(
             turns.as_array().unwrap().len(),
-            if failure == "fail-after-submit" { 2 } else { 1 },
+            if submitted { 2 } else { 1 },
             "{failure}"
         );
-        if failure == "fail-after-submit" {
+        if submitted {
             assert_eq!(
                 turns[1]["items"][0]["content"][0]["text"],
                 "Native follow-up"
@@ -181,19 +215,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         "the terminal must answer, not a headless auto-approver"
     );
     let config = read("native-config.json");
+    let server = read("native-server-config.json");
     let capture = fs::read_to_string(home.path().join("launched")).unwrap();
     let key = capture.lines().next().unwrap();
     let shard = &key.strip_prefix("run_").unwrap_or(key)[..2];
     let manifest = read(&format!("runs/{shard}/{key}/manifest.json"));
+    // lf's configuration is the private app-server's, so a conversation the
+    // person starts in the client has it too; lf's own thread adds none.
     assert_eq!(
-        config["developerInstructions"],
+        server["developer_instructions"],
         manifest["exec"]["system_prompt"]
     );
+    assert!(config.get("developerInstructions").is_none());
+    assert!(config.get("config").is_none());
     assert!(config.get("baseInstructions").is_none());
-    assert_eq!(config["approvalPolicy"], "on-request");
+    assert!(config.get("approvalPolicy").is_none());
     assert_eq!(config["threadSource"], "user");
-    assert_eq!(config["config"]["native-setting"], true);
-    let hooks = &config["config"]["hooks"];
+    let hooks = &server["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
     let state = hooks["state"].as_object().unwrap();
     assert_eq!(
@@ -238,14 +276,11 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         turns[1]["items"][0]["content"][0]["text"],
         "Native follow-up"
     );
-    let live: i64 = database
-        .query_row(
-            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(live, 0, "both launches must settle their owned providers");
+    assert_eq!(
+        settled_live_agents(&database),
+        0,
+        "both launches must settle their owned providers"
+    );
 }
 
 #[test]
@@ -759,7 +794,7 @@ fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
+        "agent: codex\ncontext: {diff: false, diff_files: false, paste: false}\n",
     );
     repo.create_file(".lf/skills/probe.md", "First input marker.");
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
@@ -850,7 +885,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
+        "agent: codex\ncontext: {diff: false, diff_files: false, paste: false}\n",
     );
     repo.create_file(".lf/graphs/inspect.yaml", "- repo/operate\n");
     let preview = |args: &[&str]| {

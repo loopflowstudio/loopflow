@@ -358,7 +358,7 @@ fn world_sessions_resume_live_through_the_stub_provider() {
 }
 
 #[test]
-fn one_task_waits_at_demo_after_an_eight_step_pursue() {
+fn one_task_waits_at_demo_after_writing_docs_and_pursuing() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     let graph = built.task_graph(&issue);
@@ -392,14 +392,17 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
     assert_eq!(
         nodes,
         [
-            (0, "implement"),
-            (1, "compress"),
-            (2, "sync"),
-            (3, "realign"),
-            (4, "loop-or-next"),
-            (5, "concept-review"),
-            (6, "loop-or-next"),
-            (7, "pr-publish"),
+            (0, "write-docs"),
+            (1, "implement"),
+            (2, "compress"),
+            (3, "sync"),
+            (4, "realign"),
+            (5, "loop-or-next"),
+            (6, "concept-review"),
+            (7, "loop-or-next"),
+            (8, "qa"),
+            (9, "loop-or-next"),
+            (10, "pr-publish"),
         ]
     );
 }
@@ -417,8 +420,8 @@ fn portfolio_has_a_stopped_run_and_a_task_waiting_at_demo() {
         .iter()
         .map(|step| step["outcome"].as_str().unwrap())
         .collect();
-    assert_eq!(outcomes, ["succeeded", "succeeded", "failed"]);
-    assert_eq!(steps[2]["label"], "sync");
+    assert_eq!(outcomes, ["succeeded", "succeeded", "succeeded", "failed"]);
+    assert_eq!(steps[3]["label"], "sync");
 
     let graph = built.task_graph(&built.issue_named("Open conversations faster"));
     assert_eq!(

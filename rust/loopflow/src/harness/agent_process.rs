@@ -71,15 +71,7 @@ pub(crate) fn spawn(
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| {
-        let capability = store.reserve_steer_adapter(session, attachment)?;
-        command.env(
-            crate::steer::PROVIDER_CONTEXT_ENV,
-            serde_json::to_string(&capability)?,
-        );
-        command.env(
-            crate::steer::STEER_SEEN_ENV,
-            crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
-        );
+        steer_environment(command.as_std_mut(), owner)?;
         let program = command
             .as_std()
             .get_program()
@@ -109,16 +101,9 @@ pub(crate) fn spawn_native(
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
-    let capability = store.reserve_steer_adapter(session, attachment)?;
-    command.env(
-        crate::steer::PROVIDER_CONTEXT_ENV,
-        serde_json::to_string(&capability)?,
-    );
-    command.env(
-        crate::steer::STEER_SEEN_ENV,
-        crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
-    );
-    store
+    steer_environment(&mut command, owner)?;
+    let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
+    let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
@@ -137,7 +122,81 @@ pub(crate) fn spawn_native(
             // Preserve the OS error (including NotFound) for the caller's message.
             Ok(spawned)
         })?
-        .map_err(Into::into)
+        .map_err(anyhow::Error::from)?;
+    if let Some(cwd) = cwd {
+        crate::transport::report_directory(&cwd);
+    }
+    Ok(child)
+}
+
+fn steer_environment(
+    command: &mut std::process::Command,
+    owner: &AttachmentOwner,
+) -> StoreResult<()> {
+    let (store, session, attachment) = owner;
+    let capability = store.reserve_steer_adapter(session, attachment)?;
+    command.env(
+        crate::steer::PROVIDER_CONTEXT_ENV,
+        serde_json::to_string(&capability)?,
+    );
+    command.env(
+        crate::steer::STEER_SEEN_ENV,
+        crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
+    );
+    Ok(())
+}
+
+/// Become the provider: this process is the AgentProcess, recorded under the
+/// owner's attachment before the exec. Returns only when the exec failed, with
+/// the launch recorded as never spawned.
+pub(crate) fn exec_native(
+    mut command: std::process::Command,
+    owner: &AttachmentOwner,
+    launch_lock: Option<std::fs::File>,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    let (store, session, attachment) = owner;
+    crate::agent_input_timing::record("provider_exec_begin", session);
+    if let Err(error) = steer_environment(&mut command, owner) {
+        return std::io::Error::other(error.to_string());
+    }
+    let pid = std::process::id();
+    let started_at = match process_started_at(pid) {
+        Ok(Some(started_at)) => started_at,
+        Ok(None) => return std::io::Error::other("AgentProcess birth unavailable before exec"),
+        Err(error) => return error,
+    };
+    let admitted = store.with_session_attachment(session, attachment, || {
+        store.record_agent_process_launch(session, attachment, &command, true)?;
+        store.record_agent_process_identity(session, attachment, pid, started_at)
+    });
+    if let Err(error) = admitted {
+        return std::io::Error::other(error.to_string());
+    }
+    // Identity is visible before another connect can acquire the launch lock.
+    drop(launch_lock);
+    let error = command.exec();
+    crate::agent_input_timing::record("provider_exec_failed", session);
+    if let Err(record) = store.with_session_attachment(session, attachment, || {
+        store.record_agent_process_exit(session, attachment, false)
+    }) {
+        tracing::warn!(error = %record, "failed exec was not recorded");
+    }
+    error
+}
+
+/// Become a client of the provider running beside this process. The client
+/// takes over holding the provider's lifeline, so the provider outlives lf.
+pub(crate) fn exec_client(
+    mut command: std::process::Command,
+    launch_lock: Option<std::fs::File>,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    if let Err(error) = crate::os_process::inherit_lifelines() {
+        return error;
+    }
+    drop(launch_lock);
+    command.exec()
 }
 
 /// Failed terminal setup still owns an admitted child. Serialize its cleanup
@@ -370,13 +429,14 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
 fn confirmed_group_death(pid: u32) -> Result<()> {
+    crate::os_process::release_agent_lifeline(pid);
     let mut survivors = OsProcess::group(pid)?;
-    if crate::os_process::release_agent_lifeline(pid) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !survivors.is_empty() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(25));
-            survivors = OsProcess::group(pid)?;
-        }
+    // Recovery in another process holds no lifeline writer, but can still
+    // observe helpers finishing the previous owner's teardown.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !survivors.is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        survivors = OsProcess::group(pid)?;
     }
     if !survivors.is_empty() {
         return Err(anyhow!(

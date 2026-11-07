@@ -46,8 +46,9 @@ use crate::store::ProviderAccountId;
 fn build_thread_request(
     launch: &AgentConfig,
     resume_agent_session: Option<&AgentSessionId>,
+    headless: bool,
 ) -> (&'static str, serde_json::Map<String, Value>) {
-    let mut params = build_codex_thread_start_params(launch);
+    let mut params = build_codex_thread_start_params(launch, headless);
     match resume_agent_session {
         Some(session_id) => {
             params.insert(
@@ -58,6 +59,84 @@ fn build_thread_request(
         }
         None => ("thread/start", params),
     }
+}
+
+/// What an AgentProcess started by `command` would inherit, including the
+/// account route's and any wrapper's own overrides, read from a short-lived
+/// stdio app-server started the same way.
+async fn read_inherited_config(
+    command: &std::process::Command,
+    cwd: Option<&std::path::Path>,
+) -> Result<Value> {
+    let mut probe = Command::new(command.get_program());
+    probe.args(command.get_args()).arg("app-server");
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => probe.env(name, value),
+            None => probe.env_remove(name),
+        };
+    }
+    if let Some(directory) = command.get_current_dir() {
+        probe.current_dir(directory);
+    }
+    let mut connection = crate::provider_auth::codex::Connection::start(&mut probe)
+        .await
+        .map_err(|error| anyhow!("Codex config/read failed: {error}"))?;
+    let inherited = connection
+        .request_raw("config/read", json!({"cwd": cwd, "includeLayers": true}))
+        .await
+        .map_err(|error| anyhow!("Codex config/read failed: {error}"))?;
+    if let Some(error) = inherited.get("error") {
+        anyhow::bail!("Codex config/read failed: {error}");
+    }
+    let inherited = inherited["result"].clone();
+    anyhow::ensure!(
+        inherited["config"].is_object(),
+        "Codex config/read returned no configuration"
+    );
+    Ok(inherited)
+}
+
+/// `-c key=value` pairs for dotted config keys; Codex parses each value as TOML.
+fn config_overrides(config: &Value) -> Result<Vec<String>> {
+    let Value::Object(entries) = config else {
+        anyhow::bail!("Codex configuration is not a table");
+    };
+    let mut args = Vec::with_capacity(entries.len() * 2);
+    for (key, value) in entries {
+        args.push("-c".to_string());
+        args.push(format!("{key}={}", toml_inline(value)?));
+    }
+    Ok(args)
+}
+
+/// JSON's escapes are TOML basic-string escapes; TOML also forbids raw DEL.
+fn toml_string(text: &str) -> Result<String> {
+    Ok(serde_json::to_string(text)?.replace('\u{7f}', "\\u007F"))
+}
+
+fn toml_inline(value: &Value) -> Result<String> {
+    Ok(match value {
+        Value::Null => anyhow::bail!("TOML has no null"),
+        Value::Bool(_) | Value::Number(_) => value.to_string(),
+        Value::String(text) => toml_string(text)?,
+        Value::Array(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(toml_inline)
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Value::Object(entries) => format!(
+            "{{{}}}",
+            entries
+                .iter()
+                .map(|(key, value)| Ok(format!("{}={}", toml_string(key)?, toml_inline(value)?)))
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+    })
 }
 
 #[derive(Debug)]
@@ -219,10 +298,6 @@ impl std::fmt::Debug for CodexHarness {
 }
 
 impl CodexHarness {
-    pub(crate) fn account_route(&self) -> Option<ProviderAccountRoute> {
-        self.account_route.clone()
-    }
-
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
@@ -377,6 +452,7 @@ impl Harness for CodexHarness {
             self.resume_agent_session.as_ref(),
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
+            config.isolate,
         )
         .await?;
         self.account_route = account_route;
@@ -595,6 +671,63 @@ impl Harness for CodexHarness {
 }
 
 impl CodexHarness {
+    /// lf's configuration for this AgentProcess's conversations, as dotted Codex
+    /// config keys: shell policy and hooks, plus configured writable roots for
+    /// the native client. Both extend what the server would otherwise inherit.
+    async fn conversation_config(
+        &self,
+        command: &std::process::Command,
+        launch: &AgentConfig,
+        tool_environment: std::collections::BTreeMap<String, String>,
+    ) -> Result<Value> {
+        let mut config = json!({
+            "shell_environment_policy.set": tool_environment,
+            "allow_login_shell": false,
+            "features.shell_snapshot": false,
+        });
+        let native = self.approval == ApprovalPolicy::NativeClient;
+        let roots = if native && launch.write_scope == crate::agent::AgentWriteScope::Configured {
+            launch
+                .cwd
+                .as_deref()
+                .map(crate::agent::workspace_add_dirs)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let inherited = if native && (!roots.is_empty() || launch.conversation_context.is_some()) {
+            read_inherited_config(command, launch.cwd.as_deref()).await?
+        } else {
+            Value::Null
+        };
+        if !roots.is_empty() {
+            let mut writable = inherited
+                .pointer("/config/sandbox_workspace_write/writable_roots")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for root in roots {
+                let root = json!(root);
+                if !writable.contains(&root) {
+                    writable.push(root);
+                }
+            }
+            config["sandbox_workspace_write.writable_roots"] = json!(writable);
+        }
+        if let Some(context) = &launch.conversation_context {
+            let session_hooks = inherited["layers"]
+                .as_array()
+                .and_then(|layers| {
+                    layers
+                        .iter()
+                        .find(|layer| layer["name"]["type"] == "sessionFlags")
+                })
+                .and_then(|layer| layer["config"].get("hooks"));
+            config["hooks"] = super::context::codex_hooks(context, session_hooks)?;
+        }
+        Ok(config)
+    }
+
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
         self.session_attachment = Some(owner.clone());
@@ -637,10 +770,6 @@ impl CodexHarness {
             command.args(route.provider_args());
         }
         command
-            // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
-            // to `codex app-server` (verified against 0.142.5).
-            .arg("app-server")
-            .args(["--listen", &format!("unix://{}", endpoint.display())])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -659,16 +788,44 @@ impl CodexHarness {
         };
         super::configure_vendor_std_env(command.as_std_mut())?;
         // Codex's shell policy need not inherit arbitrary app-server environment.
-        // Tool authority belongs to this conversation, including when another
-        // conversation later shares its app-server. Pass only explicit launch and
-        // freshly resolved lf executable/Machine values as thread configuration.
+        // Pass only explicit launch and freshly resolved lf executable/Machine
+        // values as configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
-        // The app-server can host another conversation. Only this thread receives
-        // its caller/capture provenance; app-server defaults must not lend it to a
-        // newly admitted sibling.
+        // Caller/capture provenance reaches tools only through that policy.
         for name in crate::agent::EXECUTION_IDENTITY_ENV {
             command.env_remove(name);
         }
+        let native = self.approval == ApprovalPolicy::NativeClient;
+        let (thread_method, mut thread_params) =
+            build_thread_request(launch, self.resume_agent_session.as_ref(), !native);
+        if native {
+            // A native Session's AgentProcess is private to it, so lf's
+            // configuration is the server's own: a conversation the person
+            // starts with /new or /fork gets it too. A reconnect joins a server
+            // that already has it.
+            let instructions = thread_params.remove("developerInstructions");
+            if connection.is_none() {
+                let mut config = self
+                    .conversation_config(command.as_std(), launch, tool_environment)
+                    .await?;
+                if let Some(instructions) = instructions {
+                    config["developer_instructions"] = instructions;
+                }
+                // Before the subcommand, after the route's and any wrapper's own
+                // overrides: a repeat after `app-server` would replace those.
+                command.args(config_overrides(&config)?);
+            }
+        } else {
+            let config = self
+                .conversation_config(command.as_std(), launch, tool_environment)
+                .await?;
+            thread_params.insert("config".into(), config);
+        }
+        command
+            // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
+            // to `codex app-server` (verified against 0.142.5).
+            .arg("app-server")
+            .args(["--listen", &format!("unix://{}", endpoint.display())]);
 
         let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
@@ -1003,80 +1160,6 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
-        let (thread_method, mut thread_params) =
-            build_thread_request(launch, self.resume_agent_session.as_ref());
-        // Keep shell policy on the thread. Repeating -c after app-server also
-        // replaces the wrapper's global config overrides in Codex's CLI parser.
-        let mut config = json!({
-            "shell_environment_policy.set": tool_environment,
-            "allow_login_shell": false,
-            "features.shell_snapshot": false,
-        });
-        let native = self.approval == ApprovalPolicy::NativeClient;
-        if native
-            && launch.write_scope == crate::agent::AgentWriteScope::Configured
-            && !launch.skip_permissions
-        {
-            // The native UI supplies interactive approval policy. The shared
-            // builder's unattended default belongs only to headless turns.
-            thread_params.remove("approvalPolicy");
-        }
-        let roots = if native && launch.write_scope == crate::agent::AgentWriteScope::Configured {
-            launch
-                .cwd
-                .as_deref()
-                .map(crate::agent::workspace_add_dirs)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        // Resolve through the selected provider/account once. Thread overrides
-        // must retain both configured writable roots and wrapper hook declarations.
-        let inherited = if native && (!roots.is_empty() || launch.conversation_context.is_some()) {
-            let inherited = self
-                .send_observed_request(
-                    "config/read",
-                    json!({"cwd":launch.cwd,"includeLayers":true}),
-                )
-                .await?
-                .recv()
-                .await?
-                .map_err(|error| anyhow!("Codex config/read failed: {error}"))?;
-            anyhow::ensure!(
-                inherited["config"].is_object(),
-                "Codex config/read returned no configuration"
-            );
-            inherited
-        } else {
-            Value::Null
-        };
-        if !roots.is_empty() {
-            let mut writable = inherited
-                .pointer("/config/sandbox_workspace_write/writable_roots")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            for root in roots {
-                let root = json!(root);
-                if !writable.contains(&root) {
-                    writable.push(root);
-                }
-            }
-            config["sandbox_workspace_write.writable_roots"] = json!(writable);
-        }
-        if let Some(context) = &launch.conversation_context {
-            let session_hooks = inherited["layers"]
-                .as_array()
-                .and_then(|layers| {
-                    layers
-                        .iter()
-                        .find(|layer| layer["name"]["type"] == "sessionFlags")
-                })
-                .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] =
-                super::context::codex_config(context, session_hooks)?["hooks"].clone();
-        }
-        thread_params.insert("config".into(), config);
         if self.approval == ApprovalPolicy::NativeClient {
             let (store, session, attachment) = &owner;
             store.record_agent_endpoint(session, attachment, &endpoint.to_string_lossy())?;
@@ -1290,7 +1373,7 @@ mod tests {
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
-            let (_, params) = build_thread_request(&config, session);
+            let (_, params) = build_thread_request(&config, session, true);
             assert_eq!(params["developerInstructions"], "Fixed additions.");
             assert!(!params.contains_key("baseInstructions"));
             assert!(!params.contains_key("model_instructions_file"));
@@ -1303,7 +1386,7 @@ mod tests {
             cwd: Some("/tmp/project".into()),
             ..AgentConfig::default()
         };
-        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()));
+        let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
         assert_eq!(method, "thread/resume");
         assert_eq!(
@@ -1318,7 +1401,7 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(&AgentConfig::default(), None);
+        let (method, params) = build_thread_request(&AgentConfig::default(), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }

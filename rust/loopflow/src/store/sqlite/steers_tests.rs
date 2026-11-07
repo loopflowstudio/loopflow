@@ -4,6 +4,7 @@ use super::{save_in, SqliteStore};
 use crate::durable::Author;
 use crate::id::LfProcessId;
 use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
+use crate::store::sqlite::sessions::OwnerRetention::{LiveTurn, NativeInput};
 use crate::store::StoreError;
 
 fn rendered(text: &str) -> SteerContext {
@@ -38,6 +39,197 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
         .with_provider_context(&adapter, "native", ACTIVATE, || Ok(()))
         .unwrap();
     (home, store, adapter)
+}
+
+fn native_fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
+    let (home, store, adapter) = fixture();
+    let attachment = store.session_attachment("session").unwrap().unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1 WHERE id='session'",
+            [attachment.lf_process_id.as_ref().unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            [&adapter.agent_process_id],
+        )
+        .unwrap();
+    }
+    (home, store, adapter)
+}
+
+#[test]
+fn native_input_acknowledgements_cannot_cross_provider_replacement() {
+    let (_home, store, adapter) = native_fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    assert!(store.try_record_owner_input(owner, b"draft\r").unwrap());
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
+    assert!(store
+        .acknowledge_native_input(&adapter, "other-thread", "one", Some("draft"))
+        .is_err());
+    store
+        .acknowledge_native_input(&adapter, "native", "one", Some("draft"))
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    store
+        .acknowledge_native_input(&adapter, "native", "one", None)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+    assert!(store.try_record_owner_input(owner, b"next\r").unwrap());
+    store
+        .acknowledge_native_input(&adapter, "native", "two", Some("next"))
+        .unwrap();
+    store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    assert!(store
+        .acknowledge_native_input(&adapter, "native", "two", None)
+        .is_err());
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(NativeInput));
+    store.clear_owner_input(owner).unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+}
+
+#[test]
+fn pending_requests_hold_the_owner_until_the_current_attachment_settles_them() {
+    let (_home, store, _adapter) = fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1 WHERE id='session'",
+            [owner],
+        )
+        .unwrap();
+    let mut activity = crate::session::SessionActivity {
+        preview: None,
+        observed_at: 1,
+        open_tools: 0,
+        pending_input: 1,
+        yielded: true,
+    };
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    for viewed in [false, true] {
+        store.record_owner_viewers(owner, viewed).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    }
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    activity.pending_input = 0;
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+    activity.pending_input = 1;
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+}
+
+#[test]
+fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
+    let (_home, store, adapter) = native_fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert_ne!(first.token, next.token);
+    // No editor input or open tool is needed to keep an unyielded turn.
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE processes SET viewed=1 WHERE id=?1", [owner])
+            .unwrap();
+        conn.execute(
+            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+            [],
+        ).unwrap();
+    }
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    // The provider itself survived; its stop belongs to its current attachment.
+    store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .unwrap();
+    // A viewed prompt also cannot settle its provider-owned watch.
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE processes SET viewed=0 WHERE id=?1", [owner])
+        .unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    assert!(store
+        .record_native_turn(&adapter, "child", true, Some(0))
+        .is_err());
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    let replacement = store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    // Activity from the old provider cannot keep its replacement alive.
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .is_err());
+    let current = store
+        .reserve_steer_adapter("session", &replacement)
+        .unwrap();
+    store
+        .with_provider_context(&current, "native", ACTIVATE, || Ok(()))
+        .unwrap();
+    store
+        .record_native_turn(&current, "native", true, Some(1))
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .is_err());
+    assert_eq!(store.owner_retention(owner).unwrap(), Some(LiveTurn));
+    store
+        .record_native_turn(&current, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(store.owner_retention(owner).unwrap(), None);
 }
 
 #[test]
@@ -303,7 +495,7 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
             INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at)
             VALUES('repo_00000000000040008000000000000001','task','project','T-1','/task',1),('repo_00000000000040008000000000000001','sibling-task','project','T-2','/sibling',1);
-            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local');
+            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1);
             UPDATE agent_sessions SET repo='/repo',cwd='/' ;
             UPDATE agent_sessions SET cwd='/task' WHERE id IN ('session','peer');
             UPDATE agent_sessions SET cwd='/sibling' WHERE id='sibling';",

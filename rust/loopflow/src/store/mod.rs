@@ -28,6 +28,7 @@ pub mod planning_sync;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
+mod recording_gap;
 mod repositories;
 pub mod rows;
 mod sessions;
@@ -35,6 +36,7 @@ pub mod sqlite;
 mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use recording_gap::{GapSpan, RecordingGap};
 
 /// Availability of retained planning facts, independent of execution permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -74,7 +76,6 @@ pub(crate) struct WaveLocatorUpdate {
     pub expected_repo: String,
     pub expected_slug: String,
     pub target: WaveLocator,
-    pub retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -483,22 +484,6 @@ impl Store {
 
     pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
-    }
-
-    pub(crate) async fn wave_retirement_blockers(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
     pub(crate) async fn provider_auth_snapshot(
@@ -1004,7 +989,16 @@ pub struct ProviderToken {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    schemars::JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[serde(transparent)]
 pub struct ProviderAccountId(String);
@@ -1105,7 +1099,9 @@ impl CredentialState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingState {
     Automatic,
@@ -1353,13 +1349,11 @@ mod tests {
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
@@ -1599,6 +1593,7 @@ mod tests {
                         skill: crate::graph::Skill::named("review"),
                         id: None,
                         interactive: true,
+                        interactive_name: None,
                         returns: None,
                         sources: Vec::new(),
                     },
@@ -3542,13 +3537,6 @@ mod tests {
             "ordinary Wave updates cannot bypass relocation"
         );
         assert_eq!(loaded.name(), wave.name());
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-        assert!(store
-            .get_wave(wave.id())
-            .await
-            .expect("get deleted wave")
-            .is_none());
     }
 
     #[tokio::test]
@@ -3800,6 +3788,11 @@ mod tests {
 
         store.upsert_provider_account(&primary).await.unwrap();
         assert!(store.upsert_provider_account(&duplicate).await.is_err());
+        assert!(store
+            .get_provider_account("claude", &duplicate.account_id)
+            .await
+            .unwrap()
+            .is_none());
 
         duplicate.provider = "codex".to_string();
         store.upsert_provider_account(&duplicate).await.unwrap();

@@ -12,6 +12,30 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// Why a Session owner cannot retire without losing work or native input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerRetention {
+    NativeInput,
+    RunningGraph,
+    /// No open Session names the owner. This is unknown, not work: the row may
+    /// be complete or absent, so it cannot show the owner is safe to end.
+    NoOpenSession,
+    HeadlessRun,
+    LiveTurn,
+}
+
+impl std::fmt::Display for OwnerRetention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            OwnerRetention::NativeInput => "native input",
+            OwnerRetention::RunningGraph => "a running Graph",
+            OwnerRetention::NoOpenSession => "no open Session",
+            OwnerRetention::HeadlessRun => "a headless Run",
+            OwnerRetention::LiveTurn => "a live turn",
+        })
+    }
+}
+
 /// The Graph whose process recorded, as a step, the Process that captured session
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {
@@ -34,6 +58,18 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
         EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
     ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
+/// Current provider work or a viewed terminal's working status holds Session `s`.
+/// Terminal idle cannot settle owned work; unviewed status is only history.
+const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
+    JOIN processes p ON p.id=s.agent_process_id
+    WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
+    AND p.completed_at IS NULL
+    AND ((act.attachment_token IS p.attachment_token
+            AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
+        OR (act.program_status IS NOT NULL
+            AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1)
+            AND NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
@@ -499,6 +535,61 @@ pub(crate) struct PendingInput {
     pub(crate) latest: i64,
 }
 
+/// The caller reads and validates this Session inside the same transaction.
+pub(super) fn bind_session_in(
+    conn: &Connection,
+    session: &LfSession,
+    task: &TaskId,
+) -> StoreResult<()> {
+    let id = session.id.as_str();
+    if let Some(bound) = &session.task_id {
+        if bound != task {
+            let issue = super::children::short_task_id(conn, bound)?.ok_or(StoreError::NotFound)?;
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {id} already has Task {issue}; binding is permanent"
+            )));
+        }
+    } else {
+        let wave = super::durable::task_wave_in(conn, task)?;
+        if session
+            .wave_id
+            .as_ref()
+            .is_some_and(|existing| Some(existing) != wave.as_ref())
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {id} belongs to another Wave"
+            )));
+        }
+        conn.execute(
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
+                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
+            )?;
+    }
+    repair_session_title_in(conn, id, None)
+}
+
+pub(super) fn choose_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &str,
+) -> StoreResult<()> {
+    let chosen = conn.execute(
+        &format!(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
+                    AND s.completed_at IS NULL AND s.id IN ({}))",
+            super::task_work::session_ids("?1")
+        ),
+        params![task.as_str(), session],
+    )?;
+    if chosen != 1 {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Session {session} is not an unfinished interactive conversation of this Task"
+        )));
+    }
+    Ok(())
+}
+
 impl SqliteStore {
     pub(crate) fn bind_session_transport(
         &self,
@@ -511,7 +602,8 @@ impl SqliteStore {
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+                // An owner reopens a retired conversation; its next exit retires it again.
+                "UPDATE agent_sessions SET transport_lf_process_id=?2,completed_at=NULL WHERE id=?1",
                 params![session, owner.as_str()],
             )?;
             Ok(())
@@ -552,34 +644,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Unfinished interactive Sessions whose execution owner never recorded an
-    /// exit, with that owner. Leaving or detaching records one; a restart,
-    /// crash or kill does not. Liveness is the caller's observation.
-    pub(crate) fn unexited_session_owners(
-        &self,
-    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT s.id, s.transport_lf_process_id FROM agent_sessions s
-             JOIN processes o ON o.id=s.transport_lf_process_id
-             WHERE s.interactive=1 AND s.completed_at IS NULL AND o.completed_at IS NULL
-             ORDER BY s.id",
-        )?;
-        let rows = query
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.into_iter()
-            .map(|(session, owner)| {
-                Ok((
-                    session,
-                    crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
-                ))
-            })
-            .collect()
-    }
-
     /// Whether the Session's current AgentProcess last reported work in progress,
     /// rather than waiting for a person, when it stopped.
     pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
@@ -607,33 +671,58 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether every Session execution owner `owner` holds is a standalone
-    /// interactive conversation waiting for a person. A Graph step, a headless
-    /// Run, or a turn in progress keeps it running.
-    pub(crate) fn owner_waits_for_person(
+    /// What keeps execution owner `owner` running. None means its standalone
+    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
+    pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,
-    ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // A Graph started inside an owner, as from a terminal, holds its steps
-        // there. CROSS JOIN seeds the walk from the few Graphs, not every Process.
+    ) -> StoreResult<Option<OwnerRetention>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        if super::native_input::pending(&conn, owner)? {
+            return Ok(Some(OwnerRetention::NativeInput));
+        }
+        // A running Graph started inside an owner, as from a terminal, holds
+        // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
+        // every Process.
         Ok(conn.query_row(
             &format!(
                 "WITH RECURSIVE graph_ancestors(id) AS (
                      SELECT p.parent_lf_process_id FROM graph_processes f
                          CROSS JOIN processes p ON p.id=f.lf_process_id
+                         WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                 AND EXISTS(SELECT 1 FROM agent_sessions s
+                 SELECT ?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                     OR EXISTS(SELECT 1 FROM agent_sessions s
+                         JOIN processes g ON g.id={SESSION_GRAPH}
+                         WHERE s.transport_lf_process_id=?1 AND g.completed_at IS NULL)
+                     AS running_graph,
+                 NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
-                 AND NOT EXISTS(SELECT 1 FROM agent_sessions s
+                     AS no_open_session,
+                 EXISTS(SELECT 1 FROM agent_sessions s
+                     WHERE s.transport_lf_process_id=?1 AND s.interactive=0)
+                     AS headless_run,
+                 EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0 OR {SESSION_GRAPH} IS NOT NULL
-                         OR (s.completed_at IS NULL AND {TURN_RUNNING})))"
+                         AND s.completed_at IS NULL AND {TURN_LIVE})
+                     AS live_turn"
             ),
             [owner.as_str()],
-            |row| row.get(0),
+            |row| {
+                Ok(if row.get("running_graph")? {
+                    Some(OwnerRetention::RunningGraph)
+                } else if row.get("no_open_session")? {
+                    Some(OwnerRetention::NoOpenSession)
+                } else if row.get("headless_run")? {
+                    Some(OwnerRetention::HeadlessRun)
+                } else if row.get("live_turn")? {
+                    Some(OwnerRetention::LiveTurn)
+                } else {
+                    None
+                })
+            },
         )?)
     }
 
@@ -651,20 +740,6 @@ impl SqliteStore {
             .query_map([owner.as_str()], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?;
         Ok(rows)
-    }
-
-    /// Whether a viewer is attached to execution owner `owner`.
-    pub(crate) fn owner_viewed(&self, owner: &crate::id::LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT viewed FROM processes WHERE id=?1",
-                [owner.as_str()],
-                |row| row.get::<_, Option<bool>>(0),
-            )
-            .optional()?
-            .flatten()
-            .unwrap_or(false))
     }
 
     /// A Task's unfinished interactive conversations, each with its last opening.
@@ -729,20 +804,7 @@ impl SqliteStore {
         session: &str,
     ) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let chosen = conn.execute(
-            &format!(
-                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
-                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))",
-                super::task_work::session_ids("?1")
-            ),
-            params![task.as_str(), session],
-        )?;
-        if chosen != 1 {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Session {session} is not an unfinished interactive conversation of this Task"
-            )));
-        }
+        choose_task_primary_in(&conn, task, session)?;
         task_primary_in(&conn, task)?
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
@@ -1318,22 +1380,27 @@ impl SqliteStore {
     }
 
     /// Called under the Session launch lock after proving there is no live client.
-    pub(crate) fn move_primary_workspace(
+    pub(crate) fn admit_session_workspace(
         &self,
         session: &LfSession,
         cwd: &Path,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
+    ) -> StoreResult<LfSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Binding may have selected a directory while an opening prepared the
+        // old scope's workspace. Its explicit choice wins over that preparation.
+        let updated = tx.execute(
+            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidAuthority(
-                "primary Session changed before workspace admission".into(),
+                "Session changed before workspace admission".into(),
             ));
         }
-        Ok(())
+        let admitted = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(admitted)
     }
 
     /// The Task a Session is primary for, else the repository or Wave it is or
@@ -1486,42 +1553,13 @@ impl SqliteStore {
         let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if session.cwd != before.cwd {
-            return Err(StoreError::InvalidAuthority(
-                "Session workspace changed before binding".into(),
-            ));
-        }
-        if session.captured != expected_capture {
+        let current = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if current.cwd != before.cwd || current.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
             ));
         }
-        if let Some(bound) = &session.task_id {
-            if bound != task {
-                let issue =
-                    super::children::short_task_id(&tx, bound)?.ok_or(StoreError::NotFound)?;
-                return Err(StoreError::InvalidAuthority(format!(
-                    "Session {id} already has Task {issue}; binding is permanent"
-                )));
-            }
-        } else {
-            let wave = super::durable::task_wave_in(&tx, task)?;
-            if session
-                .wave_id
-                .as_ref()
-                .is_some_and(|existing| Some(existing) != wave.as_ref())
-            {
-                return Err(StoreError::InvalidAuthority(format!(
-                    "Session {id} belongs to another Wave"
-                )));
-            }
-            tx.execute(
-                "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
-                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
-            )?;
-        }
-        repair_session_title_in(&tx, id, None)?;
+        bind_session_in(&tx, &current, task)?;
         let bound = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(bound)
@@ -2082,7 +2120,7 @@ mod metadata_tests {
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE is_local=1))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
         }
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         let exclusion = store.lock_checkout(&session.cwd).unwrap();

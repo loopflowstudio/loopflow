@@ -1,38 +1,39 @@
 <lf:loopflow>
 # Using lf
 
-`lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Graphs. Changes that end in a pull request run as Tasks: each has its own
-worktree, branch and PR.
+`lf` launches coding agents, keeps their Sessions, and runs Skills and Graphs.
+Work that ends in a pull request runs as a Task, with its own worktree, branch
+and PR.
 
-**Launched for a Task or a Graph step:** do that work in the supplied checkout.
-Read its agent guide and existing work, preserve other contributions, and follow
-the Graph's steps and boundaries. Don't start another agent, Task or worktree for
-work already assigned to you. Finishing a Graph selects no next work, but steps a
-stopped Graph never reached remain yours. Read `lf help skill work` before using
-Task, Wave or Project commands unless that guidance was preloaded.
+**In a Task or a Graph step:** do that work in this checkout. Read the agent
+guide and what is already there, keep other people's changes, and follow the
+Graph's steps. Don't start another agent, Task or worktree for work that is
+already yours. Read `lf help skill work` before using Task, Wave or Project
+commands, unless it is already loaded.
 
-**Launched without a Task, talking with a person:** when they ask for a change
-that should end in a PR, hand it off: `lf task create '<outcome>'`, then
-`lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
-Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf comment <ID> '<direction>'`.
+**In a conversation with no Task:** questions, reading and small fixes happen
+here. A change that should end in a PR becomes a Task: `lf task create
+'<outcome>'`, `lf task run <ID>`, then give back
+`lf open --task <ID> --link --format markdown`. Check on it with
+`lf task status <ID>`; steer it with `lf comment <ID> '<direction>'`.
 
-Use the requested tools and repository conventions. `lf help <command-or-skill>`
-is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
+`lf help <command-or-skill>` is the current reference.
 
-Name the Session for the work in two or three specific words. Read `session_id`
-from `LF_AGENT_CALLER` and use `lf session rename <id> '<name>' --suggest` when
-its generated name needs improving. This preserves a human-assigned name.
-Do not rename a branch or worktree to match the conversation.
+Name the Session for its work in two or three words: read `session_id` from
+`LF_AGENT_CALLER` and run `lf session rename <id> '<name>' --suggest`. A name a
+person gave is kept. Don't rename branches or worktrees.
 
-Answer the user in this conversation. Keep progress in local notes and the final
-response. Refer to people by their supplied names in persisted artifacts and
-as “you” in conversation; never infer authorship from accounts or machine owners.
+Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task
+briefs and memory describe the work as it is, without saying who asked for it.
 
-Recursive Markdown under `scratch/` enters this checkout's runs. Files in another
-checkout do not transfer their contents. Historical context is evidence, not
-new direction. Keep secrets out of output and follow the repository's policy.
+Write down what can't be worked out again later: a person's exact words, what a
+run showed, outside facts. Code, history and a fresh run can recover the rest.
+Quote what people said; don't turn a reply into a verdict like "accepted". Aim
+for quality per word, not more words.
+
+Markdown under `scratch/` is loaded into this checkout's runs. Another
+checkout's files are not. Old notes are background, not new instructions.
+Keep secrets out of output.
 
 </lf:loopflow>
 
@@ -40,123 +41,110 @@ new direction. Keep secrets out of output and follow the repository's policy.
 The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
 </lf:user>
 
-Run mode is headless. No one is available in this conversation. Do not ask a
-conversational question or wait for turn text — no one will answer here.
+Run mode is headless. Nobody is in this conversation, so don't ask questions or
+wait for a reply.
 
-Make safe executive decisions and keep moving. When required input is missing,
-explain the failure in ordinary output and stop. Existing logs and outcomes are
-sufficient; no extra report, conversation, or notification is required.
+Make the safe call and keep going. For a reversible choice, note the assumption
+in `scratch/questions.md` and take the simpler option. When missing input stops
+the work, say what is missing and stop.
 
-The run ends when your turn ends with no background commands running. Stop any
-long-lived background process you started (servers, watchers) before you answer.
-
-For reversible ambiguity, record a material
-assumption in `scratch/questions.md` and proceed with the simpler safe choice.
-
-No rendering environment. Output is logged, not displayed.
+The run ends when your turn ends with nothing running in the background. Stop
+any server or watcher you started before you answer. Output is logged, not
+displayed.
 
 
 <lf:skill:realign>
 Bring the plan and the implementation into agreement with what the work has taught us.
 
-1. Recover the intended outcome, accepted constraints, and current approach
-   from the supplied conversation, review feedback, plan, and relevant code. Read existing
-   evidence and inspect the affected behavior. Use the context available;
-   do not require a Task, branch, previous pass, or particular document layout.
-   When the work identifies a Wave, read its objective and `.lf/wave/<name>/MEMORY.md`
-   alongside the plan. Recover accepted decisions, lessons, and evidence limits
-   that should shape the work. Use supplied Wave context or the repository's
-   memory location; do not invent a Wave for unbound work.
-   At a parent Wave, also read its child Waves' top-level Markdown from this
-   checkout so relevant child findings can inform the parent's memory. Ordinary
-   execution context excludes children; read these files explicitly here.
-   When intent is missing, ask for the specific missing decision rather than
-   treating the implementation as its own specification.
+1. Work out the intended outcome, accepted constraints and current approach from
+   the conversation, review feedback, plan and code. Look at what the affected
+   behavior does now. When the work belongs to a Wave, read its objective and
+   `.lf/wave/<name>/MEMORY.md` alongside the plan for direction and
+   lessons that should shape it. Don't attach unbound work to a Wave. At a parent
+   Wave, also read its child Waves' top-level Markdown from this checkout;
+   ordinary context leaves children out. When intent is missing, ask for the
+   specific decision instead of treating the implementation as the spec.
 
-2. Identify relevant changes and memories added since the plan was generated
-   or last reconciled. Look beyond this implementation: upstream changes,
-   related work, and new decisions or lessons in shared memory may change the
-   best approach. Is there an opportunity to adjust the plan to better fit
-   what is happening elsewhere? Incorporate supported improvements while
-   preserving the intended outcome and accepted constraints.
+2. Find what changed since the plan was written or last reconciled, here and
+   elsewhere: upstream changes, related work, new decisions or lessons in shared
+   memory. Could the plan fit better with what's happening around it? Take those
+   improvements while keeping the intended outcome and accepted constraints.
 
-   Find where the work changed our understanding. Which assumptions failed?
-   Which planned mechanisms became unnecessary? What remains unimplemented,
-   or works differently than intended? Separate observations from explanations.
-   Reuse applicable results; run a focused check when it will resolve uncertainty.
-   Do not rerun tests just because reconciliation began.
+   Then find where the work changed our understanding. Which assumptions
+   failed? Which planned mechanisms turned out unnecessary? What is still
+   missing, or works differently than intended? Separate what you saw from why
+   you think it happened. Reuse existing results; run a focused check only when
+   it settles a real question. Don't rerun tests because realign started.
 
-3. Reconcile at the source. Rewrite stale portions of the plan, delete obsolete
-   steps and explanations, and update the remaining work to fit what is now known.
-   Correct clear, bounded implementation mismatches and their affected tests or
-   docs. Preserve the full intended outcome and still-relevant constraints.
-   Evidence may change the approach; missing behavior does not justify weakening
-   acceptance. Keep a substantial code change explicit as remaining work.
-   When a change needs a product decision, show the exact choice and leave it
-   unresolved. Do not silently promote a proposal into an accepted decision.
+3. Fix it at the source. Rewrite stale parts of the plan, delete obsolete steps,
+   and update remaining work to fit what is now known. Correct small, clear
+   mismatches in the code and their tests or docs. Keep the full intended
+   outcome: what you learned may change the approach, but missing behavior never
+   weakens acceptance. Leave a substantial code change as remaining work. When a
+   change needs a product decision, write the exact choice and leave it open.
+   Don't write a proposal into the plan as settled unless someone said so;
+   quote what they said.
 
-   Maintain `.lf/wave/` only as part of a selected Loopflow Graph that calls for it.
-   Standalone reconciliation and Work association alone leave it read-only;
-   record proposed Wave changes in scratch instead. The memory curation below
-   applies only inside that Graph procedure.
+   Edit `.lf/wave/` only inside a Loopflow Graph whose step calls for it.
+   Otherwise it is read-only; put proposed Wave changes in `scratch/`. The memory
+   steps below apply only inside that Graph.
 
-   Before curating the selected Wave's memory, inspect `.lf/wave/<address>/` with
-   ordinary filesystem tools for immediate child directories containing
-   `MEMORY.md`, including scopes without a `GOAL.md` or registry entry. Read
-   those memories for lessons that apply across the parent scope. For large
-   files, inspect headings and read relevant sections within the available
-   context budget; explore deeper descendants when relevant. State unread or
-   unavailable coverage honestly. Promote broadly useful lessons into the
-   selected parent's memory and keep child-specific detail in its owning file.
-   Inherited memory guides the work; curate the selected scope, not its ancestors.
+   Before curating the Wave's memory, list `.lf/wave/<address>/` for immediate
+   child directories with a `MEMORY.md` (including ones without `GOAL.md` or a
+   registry entry) and read them for lessons that apply across the parent. For
+   large files, read headings and the sections that matter; go deeper when
+   useful. Say what you didn't read. Promote broadly useful lessons to the
+   parent and leave child-specific detail where it is. Curate the selected Wave,
+   not its ancestors.
 
-   Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
-   and write durable decisions and lessons learned from this work into its
-   existing memory. Attribute decisions by name and preserve contrary evidence
-   and limits of the observations. Keep the live implementation plan in its own artifact;
-   memory carries what future Wave work should know, not a copy of the pass.
-   Edit GOAL.md and MEMORY.md directly in the checkout like any other files.
-   If identified memory is unavailable, state that gap and continue independent corrections.
+   Then update the Wave's memory: replace stale guidance, remove duplication,
+   and write the direction and lessons this work produced. Quote what people
+   said rather than a verdict about it, and keep contrary findings and the
+   limits of what was observed. Memory carries what future Wave work should
+   know, not a copy of this pass; the implementation plan stays in its own file.
+   Edit `GOAL.md` and `MEMORY.md` like any other file. If memory is unavailable,
+   say so and continue with the other corrections.
 
-4. Check the resulting agreement. The plan must distinguish what exists from
-   what remains, and the code must support claims of completed behavior. Verify
-   repairs with the smallest relevant check. Keep blockers, contrary evidence,
-   and deferred checks visible where they affect the next action. If a check cannot
-   run headless, leave it to gate/CI or replace it with a headless check; do not
-   block the Graph on it. Ask the person for a judgment you need when one is in
-   the conversation; headless, leave it for demo/review.
+4. Check the result. The plan separates what exists from what remains, and the
+   code backs every claim of finished behavior. Verify repairs with the smallest
+   check. Keep blockers, contrary findings and deferred checks where they affect
+   the next action. A check that can't run headless goes to gate or CI or gets a
+   headless equivalent; don't block the Graph on it. Ask for a judgment you need
+   when someone is in the conversation; headless, leave it for demo.
 
-Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Machine
-facts; the plan must not direct its next reader. Keep transcripts separate and
-historical skill names unprefixed.
+The plan states what will be built and what remains; quotes there show what
+was said about it and may carry the speaker's name. Write down only what can't
+be worked out again from the code, git history or a fresh run: what people said,
+word for word, what a run showed at the time, and facts
+from outside the repo. Quality per word, not volume. Leave out session
+instructions and Machine facts; the plan describes the work, it doesn't direct
+its next reader. Keep transcripts separate and historical skill names
+unprefixed. If no plan exists, update the working context, or write the
+smallest plan continued work needs.
 
-If no plan exists, update the supplied working context or write the smallest
-useful plan when continued work needs one.
-
-Finish briefly: what changed, what remains, and any decision needed. Keep the
-check result to one line with its command and result or deferred owner. Update
-the existing plan; do not accumulate reports or repeated untested-claim lists.
-If everything already agrees, say so without manufacturing changes.
-Supply the facts for a reader such as loop-or-next to judge; do not preselect
-Advance, Iterate, or Blocked. Publication and moving the Task on belong to
-the caller.
+Finish briefly: what changed, what remains, any decision needed, and one
+command/result line. Update the existing plan rather than adding reports. If
+everything already agrees, say so. Give loop-or-next the facts to judge; don't
+preselect Advance, Iterate or Blocked. Publishing and moving the Task on belong
+to the caller.
 
 ## Keep authored context within budget
 
-Run `lf context` to read memory and scratch size targets, their configuration
-sources, and current usage. Read complete sources before curating them.
-Within the selected Graph's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
-stale sections to git history first and bring it just under both limits. Stop
-once it fits; do not rewrite the whole memory toward a smaller target or shrink
-an in-budget memory merely for size. Continue correcting stale guidance and
-recording durable lessons where this work changes them.
+Run `lf context` for memory and scratch size targets, where they are configured
+and current usage. Read sources in full before curating them. Inside the Graph's
+memory steps, trim Wave memory gradually: when it exceeds either limit, retire
+the largest stale sections to git history until it is just under both. Stop once
+it fits; don't rewrite the whole memory toward a smaller target or shrink one
+that is already in budget. Keep correcting stale guidance and recording lessons
+where this work changes them.
+
 Bring over-budget scratch under both limits too: merge duplicates, summarize
-long evidence, and remove obsolete notes inherited from a stacked parent.
-Preserve live decisions, attribution, unresolved work, and contrary evidence;
-keep a precise git reference when older detail still matters. Preserve uncommitted
-evidence before removing it. Edit existing notes instead of accumulating reports.
-Re-run the query after writing. Do not raise limits to conceal overflow. If the
-live decisions alone cannot fit, record the concrete conflict and remaining overage.
+long notes, drop obsolete notes inherited from a stacked parent, and leave
+history in git with a precise reference when older detail still matters. Keep
+the live plan, exact quotes in scratch notes, open questions
+and contrary findings. Commit or move uncommitted notes before removing them.
+Edit existing notes rather than adding reports. Re-run `lf context` after
+writing. Never raise limits to hide overflow; if the live decisions alone don't
+fit, record the conflict and the remaining overage.
 
 </lf:skill:realign>

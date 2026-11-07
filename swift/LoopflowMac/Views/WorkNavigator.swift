@@ -16,8 +16,8 @@ struct WorkNavigator: View {
     @State private var wavesHeight: CGFloat = 130
     /// The Wave row just clicked, shown before its selection moves it.
     @State private var pressedScope: WorkNavigation.SidebarScope?
-    /// Pointing at the Waves section reveals New Wave; only that row reads it.
-    @State private var wavesHover = HoverFlag()
+    @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
     @State private var taskDrag = TaskOrderDrag.State()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -146,17 +146,19 @@ struct WorkNavigator: View {
     /// Pinned below the Task list so any Wave is a click away however far the
     /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
-                NewWaveRow(model: model, hover: wavesHover)
-            }.padding(8)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
+                }.padding(8)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+                wavesHeight = height
+            }
+            .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
+            NewWaveRow(model: model).padding(.horizontal, 8).padding(.bottom, 8)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-            wavesHeight = height
-        }
-        .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
-        .hoverSource(wavesHover)
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
@@ -168,6 +170,9 @@ struct WorkNavigator: View {
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
                 count: model.startedTaskCount(.wave(wave.wave.id)), unavailableReason: wave.tasks.unavailableReason)
+            .contextMenu {
+                WaveLifecycleMenu(onRename: { renamingWave = wave.wave }, onRemove: { removingWave = wave.wave })
+            }
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
@@ -322,6 +327,8 @@ extension WorkNavigator: Equatable {
 struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
     @Environment(\.palette) private var palette
+    @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -334,6 +341,7 @@ struct WorkBreadcrumbs: View {
         .font(Typography.strong(13))
         .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     private func trail(showWave: Bool) -> some View {
@@ -398,6 +406,11 @@ struct WorkBreadcrumbs: View {
                 model.select(.wave(id: id))
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
+            .contextMenu {
+                if let wave = model.wave(id: id)?.wave {
+                    WaveLifecycleMenu(onRename: { renamingWave = wave }, onRemove: { removingWave = wave })
+                }
+            }
             WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
         }
     }
@@ -560,50 +573,86 @@ private struct NewTaskRow: View {
     }
 }
 
-/// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+/// Pinned below the scrolling Waves list; names and authors a Wave.
+/// An add with leftovers (its files uncommitted on main) keeps the popover open
+/// showing the receipt's lines; a clean add closes it.
 private struct NewWaveRow: View {
     let model: WorkModel
-    let hover: HoverFlag
     @Environment(\.palette) private var palette
     @State private var naming = false
     @State private var name = ""
+    @State private var objective = ""
     @State private var error: String?
+    @State private var leftovers: WaveAdded?
 
     var body: some View {
-        HoverRevealed(flag: hover) {
-            Button { naming = true } label: {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("New Wave").lineLimit(1)
-                    Spacer()
-                }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-            }.buttonStyle(.plain)
-                .accessibilityIdentifier("work-new-wave")
-                .popover(isPresented: $naming, arrowEdge: .trailing) { form }
-        }
+        Button { naming = true } label: {
+            HStack {
+                Image(systemName: "plus")
+                Text("New Wave").lineLimit(1)
+                Spacer()
+            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .accessibilityIdentifier("work-new-wave")
+            .popover(isPresented: $naming, arrowEdge: .trailing) { form }
     }
 
+    @ViewBuilder
     private var form: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
-            if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
-            HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
-        }.padding(12)
+        if let leftovers {
+            WaveAddedLeftovers(added: leftovers) {
+                self.leftovers = nil
+                naming = false
+            }.padding(12)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+                TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
+                if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+                HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
+            }.padding(12)
+        }
     }
 
     private func create() {
         guard let repoPath = model.repoPath else { return }
         Task {
             do {
-                try await PortfolioRepoState.createWave(name: name, repoPath: repoPath)
-                naming = false
+                let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
                 name = ""
+                objective = ""
                 error = nil
-                await model.refreshPlanning()
+                if added.summary.isEmpty { naming = false } else { leftovers = added }
+                model.select(.wave(id: added.id))
             } catch let failure {
                 error = failure.localizedDescription
+            }
+        }
+    }
+}
+
+/// An add receipt with lines a person still has to act on, and a Done button.
+struct WaveAddedLeftovers: View {
+    let added: WaveAdded
+    let onDone: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(added.created ? "Added \(added.name)" : "\(added.name) already exists")
+                .font(Typography.body(13)).foregroundStyle(palette.text)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(Array(added.summary.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                }
+            }.accessibilityIdentifier("new-wave-summary")
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("new-wave-done")
             }
         }
     }

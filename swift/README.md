@@ -91,9 +91,8 @@ Selecting a retained Session reuses its surface. When a surface needs reconnecti
 Desktop attaches to the recorded execution without starting a provider, replaying
 input or taking control from another viewer. A failed connection stays visible.
 **Resume** does what `lf resume` does: it attaches to a running conversation, or
-otherwise reopens its saved provider history. At launch Desktop runs
-`lf resume --all`, so conversations a reboot or crash interrupted come back
-unasked. Repository, Wave and Task conversation entry share metadata-only
+otherwise reopens its saved provider history. Launching Desktop does not restart
+other conversations. Repository, Wave and Task conversation entry share metadata-only
 preparation; only a newly admitted conversation offers its first launch.
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
@@ -102,12 +101,30 @@ its result before retrying.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
+Open a Task's **Graph processes** page to see its current position and readiness,
+then expand a run, loop position and step for recorded timing and exit evidence.
+Earlier runs stay collapsed. **Files** opens the diff; steps without a recorded
+summary show no invented summary. Local and remote run pages follow store changes.
+Open native Task Sessions also receive settled progress through their provider,
+without typing into the draft. Codex and Pi keep the incoming context hidden;
+Claude shows a collapsed peer message and OpenCode a brief worker-progress notice.
+The provider schedules delivery around active turns; uncertain delivery is retained
+instead of replayed after reconnect.
+Progress posts name the runs that changed, including an earlier run that finishes
+or fails while newer work is running.
+
 Task rows show reported program status, Task IDs, stored PR links and the recorded
 remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
 remain plain text. Qualified Session excerpts show their source age; stale output
 falls back to a labeled summary. Local Machine names stay hidden. Links open
 separately from the Task row; unknown activity and live clients without reports
 show no activity label.
+
+Follow a turn in the pane and Task row: Working during active work, Blocked for
+a question or permission request, and the provider’s Idle or Done on completion.
+Reconnect restores the current report without sending another prompt. Quiet output
+does not change activity; clearing a report removes its label without completing
+the Task.
 
 Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
@@ -547,10 +564,9 @@ which does not establish a fresh provider sync. The outline retains an empty Wav
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
-Current Wave navigation reads `lf wave list --all --current --json`. The CLI excludes
-abandoned and retired registrations; unfiltered `lf wave list` retains historical
-registry visibility. Authored `.lf/wave/<name>/GOAL.md` files still appear before
-their first registration.
+Wave navigation reads `lf wave list --all --json`. Desktop and `lf wave list` read
+the same rows: every registered Wave that `lf wave remove` has not removed. A
+removed Wave stays readable by `lf wave show <id>`.
 
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
@@ -657,9 +673,9 @@ launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
 
-Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
-reads its stream from `~/.lf/config.yaml`, asks its bundled
-`lf install can-open` before installing, and runs `lf install adopt` on the first
+The installed app updates itself (`AppUpdater`, Sparkle), including a custom
+location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
+reads its stream from `~/.lf/config.yaml` and runs `lf install adopt` on the first
 launch of a new version. Dev builds, and a Machine recording `dev` (which has no
 appcast), never check for updates.
 

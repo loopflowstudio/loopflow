@@ -68,6 +68,12 @@ impl TerminalOutput {
         Ok(output)
     }
 
+    /// The diagnostics log and its size before the client ran, for whoever
+    /// reports new diagnostics once this process has exec'd away.
+    pub(crate) fn diagnostics(&self) -> (PathBuf, u64) {
+        (self.path.clone(), self.initial_size)
+    }
+
     pub(crate) fn configure_child(&self, command: &mut Command) -> io::Result<()> {
         command
             .stdout(self.stdout.try_clone()?)

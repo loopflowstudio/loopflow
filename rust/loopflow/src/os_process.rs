@@ -225,8 +225,8 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
 mod installation_tests;
 mod lifeline;
 pub(crate) use lifeline::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, release_agent_lifeline,
-    spawn_agent_process, spawn_native_agent_process, watch_tool_lifeline,
+    agent_process_lifeline_path, hold_agent_process_lifeline, inherit_lifelines,
+    release_agent_lifeline, spawn_agent_process, spawn_native_agent_process, watch_tool_lifeline,
 };
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
@@ -351,6 +351,7 @@ fn session_environment(
 ) -> Vec<(String, String)> {
     let inherited_context = [
         crate::config::AGENT_OVERRIDE_ENV,
+        "LF_SETTINGS",
         "LF_TRACE_ID",
         "LF_PROCESS_ID",
         crate::lf::WORK_DECLARATION_ENV,

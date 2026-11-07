@@ -38,13 +38,25 @@ copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
 On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
 `Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
-it links to the selected build under `~/.lf/bin`. `lf install` replaces a
-Loopflow.app that isn't running. A running app that updates itself is asked to
-update instead, and `lf` follows the new bundle; an older running app is quit,
-replaced and reopened. Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI
-without replacing or stopping Desktop and its clients. Promotion advances the shared store through
-the install switch and retains the prior published artifacts;
-it does not restart Tasks or Flows.
+it links to the selected build under `~/.lf/bin`. `lf install` promotes the complete
+signed bundle through one recoverable installation switch, quitting and reopening
+Desktop when necessary, including during scheduled updates. An interrupted switch
+finishes recovery before considering another update. `LF_INSTALL_CLI_ONLY=1` skips initial Desktop setup on an
+app-free Machine; an existing app always updates with the CLI. Direct promotion
+can reuse an installed bundle only when its helper matches the candidate.
+Updates follow the app reached by the public `lf` entry, preserving custom
+locations through ordinary and scheduled updates. `LF_APPLICATIONS_DIR` supplies
+an explicit destination; `/Applications` is the default for initial setup.
+Freshness checks the public link, bundled helper identity and store compatibility,
+as well as the app's release version. A matching version string alone is insufficient.
+
+Running Session owners and Graphs keep their process images. Promotion never kills
+bundled `lf` processes; renamed bundles remain while they are in use. A superseded
+owner ends itself once its Sessions hold no work or input, and `lf monitor rollover`
+moves every eligible owner at once. Installed files and already-running processes
+can therefore report different builds during an update. Promotion retains the
+prior published artifacts, which are [not a rollback path](../docs/architecture/machines.md#one-main-machine),
+and does not restart Tasks or Graphs.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
@@ -54,6 +66,11 @@ intent, an isolated release PR, the tag, and observed completion. This
 repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
+
+The dedicated release host runs its installed `lf` and follows `dev`, so
+release fixes reach it from green main. On a Machine that follows another
+stream, `lf install --dev` before releasing with a fix the installed build
+lacks: a main build refuses a store missing main's migrations.
 
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.
@@ -84,7 +101,6 @@ the app is not a side artifact.
 | `Loopflow-<version>.dmg` | R2 `downloads/` + GitHub Release | tag |
 | `Loopflow-latest.dmg` | R2 `downloads/` | the `stable` release |
 | `appcast-preview.xml`, `appcast-stable.xml` | R2 `downloads/` | that stream's release, EdDSA-signed |
-| `reader-catalog.txt` | GitHub Release | the reader floors this build opens |
 | `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
@@ -98,12 +114,13 @@ version as `lf --version` — no separate manifest to bump or drift.
 |--------|------------|--------------|
 | `dev` | Newest green main build | Every green main |
 | `preview` | Newest published release | Every release |
-| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
+| `stable` | GitHub's Latest marker | The daily release run or `lf release promote`, to the newest release published at least 7 days ago that no regression covers |
 
 Publishing never marks a release Latest (`gh release edit --latest=false`).
 After each run, including one with nothing to release, `lf release run` moves
-`stable` forward for a target with `completion: github-release`. It never
-moves it back: a Latest set ahead by hand stays until a newer release soaks.
+`stable` forward for a target with `completion: github-release`, the same move
+`lf release promote` makes on demand. Neither moves it back: a Latest set ahead
+by hand stays until a newer release soaks.
 Before moving the marker it runs the publisher's `promote --tag <tag>`, which
 points `Loopflow-latest.dmg` at that release's DMG after checking it against
 `SHA256SUMS`. A failed promotion leaves the marker for the next run.
@@ -121,33 +138,40 @@ A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 `install.sh` follow it, `stable` when none is recorded. `install.sh` installs
 `stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`,
 which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
-Before downloading a release, `lf install` checks the release's
-`reader-catalog.txt` against this Machine's store. When a newer lf migrated the
-store past what that build reads, it keeps the installed lf and says so; the
-next run installs once the stream reaches a build that opens the store.
-Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
-cadence is already installed, so a Machine stays on its stream unasked.
+Every install of a build schedules `lf install` daily (launchd, or cron on Linux)
+unless a cadence is already installed, so a Machine stays on its stream unasked.
+[Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
+install adds the line back.
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
 appcast. `dev` has no appcast and runs no updater: each `lf install --dev`
 replaces the app itself, quitting and reopening it when it runs. Publishing writes `appcast-preview.xml`;
 `promote` writes `appcast-stable.xml`, both signed with the publisher's
 `SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
-`swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled
-`lf install can-open <tag>` and skips a release that can't open the store. Its
-first launch after an update runs `lf install adopt`, which migrates the store
-and links `lf` into the new bundle without moving files.
+`swift/LoopflowMac/Info.plist`. The app's first launch after an update runs
+`lf install adopt`, which migrates the store and links `lf` into the new bundle
+without moving files.
 
 ```bash
-lf task create --title "Sessions lose their name" --regressed-in v0.15.3
-lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
+lf release regress v0.15.3 "Sessions lose their name"  # creates the label if needed, files the issue
+lf release issues v0.15.3                              # what it carries, and what each issue holds
+lf release issues                                      # every open regression
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # checks soak and regressions, then moves stable
+gh issue edit 12 --add-label regressed-in:v0.15.3      # mark an existing bug
+gh issue close 12 --reason completed                   # the fix landed
+gh issue close 12 --reason "not planned"               # it was not a regression
 ```
 
-A regression is a bug Task marked with the release it regressed in. While it
-is open, `stable` stays below that release. Completing it (landing the fix)
-makes the first release published afterwards eligible once it soaks; releases
-in between still carry the bug and stay skipped. The run logs which Task holds
-`stable`. It reads the release Machine's Tasks, never Linear.
+A regression is a GitHub issue on the repository being released, labelled with
+the release it regressed in; the label is all it takes. While it is open,
+`stable` stays below that release. Closing it as completed makes the first
+release published afterwards eligible once it soaks; releases in between still
+carry the bug and stay skipped. Closing it as not planned or as a duplicate, or
+removing the label, drops the hold. Every Machine reads the same issues. The run
+logs which issue holds `stable`. When GitHub can't be read, the release still
+publishes, `stable` stays put, and `lf release status` says why; `lf release
+check` and `lf release promote` fail.
 
 ## What we took from other projects
 
@@ -157,11 +181,11 @@ Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
 |----------|---------|------|
 | Cut every release from main; no paired minor/patch snapshot | Docker, opencode, Codex alphas, Ghostty tip | Adopted: a minor is a bigger number cut from main like any release |
 | Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
-| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
+| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: a `regressed-in:vX.Y.Z` issue holds `stable` below a regression |
 | One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
 | Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Adopted: `Packages (main)` signs and notarizes the app for `dev` |
-| Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |
-| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may, when the store allows it |
+| Refuse newer-format data and name which side to update | Rex, Firefox | Declined: older lf keeps opening a newer store, and destructive changes are staged |
+| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: no install compares versions, so a switch, or a scheduled run on a Machine ahead of its stream, may install older |
 | One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
 | Separate data per channel | Zed, Warp, VS Code | Declined: the store is the work model, and Tasks must not split by stream |
 | Release branches and cherry-picks for hotfixes | Zed, Tailscale | Declined for now: fix forward on main; branch only when main can't carry the fix (Docker's rule) |

@@ -1093,7 +1093,6 @@ final class WorkModel {
         task: nil
     )
     private(set) var repos: [PortfolioRepo] = []
-    private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
 
     private let query: RegistryQuery
@@ -1252,31 +1251,15 @@ final class WorkModel {
                                   snapshot: reason == nil ? wave : nil, reason: reason)
     }
 
+    /// The Waves the planning store knows, in the selected repository. `lf` registers
+    /// a repository's authored directories when it joins the portfolio, so one reader
+    /// serves Desktop and the CLI; a removed Wave's kept directory stays removed.
     var visibleWaves: [WaveViewModel] {
-        let registered = filterByRepo(waves.value ?? [], repo: { $0.repo })
-        let registeredNames = Set(registered.map { waveIdentity(repo: $0.repo, name: $0.name) })
-        var result = registered.map { wave in
+        filterByRepo(waves.value ?? [], repo: { $0.repo }).map { wave in
             let objective = roadmap.value?.waves.first(where: { $0.wave.id == wave.id })?.wave.goal ?? ""
             let plan = objective.isEmpty ? nil : WavePlan(objective: objective)
             return WaveViewModel(api: wave, plan: plan)
-        }
-
-        for repo in visibleRepos {
-            for name in authoredWavesByRepo[repo.path] ?? [] {
-                let identity = waveIdentity(repo: repo.path, name: name)
-                guard !registeredNames.contains(identity) else { continue }
-                result.append(WaveViewModel(
-                    api: Wave(
-                        id: identity,
-                        name: name,
-                        repo: repo.path,
-                        status: .ready
-                    ),
-                    isRegistered: false
-                ))
-            }
-        }
-        return result.sorted {
+        }.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
     }
@@ -1717,13 +1700,12 @@ final class WorkModel {
 
     private var portfolioGeneration = 0
 
-    /// Consume the shared membership; only authored Wave discovery is window-local.
+    /// Consume the shared membership.
     func applyPortfolio(_ discovered: [PortfolioRepo], initialRepoPath: String?) async {
         guard !usesFixedFixture, !Task.isCancelled else { return }
         portfolioGeneration &+= 1
         let generation = portfolioGeneration
         await Self.resolveRepoOrigins(discovered.map(\.path))
-        let authored = await PortfolioDiscovery.authoredWaves(in: discovered)
         guard generation == portfolioGeneration, !Task.isCancelled else { return }
         if let trusted = unverifiedRepoPath {
             unverifiedRepoPath = nil
@@ -1732,7 +1714,6 @@ final class WorkModel {
         }
         guard generation == portfolioGeneration, !Task.isCancelled else { return }
         repos = discovered
-        authoredWavesByRepo = authored
         if repoPath == nil, let initialRepoPath {
             repoPath = PortfolioDiscovery.resolveLaunchRepo(initialRepoPath)
         }
@@ -1749,6 +1730,29 @@ final class WorkModel {
         projectCommands[id] != nil
     }
 
+    /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    /// The receipt's `summary` names anything left to finish.
+    @discardableResult
+    func addWave(name: String, objective: String? = nil, repo: String) async throws -> WaveAdded {
+        let added = try await query.addWave(name: name, objective: objective, cwd: repo)
+        await refreshPlanning()
+        return added
+    }
+
+    /// `lf wave rename`; the Wave keeps its id, so selection stays on it.
+    func renameWave(id: String, newName: String, repo: String) async throws -> WaveRenamed {
+        let renamed = try await query.renameWave(wave: id, newName: newName, cwd: repo)
+        await refreshPlanning()
+        return renamed
+    }
+
+    /// `lf wave remove`; a removal refreshes planning so the row disappears.
+    func removeWave(name: String, preview: Bool, repo: String) async throws -> WaveRemoval {
+        let removal = try await query.removeWave(name: name, preview: preview, cwd: repo)
+        if !preview { await refreshPlanning() }
+        return removal
+    }
+
     @discardableResult
     func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
         guard !usesFixedFixture else { return nil }
@@ -1756,7 +1760,7 @@ final class WorkModel {
         projectCommandErrors[id] = nil
         let command = Task {
             defer { projectCommands[id] = nil }
-            do { try await query.ensureProject(wave: name, cwd: repo) }
+            do { try await query.addWave(name: name, cwd: repo) }
             catch { projectCommandErrors[id] = error.localizedDescription }
         }
         projectCommands[id] = command
@@ -2400,7 +2404,10 @@ final class WorkModel {
 
     func beginSessionBinding(_ record: SessionRecord) {
         guard navigation.binding == nil else { return }
-        navigation.binding = SessionBindingDraft(sessionId: record.id, title: record.title)
+        navigation.binding = SessionBindingDraft(
+            sessionId: record.id, title: record.title,
+            assignedTaskId: record.work?.kind == .task ? record.work?.id : nil,
+            taskTitle: record.title)
     }
 
     func previewSessionBinding() async {
@@ -2423,16 +2430,39 @@ final class WorkModel {
 
     func commitSessionBinding() async {
         guard let repo = repoPath, let draft = navigation.binding, !draft.submitting,
-              let preview = draft.preview, preview.sessionId == draft.sessionId else { return }
+              let taskId = draft.assignedTaskId ?? draft.preview?.taskId else { return }
         let owner = navigation
         let key = repositoryReadingKey(repo)
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
-            let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
+            let record = try await query.bindSession(id: draft.sessionId, taskId: taskId, cwd: repo)
             supersedeSessions()
             replaceSession(record, key: key)
+            // Refresh the Task's other conversations after their primary changes.
+            await refreshSessions()
             if owner.selectedSessionId == record.id { owner.selection = record.work }
+            if owner.binding?.id == draft.id { owner.binding = nil }
+        } catch {
+            guard owner.binding?.id == draft.id else { return }
+            owner.binding?.submitting = false
+            owner.binding?.error = error.localizedDescription
+        }
+    }
+
+    func createTaskFromSession() async {
+        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
+        let owner = navigation
+        owner.binding?.submitting = true
+        owner.binding?.error = nil
+        do {
+            let task = try await query.createTaskFromSession(
+                id: draft.sessionId, title: draft.taskTitle, cwd: repo)
+            // Keep the selected Session, its retained terminal and composer.
+            // Promotion changes its Work address, never its input attachment.
+            supersedeSessions()
+            await refreshSessions()
+            if owner.selectedSessionId == draft.sessionId { owner.selection = .task(id: task.id) }
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
             guard owner.binding?.id == draft.id else { return }
@@ -2584,7 +2614,6 @@ final class WorkModel {
         self.waves = waves
         self.workActivity = workActivity
         self.repos = repos
-        authoredWavesByRepo = [:]
         usesFixedFixture = fixed
         clearSelectionIfOutsideScope()
     }
@@ -2596,10 +2625,6 @@ final class WorkModel {
         guard let repoPath else { return values }
         let target = repoIdentity(repoPath)
         return values.filter { repoIdentity(repo($0)) == target }
-    }
-
-    private func waveIdentity(repo: String, name: String) -> String {
-        "\(repoIdentity(repo))#\(name)"
     }
 
     /// Every repository filter asks this once per Wave on each render, and one

@@ -72,7 +72,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
-        loopflow::work::wave::setup::SetupSource::Wave
+        loopflow::config::ConfigSource::Repository
     );
     assert_eq!(snapshot.setup.accounts["claude"].accounts, ["work"]);
     let Evidence::Ok {
@@ -87,6 +87,7 @@ fn wave_detail_preserves_graph_and_machine() {
     };
     assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
+    assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
@@ -455,6 +456,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.worktree.as_deref(),
         Some("/src/loopflow.workspace")
     );
+    assert!(snapshot.provider.is_none());
     assert!(snapshot.pr.is_none());
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(
@@ -1268,6 +1270,45 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
 }
 
 #[test]
+fn wave_removal_preview_round_trips() {
+    use loopflow::ops::wave_lifecycle::WaveRemoval;
+    let json = include_str!("../../../tests/fixtures/dto/wave_removal.json");
+    let removal: WaveRemoval = serde_json::from_str(json).unwrap();
+    assert!(removal.moved[1].started);
+    assert_eq!(
+        serde_json::from_str::<WaveRemoval>(&serde_json::to_string(&removal).unwrap()).unwrap(),
+        removal
+    );
+}
+
+#[test]
+fn wave_added_receipt_round_trips_with_its_leftover() {
+    use loopflow::ops::wave_lifecycle::WaveAdded;
+    let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
+    let added: WaveAdded = serde_json::from_str(json).unwrap();
+    assert!(added.created);
+    assert_eq!(added.project.wave_id, added.id);
+    assert_eq!(added.summary.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&added).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn wave_renamed_receipt_round_trips_with_its_leftovers() {
+    use loopflow::ops::wave_lifecycle::WaveRenamed;
+    let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");
+    let renamed: WaveRenamed = serde_json::from_str(json).unwrap();
+    assert!(renamed.renamed);
+    assert_eq!(renamed.summary.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&renamed).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
     let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =
@@ -1287,7 +1328,7 @@ fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
     let graphs: Vec<loopflow::ops::project::WaveGraph> = serde_json::from_str(json).unwrap();
-    assert_eq!(graphs[0].default.source.as_str(), "repo");
+    assert_eq!(graphs[0].default.source.as_str(), "repository");
     assert!(graphs[1].wave.is_none());
     assert_eq!(
         serde_json::to_value(&graphs).unwrap(),

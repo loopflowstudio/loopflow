@@ -19,7 +19,6 @@ pub struct WorkBinding {
     pub subjects: Vec<String>,
     pub cwd: PathBuf,
     pub context: String,
-    pub agent: Option<String>,
 }
 
 pub(crate) fn render_task_context(
@@ -253,7 +252,6 @@ async fn bind_selected_work(
             wave_name: wave.as_ref().map(|w| w.slug().to_owned()),
             cwd,
             context,
-            agent: task.agent,
         });
     }
 
@@ -283,7 +281,6 @@ async fn bind_selected_work(
         wave_name: Some(wave.slug().to_string()),
         cwd,
         context,
-        agent: None,
     })
 }
 
@@ -412,13 +409,11 @@ mod tests {
             branch: "jack/runtime-research".to_string(),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
-            agent: None,
             created_at: now,
             updated_at: now,
             rank: 0,
             assignee: None,
             due_date: None,
-            regressed_in: None,
             state: None,
             completed_at: None,
             observation: Observation::NotRequired,
@@ -475,20 +470,15 @@ mod tests {
         )
         .unwrap();
         let task = store
-            .create_task(
-                &crate::work::task::NewTask {
-                    repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
-                    due_date: None,
-                    id: TaskId::new(),
-                    project_id: Some(project.id),
-                    title: "Inspect before starting".into(),
-                    description: String::new(),
-                },
-                Some(std::sync::Arc::new(crate::store::PlanningLocks::new(
-                    tempfile::tempfile().unwrap(),
-                ))),
-            )
-            .await
+            .sqlite
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
+                due_date: None,
+                id: TaskId::new(),
+                project_id: Some(project.id),
+                title: "Inspect before starting".into(),
+                description: String::new(),
+            })
             .unwrap();
         let report = explain_context(
             &store,
@@ -704,9 +694,6 @@ mod tests {
         ] {
             let prepared = crate::prompt::process::prepare_process_prompt(
                 &crate::config::Config {
-                    diff_files: false,
-                    diff: false,
-                    paste: false,
                     ..Default::default()
                 },
                 crate::prompt::process::ProcessPromptInput {

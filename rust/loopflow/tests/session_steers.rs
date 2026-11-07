@@ -345,9 +345,12 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert!(rejected.stdout.is_empty());
     let mut foreign = payload.clone();
     foreign["session_id"] = serde_json::json!("child-native");
+    // A foreign conversation's refused authority is a recording gap: its tool
+    // completes with the launch's plain context and no steer reaches it.
     let rejected = hook(foreign);
-    assert!(!rejected.status.success());
-    assert!(rejected.stdout.is_empty());
+    assert!(rejected.status.success());
+    let rejected = String::from_utf8_lossy(&rejected.stdout);
+    assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
     // Exercise the shipped OpenCode transform against the real receipt command.
     // Internal stream retries reuse one transformed value; a later callback has
@@ -439,8 +442,10 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
     let cleared = String::from_utf8_lossy(&cleared.stdout).into_owned();
     assert!(cleared.contains("CLEARED_DIRECTION"));
     assert!(cleared.contains("additionalContext"));
+    // The replaced conversation keeps working without steers.
     let old_conversation = hook(payload.clone());
-    assert!(!old_conversation.status.success());
+    assert!(old_conversation.status.success());
+    assert!(!String::from_utf8_lossy(&old_conversation.stdout).contains("_DIRECTION"));
     store
         .save_session_steer(session, "Fixture author", "AFTER_CLEAR_DIRECTION")
         .unwrap();

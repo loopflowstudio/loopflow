@@ -141,7 +141,6 @@ pub struct TaskSummary {
     pub state: Option<String>,
     pub completed_at: Option<String>,
     pub due_date: Option<String>,
-    pub regressed_in: Option<String>,
     pub assignee: Option<String>,
 }
 
@@ -170,7 +169,7 @@ pub struct TaskRuntimeSnapshot {
     pub completion_pending: Option<String>,
     pub reason: String,
     pub updated_at: String,
-    pub provider: String,
+    pub provider: Option<String>,
     /// Who owns the Task on which Machine, as this Machine reads the ownership
     /// log; absent when the Task is unowned.
     pub owner: Option<crate::durable::TaskOwner>,
@@ -531,7 +530,7 @@ pub struct RoadmapTask {
     /// The graph the Task took up, else the one its first `lf task run` takes up.
     pub graph_name: Option<String>,
     /// The layer that chose it: `task`, `personal`, `wave`, `repo`, `global` or `default`.
-    pub graph_source: Option<crate::work::wave::setup::SetupSource>,
+    pub graph_source: Option<crate::config::ConfigSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -562,10 +561,10 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
         .collect())
 }
 
-pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
+pub fn ls(json: bool, all: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let Some(snapshots) = list(all, current).await? else {
+        let Some(snapshots) = list(all).await? else {
             return no_registry(json, "[]");
         };
         if json {
@@ -578,19 +577,16 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
 }
 
 /// `lf wave list`'s rows; `None` before this Machine has a registry.
-pub async fn list(all: bool, current: bool) -> Result<Option<Vec<WaveSnapshot>>> {
+pub async fn list(all: bool) -> Result<Option<Vec<WaveSnapshot>>> {
     let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
         return Ok(None);
     };
-    Ok(Some(wave_snapshots(&store, all, current).await?))
+    Ok(Some(wave_snapshots(&store, all).await?))
 }
 
-/// The rows of `lf wave list`, in its order.
-pub(crate) async fn wave_snapshots(
-    store: &SharedStore,
-    all: bool,
-    current: bool,
-) -> Result<Vec<WaveSnapshot>> {
+/// The rows of `lf wave list`, in its order: every Wave `lf wave remove` has
+/// not removed. Desktop's sidebar reads the same rows.
+pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec<WaveSnapshot>> {
     let waves = store
         .list_waves(None)
         .await
@@ -600,17 +596,10 @@ pub(crate) async fn wave_snapshots(
     let mut checkouts = Checkouts::default();
     for wave in waves {
         let checkout = wave_repository(&wave, &mut checkouts)?;
-        let snapshot = snapshot_wave(store, &wave, &checkout).await?;
-        if !current || current_wave(&snapshot) {
-            snapshots.push(snapshot);
-        }
+        snapshots.push(snapshot_wave(store, &wave, &checkout).await?);
     }
     snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
     Ok(snapshots)
-}
-
-fn current_wave(wave: &WaveSnapshot) -> bool {
-    wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
 /// Publication is local; Session claims and receipts never enter planning sync.
@@ -845,6 +834,19 @@ pub fn watch_show(
     )
 }
 
+/// The most recently removed Wave at an explicit address in this repository.
+fn removed_wave_at(
+    store: &SharedStore,
+    repo: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Option<crate::work::wave::Wave>> {
+    let (Some(repo), Some(wave)) = (repo, wave) else {
+        return Ok(None);
+    };
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)?;
+    Ok(store.sqlite.retired_wave_at(&locator)?)
+}
+
 /// What `lf wave show` prints. `observe` first asks the tracker about each
 /// repository read.
 async fn show_roadmap(
@@ -888,6 +890,13 @@ async fn show_roadmap(
     .await
     {
         Ok(wave) => vec![wave],
+        // A removed Wave's address still shows its history until a new Wave takes it.
+        Err(error @ crate::work::wave::context::WaveResolveError::UnknownExplicit(_)) => {
+            match removed_wave_at(store, repo.as_deref(), wave)? {
+                Some(removed) => vec![removed],
+                None => return Err(anyhow!(error)),
+            }
+        }
         Err(crate::work::wave::context::WaveResolveError::NoContext) => {
             let waves = store
                 .list_waves(None)
@@ -1354,7 +1363,7 @@ async fn roadmap_snapshot(
             .unwrap_or(wave);
         let checkout = wave_repository(wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
-        if !include_history && !current_wave(&snapshot) {
+        if !include_history && snapshot.retired_at.is_some() {
             continue;
         }
         if task.is_some()
@@ -1615,7 +1624,7 @@ fn snapshot_task_runtime(
     status: TaskState,
     completion_pending: Option<String>,
     owner: Option<crate::durable::TaskOwner>,
-    provider: String,
+    provider: Option<String>,
 ) -> TaskRuntimeSnapshot {
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
@@ -1719,7 +1728,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                scope.spawn(|| {
+                scope.spawn(crate::config::observation::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1734,7 +1743,7 @@ fn snapshot_task_details(
                         ));
                         details.push((index, detail));
                     }
-                })
+                }))
             })
             .collect();
         handles
@@ -1753,7 +1762,7 @@ struct DetailReads<'a> {
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    selections: HashMap<crate::durable::TaskId, (String, crate::work::wave::setup::SetupSource)>,
+    selections: HashMap<crate::durable::TaskId, (String, Option<crate::config::ConfigSource>)>,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<crate::id::WaveId, String>,
     /// Each Task Wave's and repository's checkout with your `lf set` values,
@@ -1776,17 +1785,20 @@ impl<'a> DetailReads<'a> {
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
-        let mut defaults = HashMap::<_, (String, crate::work::wave::setup::SetupSource)>::new();
+        let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut personal = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
-                Some(name) => (name.clone(), crate::work::wave::setup::SetupSource::Task),
+                Some(name) => (name.clone(), None),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
-                        .insert(crate::ops::task::task_graph_default(store, task)?)
+                        .insert({
+                            let (name, source) = crate::ops::task::task_graph_default(store, task)?;
+                            (name, Some(source))
+                        })
                         .clone(),
                 },
             };
@@ -1895,10 +1907,9 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         wave,
         personal,
-        task.agent.as_deref(),
         None,
     );
-    let (provider, _) = crate::config::parse_agent(&agent);
+    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
@@ -2069,7 +2080,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         graph_name: Some(graph_name),
-        graph_source: Some(graph_source),
+        graph_source,
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
@@ -2365,7 +2376,6 @@ fn task_summary(
         wave_id: task.wave_id.as_ref().map(ToString::to_string),
         acquisition,
         due_date: task.due_date.clone(),
-        regressed_in: task.regressed_in.clone(),
         sync,
         id: task.id.to_string(),
         linear_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
@@ -2532,27 +2542,32 @@ fn print_setup(setup: &crate::work::wave::setup::WaveSetup) {
     }
 }
 
-fn print_status(status: &WaveDetailSnapshot) {
+/// The Wave line `lf wave show` and `lf wave status` open with. A removed Wave
+/// reads `removed`, with its date and its successor when one exists.
+fn print_wave_heading(wave: &WaveSnapshot) {
     let colors = Colors::default();
-    let wave = &status.wave;
     println!(
         "{bold}{name}{reset}  {status}",
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
         status = if wave.retired_at.is_some() {
-            "retired"
+            "removed"
         } else {
             wave.status.label()
         },
     );
-    if let Some(retired_at) = &wave.retired_at {
-        println!(
-            "  history   retired at {retired_at}; superseded by {}: {}",
-            wave.superseded_by_wave_id.as_deref().unwrap_or("-"),
-            wave.retirement_reason.as_deref().unwrap_or("retired")
-        );
+    if let Some(removed_at) = &wave.retired_at {
+        println!("  removed at {removed_at}");
     }
+    if let Some(successor) = &wave.superseded_by_wave_id {
+        println!("  superseded by {successor}");
+    }
+}
+
+fn print_status(status: &WaveDetailSnapshot) {
+    let wave = &status.wave;
+    print_wave_heading(wave);
     println!("  goal      {}", wave.goal);
     match &wave.machine {
         Some(machine) => println!("  machine      {} ({})", machine.id, machine.route),
@@ -2583,9 +2598,6 @@ fn print_status(status: &WaveDetailSnapshot) {
                 );
                 if let Some(due) = &task.task.due_date {
                     println!("    due        {due}");
-                }
-                if let Some(version) = &task.task.regressed_in {
-                    println!("    regressed  {version}");
                 }
                 for line in task.task.sync.lines() {
                     println!("    {line}");
@@ -2964,20 +2976,13 @@ fn section_label(section: TaskSection) -> &'static str {
 }
 
 fn print_roadmap(roadmap: &RoadmapSnapshot) {
-    let colors = Colors::default();
     if roadmap.waves.is_empty() {
         println!("No waves in the registry.");
         return;
     }
     let now = now();
     for wave in &roadmap.waves {
-        println!(
-            "{bold}{name}{reset}  {status}",
-            bold = colors.bold,
-            reset = colors.reset,
-            name = wave.wave.name,
-            status = wave.wave.status.label(),
-        );
+        print_wave_heading(&wave.wave);
         print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
@@ -3893,7 +3898,7 @@ mod tests {
                 status,
                 reason: "settled".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
-                provider: "codex".to_string(),
+                provider: Some("codex".to_string()),
                 owner: Some(owned()),
                 completion_pending: None,
             };
@@ -3976,7 +3981,7 @@ mod tests {
             status: TaskState::Moving,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
-            provider: "codex".to_string(),
+            provider: Some("codex".to_string()),
             owner: Some(owned()),
             completion_pending: None,
         };
@@ -4084,7 +4089,7 @@ mod tests {
                         status,
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
-                        provider: "codex".into(),
+                        provider: Some("codex".into()),
                         owner: Some(owned()),
                         completion_pending: None,
                     };
@@ -4147,7 +4152,7 @@ mod tests {
                 status,
                 reason: "terminal".into(),
                 updated_at: "2026-07-21T00:00:00Z".into(),
-                provider: "codex".into(),
+                provider: Some("codex".into()),
                 owner: Some(owned()),
                 completion_pending: None,
             };

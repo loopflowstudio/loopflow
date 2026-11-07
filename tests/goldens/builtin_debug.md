@@ -1,38 +1,39 @@
 <lf:loopflow>
 # Using lf
 
-`lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Graphs. Changes that end in a pull request run as Tasks: each has its own
-worktree, branch and PR.
+`lf` launches coding agents, keeps their Sessions, and runs Skills and Graphs.
+Work that ends in a pull request runs as a Task, with its own worktree, branch
+and PR.
 
-**Launched for a Task or a Graph step:** do that work in the supplied checkout.
-Read its agent guide and existing work, preserve other contributions, and follow
-the Graph's steps and boundaries. Don't start another agent, Task or worktree for
-work already assigned to you. Finishing a Graph selects no next work, but steps a
-stopped Graph never reached remain yours. Read `lf help skill work` before using
-Task, Wave or Project commands unless that guidance was preloaded.
+**In a Task or a Graph step:** do that work in this checkout. Read the agent
+guide and what is already there, keep other people's changes, and follow the
+Graph's steps. Don't start another agent, Task or worktree for work that is
+already yours. Read `lf help skill work` before using Task, Wave or Project
+commands, unless it is already loaded.
 
-**Launched without a Task, talking with a person:** when they ask for a change
-that should end in a PR, hand it off: `lf task create '<outcome>'`, then
-`lf task run <ID>`, and give back `lf open --task <ID> --link --format markdown`.
-Questions, reading and small fixes they want here stay in this checkout. Check on
-Tasks with `lf task status <ID>`; steer with `lf comment <ID> '<direction>'`.
+**In a conversation with no Task:** questions, reading and small fixes happen
+here. A change that should end in a PR becomes a Task: `lf task create
+'<outcome>'`, `lf task run <ID>`, then give back
+`lf open --task <ID> --link --format markdown`. Check on it with
+`lf task status <ID>`; steer it with `lf comment <ID> '<direction>'`.
 
-Use the requested tools and repository conventions. `lf help <command-or-skill>`
-is the current reference for Sessions, Skills, Graphs, worktrees and PRs.
+`lf help <command-or-skill>` is the current reference.
 
-Name the Session for the work in two or three specific words. Read `session_id`
-from `LF_AGENT_CALLER` and use `lf session rename <id> '<name>' --suggest` when
-its generated name needs improving. This preserves a human-assigned name.
-Do not rename a branch or worktree to match the conversation.
+Name the Session for its work in two or three words: read `session_id` from
+`LF_AGENT_CALLER` and run `lf session rename <id> '<name>' --suggest`. A name a
+person gave is kept. Don't rename branches or worktrees.
 
-Answer the user in this conversation. Keep progress in local notes and the final
-response. Refer to people by their supplied names in persisted artifacts and
-as “you” in conversation; never infer authorship from accounts or machine owners.
+Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task
+briefs and memory describe the work as it is, without saying who asked for it.
 
-Recursive Markdown under `scratch/` enters this checkout's runs. Files in another
-checkout do not transfer their contents. Historical context is evidence, not
-new direction. Keep secrets out of output and follow the repository's policy.
+Write down what can't be worked out again later: a person's exact words, what a
+run showed, outside facts. Code, history and a fresh run can recover the rest.
+Quote what people said; don't turn a reply into a verdict like "accepted". Aim
+for quality per word, not more words.
+
+Markdown under `scratch/` is loaded into this checkout's runs. Another
+checkout's files are not. Old notes are background, not new instructions.
+Keep secrets out of output.
 
 </lf:loopflow>
 
@@ -40,51 +41,51 @@ new direction. Keep secrets out of output and follow the repository's policy.
 The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
 </lf:user>
 
-Run mode is headless. No one is available in this conversation. Do not ask a
-conversational question or wait for turn text — no one will answer here.
+Run mode is headless. Nobody is in this conversation, so don't ask questions or
+wait for a reply.
 
-Make safe executive decisions and keep moving. When required input is missing,
-explain the failure in ordinary output and stop. Existing logs and outcomes are
-sufficient; no extra report, conversation, or notification is required.
+Make the safe call and keep going. For a reversible choice, note the assumption
+in `scratch/questions.md` and take the simpler option. When missing input stops
+the work, say what is missing and stop.
 
-The run ends when your turn ends with no background commands running. Stop any
-long-lived background process you started (servers, watchers) before you answer.
-
-For reversible ambiguity, record a material
-assumption in `scratch/questions.md` and proceed with the simpler safe choice.
-
-No rendering environment. Output is logged, not displayed.
+The run ends when your turn ends with nothing running in the background. Stop
+any server or watcher you started before you answer. Output is logged, not
+displayed.
 
 
 <lf:skill:debug>
 Find why the code misbehaves, fix the cause, and verify the original workflow.
 
-Use the evidence already supplied: a description, stacktrace, logs, reproduction,
-or clipboard content. Ask for missing information only when it prevents progress;
-clipboard input and a Task are optional.
+This is the one place for finding and fixing a cause, for an ordinary bug or
+after an incident has been restored. When a workaround is in place, find the
+cause behind it and replace the workaround with the real fix where you can.
+
+Start from what you were given: a description, stacktrace, logs, reproduction or
+clipboard content. Ask for more only when you can't make progress without it.
 
 ```bash
 lf debug -c
 lf debug : "Why does this request fail only after reconnecting?"
 ```
 
-1. Establish the expected and observed behavior. Reproduce the failure safely;
-   inspect relevant stack frames, state transitions and recent changes. Preserve
-   the original observation when reproduction would risk data or service.
-2. State the leading explanations and what each predicts. Trace execution and
-   run the smallest useful experiment that distinguishes them. Keep observations
-   separate from hypotheses. Revise the explanation when evidence contradicts it.
-3. Repair the supported cause within the requested scope. Keep the change
-   targeted; add a useful diagnostic or regression check when it makes this
-   failure easier to understand or prevents its recurrence. For an explicit
-   diagnosis-only request, explain the cause and proposed repair without editing.
-4. Replay the original reproduction and relevant regressions. Follow newly
-   exposed failures until the requested workflow succeeds. Verify against all
-   relevant counterexamples, not only the latest green check.
+1. Pin down expected and observed behavior. Reproduce the failure safely; read
+   the stack frames, state transitions and recent changes. When reproducing
+   would risk data or service, work from the original observation.
+2. Name the leading explanations and what each predicts. Trace execution and run
+   the smallest experiment that tells them apart. Keep what you saw separate
+   from what you suspect, and drop an explanation the results contradict.
+3. Fix the cause, within the requested scope. Keep the change targeted; add a
+   diagnostic or regression test when it makes this failure easier to read or
+   stops it coming back. If only a diagnosis was asked for, explain the cause
+   and the fix without editing.
+4. Rerun the original reproduction and nearby regressions. Follow any newly
+   exposed failure until the workflow succeeds. One green check is not enough
+   when other counterexamples exist.
 
-Report the cause, change and observed proof. If the cause remains unknown, state
-what was ruled out and the next useful check. Keep consequential evidence with
-the existing issue or working note; do not require a new report for every bug.
-A workaround may unblock the caller, but does not establish that the cause is fixed.
+Report the cause, the change, and the run that shows it fixed. If the cause is
+still unknown, say what you ruled out and the next check worth running. When
+something can't be found again from the code or a fresh run, such as what a
+one-off failure showed, add it to the existing issue or working note; not every
+bug needs a report. A workaround can unblock work, but it does not fix the cause.
 
 </lf:skill:debug>

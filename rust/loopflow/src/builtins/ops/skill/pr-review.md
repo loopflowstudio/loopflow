@@ -1,173 +1,127 @@
 ---
-requires: PR or branch diff, source code, and available design context
+requires: PR or branch diff, source code, and any design context
 produces: self-contained HTML walkthrough of user behavior, key data models, and APIs
 ---
 Create a minimalist HTML walkthrough of what changes for users and how the key data models and APIs produce that change, with fewer, larger code excerpts.
 
-Assume the reader helped design the change and knows its goals, but does not
-know the implementation. Lead with what changes for users: what they can do,
-what they see, and how failure or recovery differs. Then center the few models
-and APIs that explain that behavior and matter to their judgment. Show what
-changes from the base: fields, relationships, ownership,
-callers, state transitions and return contracts. An unchanged type can acquire
-a different role when its readers, writers or relationships change. Explain
-existing behavior only where needed to understand that shift; do not give a
-tour of the current system. Treat implementation as evidence,
-not a commitment: expose where the code fits the intended experience and where
-a product choice remains. Let real snippets carry the review; use prose to
-connect them and explain consequential choices. Spend the page on a few useful
-code examples, with restrained typography, generous whitespace, and little decoration.
+The reader helped design the change and knows its goals, but not the
+implementation. Lead with what changes for users: what they can do, what they
+see, how failure and recovery differ. Then show the few models and APIs that
+cause it, and what changes from the base: fields, relationships, who reads and
+writes them, state transitions, return values. An unchanged type can take on a
+new role when its readers, writers or relationships change. Explain existing
+behavior only where the shift needs it; this is not a tour of the system. The
+code is the case for the change, not a commitment: show where it fits the
+intended experience and where a product choice is still open. Let real
+snippets carry the page; prose connects them.
 
 ## Workflow
 
-1. **Establish the scope.** Use the requested PR or the current branch's PR
-   when available. Read its diff against the actual base, relevant surrounding
-   source, and available design or discussion. Without a published PR, use the
-   local branch comparison and label it. Record base and head revisions;
-   distinguish unpublished working changes from the published diff. Name missing
-   source or context instead of inventing it. Prior design context is useful,
-   not required.
+1. **Scope.** Use the requested PR, or the current branch's PR. Read its diff
+   against the actual base, the surrounding source, and any design or
+   discussion. Without a published PR, compare the local branch and say so.
+   Record base and head revisions, and separate uncommitted work from the
+   published diff. Name missing source or context; don't fill it in.
 
-2. **Choose the review's center and shape.** Ask what this particular reader
-   needs to see to decide whether the change is done right or wrong. Open with
-   that consequential user-visible shift and its delivered scope, then show
-   the model and API changes that cause it. Be creative about the
-   structure: a before/after model comparison, a changed relationship diagram,
-   an API contract trace, or a failure-and-recovery story may carry different
-   changes best. Choose deliberately for this diff and reader; do not reuse a
-   fixed report outline or force novelty where it does not help judgment.
+2. **Choose the center.** Ask what this reader needs to see to judge whether
+   the change is right. Open with that user-visible shift and its scope, then
+   the model and API changes that cause it. Pick the shape that fits this
+   diff: a before/after model, a changed relationship diagram, an API trace, a
+   failure-and-recovery story. No fixed outline, and no novelty for its own
+   sake.
 
-   Select the few key models and APIs, not an inventory. For each, identify
-   what is added, removed, directly mutated, or related to differently. Trace
-   how API inputs, outputs, effects and failure behavior shift with the model.
-   An unchanged signature may now save locally instead of calling a provider;
-   that is an API change worth showing. Distinguish preserved behavior from
-   changes introduced here and future proposals.
+   Pick the few key models and APIs, not an inventory. For each, show what is
+   added, removed, mutated, or related differently, and how inputs, outputs,
+   effects and failures shift with it. An unchanged signature that now saves
+   locally instead of calling a provider is an API change worth showing. Keep
+   kept behavior, new behavior and future proposals apart. A short opening map
+   is fine when it helps; a symbol alone is not an explanation.
 
-   Use a short map only when it helps orientation. Write concrete actions and
-   visible consequences, with links to the excerpts that explain the changes.
-   A symbol alone is not an explanation. Omit incidental helpers, repeated
-   background and familiar goals that do not help assess the diff.
+3. **Fewer, larger snippets.** Organize a few stops around user behaviors and
+   the structures and APIs behind them. Each stop connects:
 
-3. **Choose fewer, larger snippets.** Organize a few stops around the user
-   behaviors and the data structures and APIs that produce them. Each stop connects:
+   - **Behavior first:** a concrete action and how its result changes from the
+     base, including failure or recovery.
+   - **Data structure:** real before/after types, schema or declarations. For
+     an unchanged type, show the changed relationship or use, not its
+     definition again.
+   - **API:** old and new signatures and the deciding branches: changed inputs,
+     effects, results or failures. Show the old path or its deletion when that
+     explains the change better.
+   - **Review note:** a sentence or two on a tradeoff, a mismatch, or a product
+     decision the code doesn't explain alone.
 
-   - **Behavior first:** a concrete action and how its visible result changes
-     from the base, including consequential failure or recovery differences.
-   - **Data structure:** real before/after types, schema or declarations showing
-     the changed fields, relationships or ownership. If the type is unchanged,
-     show the changed relationship or use rather than repeating its definition.
-   - **API:** the old and new contract, with public signatures and decisive
-     implementation branches showing changed inputs, effects, results or
-     failure behavior. Include the old path or its deletion when that explains
-     the change better than the new implementation alone.
-   - **Review note:** a brief annotation for ownership, a surprising tradeoff,
-     a mismatch, or a product decision that the snippets do not explain alone.
+   For CLI behavior, lead with a terminal transcript: the command someone types
+   and the output they see, plus the important error and the command that
+   recovers from it. Prefer captured runs and name their revision and setup.
+   If a command is silent, say so and show what changed instead. Redact
+   secrets. Label unexecuted examples as illustrative; never present them as
+   real output. Pair the transcript with the excerpts that explain it.
 
-   For CLI behavior, lead with a terminal transcript: the actual command and
-   arguments someone types, followed by the relevant output they see. Show the
-   important error and recovery command where they explain the contract. Prefer
-   captured runs; identify their revision and relevant setup. If a command is
-   silent, say so and show the observable result instead of inventing output.
-   Mark omissions and redact secrets. Label unexecuted examples as illustrative
-   or expected from source, never as observed output. Pair the transcript with
-   the data structure and API excerpts that explain its result; a command list
-   or test log alone is not the walkthrough.
+   These are reading priorities, not four required panels. Show a shared type
+   once and link back. For prose or config changes, show the text that
+   controls behavior. Default to inline unified diffs: red removed, green
+   added, with visible −/+ markers. Keep enough context to follow the type or
+   branch; one diff beats separate before/after blocks. Generate diffs from the
+   pinned revisions and caption both sides with revision and line range.
 
-   These are reading priorities, not four required panels. Adapt to the change.
-   Show a shared data structure once and link back to it;
-   do not force a new type or a finding into every stop. For prose or config
-   changes, show the instructions or declarations that control behavior. Default
-   to inline unified diffs for changed contracts: removed lines in red, added
-   lines in green, with visible −/+ markers so color is not the only signal.
-   Keep enough unchanged context to follow the type or decisive branch. Prefer
-   one diff over separate before/after blocks that make the reader compare from
-   memory. Use plain excerpts for unchanged context; label wholly new code.
-   Generate diffs from the pinned source revisions, preserve source text, and
-   caption both sides with their revision and line range.
+   Prefer one or two substantial excerpts per stop: a whole type, function, or
+   branch. Merge adjacent fragments of the same symbol; a gallery of tiny
+   snippets makes the reader rebuild control flow. Keep code larger than the
+   commentary and cut paragraphs that paraphrase readable code.
 
-   Prefer one or two substantial excerpts per stop: a complete relevant type,
-   function, or coherent branch with enough surrounding code to explain it.
-   Combine adjacent fragments from the same symbol. Avoid a gallery of tiny
-   snippets that makes the reader reconstruct control flow across captions.
-   More lines should supply context, not unrelated implementation detail.
+   Trace at least one action through the entry API, the state it changes, and
+   the visible result, including the important failure path: what survives,
+   what changes, how the caller continues. Show the deciding conditions, not
+   just a call sequence. Label hypothetical examples and test scenarios.
 
-   Keep central snippets visible and larger than their accompanying commentary.
-   Usually one or two sentences per annotation suffice. Cut paragraphs that
-   paraphrase readable code. Avoid a long introduction, narrative between every
-   excerpt, or explanations that bury the model and API below the fold.
+   Caption every excerpt with file, symbol, revision and line range. Link to
+   pinned source when a remote exists; keep code readable offline. Mark
+   omissions, label pseudocode, and never omit the condition being discussed.
 
-   Trace at least one representative action through the entry API, owned state
-   change, and visible result. Include the important failure and recovery path:
-   what survives, what changes, and how the caller continues. Show the decisive
-   conditions, not merely a sequence of function calls. Include unchanged source
-   when necessary to complete that trace. Label hypothetical examples and test
-   scenarios so they cannot be mistaken for accepted product changes.
+4. **Decisions beside the code.** Separate accepted intent, implementation
+   choices and open questions. Check whether models and APIs match the
+   concepts people use, whether names say what they do, and whether an awkward
+   interaction leaks an implementation detail. Raise the biggest mismatch with
+   its source and a counterexample; this is not a redesign, and cosmetic
+   refactors don't belong.
 
-   Caption every excerpt with file, symbol, revision, and line range. Link to
-   revision-pinned source when a remote exists; keep code readable offline and
-   label local-only excerpts. Preserve source text, mark omissions, and label
-   explanatory pseudocode separately. Never omit the condition being discussed.
+   Mark planned behavior apart from implemented behavior and name work this
+   change depends on. Tie each check to the claim it supports: tests read,
+   recorded passes, checks run now, behavior not yet tried. Passing tests don't
+   cover every goal. Don't manufacture findings, change product code, or make a
+   merge decision.
 
-4. **Expose the decisions and proof beside the code.** Distinguish accepted
-   intent, implementation choices, and unresolved questions. Check whether the
-   models and APIs map to concepts the user needs, whether names reveal their
-   behavior, and whether an awkward interaction or unnecessary distinction leaks
-   an implementation detail. Surface the most consequential mismatch with its
-   source and counterexample; do not turn the walkthrough into a full redesign
-   or ask the reader to adjudicate cosmetic refactors.
+5. **Build and inspect the HTML.** Write to the requested path, default
+   `scratch/pr-review.html`: one self-contained file, inline styles and small
+   scripts, no network fonts, CDN libraries or build step. Escape source and
+   diff text.
 
-   Mark planned behavior separately from implemented behavior. Name dependencies
-   supplied by related work. Tie evidence to the specific claim it supports;
-   distinguish inspected tests, recorded passes, newly run checks, and unverified
-   behavior. Keep evidence notes short and put supporting detail in disclosures.
-   Passing tests do not prove every goal. Do not manufacture findings, invent
-   approval, change product code, or make a merge decision.
+   Minimalist editorial layout: short title, quiet navigation, clear type,
+   generous whitespace, restrained palette. No hero sections, badges, card
+   frames or dashboard chrome. Give code most of the space. Default to one wide
+   column; go side by side only when comparison helps and neither side gets
+   cramped, and stack on narrow screens. Keep central code out of disclosures;
+   use them for secondary detail. Support keyboard navigation and printing. A
+   diagram earns space only when it shows state or a transition better than
+   the excerpts.
 
-5. **Build and inspect the HTML.** Write to the requested path, defaulting to
-   `scratch/pr-review.html`. Produce one self-contained file with inline styles
-   and any small scripts; no network fonts, CDN libraries, or build step. Escape
-   source and diff text so code is displayed without executing it.
+   Render it in whatever browser tool you have, at desktop and narrow widths,
+   and fix overflow, contrast and navigation problems. If you can't render,
+   say so. Recheck excerpts against the named revisions.
 
-   Use a minimalist editorial layout: a short title, quiet navigation, clear
-   typography, generous whitespace, and a restrained palette. Avoid decorative
-   hero sections, badges, repeated card frames, and dashboard chrome. Give code
-   most of the space, with a readable font size and compact source captions.
-
-   Default to one wide reading column so larger excerpts remain readable. Use
-   side-by-side excerpts only when direct comparison helps and neither becomes
-   cramped; stack them on narrow screens. If using an opening map, let it stack
-   into labeled rows on narrow screens rather than squeezing explanations into
-   tiny columns. Keep central
-   code out of disclosure controls and use disclosures for secondary
-   implementation and evidence. Support keyboard navigation and printing.
-   A diagram earns space only when it clarifies state
-   ownership or a transition better than the excerpts.
-
-   Render through whatever browser capture tool the agent has available. Inspect
-   desktop and narrow widths, including the code sections, navigation, contrast,
-   overflow, and disclosures. Fix defects before delivery. If rendering is
-   unavailable, state the limit. Recheck excerpts against the named revisions.
-
-   Read the opening without following links: does it put this reader's most
-   consequential judgment first? Then read only the models and API snippets:
-   can the collaborator explain what changed from the base, including changed
-   relationships, and the normal path, failure and recovery? Would the page
-   still read the same without this diff? If so, replace the inventory with
-   evidence of the actual change. Read the annotations:
-   does each add a connection, constraint, evidence limit, or decision the code
-   cannot communicate alone? Remove the rest. Finally, can adjacent snippets be
-   combined, or a visual element removed, without losing meaning? Prefer the
-   version with fewer pieces and more readable code.
+   Then reread. Does the opening put this reader's biggest judgment first? From
+   the snippets alone, can the reader explain what changed, the normal path,
+   and failure and recovery? Would the page read the same without this diff?
+   Then it's an inventory; replace it. Cut annotations that add nothing the
+   code doesn't say. Merge snippets and drop visuals when meaning survives.
 
 ## Delivery
 
-Return the HTML link and a brief description of the reading route. Surface
-material evidence limits. Keep generation local; publishing, PR comments,
-approval, and code changes are separate actions. On repeat invocation, refresh
-the same walkthrough and remove stale explanations. Reuse it when it already
-matches the requested revisions and this contract.
+Return the HTML path and a short description of the reading route, plus any
+checks that limit a claim. Keep it local: publishing, PR comments, approval and
+code changes are separate actions. On a repeat run, refresh the same page and
+remove stale explanation; reuse it as is when it already matches the revisions.
 
-A narrative summary with incidental snippets, a type inventory without user
-behavior, or a polished page whose claims cannot be traced to source does not
-satisfy this skill.
+A narrative with incidental snippets, a type inventory without user behavior,
+or a polished page whose claims don't trace to source doesn't count.

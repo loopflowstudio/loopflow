@@ -263,7 +263,7 @@
             "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
           },
           "graph_name": "feature",
-          "graph_source": "task"
+          "graph_source": null
         }
       ],
       "truncated": false

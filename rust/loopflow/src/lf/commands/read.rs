@@ -71,12 +71,19 @@ pub enum Read {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     TaskFile { issue: String, path: String },
-    /// `lf wave list --all --current`: every current Wave on this Machine.
+    /// `lf wave list --all`: every Wave on this Machine that is not removed.
     Waves,
     /// `lf machine id`: this Machine's identity.
     MachineId,
     /// `lf portfolio`: the repositories this Machine's windows show.
     Portfolio,
+    Settings {
+        directory: PathBuf,
+        wave: Option<String>,
+        skill: Option<String>,
+        graph: Option<String>,
+        step: Option<String>,
+    },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     PaneLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> ops people`: who owns the repository's Tasks.
@@ -204,9 +211,23 @@ impl Read {
                 argv
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
-            Self::Waves => words(&["wave", "list", "--all", "--current", "--json"]),
+            Self::Waves => words(&["wave", "list", "--all", "--json"]),
             Self::MachineId => words(&["machine", "id", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
+            Self::Settings {
+                directory,
+                wave,
+                skill,
+                graph,
+                step,
+            } => {
+                let mut argv = at(directory, &["config", "show", "--json"]);
+                argv.extend(optional("--wave", wave.as_ref()));
+                argv.extend(optional("--skill", skill.as_ref()));
+                argv.extend(optional("--graph", graph.as_ref()));
+                argv.extend(optional("--step", step.as_ref()));
+                argv
+            }
             // `desktop layout` always prints JSON.
             Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
             Self::People { directory } => at(directory, &["ops", "people", "--json"]),
@@ -370,11 +391,24 @@ impl Read {
             } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
             Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
             Self::Waves => {
-                let waves = block_on(list_waves(true, true))??;
+                let waves = block_on(list_waves(true))??;
                 pretty(&waves.unwrap_or_default())
             }
             Self::MachineId => pretty(&block_on(local_machine())??),
             Self::Portfolio => pretty(&crate::portfolio::read()?),
+            Self::Settings {
+                directory,
+                wave,
+                skill,
+                graph,
+                step,
+            } => pretty(&crate::config::api::inspect(
+                directory,
+                wave.as_deref(),
+                skill.as_deref(),
+                graph.as_deref(),
+                step.as_deref(),
+            )?),
             Self::PaneLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }

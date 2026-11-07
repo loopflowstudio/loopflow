@@ -6,7 +6,7 @@
 mod session;
 pub(crate) use session::{
     build_session_command, native_connection_command, resolve_session_config, session_environment,
-    NativeConnection, ProviderInvocation, SessionCommand,
+    ProviderInvocation, SessionCommand,
 };
 
 use crate::id::AgentSessionId;
@@ -21,7 +21,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{default_agent, parse_agent};
+use crate::config::parse_agent;
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
 use crate::platform::kill_process;
@@ -177,8 +177,10 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
-    /// Chrome integration for Claude terminal and stream sessions.
-    pub chrome: bool,
+    /// Claude Chrome integration. `None` sends no flag so Claude's own
+    /// configuration decides; an explicit choice sends `--chrome`/`--no-chrome`.
+    pub chrome: Option<bool>,
+    pub isolate: Option<bool>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -226,17 +228,15 @@ impl AgentConfig {
     pub(crate) fn apply_agent_override(&mut self) {
         if let Some(agent) = crate::config::agent_override() {
             self.agent = Some(agent.clone());
-            self.env
-                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
         }
     }
 
-    /// Return the selected agent or Loopflow's compiled default.
-    pub fn agent(&self) -> &str {
-        match self.agent.as_deref() {
-            Some(agent) => agent,
-            None => default_agent(),
-        }
+    /// Resolve the selected agent, or the sole installed harness.
+    ///
+    /// # Errors
+    /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
+    pub fn agent(&self) -> Result<&str, crate::error::LoadError> {
+        crate::config::select_agent(self.agent.as_deref())
     }
 }
 
@@ -272,7 +272,7 @@ impl std::fmt::Debug for AgentConfig {
 
 /// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
-    let (harness, _) = parse_agent(launch.agent());
+    let (harness, _) = parse_agent(launch.agent()?);
     let provider = match harness.as_str() {
         "claude" => Provider::Claude,
         "codex" => Provider::Codex,
@@ -312,6 +312,7 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
+            launch.isolate,
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
@@ -544,10 +545,14 @@ fn merge_codex_permission_config(
     }
 }
 
-/// App-server overrides for native and headless startup. None preserves vendor policy.
+/// App-server overrides. `None` preserves vendor policy. A headless run must
+/// write to the workspace and has nobody to answer an approval, so it gets at
+/// least `workspace-write` and `never`; an attended Session keeps Codex's own
+/// sandbox and approval configuration unless `yolo` or a managed boundary applies.
 fn codex_permission_policy(
     config: CodexPermissionConfig,
     launch: &AgentConfig,
+    headless: bool,
 ) -> CodexPermissionConfig {
     if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
         return CodexPermissionConfig {
@@ -560,6 +565,9 @@ fn codex_permission_policy(
             sandbox: Some(CodexSandboxMode::DangerFullAccess),
             approval: Some(CodexApprovalPolicy::Never),
         };
+    }
+    if !headless {
+        return CodexPermissionConfig::default();
     }
     CodexPermissionConfig {
         sandbox: (config.sandbox < Some(CodexSandboxMode::WorkspaceWrite))
@@ -609,6 +617,9 @@ fn parse_claude_permission_mode(contents: &str) -> Option<ClaudePermissionMode> 
         .and_then(ClaudePermissionMode::parse)
 }
 
+/// Explicit `yolo` always bypasses. Otherwise an attended Session keeps
+/// Claude's own permission mode, and only an unattended run bypasses: nobody
+/// is present to answer a prompt, so a prompt would stall the step.
 fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: bool) -> bool {
     if skip_permissions {
         return true;
@@ -636,12 +647,12 @@ fn claude_options(
     context_file: Option<&Path>,
     stream: bool,
 ) -> Vec<String> {
-    let mut args = vec![if config.chrome {
-        "--chrome"
-    } else {
-        "--no-chrome"
+    // Harness preferences (Chrome, model) pass through only when a Loopflow
+    // setting names them; Claude's own configuration decides the rest.
+    let mut args: Vec<String> = Vec::new();
+    if let Some(chrome) = config.chrome {
+        args.push(if chrome { "--chrome" } else { "--no-chrome" }.into());
     }
-    .into()];
     if let Some(model) = model {
         args.extend(["--model".into(), model.into()]);
     }
@@ -708,7 +719,6 @@ pub fn resolve_codex_model(model: &str) -> Option<String> {
     }
 }
 
-const CODEX_DEFAULT_SERVICE_TIER: &str = "default";
 const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(2),
     Duration::from_secs(5),
@@ -746,9 +756,11 @@ pub enum AgentFailure {
     AccountCredentialInvalidated,
 }
 
-/// Build `thread/start` params for Codex app-server sessions.
+/// Build `thread/start` params for Codex app-server sessions. `headless` runs
+/// get Loopflow's permission floor; attended Sessions keep Codex's own.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
+    headless: bool,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
     let instructions = system_prompt_with_structured_replies(launch);
@@ -758,11 +770,6 @@ pub fn build_codex_thread_start_params(
             serde_json::Value::String(instructions),
         );
     }
-
-    params.insert(
-        "serviceTier".to_string(),
-        serde_json::Value::String(CODEX_DEFAULT_SERVICE_TIER.to_string()),
-    );
 
     if let Some(model) = launch.agent.as_deref().and_then(resolve_codex_model) {
         params.insert("model".to_string(), serde_json::Value::String(model));
@@ -775,8 +782,11 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    let policy =
-        codex_permission_policy(read_codex_permission_config(launch.cwd.as_deref()), launch);
+    let policy = codex_permission_policy(
+        read_codex_permission_config(launch.cwd.as_deref()),
+        launch,
+        headless,
+    );
     if let Some(sandbox) = policy.sandbox {
         params.insert("sandbox".into(), sandbox.as_str().into());
     }
@@ -864,8 +874,7 @@ fn run_admitted_agent(
     process: &ProcessConfig,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    launch.apply_agent_override();
-    if process.auto && parse_agent(launch.agent()).0 != "claude" {
+    if process.auto && parse_agent(launch.agent()?).0 != "claude" {
         if launch.max_turns.is_some() {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
@@ -881,7 +890,7 @@ fn run_admitted_agent(
         }
     }
     pin_provider_account_id_blocking(&mut launch)?;
-    let (harness, model) = parse_agent(launch.agent());
+    let (harness, model) = parse_agent(launch.agent()?);
     let implicit_capture = if process.capture.is_none() {
         Some(_begin_implicit_capture(&launch, process, &harness, model)?)
     } else {
@@ -980,7 +989,7 @@ fn _run_with_transient_retries(
         result.failure = failure;
         // Pi and OpenCode cannot be resumed without adding a new
         // model-visible input. Preserve failure; only explicit input starts more work.
-        if matches!(parse_agent(launch.agent()).0.as_str(), "opencode" | "pi") {
+        if matches!(parse_agent(launch.agent()?).0.as_str(), "opencode" | "pi") {
             return Ok(result);
         }
         let Some(failure) = failure else {
@@ -1166,7 +1175,7 @@ fn _begin_implicit_capture(
     let capture = if process.auto {
         CaptureHandle::begin_with_request(
             spec,
-            crate::session_record::AgentProcessRequest::from_prepared(launch),
+            crate::session_record::AgentProcessRequest::from_prepared(launch)?,
         )
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1178,7 +1187,7 @@ fn _begin_implicit_capture(
             &context,
             Some(crate::session_record::AgentProcessRequest::from_prepared(
                 launch,
-            )),
+            )?),
         )
     };
     capture.map(Into::into).map_err(|error| {
@@ -1211,7 +1220,7 @@ fn _run_harness_once(
     use crate::harness::ApprovalPolicy;
 
     let capture = process.capture.as_ref().map(|capture| &capture.0);
-    let (provider, _) = parse_agent(launch.agent());
+    let (provider, _) = parse_agent(launch.agent()?);
     let account_route = match match provider.as_str() {
         "codex" => resolve_account_route_blocking(Provider::Codex, launch),
         "claude" => resolve_account_route_blocking(Provider::Claude, launch),
@@ -1398,7 +1407,7 @@ fn _run_agent_once(
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
-    let (harness, model) = parse_agent(launch.agent());
+    let (harness, model) = parse_agent(launch.agent()?);
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
@@ -1755,6 +1764,7 @@ trust_level = "trusted"
                     approval: None,
                 },
                 &AgentConfig::default(),
+                true,
             );
             assert_eq!(
                 policy.sandbox,
@@ -1772,8 +1782,32 @@ trust_level = "trusted"
                 approval: Some(CodexApprovalPolicy::Never),
             },
             &AgentConfig::default(),
+            true,
         );
         assert_eq!(policy, CodexPermissionConfig::default());
+    }
+
+    #[test]
+    fn attended_codex_keeps_its_own_policy_unless_yolo_or_a_boundary_applies() {
+        let restrictive = CodexPermissionConfig {
+            sandbox: Some(CodexSandboxMode::ReadOnly),
+            approval: Some(CodexApprovalPolicy::OnRequest),
+        };
+        assert_eq!(
+            codex_permission_policy(restrictive, &AgentConfig::default(), false),
+            CodexPermissionConfig::default()
+        );
+        let yolo = AgentConfig {
+            skip_permissions: true,
+            ..AgentConfig::default()
+        };
+        assert_eq!(
+            codex_permission_policy(restrictive, &yolo, false),
+            CodexPermissionConfig {
+                sandbox: Some(CodexSandboxMode::DangerFullAccess),
+                approval: Some(CodexApprovalPolicy::Never),
+            }
+        );
     }
 
     #[test]
@@ -1809,7 +1843,7 @@ trust_level = "trusted"
             skip_permissions: true,
             ..default_launch()
         };
-        let thread = build_codex_thread_start_params(&launch);
+        let thread = build_codex_thread_start_params(&launch, false);
         assert_eq!(thread["sandbox"], "danger-full-access");
         assert_eq!(thread["approvalPolicy"], "never");
         assert!(thread.get("config").is_none());
@@ -1837,8 +1871,7 @@ trust_level = "trusted"
             match provider {
                 "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
                 "codex" => {
-                    let params = build_codex_thread_start_params(&launch);
-                    assert_eq!(params["serviceTier"], "default");
+                    let params = build_codex_thread_start_params(&launch, true);
                     assert_eq!(params["developerInstructions"], "Fixed additions.");
                 }
                 _ => {}
@@ -1872,7 +1905,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch);
+        let params = build_codex_thread_start_params(&launch, true);
         assert_eq!(
             params.get("model"),
             Some(&serde_json::Value::String("o3".to_string()))
@@ -1881,10 +1914,7 @@ trust_level = "trusted"
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
         );
-        assert_eq!(
-            params.get("serviceTier"),
-            Some(&serde_json::Value::String("default".to_string()))
-        );
+        assert!(!params.contains_key("serviceTier"));
     }
 
     #[test]
@@ -1895,15 +1925,11 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch);
+        let params = build_codex_thread_start_params(&launch, true);
         assert!(!params.contains_key("model"));
         assert_eq!(
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
-        );
-        assert_eq!(
-            params.get("serviceTier"),
-            Some(&serde_json::Value::String("default".to_string()))
         );
     }
 

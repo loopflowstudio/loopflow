@@ -24,7 +24,7 @@ use crate::session::{
     SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
 };
 use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
+use crate::store::{RecordingGap, StoreResult};
 
 /// Origins frozen when Loopflow sent each request, keyed by request id. The
 /// sending side fills it; the reader's writer takes each one once.
@@ -229,6 +229,16 @@ impl FactWriter {
         self.activity
             .record_at(&self.store, &self.session, attachment, signals, now);
     }
+
+    /// Offer the store the reading it refused, so the Session's activity row
+    /// catches up with the stream at the store's first answer.
+    pub(super) fn catch_up(&mut self) -> StoreResult<()> {
+        let Some(attachment) = &self.attachment else {
+            return Ok(());
+        };
+        self.activity
+            .catch_up(&self.store, &self.session, attachment)
+    }
 }
 
 impl TurnContext {
@@ -293,7 +303,11 @@ struct SessionActivityTracker {
     pending_input: BTreeSet<String>,
     yielded: bool,
     failed: bool,
+    /// The reading the store holds; marked only by a successful write.
     saved: Option<SessionActivity>,
+    /// The reading the store refused, offered again until it takes one.
+    unsaved: Option<SessionActivity>,
+    failure: RecordingGap,
     preview: Option<SessionPreview>,
 }
 
@@ -351,7 +365,7 @@ impl SessionActivityTracker {
     }
 
     /// The reading to save, when it changed or the saved one has aged.
-    fn reading(&mut self, now: i64) -> Option<SessionActivity> {
+    fn reading(&self, now: i64) -> Option<SessionActivity> {
         let reading = SessionActivity {
             preview: self.preview.clone(),
             observed_at: now,
@@ -369,11 +383,11 @@ impl SessionActivityTracker {
         if unchanged {
             return None;
         }
-        self.saved = Some(reading.clone());
         Some(reading)
     }
 
-    /// Activity is display evidence: a failed save never fails the turn.
+    /// Activity is display evidence: a failed save never fails the turn. The
+    /// reading waits for the next signal or [`Self::catch_up`].
     fn record_at(
         &mut self,
         store: &SqliteStore,
@@ -387,8 +401,40 @@ impl SessionActivityTracker {
         }
         if let Some(reading) = self.reading(now) {
             report(&reading, false);
-            if let Err(error) = store.record_session_activity(session, attachment, &reading) {
-                tracing::warn!(%error, session, "failed to save Session activity");
+            let _ = self.save(store, session, attachment, reading);
+        }
+    }
+
+    fn catch_up(
+        &mut self,
+        store: &SqliteStore,
+        session: &str,
+        attachment: &SessionAttachment,
+    ) -> StoreResult<()> {
+        match self.unsaved.take() {
+            Some(reading) => self.save(store, session, attachment, reading),
+            None => Ok(()),
+        }
+    }
+
+    fn save(
+        &mut self,
+        store: &SqliteStore,
+        session: &str,
+        attachment: &SessionAttachment,
+        reading: SessionActivity,
+    ) -> StoreResult<()> {
+        match store.record_session_activity(session, attachment, &reading) {
+            Ok(()) => {
+                self.saved = Some(reading);
+                self.unsaved = None;
+                self.failure.recovered();
+                Ok(())
+            }
+            Err(error) => {
+                self.failure.note("Session activity", &error);
+                self.unsaved = Some(reading);
+                Err(error)
             }
         }
     }
@@ -494,6 +540,11 @@ mod tests {
                 signals(decoded),
                 self.now,
             );
+        }
+
+        fn catch_up(&mut self) -> crate::store::StoreResult<()> {
+            self.activity
+                .catch_up(&self.store, "conversation", &self.attachment)
         }
 
         /// Whether the inventory calls it Available `quiet` seconds after the
@@ -708,13 +759,44 @@ mod tests {
     fn an_unchanged_reading_is_saved_only_as_it_ages() {
         let mut activity = SessionActivityTracker::default();
         assert!(activity.apply(vec![Signal::Working], 10));
-        assert!(activity.reading(10).is_some());
+        activity.saved = activity.reading(10);
+        assert!(activity.saved.is_some());
         activity.apply(vec![Signal::Working], 12);
         assert!(activity.reading(12).is_none());
         activity.apply(vec![Signal::ToolStarted("call".into())], 12);
-        assert_eq!(activity.reading(12).unwrap().open_tools, 1);
+        activity.saved = activity.reading(12);
+        assert_eq!(activity.saved.as_ref().unwrap().open_tools, 1);
         activity.apply(vec![Signal::Working], 17);
         assert_eq!(activity.reading(17).unwrap().observed_at, 17);
+    }
+
+    #[test]
+    fn a_yielded_reading_the_store_refused_is_saved_when_it_answers() {
+        let mut session = Driven::new(true);
+        session.hear(vec![Decoded::Fact(ProviderFact::Activity(Signal::Working))]);
+        assert!(!session.available_after(0));
+        let sql = rusqlite::Connection::open(session._home.path().join("facts.db")).unwrap();
+        sql.execute_batch(
+            "CREATE TRIGGER refuse_activity BEFORE UPDATE ON session_activity
+             BEGIN SELECT RAISE(FAIL, 'fixture store unavailable'); END;",
+        )
+        .unwrap();
+        session.hear(vec![Decoded::Fact(ProviderFact::Activity(
+            Signal::Yielded(true),
+        ))]);
+        assert!(
+            !session.available_after(0),
+            "the yield never reached the store"
+        );
+        assert!(session.catch_up().is_err());
+        sql.execute_batch("DROP TRIGGER refuse_activity").unwrap();
+        // Nothing more is heard; the hosting relay's idle tick asks again.
+        session.catch_up().unwrap();
+        assert!(
+            session.available_after(0),
+            "the store caught up with the stream"
+        );
+        session.catch_up().unwrap();
     }
 
     #[test]

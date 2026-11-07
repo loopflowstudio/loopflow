@@ -202,13 +202,30 @@ fn retain_lifeline(group: Option<u32>, writer: File) {
         .push((group, writer));
 }
 
+/// Keep this process's lifeline writers across exec, so the program it becomes
+/// holds its provider alive and no lf process has to.
+pub(crate) fn inherit_lifelines() -> std::io::Result<()> {
+    for (_, writer) in HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .iter()
+    {
+        // SAFETY: the descriptor is open for as long as the list owns it, and
+        // F_SETFD changes only its close-on-exec flag.
+        if unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFD, 0) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// Release only this process's retained spawn writer. The already-owned watchdog
 /// performs shutdown; no signal authority is inferred from a dead leader.
-pub(crate) fn release_agent_lifeline(group: u32) -> bool {
-    let mut held = HELD_LIFELINES.lock().expect("lifeline list poisoned");
-    let before = held.len();
-    held.retain(|(owner, _)| *owner != Some(group));
-    held.len() != before
+pub(crate) fn release_agent_lifeline(group: u32) {
+    HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .retain(|(owner, _)| *owner != Some(group));
 }
 
 // Command installs native stdio before pre_exec. An invocation with a closed
@@ -608,8 +625,7 @@ mod tests {
         let group = child.id().unwrap();
         assert_eq!(child.wait().await.unwrap().code(), Some(7));
         assert!(group_alive(group), "watchdog and helper survive the leader");
-        assert!(super::release_agent_lifeline(group));
-        assert!(!super::release_agent_lifeline(group));
+        super::release_agent_lifeline(group);
         let died = wait_until(|| !group_alive(group));
         kill_process_group(group);
         assert!(died, "the owned watchdog must settle its entire group");

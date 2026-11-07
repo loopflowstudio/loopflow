@@ -24,12 +24,14 @@ pub struct Skill {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_agent: Option<String>,
+    pub occurrence: Option<Box<crate::config::settings::OccurrenceSettings>>,
+    #[serde(default, flatten)]
+    pub settings: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_style: Option<String>,
-    /// Docs the skill includes, resolved like `--docs`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub docs: Vec<String>,
+    /// Omitted docs inherit; an explicit empty list resets lower-priority docs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -52,9 +54,10 @@ impl Skill {
             name: name.to_string(),
             source: None,
             agent: None,
-            default_agent: None,
+            occurrence: None,
+            settings: BTreeMap::new(),
             action_style: None,
-            docs: Vec::new(),
+            docs: None,
             content: None,
         }
     }
@@ -223,6 +226,9 @@ pub struct ConcreteSkill {
     /// An interactive step, where a person takes part; its id is `id`, else the skill name.
     #[serde(alias = "human")]
     pub interactive: bool,
+    /// Unique navigation name when composition repeats an interactive step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interactive_name: Option<String>,
     /// A deciding occurrence returns this many steps back in its own body.
     pub returns: Option<usize>,
     pub sources: Vec<String>,
@@ -231,8 +237,12 @@ pub struct ConcreteSkill {
 impl ConcreteSkill {
     /// The interactive step this occurrence is, when a person takes part at it.
     pub fn interactive_step(&self) -> Option<&str> {
-        self.interactive
-            .then(|| self.id.as_deref().unwrap_or(&self.skill.name))
+        self.interactive.then(|| {
+            self.interactive_name
+                .as_deref()
+                .or(self.id.as_deref())
+                .unwrap_or(&self.skill.name)
+        })
     }
 }
 
@@ -340,14 +350,14 @@ pub fn available_graph_names(repo: &Path) -> Result<Vec<String>, LoadError> {
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
-    names.extend(repo_graph_names(repo)?);
+    names.extend(graph_sources(repo)?.into_keys());
     names.sort();
     names.dedup();
     Ok(names)
 }
 
 pub(crate) fn repo_graph_names(repo: &Path) -> Result<Vec<String>, LoadError> {
-    Ok(repo_graph_sources(repo)?.into_keys().collect())
+    Ok(graph_sources_in(repo)?.into_keys().collect())
 }
 
 /// Load an authored graph without adapting a skill into a graph.
@@ -426,27 +436,32 @@ impl<'a> DefinitionLoader<'a> {
     }
 
     pub(crate) fn load_graph(&mut self, name: &str) -> Result<GraphDefinition, LoadError> {
-        let (resolved_name, content) = match self
+        let (name, content, source, source_path) = match self
             .repo
-            .map(|repo| find_repo_graph(name, repo))
+            .map(|repo| resolve_graph_source(name, repo))
             .transpose()?
             .flatten()
         {
-            Some((key, path)) => (key, fs::read_to_string(path)?),
+            Some((key, path)) => (
+                key,
+                crate::config::observation::read_to_string(&path)?,
+                crate::config::settings::definition_source(Some(&path)),
+                Some(path),
+            ),
             None => {
                 let key = crate::builtins::resolve_builtin_graph(name)
                     .ok_or_else(|| LoadError::GraphNotFound(name.to_string()))?;
                 let content =
                     crate::builtins::get_builtin_graph(key).expect("resolved builtin graph exists");
-                (key.to_string(), content.to_string())
+                (
+                    key.to_string(),
+                    content.to_string(),
+                    crate::config::ConfigSource::Builtin,
+                    None,
+                )
             }
         };
-        self.parse_source(resolved_name, &content)
-    }
-
-    /// Parse authored Graph text as the definition named `name`.
-    fn parse_source(&mut self, name: String, content: &str) -> Result<GraphDefinition, LoadError> {
-        let value: Value = serde_yaml_ng::from_str(content)
+        let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidGraph(err.to_string()))?;
         validate_graph_nesting(&self.sources, &name)?;
         self.sources.push(name.clone());
@@ -454,7 +469,50 @@ impl<'a> DefinitionLoader<'a> {
         self.sources.pop();
         // The outer definition exists. A missing child must not trigger
         // top-level fallback to a same-named local or cached skill.
-        let items = items.map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
+        let mut items =
+            items.map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
+        fn retain_origin(
+            steps: &mut [Step],
+            graph: &str,
+            layer: crate::config::ConfigSource,
+            source_path: Option<&Path>,
+            prefix: &str,
+        ) -> Result<(), LoadError> {
+            for (index, step) in steps.iter_mut().enumerate() {
+                let position = format!("{prefix}/{index}");
+                match &mut step.target {
+                    Target::Skill(skill) => {
+                        let mut occurrence = crate::config::settings::OccurrenceSettings::capture(
+                            graph,
+                            step.id.as_deref(),
+                            layer,
+                            skill,
+                        )?;
+                        occurrence.path = source_path.map(Path::to_path_buf);
+                        occurrence.address =
+                            Some(occurrence_address(step.id.as_deref(), &position));
+                        skill.occurrence = Some(Box::new(occurrence));
+                    }
+                    Target::Xor(branch) => {
+                        for (name, path) in &mut branch.paths {
+                            retain_origin(
+                                &mut path.steps,
+                                graph,
+                                layer,
+                                source_path,
+                                &format!(
+                                    "{position}/{}",
+                                    name.replace('~', "~0").replace('/', "~1")
+                                ),
+                            )?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+        retain_origin(&mut items, &name, source, source_path.as_deref(), "")?;
         Ok(GraphDefinition { name, items })
     }
 }
@@ -484,31 +542,63 @@ fn resolve_graph_with_catalog(
     graph: &GraphDefinition,
     catalog: &SkillCatalog,
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
-    let resolved = compile_with_sources(graph, catalog, &[])?;
+    let mut resolved = compile_with_sources(graph, catalog, &[])?;
+    name_interactive_steps(&mut resolved);
     let items = flatten_resolved(&resolved);
-    let mut ids = HashSet::new();
-    validate_occurrence_ids(&items, &mut ids)?;
-    validate_interactive_steps(&items, &mut HashSet::new())?;
+    validate_interactive_steps(&items)?;
     Ok(resolved)
+}
+
+// Settings retain authored IDs; Task navigation names repeated interactive stops
+// distinctly in the captured graph so continuation never returns to the first copy.
+fn name_interactive_steps(items: &mut [ResolvedGraphItem]) {
+    fn visit(items: &mut [ResolvedGraphItem], f: &mut impl FnMut(&mut ConcreteSkill)) {
+        for item in items {
+            match item {
+                ResolvedGraphItem::Skill(skill) => f(skill),
+                ResolvedGraphItem::Group { items, .. } => visit(items, f),
+                ResolvedGraphItem::Xor { paths, .. } => {
+                    let mut names: Vec<_> = paths.keys().cloned().collect();
+                    names.sort();
+                    for name in names {
+                        visit(&mut paths.get_mut(&name).expect("path exists").items, f);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut counts = HashMap::<String, usize>::new();
+    visit(items, &mut |skill| {
+        if let Some(name) = skill.interactive_step() {
+            *counts.entry(name.into()).or_default() += 1;
+        }
+    });
+    let mut used: HashSet<_> = counts.keys().cloned().collect();
+    visit(items, &mut |skill| {
+        let Some(name) = skill.interactive_step().map(str::to_owned) else {
+            return;
+        };
+        if counts[&name] > 1 {
+            let mut index = 1;
+            while !used.insert(format!("{name}#{index}")) {
+                index += 1;
+            }
+            skill.interactive_name = Some(format!("{name}#{index}"));
+        }
+    });
 }
 
 /// Every interactive step has its own id, and no autonomous loop returns across one: a
 /// person decides there, so nothing automatic may run back over it.
-fn validate_interactive_steps(
-    items: &[ConcreteStep],
-    steps: &mut HashSet<String>,
-) -> Result<(), LoadError> {
+fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
     for (index, item) in items.iter().enumerate() {
         match item {
             ConcreteStep::Skill(skill) => {
-                if let Some(step) = skill.interactive_step() {
-                    if !steps.insert(step.to_string()) {
-                        return Err(LoadError::InvalidGraph(format!(
-                            "two interactive steps are named {step:?}; give one `interactive: {{name: {}, id: <step>}}`",
-                            skill.skill.name
-                        )));
-                    }
-                } else if let Some(target) = return_target(items, index) {
+                if let Some(target) = (!skill.interactive)
+                    .then(|| return_target(items, index))
+                    .flatten()
+                {
                     if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
                         ConcreteStep::Skill(step) => step.interactive_step(),
                         _ => None,
@@ -522,7 +612,7 @@ fn validate_interactive_steps(
             }
             ConcreteStep::Xor(branch) => {
                 for path in branch.paths.values() {
-                    validate_interactive_steps(&path.steps, steps)?;
+                    validate_interactive_steps(&path.steps)?;
                 }
             }
             ConcreteStep::Command(_) => {}
@@ -597,32 +687,6 @@ pub(crate) fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usiz
         .filter(|target| *target < index)
 }
 
-fn validate_occurrence_ids(
-    items: &[ConcreteStep],
-    ids: &mut HashSet<String>,
-) -> Result<(), LoadError> {
-    for item in items {
-        match item {
-            ConcreteStep::Skill(skill) => {
-                if let Some(id) = skill.id.as_ref() {
-                    if !ids.insert(id.clone()) {
-                        return Err(LoadError::InvalidGraph(format!(
-                            "graph occurrence id {id:?} is not unique after expansion"
-                        )));
-                    }
-                }
-            }
-            ConcreteStep::Xor(branch) => {
-                for path in branch.paths.values() {
-                    validate_occurrence_ids(&path.steps, ids)?;
-                }
-            }
-            ConcreteStep::Command(_) => {}
-        }
-    }
-    Ok(())
-}
-
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     SkillCatalog::discover(Some(repo))?.load_skill(name)
 }
@@ -639,8 +703,9 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((frontmatter, body))
 }
 
-fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
+pub(crate) fn graph_sources_in(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
+    crate::config::observation::directory(&root);
     let mut sources = BTreeMap::<String, PathBuf>::new();
     if !root.exists() {
         return Ok(sources);
@@ -653,6 +718,9 @@ fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadErro
     {
         let entry = entry.map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         let path = entry.path();
+        if path.is_dir() {
+            crate::config::observation::directory(path);
+        }
         if !path.is_file()
             || !path
                 .extension()
@@ -681,12 +749,79 @@ fn repo_graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadErro
     Ok(sources)
 }
 
-pub fn find_graph_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
-    Ok(find_repo_graph(name, repo)?.map(|(_, path)| path))
+fn graph_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
+    let mut sources = graph_sources_in(repo)?;
+    if let Some(home) = dirs::home_dir() {
+        for (name, path) in graph_sources_in(&home)? {
+            sources.entry(name).or_insert(path);
+        }
+    }
+    Ok(sources)
 }
 
-fn find_repo_graph(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
-    let mut sources = repo_graph_sources(repo)?;
+/// Named occurrences survive topology changes; unnamed metadata belongs to its authored position.
+pub(crate) fn occurrence_address(id: Option<&str>, position: &str) -> String {
+    id.map_or_else(|| format!("position:{position}"), |id| format!("id:{id}"))
+}
+
+/// Visit only authored LF occurrence mappings, never composed definitions or instruction bodies.
+pub(crate) fn visit_preferences(
+    value: &mut Value,
+    prefix: &str,
+    visit: &mut impl FnMut(&str, &mut Value) -> Result<(), LoadError>,
+) -> Result<(), LoadError> {
+    let value = if value.is_mapping() {
+        value
+            .get_mut("steps")
+            .ok_or_else(|| LoadError::InvalidGraph("graph root must be a list".into()))?
+    } else {
+        value
+    };
+    let items = value
+        .as_sequence_mut()
+        .ok_or_else(|| LoadError::InvalidGraph("graph root must be a list".into()))?;
+    for (index, item) in items.iter_mut().enumerate() {
+        let position = format!("{prefix}/{index}");
+        for key in ["step", "interactive"] {
+            if let Some(value) = item.get_mut(key).filter(|value| value.is_mapping()) {
+                let address =
+                    occurrence_address(value.get("id").and_then(Value::as_str), &position);
+                visit(&address, value)?;
+            }
+        }
+        // Inline skill mappings are also allowed inside xor path steps.
+        if item.get("name").is_some() {
+            let address = occurrence_address(item.get("id").and_then(Value::as_str), &position);
+            visit(&address, item)?;
+        }
+        if let Some(paths) = item
+            .get_mut("xor")
+            .and_then(|xor| xor.get_mut("paths"))
+            .and_then(Value::as_mapping_mut)
+        {
+            for (name, path) in paths {
+                if let Some(steps) = path.get_mut("steps") {
+                    let name = name
+                        .as_str()
+                        .ok_or_else(|| LoadError::InvalidGraph("path name must be text".into()))?;
+                    visit_preferences(
+                        steps,
+                        &format!("{position}/{}", name.replace('~', "~0").replace('/', "~1")),
+                        visit,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn find_graph_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
+    Ok(resolve_graph_source(name, repo)?.map(|(_, path)| path))
+}
+
+fn resolve_graph_source(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
+    let mut sources = graph_sources(repo)?;
     let names = sources
         .keys()
         .map(String::as_str)
@@ -1052,12 +1187,6 @@ fn resolve_skill_reference(skill: &Skill, catalog: &SkillCatalog) -> Result<Skil
 
     let mut resolved = catalog.load_skill(&skill.name)?;
 
-    if let Some(agent) = &skill.agent {
-        resolved.agent = Some(agent.clone());
-    }
-    if let Some(default_agent) = &skill.default_agent {
-        resolved.default_agent = Some(default_agent.clone());
-    }
     if let Some(action_style) = &skill.action_style {
         resolved.action_style = Some(action_style.clone());
     }
@@ -1085,6 +1214,28 @@ fn compile_with_sources(
     sources: &[String],
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
     validate_graph_nesting(sources, &graph.name)?;
+    fn validate_ids(
+        steps: &[Step],
+        ids: &mut HashSet<String>,
+        name: &str,
+    ) -> Result<(), LoadError> {
+        for step in steps {
+            if let Some(id) = &step.id {
+                if !ids.insert(id.clone()) {
+                    return Err(LoadError::InvalidGraph(format!(
+                        "duplicate step id {id} in {name}"
+                    )));
+                }
+            }
+            if let Target::Xor(branch) = &step.target {
+                for path in branch.paths.values() {
+                    validate_ids(&path.steps, ids, name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    validate_ids(&graph.items, &mut HashSet::new(), &graph.name)?;
     let mut sources = sources.to_vec();
     sources.push(graph.name.clone());
     compile_steps(&graph.items, catalog, &sources)
@@ -1116,9 +1267,31 @@ fn compile_steps(
                 });
             }
             Target::Skill(skill) => items.push(ResolvedGraphItem::Skill(ConcreteSkill {
-                skill: resolve_skill_reference(skill, catalog)?,
+                skill: {
+                    let mut resolved = resolve_skill_reference(skill, catalog)?;
+                    resolved.occurrence = Some(match &skill.occurrence {
+                        Some(occurrence) => occurrence.clone(),
+                        None => {
+                            let graph = sources.last().expect("compiling a defining graph");
+                            let source = catalog
+                                .repo
+                                .as_deref()
+                                .map(|repo| find_graph_source_path(graph, repo))
+                                .transpose()?
+                                .flatten();
+                            Box::new(crate::config::settings::OccurrenceSettings::capture(
+                                graph,
+                                step.id.as_deref(),
+                                crate::config::settings::definition_source(source.as_deref()),
+                                skill,
+                            )?)
+                        }
+                    });
+                    resolved
+                },
                 id: step.id.clone(),
                 interactive: step.interactive,
+                interactive_name: None,
                 returns: step
                     .returns
                     .as_deref()
@@ -1345,7 +1518,10 @@ mod tests {
         let ConcreteStep::Skill(demo) = &items[1] else {
             panic!("demo compiles to a skill step");
         };
-        assert_eq!(demo.skill.agent.as_deref(), Some("codex"));
+        assert_eq!(
+            demo.skill.occurrence.as_ref().unwrap().values["agent"].as_str(),
+            Some("codex")
+        );
 
         fs::write(
             graphs.join("retired.yaml"),
@@ -1385,7 +1561,8 @@ mod tests {
             edges(&pursue),
             [
                 ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 6)
+                ("loop-or-next".to_string(), 6),
+                ("loop-or-next".to_string(), 8)
             ]
         );
 
@@ -1485,10 +1662,30 @@ mod tests {
         )
         .unwrap();
         let duplicate = load_graph("duplicate", tmp.path()).unwrap();
+        let steps = compile_graph(&duplicate, tmp.path()).unwrap();
+        let captured = crate::task_graph::CapturedGraph {
+            name: "duplicate".into(),
+            steps,
+        };
+        let stops = captured.interactive_steps();
+        assert_eq!(stops[0].1.interactive_step(), Some("review_kickoff#1"));
+        assert_eq!(stops[1].1.interactive_step(), Some("review_kickoff#2"));
+        assert_eq!(captured.after(&stops[0].0), Some(stops[1].0.clone()));
+        assert_eq!(
+            captured.interactive_step("review_kickoff#2"),
+            Some(stops[1].0.clone())
+        );
+        assert_eq!(stops[0].1.skill.occurrence, stops[1].1.skill.occurrence);
+        fs::write(
+            graphs.join("duplicate.yaml"),
+            "- step: {name: explore, id: same}\n- step: {name: demo, id: same}\n",
+        )
+        .unwrap();
+        let duplicate = load_graph("duplicate", tmp.path()).unwrap();
         assert!(compile_graph(&duplicate, tmp.path())
             .unwrap_err()
             .to_string()
-            .contains("not unique after expansion"));
+            .contains("duplicate step id"));
 
         fs::write(graphs.join("invalid.yaml"), "- cmd: sync\n  id: review\n").unwrap();
         assert!(load_graph("invalid", tmp.path())
@@ -1577,14 +1774,14 @@ Do it quickly.
     }
 
     #[test]
-    fn load_skill_parses_frontmatter_default_agent() {
+    fn load_skill_parses_bare_model_policy() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join(".lf/skills");
         fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
             skills_dir.join("fast.md"),
             r#"---
-default_agent: codex:o3
+agent: codex:o3
 ---
 # Fast Skill
 Do it quickly.
@@ -1593,7 +1790,7 @@ Do it quickly.
         .unwrap();
 
         let skill = load_skill("fast", tmp.path()).unwrap();
-        assert_eq!(skill.default_agent, Some("codex:o3".to_string()));
+        assert_eq!(skill.agent, Some("codex:o3".to_string()));
     }
 
     #[test]
@@ -1690,7 +1887,7 @@ Design the feature.
                 _ => panic!("incident should contain only repair, analysis and planning"),
             })
             .collect();
-        assert_eq!(names, ["unbreak", "5whys", "launch-plan"]);
+        assert_eq!(names, ["unbreak", "debug", "5whys", "launch-plan"]);
     }
 
     #[test]
@@ -1708,7 +1905,7 @@ Design the feature.
                 assert!(!step.interactive);
                 assert!(step.returns.is_none());
                 let content = step.skill.content.as_ref().unwrap();
-                assert!(content.contains("lf wave list --current --json"));
+                assert!(content.contains("lf wave list --json"));
                 assert!(content.contains("LF_GRAPH_ID"));
                 step.skill.name.as_str()
             })
@@ -2205,7 +2402,10 @@ Design the feature.
             panic!("nested skill")
         };
         assert_eq!(other.skill.content.as_deref(), Some("Original other"));
-        assert_eq!(other.skill.agent.as_deref(), Some("claude"));
+        assert_eq!(
+            other.skill.occurrence.as_ref().unwrap().values["agent"].as_str(),
+            Some("claude")
+        );
         assert_eq!(other.sources, ["pin-root", "pin-inner"]);
         assert!(build_xor_routing_suffix(inner).contains("Nested description"));
     }
@@ -2251,7 +2451,6 @@ Design the feature.
         for (body, expected) in [
             ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - loop: outside\n", "preceding step"),
             ("- xor:\n    paths:\n      inline:\n        description: Invalid gate\n        steps:\n          - step:\n              name: demo\n              human: true\n", "retired"),
-            ("- xor:\n    paths:\n      inline:\n        description: Duplicate gate\n        steps:\n          - interactive:\n              name: demo\n              id: outside\n", "not unique"),
         ] {
             fs::write(graphs.join("pin-invalid.yaml"), body).unwrap();
             let error = load_graph("pin-validation", tmp.path())

@@ -16,22 +16,6 @@ struct WaveLensTests {
         #expect(active.reason == "2 active Tasks")
     }
 
-    @Test("retired Wave renders history rather than disabled current state")
-    func retiredWaveIsHistorical() {
-        let wave = Wave(
-            id: "wave_old",
-            name: "infra",
-            repo: "/tmp/old",
-            status: .abandoned,
-            retiredAt: "2026-08-20T12:00:00Z",
-            supersededByWaveId: "wave_current"
-        )
-        let lens = WaveViewModel(api: wave).lens
-
-        #expect(lens.color == .black)
-        #expect(lens.reason == "Retired at 2026-08-20T12:00:00Z · superseded by wave_current")
-    }
-
     // MARK: - Task conditions map 1:1, and unknown is lit (never off/black)
 
     @Test("Task conditions map to lens colors one-to-one")
@@ -188,7 +172,7 @@ struct WaveLensTests {
         let json = """
         {"task":{"repository_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,
-        "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move":{"owner":"task","reason":"\(reason)"},
         "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},

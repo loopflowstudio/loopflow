@@ -101,10 +101,44 @@ backoff that grows from 1 to 30 minutes. Pending or missing checks keep waiting;
 time alone never starts a repair. For progress through a closed laptop, ship
 from an always-on Machine (below).
 
+## Updates
+
+```bash
+lf schedule hourly             # also weekly, daily, 5min; none keeps the current cadence
+tail ~/.lf/logs/refresh.log    # what each scheduled update did
+```
+
+Installing a build schedules `lf install` on your stream: daily at 09:00 local
+time, or the cadence already set. On macOS this is the LaunchAgent
+`com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
+it is a crontab line.
+
+Turn it off on macOS:
+
+```bash
+launchctl disable gui/$(id -u)/com.loopflow.refresh
+launchctl bootout gui/$(id -u)/com.loopflow.refresh
+```
+
+Both are needed: `bootout` alone lasts until the next login or install. While it
+is disabled, installs warn that updates aren't scheduled, and `lf install --dev`
+exits with an error after installing its build. Loopflow.app still updates itself
+through Sparkle.
+
+Turn it back on, which also runs `lf install` once:
+
+```bash
+launchctl enable gui/$(id -u)/com.loopflow.refresh
+lf schedule
+```
+
+On Linux, delete the crontab line ending `# loopflow install schedule`. The next
+install adds it back.
+
 ## Schedule it yourself
 
-Loopflow keeps no scheduler. Any lf command runs from your own crontab, launchd
-or systemd timer:
+The update job is the only one Loopflow registers. Any other lf command runs from
+your own crontab, launchd or systemd timer:
 
 ```bash
 # crontab -e
@@ -150,6 +184,17 @@ the exact merged commit, and tags it only after that build and your publisher
 succeed. Interrupted, it resumes the same release from where it stopped; a
 failed build is fixed with another commit under the same version, never by
 bumping. `lf skill release-run minor` hands the same command to an agent.
+
+```bash
+lf release regress v0.15.3 "Sessions lose their name"  # file a regression; stable stays below it
+lf release issues                                      # every open regression
+lf release promote --dry-run                           # what would move, or what holds it
+lf release promote                                     # move stable now, outside a run
+```
+
+A target with `completion: github-release` has a `stable` stream, GitHub's Latest
+marker. A GitHub issue labelled `regressed-in:v0.15.3` holds it below that release
+until the issue closes as completed.
 
 Your repository owns the build and publish steps. Declare them per target:
 
@@ -198,6 +243,16 @@ lf task run LOO-13 --stack-on LOO-12
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 
+For a stacked Task, `lf sync` follows its parent. To deliver the child's work
+independently, run `lf sync main` (or the repository's default branch). It uses
+the recorded parent tip to remove inherited changes, keeps the Task, branch and
+PR identities, and retargets the PR after integration succeeds. Resolve conflicts
+with `lf sync --manual main`, then `lf sync --continue`; `lf sync --abort` keeps
+the original placement. Parent work remains in its own branch and in Git history.
+If the recorded fork is unavailable, sync recovers it from the common ancestor
+of this checkout and the parent's remote branch. `lf sync main --plan` shows
+that fork without changing placement.
+
 ## Other machines
 
 ```bash
@@ -221,7 +276,7 @@ lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-us
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
-lf --wave infrastructure set machine code            # the Wave's new Tasks rent from code
+lf --wave infrastructure set machine.capacity code            # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
@@ -236,7 +291,7 @@ us-east-1's, so AWS names the region it rents in and the region it priced. When
 the repository plans in Linear, a rented machine gets an access token this
 laptop just refreshed; the refresh grant stays here, so Linear works there for
 the token's lifetime (about a day). Its provider deletes a rented machine at
-its deadline. `lf --wave infrastructure set machine code`
+its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".

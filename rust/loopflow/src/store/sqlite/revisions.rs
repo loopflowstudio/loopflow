@@ -90,7 +90,6 @@ mod tests {
         "planning_peer_changes",
         "planning_peer_observed",
         "project_binding_imports",
-        "auth_browser_bindings",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf ops people`.
         "github_people",
@@ -117,6 +116,8 @@ mod tests {
         "store_revisions",
         "task_linear_ingested_comments",
         "tool_responses",
+        // Wave retry receipts are read only by explicit lifecycle operations.
+        "wave_lifecycle_operations",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {

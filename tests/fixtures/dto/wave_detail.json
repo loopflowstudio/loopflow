@@ -197,7 +197,7 @@
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
-          "provider": "codex",
+          "provider": null,
           "owner": {
             "person": "Jack Heart",
             "person_key": "jack@loopflow.studio",
@@ -438,7 +438,7 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": "task",
+        "graph_source": null,
         "section": "backlog"
       },
       {
@@ -563,7 +563,7 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task",
+        "graph_source": null,
         "section": "backlog"
       }
     ],
@@ -645,36 +645,50 @@
   "setup": {
     "graph": {
       "value": "code",
-      "source": "wave"
+      "source": "repository",
+      "scope": null,
+      "locator": null
     },
     "agent": {
       "value": "claude",
-      "source": "repo"
+      "source": "repository",
+      "scope": null,
+      "locator": null
     },
     "skill_agents": {
       "implement": {
         "value": "claude:opus",
-        "source": "wave"
+        "source": "repository",
+        "scope": null,
+        "locator": null
       }
     },
     "tasks_machine": {
       "value": "home_00000000000000000000000000000001",
-      "source": "personal"
+      "source": "personal",
+      "scope": null,
+      "locator": null
     },
     "session_machine": {
       "value": "home_00000000000000000000000000000002",
-      "source": "default"
+      "source": "builtin",
+      "scope": null,
+      "locator": null
     },
     "accounts": {
       "claude": {
         "accounts": [
           "work"
         ],
-        "source": "personal"
+        "source": "personal",
+        "scope": null,
+        "locator": null
       },
       "codex": {
         "accounts": [],
-        "source": "default"
+        "source": "builtin",
+        "scope": null,
+        "locator": null
       }
     }
   }

@@ -226,8 +226,8 @@ fn portfolio(world: &World) -> Result<()> {
         "Additive migrations should not lock out older lf.",
     )?;
     let failed = world.checkout(&failed)?;
-    // `code` sets out on `pursue`, which fails at `sync` (its third step).
-    world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(2))?;
+    // `code` sets out on `pursue`, which fails at `sync` (its fourth step).
+    world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(3))?;
 
     world.task(
         Some("systems"),
@@ -858,7 +858,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
     let open = world.task(
         Some("desktop"),
         "Add a Wave from Desktop",
-        "Creating a Wave writes GOAL.md, but the Wave doesn't appear until `lf wave ensure`.",
+        "Creating a Wave writes GOAL.md, but the Wave doesn't appear until `lf wave add`.",
     )?;
     let open = world.checkout(&open)?;
     world.session(

@@ -41,18 +41,23 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 ```
 
 A Skill's frontmatter `agent:` names its harness and model; a Graph step can
-name another for that occurrence. `-a` overrides them all, including nested
-Graphs and child `lf` commands. Without any, your configured `agent:` applies,
-then the Skill's `default_agent:`, then whichever harness is installed.
+name another for that occurrence. Explicit Graph `-a` applies to all its steps,
+including nested Graphs and routers. It is not exported to unrelated child work.
+Personal preferences can target the skill or an authored step ID;
+see [setting precedence](config.md). Use `default_agent:` in either definition
+for a fallback: every applicable `agent:` choice wins before any fallback,
+then source, scope and target decide within each class. Builtin skills recommend
+no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown
 ---
-docs: [scripts/testing.md]
+context:
+  docs: [scripts/testing.md]
 ---
 Run the affected suites once for this tree.
 ```
 
-A repository Skill's `docs:` adds files to its context, resolved like `--docs`.
+A repository Skill's `context.docs` adds files to its context, resolved like `--docs`.
 
 ## Run a Graph anywhere
 
@@ -81,14 +86,31 @@ Mechanical steps ride along as commands:
 `pursue` is a Graph with a backward edge:
 
 ```yaml
+- write-docs           # edit the actual user docs before implementation
 - implement
 - compress
 - graph: refresh      # sync with main, then realign the plan
 - loop: implement     # loop-or-next decides: advance, iterate, or blocked
 - concept-review
 - loop: implement
+- qa                  # use the change through its real path before anyone demos it
+- loop: implement
 - pr-publish
 ```
+
+`write-docs` edits the actual README, guides, or reference files before code:
+examples, expected results, and what someone needs to know to use the change.
+In `feature`, this happens after exploration. An already attached Loopflow
+Desktop shows the relevant files in Files, with rendered Markdown/HTML and
+existing drafts preserved. In other hosts, or without an attached Desktop,
+the conversation reports the actual documentation paths and continues. Automatic
+presentation never launches an editor, host, browser or conversation.
+
+Edit the docs or discuss changes while work continues. There is no extra review
+stop or scratch copy. Saved edits guide implementation; for a change that needs
+attention now, tell the Task conversation. `lf open --file <path>` presents the
+original in an attached Desktop Files view. Internal changes with no
+documentation impact leave the docs alone.
 
 At each `loop:`, the deciding step reads the work and the plan and returns
 advance, iterate (back to the target, with direction) or blocked (with the
@@ -115,6 +137,22 @@ work. Name your own decider with `step:`:
         description: "Reproduced defects within the change need repair"
       silence:
         description: "No actionable defect in the supplied change"
+```
+
+## Move one number
+
+```bash
+lf graph optimize : "cut p50 export time on the 60k-row dataset"
+```
+
+`optimize` measures, plans one change, makes it, and keeps or reverts it, until
+no clear way forward remains. It then compresses, refreshes and measures the
+whole result. It runs without a person and delivers nothing, so compose it:
+
+```yaml
+# .lf/graphs/speed-up.yaml
+- graph: optimize
+- graph: deliver
 ```
 
 ## Where a person takes part

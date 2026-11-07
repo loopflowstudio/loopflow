@@ -157,24 +157,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         }
         SessionCommand::List(_) => unreachable!("lists return before any runtime"),
         SessionCommand::Resume {
-            all: true,
-            connection,
-            ..
-        } => {
-            let store = open_shared_store().await?;
-            let resumed = crate::ops::human_session::restore::resume_all(&store).await?;
-            if connection.json || cli.json {
-                println!("{}", serde_json::to_string_pretty(&resumed)?);
-            } else {
-                println!("{}", crate::ops::human_session::restore::render(&resumed));
-            }
-            Ok(())
-        }
-        SessionCommand::Resume {
             id,
             connection,
             fork,
-            all: false,
         } => {
             resume(
                 cli,
@@ -651,11 +636,25 @@ async fn resume(
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
+        let lock_id = session.id.to_string();
+        let launch = tokio::task::spawn_blocking(move || {
+            crate::ops::human_session::lock_session_process(&lock_id)
+        })
+        .await??;
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }
-    let session = reopen(&store, &cwd, target, fork, !*prepare).await?;
+    let session = reopen(
+        &store,
+        &cwd,
+        target,
+        fork,
+        !*prepare,
+        connection.json || cli.json,
+    )
+    .await?;
     print_opened(cli, connection, &session)
 }
 
@@ -680,9 +679,10 @@ async fn reopen(
     target: crate::ops::human_session::SessionTarget<'_>,
     fork: bool,
     launch: bool,
+    json: bool,
 ) -> anyhow::Result<SessionRecord> {
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, &id, fork, launch).await
+    crate::ops::human_session::open(store, &id, fork, launch, json).await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -699,14 +699,13 @@ pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<Sessio
                 id,
                 connection,
                 fork,
-                all: false,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, *fork, false).await
+                reopen(&store, directory, target, *fork, false, false).await
             }
             SessionCommand::New { id, connection } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                restarted(&store, directory, target, false).await
+                restarted(&store, directory, target, false, false).await
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -731,6 +730,7 @@ async fn new_thread(
         &std::env::current_dir()?,
         target,
         !connection.prepare,
+        connection.json || cli.json,
     )
     .await?;
     print_opened(cli, connection, &record)
@@ -743,6 +743,7 @@ async fn restarted(
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
     launch: bool,
+    json: bool,
 ) -> anyhow::Result<SessionRecord> {
     let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
     let session = crate::ops::human_session::session_by_id(store, &selected.id)
@@ -757,12 +758,26 @@ async fn restarted(
         if selected.started {
             eprintln!("Nothing to restart here; starting a new conversation.");
         }
-        return crate::ops::human_session::open(store, &selected.id, false, launch).await;
+        return crate::ops::human_session::open(store, &selected.id, false, launch, json).await;
     }
     let agent = crate::config::agent_override();
-    let next = crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch)
-        .await?;
+    let next =
+        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json)
+            .await?;
     crate::ops::human_session::surface(store, &next).await
+}
+
+/// Finish a successful Session connection after its thin relay has returned.
+pub fn print_returned(id: &str) -> anyhow::Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        let session = crate::ops::human_session::session_by_id(&store, id)
+            .await?
+            .context("Session not found")?;
+        let record = crate::ops::human_session::surface(&store, &session).await?;
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        Ok(())
+    })
 }
 
 fn print_opened(

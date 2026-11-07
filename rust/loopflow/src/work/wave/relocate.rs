@@ -22,7 +22,6 @@ pub struct WaveRelocationReceipt {
 struct PlannedWaveMove {
     wave: Wave,
     target: WaveLocator,
-    retire_collision: Option<WaveId>,
 }
 
 /// Relocation changes planning addresses. Definitions and execution retain their identities.
@@ -58,20 +57,14 @@ pub async fn relocate_wave(
     if wave.repo() != target.repo().to_string() && wave.parent_wave_id().is_some() {
         return Err(anyhow!("repository relocation must start from a root Wave"));
     }
-    let mut moves = plan_moves(store, wave, target).await?;
-    for planned in &mut moves {
+    let moves = plan_moves(store, wave, target).await?;
+    for planned in &moves {
         if let Some(existing) = store.get_wave_at(&planned.target).await? {
             if existing.id() != planned.wave.id() {
-                let blockers = store.wave_retirement_blockers(existing.id()).await?;
-                if !blockers.is_empty() {
-                    return Err(anyhow!(
-                        "cannot relocate Wave {}: destination Wave {} retains {}",
-                        planned.wave.id(),
-                        existing.id(),
-                        blockers.join(", ")
-                    ));
-                }
-                planned.retire_collision = Some(existing.id().clone());
+                return Err(anyhow!(
+                    "Wave {} already exists; remove or rename it first",
+                    planned.target.slug()
+                ));
             }
         }
     }
@@ -89,6 +82,20 @@ pub async fn relocate_wave(
             .sqlite
             .ensure_wave(&root.target.repo().to_string(), parent)?;
     }
+    let mut copied = Vec::new();
+    for planned in &moves {
+        if let Some(value) = crate::config::files::copy_wave(
+            Path::new(planned.wave.repo()),
+            planned.target.repo().as_path(),
+            planned.wave.id(),
+        )? {
+            copied.push((
+                planned.wave.repo().to_owned(),
+                planned.wave.id().clone(),
+                value,
+            ));
+        }
+    }
     store
         .relocate_waves(
             moves
@@ -98,11 +105,13 @@ pub async fn relocate_wave(
                     expected_repo: planned.wave.repo().to_string(),
                     expected_slug: planned.wave.slug().to_string(),
                     target: planned.target.clone(),
-                    retire_collision: planned.retire_collision.clone(),
                 })
                 .collect(),
         )
         .await?;
+    for (source, id, value) in copied {
+        crate::config::files::finish_wave_move(Path::new(&source), &id, &value)?;
+    }
     Ok(receipt)
 }
 
@@ -135,11 +144,7 @@ async fn plan_moves(
     root: Wave,
     target: WaveLocator,
 ) -> Result<Vec<PlannedWaveMove>> {
-    let mut moves = vec![PlannedWaveMove {
-        wave: root,
-        target,
-        retire_collision: None,
-    }];
+    let mut moves = vec![PlannedWaveMove { wave: root, target }];
     // Parents precede children so the store can resolve each destination parent.
     let mut next = 0;
     while next < moves.len() {
@@ -150,7 +155,6 @@ async fn plan_moves(
                     &format!("{}/{}", moves[next].target.slug(), child.name()),
                 )?,
                 wave: child,
-                retire_collision: None,
             });
         }
         next += 1;

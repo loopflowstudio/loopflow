@@ -57,9 +57,12 @@ extension WorkModel {
             if session.titleSource != .unavailable {
                 rows.append(.init(id: .rename(id), title: "Rename \(session.title)", detail: "Action · Edit name", key: "Rename"))
             }
-            if session.work?.kind != .task {
+            if session.interactive, session.work?.kind != .task {
                 rows.append(.init(id: .bind(id), title: "Bind to Task…",
-                                  detail: "Action · \(session.title) · Review permanent assignment", key: "Bind"))
+                                  detail: "Action · \(session.title) · Review permanent binding", key: "Bind"))
+            } else if session.interactive, !session.taskPrimary {
+                rows.append(.init(id: .bind(id), title: "Make primary Task conversation…",
+                                  detail: "Action · \(session.title)", key: "Primary"))
             }
         }
         return rows

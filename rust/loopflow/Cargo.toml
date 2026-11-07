@@ -102,12 +102,13 @@ path = "tests/session_launch_contract.rs"
 clap = { version = "4.6", features = ["derive", "env"] }
 dirs = "7"
 ignore = "0.4"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 schemars = "1.2"
 shlex = "2.0"
 serde_urlencoded = "0.7"
 serde_yaml_ng = "0.10"
+yaml-edit = "0.3.2"
 tracing = "0.1"
 thiserror = "2.0"
 tiktoken-rs = "0.12"
@@ -154,8 +155,6 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = "0.30"
 tempfile = "3.27"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-vt100 = "0.16"
-vte = "0.15"
 
 # ARM file-selection latency includes hashing the executable for install authority.
 [target.'cfg(target_arch = "aarch64")'.dependencies]
@@ -169,6 +168,7 @@ tokio = { version = "1", features = ["test-util"] }
 
 [build-dependencies]
 cc = "1"
+sha2 = "0.10"
 rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -176,6 +176,20 @@ async fn refuse_busy(mut socket: UnixStream) {
         .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS })),
     ));
     let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
+    let _ = socket.shutdown().await;
+    drain(&mut socket).await;
+}
+
+/// Read what the client already sent before closing: Linux resets a Unix socket
+/// closed with unread input, and the client would lose its answer. A client
+/// that keeps writing is not waited for.
+async fn drain(socket: &mut UnixStream) {
+    let mut rest = [0; 4096];
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        while socket.read(&mut rest).await? > 0 {}
+        std::io::Result::Ok(())
+    })
+    .await;
 }
 
 async fn connection(
@@ -306,15 +320,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
         socket.shutdown().await
     })
     .await??;
-    // Read what the old client already sent before closing: Linux resets a
-    // Unix socket closed with unread input, and the client would lose the
-    // reply. A client that keeps writing is not waited for.
-    let mut rest = [0; 4096];
-    let _ = tokio::time::timeout(Duration::from_millis(250), async {
-        while socket.read(&mut rest).await? > 0 {}
-        std::io::Result::Ok(())
-    })
-    .await;
+    drain(&mut socket).await;
     Ok(())
 }
 

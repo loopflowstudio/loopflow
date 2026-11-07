@@ -75,7 +75,21 @@ fn a_client_that_closes_at_once_leaves_the_server_listening() {
         }
     }
     assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-    loopflow::server::client::Connection::open().unwrap();
+    // Closed clients leave as their connections notice; until then it may be `busy`.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        match loopflow::server::client::Connection::open() {
+            Ok(_) => break,
+            Err(error) => {
+                let busy = error
+                    .downcast_ref::<loopflow::engine::Error>()
+                    .is_some_and(|error| error.code == loopflow::engine::ErrorCode::Busy);
+                assert!(busy, "{error:#}");
+                assert!(std::time::Instant::now() < deadline, "{error:#}");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 #[test]

@@ -31,13 +31,19 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
       },
       {
         "kind": "move_here",
-        "label": "Move here",
+        "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ],
     "graph_membership": {
@@ -97,6 +103,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -163,13 +175,19 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
       },
       {
         "kind": "move_here",
-        "label": "Move here",
+        "label": "Take back",
         "help": "Transfer control here; unsent text in the previous terminal is not transferred",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
       }
     ],
     "graph_membership": {
@@ -221,6 +239,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -274,6 +298,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],
@@ -338,6 +368,12 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
+        "unavailable_reason": null
       }
     ],
     "graph_membership": {
@@ -397,6 +433,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      },
+      {
+        "kind": "reveal",
+        "label": "Show conversation",
+        "help": "Continue existing history without taking another terminal's input",
         "unavailable_reason": null
       }
     ],

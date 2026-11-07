@@ -177,7 +177,7 @@ struct TaskGraphTests {
         #expect(GraphLoopGeometry.below(1) > GraphLoopGeometry.below(0))
     }
 
-    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions", .requiresDisplay)
+    @Test("Task navigation reveals the existing conversation and keeps the Workflow and companions", .requiresDisplay)
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -257,20 +257,19 @@ struct TaskGraphTests {
         try await eventually("planning arrives") { model.task(id: "issue-now") != nil }
         let task = try #require(model.task(id: "issue-now")?.task)
         let identity = try #require(task.reference.workspace?.identity)
+        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
         model.bindWorkspaces(registry, repository: "fixture-repository")
         model.select(.task(id: task.id))
         let key = model.workspaceKey(for: .task(id: task.id), repository: "fixture-repository")
         let panes = registry.workspace(for: key, title: task.task.name, location: identity).multiplexer
-        try await settle()
-        #expect(panes.focusedPane.sessionId == nil)
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "resume", "--task"]) })
+        try await eventually("Task navigation reveals its existing conversation") { panes.focusedPane.sessionId == record.id }
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["task", "run"]) })
 
-        // A separate explicit link opens the known conversation, not bare navigation.
-        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
+        // An exact link reuses the automatically revealed conversation.
         let link = TaskLink(issue: task.task.identifier, repo: repo, session: record.id)
         await model.openTaskLink(link)
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "resume", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["task", "run"]) })
 
         // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }

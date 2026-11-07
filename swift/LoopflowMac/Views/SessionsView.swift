@@ -114,7 +114,17 @@ final class SessionsWorkspace {
     var conversationRequest: UUID?
     var openingConversation: Bool { conversationRequest != nil }
     var conversationError: String?
+    var conversationStart: SessionAction?
+    /// What automatic opening and Retry may do; only Take back replaces input.
+    /// Repository and Wave primaries always start; a Task's intent follows its state.
+    var conversationIntent: SessionOpenIntent
+    /// The Wave's name as `--wave` takes it; nil outside Wave Work.
+    var wave: String?
     private var didPrepareTaskPanes = false
+    var lastVisit = Date.distantPast
+    var conversationClosed = false
+    var requiresLocationValidation = false
+    var onConversationClosed: (() -> Void)?
 
     /// Run one conversation opening against this workspace's progress and error.
     func openConversation(_ open: () async throws -> Void) async {
@@ -123,25 +133,12 @@ final class SessionsWorkspace {
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
-        do { try await open() } catch { conversationError = error.localizedDescription }
-    }
-
-    /// Populate this retained Work even if navigation changes while lf prepares it.
-    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
-        await openConversation {
-            let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
-            store.reconcile([record])
-            store.adoptPreparation(record)
-            registry.revealSession(record, in: self)
-            presentation.content = .terminals
-            presentation.selectedSessionId = record.id
-            await store.select(record.id)
-        }
+        do { try await open() } catch { if !Task.isCancelled { conversationError = error.localizedDescription } }
     }
 
     /// Whether a pane shows a Session the store holds. A saved layout can name a
     /// headless Run or an aged-out Session the store doesn't hold, and that pane
-    /// renders as "No Task conversation open".
+    /// renders as "Conversation not open".
     func showsConversation(held: Set<String>) -> Bool {
         multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
     }
@@ -242,6 +239,11 @@ final class SessionsWorkspace {
         } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeBrowserTab(id)
         } else {
+            if case .session = pane.content {
+                conversationRequest = nil
+                conversationClosed = true
+                onConversationClosed?()
+            }
             replaced = multiplexer.close(paneId)
         }
         switch replaced {
@@ -309,7 +311,10 @@ final class SessionsWorkspace {
     func present(_ shown: Bool) {
         guard key.kind == .task, presented != shown else { return }
         presented = shown
-        if !shown { detachTerminals() }
+        if !shown {
+            conversationRequest = nil
+            detachTerminals()
+        }
     }
 
     private func detachTerminals() {
@@ -419,6 +424,7 @@ final class SessionsWorkspace {
         self.location = location
         self.localMachineId = localMachineId
         self.surfaces = surfaces
+        conversationIntent = key.kind == .task ? .reveal : .start
         multiplexer = MultiplexerStore(taskId: key.kind == .task ? key.id : nil)
         // The workspace outlives SessionsView, including while a shell exits
         // on the Work screen or while another repository is selected.
@@ -440,15 +446,289 @@ final class SessionsWorkspace {
 @MainActor
 @Observable
 final class SessionsWorkspaceRegistry {
+    static let warmConversationLimit = 16
+    static let preparationLimit = 2
+
     // Observable only for environment delivery; lazy creation must not invalidate views.
     @ObservationIgnored private var workspaces: [WorkWorkspaceKey: SessionsWorkspace] = [:]
-    let surfaces = GhosttySurfacePool()
+    let surfaces: GhosttySurfacePool
     private(set) var localMachineId: String?
     private(set) var machineError: String?
 
-    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
+    private(set) var recentTasks: [WorkWorkspaceKey] = []
+    /// Repository and Wave primaries: always warm outside the Task bound until Close.
+    private(set) var warmPrimaries: [WorkWorkspaceKey] = []
+    private(set) var restoreCandidates: [WorkWorkspaceKey] = []
+    private var completedTasks: Set<WorkWorkspaceKey> = []
+    private struct WarmIntent: Codable {
+        let recent: [WorkWorkspaceKey]
+        let closed: Set<WorkWorkspaceKey>
+    }
+    private var closedConversations: Set<WorkWorkspaceKey> = []
+    private var warmPersistenceKey: String?
+    private var quitting = false
+    private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
+    private var sessions: SessionsStore?
+    var onWarmthChanged: (() -> Void)?
+    var canPrepare: (() -> Bool)?
+    var onPreparationFinished: (() -> Void)?
+    var preparationCount: Int { openings.count }
+
+    func continueOpenings() {
+        if let sessions { openWarmConversations(store: sessions) }
+    }
+
+    func evict(_ key: WorkWorkspaceKey) {
+        recentTasks.removeAll { $0 == key }
+        reconcileWarmth()
+    }
+
+    /// `runtime` lets prepared Sessions start their terminals before a pane shows
+    /// them; a registry without one retains and shows but never launches.
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+        self.localMachineId = localMachineId
+        surfaces = GhosttySurfacePool(runtime: runtime)
+    }
+
+    func loadWarmIntent(repository: String) {
+        guard warmPersistenceKey == nil else { return }
+        let repository = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository).repository
+        let key = "warm-conversations-\(localMachineId ?? "unknown")-\(repository)"
+        warmPersistenceKey = key
+        if let data = UserDefaults.standard.data(forKey: key),
+           let saved = try? JSONDecoder().decode(WarmIntent.self, from: data) {
+            closedConversations = saved.closed
+            restoreCandidates = Array(saved.recent.filter { $0.repository == repository && $0.kind == .task }.prefix(Self.warmConversationLimit))
+        }
+    }
+
+    /// Restore saved intent or fill spare warmth from fresh working Tasks.
+    /// A visit, Close or eviction already decided an existing workspace's lifetime.
+    func prefetch(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity, completed: Bool) {
+        guard !presentationClosed, !quitting else { return }
+        let restoring = restoreCandidates.contains(key)
+        restoreCandidates.removeAll { $0 == key }
+        // A visible tile's workspace was shown, not chosen: admitting it keeps the
+        // conversation warm after the Dashboard leaves; its location is already in use.
+        guard !completed, !closedConversations.contains(key), !recentTasks.contains(key),
+              restoring || workspaces[key] == nil || visibleWork.contains(key),
+              recentTasks.count < Self.warmConversationLimit else { return }
+        let fresh = workspaces[key] == nil
+        let workspace = workspace(for: key, title: title, location: location)
+        if fresh || restoring { workspace.requiresLocationValidation = true }
+        recentTasks.append(key)
+        reconcileWarmth()
+    }
+
+    /// A repository or Wave primary opens on load like any working Task and stays
+    /// warm beside the Task bound; only Close leaves it unopened. Each load
+    /// refreshes its location and the Wave's `--wave` name.
+    func prefetchPrimary(_ key: WorkWorkspaceKey, title: String, wave: String? = nil, location: WorkspaceIdentity) {
+        guard !presentationClosed, !quitting, !closedConversations.contains(key) else { return }
+        workspace(for: key, title: title, location: location).wave = wave
+        guard !warmPrimaries.contains(key) else { return }
+        warmPrimaries.append(key)
+        reconcileWarmth()
+    }
+
+    func confirmLocation(in workspace: SessionsWorkspace) {
+        workspace.requiresLocationValidation = false
+        reconcileWarmth()
+    }
+
+    func updateCompletion(_ key: WorkWorkspaceKey, completed: Bool) {
+        guard completedTasks.contains(key) != completed else { return }
+        if completed { completedTasks.insert(key); recentTasks.removeAll { $0 == key } }
+        else { completedTasks.remove(key) }
+        reconcileWarmth()
+    }
+
+    private func saveWarmIntent() {
+        let pending = restoreCandidates.filter { !recentTasks.contains($0) && !closedConversations.contains($0) }
+        let intent = WarmIntent(recent: Array((recentTasks + pending).prefix(Self.warmConversationLimit)), closed: closedConversations)
+        guard let key = warmPersistenceKey, let data = try? JSONEncoder().encode(intent) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func reconcileWarmth() {
+        let visible = Set(visibleWork)
+        while recentTasks.count > Self.warmConversationLimit, let index = recentTasks.lastIndex(where: { !visible.contains($0) }) {
+            recentTasks.remove(at: index)
+        }
+        for workspace in workspaces.values {
+            let retained = visible.contains(workspace.key) || recentTasks.contains(workspace.key)
+                || warmPrimaries.contains(workspace.key)
+            if (!retained || workspace.conversationClosed) && (workspace.presented || openings[workspace.key] != nil) {
+                openings.removeValue(forKey: workspace.key)?.cancel()
+                for pane in workspace.multiplexer.layout.allPanes {
+                    if let id = pane.sessionId { sessions?.release(id) }
+                }
+            }
+            workspace.present(retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
+        }
+        saveWarmIntent()
+        onWarmthChanged?()
+    }
+
+    private func closeConversation(in key: WorkWorkspaceKey) {
+        closedConversations.insert(key)
+        recentTasks.removeAll { $0 == key }
+        warmPrimaries.removeAll { $0 == key }
+        restoreCandidates.removeAll { $0 == key }
+        reconcileWarmth()
+    }
+
+    /// Selected first, then visible Tasks, which the warm limit excepts, then
+    /// repository and Wave primaries, then bounded restored, visited and
+    /// prefetched Tasks.
+    var warmWork: [WorkWorkspaceKey] {
+        var keys = [selectedWork].compactMap { $0 }
+        for key in visibleWork.filter({ $0.kind == .task }) + warmPrimaries + recentTasks where !keys.contains(key) {
+            keys.append(key)
+        }
+        return keys
+    }
+
+    func openWarmConversations(store: SessionsStore) {
+        guard !presentationClosed, !quitting else { return }
+        sessions = store
+        for key in warmWork {
+            guard openings.count < Self.preparationLimit, canPrepare?() != false else { break }
+            guard let workspace = workspaces[key], !workspace.conversationClosed, openings[key] == nil,
+                  !workspace.openingConversation, workspace.conversationError == nil else { continue }
+            let id = workspace.multiplexer.sessionPane?.sessionId
+            let existing = id.flatMap { id in store.sessions.first { $0.id == id } }
+            if let existing {
+                // Try again needs its prefetched location confirmed like any opening.
+                guard existing.opensAutomatically(intent: workspace.conversationIntent)
+                        || (workspace.requiresLocationValidation && existing.record.launchRetry != nil) else { continue }
+            } else {
+                guard workspace.location != nil else { continue }
+                // A Wave's `--wave` name arrives with the roadmap; the next pass opens it.
+                guard key.kind != .wave || id != nil || workspace.wave != nil else { continue }
+                // A tile with nothing to reveal keeps its own offer; visiting it may still refuse.
+                guard id != nil || workspace.conversationIntent == .start || key == selectedWork
+                        || recentTasks.contains(key) else { continue }
+            }
+            openings[key] = opening(workspace, existing: existing, intent: nil, store: store)
+        }
+    }
+
+    /// The placeholder's explicit action for a Work shown in place, a primary's
+    /// pane or a Dashboard tile: Rust's Start after a refused reveal, else Retry
+    /// on the workspace intent. The same opener as automatic opening, so a refusal
+    /// lands the same offer or error here, and a deliberate press readmits a
+    /// closed one.
+    func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
+        let key = workspace.key
+        guard openings[key] == nil, !workspace.openingConversation else { return }
+        sessions = store
+        if workspace.conversationClosed {
+            closedConversations.remove(key)
+            workspace.conversationClosed = false
+            reconcileWarmth()
+        }
+        let intent: SessionOpenIntent? = workspace.conversationStart == nil ? nil : .start
+        workspace.conversationStart = nil
+        let id = workspace.multiplexer.sessionPane?.sessionId
+        let existing = id.flatMap { id in store.sessions.first { $0.id == id } }
+        let opening = opening(workspace, existing: existing, intent: intent, store: store)
+        openings[key] = opening
+        await opening.value
+    }
+
+    /// One opening in the slots: the workspace's intent, or an explicit one that
+    /// no later intent change supersedes.
+    private func opening(_ workspace: SessionsWorkspace, existing: SessionItem?, intent explicit: SessionOpenIntent?,
+                         store: SessionsStore) -> Task<Void, Never> {
+        let key = workspace.key
+        return Task { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            defer {
+                if !Task.isCancelled {
+                    self.openings[key] = nil
+                    self.openWarmConversations(store: store)
+                    self.onPreparationFinished?()
+                }
+            }
+            await workspace.openConversation {
+                let intent = explicit ?? workspace.conversationIntent
+                do {
+                    try await self.openWarmConversation(in: workspace, existing: existing, intent: intent, store: store)
+                } catch where explicit == nil && workspace.conversationIntent != intent {
+                    // Superseded: this queue's `defer` opens with the current intent.
+                }
+            }
+        }
+    }
+
+    private func openWarmConversation(in workspace: SessionsWorkspace, existing: SessionItem?,
+                                      intent: SessionOpenIntent, store: SessionsStore) async throws {
+        if let existing, !workspace.requiresLocationValidation {
+            await store.select(existing.id, intent: intent)
+            return
+        }
+        guard let location = workspace.location else {
+            throw RegistryQueryError("The recorded Task location is unavailable; no conversation was opened.")
+        }
+        let key = workspace.key
+        let query = location.machineId == localMachineId ? store.query
+            : store.query.onMachine(location.machineId, repository: key.repository)
+        var observation: TaskLocationObservation?
+        var task = key.id
+        // Restored retention and preparation use the same fresh location read.
+        if key.kind == .task {
+            let current = try await query.taskLocation(task: key.id, repository: key.repository, machine: location.machineId)
+            try Task.checkCancellation()
+            guard case .recorded(let owner, let checkout) = current.location, checkout == location.worktree else {
+                throw RegistryQueryError("The recorded Task location changed; no conversation was opened.")
+            }
+            observation = current
+            task = owner
+        }
+        let record: SessionRecord
+        if let existing { record = existing.record }
+        else if let id = workspace.multiplexer.sessionPane?.sessionId {
+            record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: intent)
+        } else if key.kind != .task {
+            record = try await query.ensurePrimarySession(wave: workspace.wave, cwd: store.repoPath)
+        } else {
+            do {
+                record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: intent)
+            } catch {
+                let action = await query.startOffer(refused: intent, issue: task, cwd: store.repoPath)
+                if !Task.isCancelled, !workspace.conversationClosed, workspace.location == location,
+                   workspace.conversationIntent == intent {
+                    workspace.conversationStart = action
+                }
+                throw error
+            }
+        }
+        try Task.checkCancellation()
+        guard !workspace.conversationClosed, workspace.location == location else { return }
+        // A primary runs in the persistent checkout Rust chose for its scope, so
+        // only its Machine must agree; a Task conversation must match its checkout.
+        let placed = key.kind == .task ? record.workspace?.identity == location
+            : record.workspace?.machineId == location.machineId
+        guard placed else {
+            throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
+        }
+        workspace.conversationStart = nil
+        if location.machineId != localMachineId, let observation { store.retainLocation(observation, for: record) }
+        confirmLocation(in: workspace)
+        try Task.checkCancellation()
+        if let existing {
+            await store.select(existing.id, intent: intent)
+        } else {
+            store.reconcile([record])
+            store.adoptPreparation(record, intent: intent)
+            // Its Session frame can arrive first; the person may have moved on since.
+            if workspace.multiplexer.pane(forSessionId: record.id) == nil { presentSession(record, in: workspace) }
+        }
+    }
 
     func sessionStore(repository: String, repoPath: String, query: RegistryQuery) -> SessionsStore {
+        loadWarmIntent(repository: repository)
         let path = WaveOrigin.resolve(repoPath)
         let root = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)
         return workspace(for: root, title: URL(fileURLWithPath: path).lastPathComponent,
@@ -466,28 +746,47 @@ final class SessionsWorkspaceRegistry {
     }
 
     func clearPresentation() {
-        closePresentation()
+        surfaces.clearFocus()
         openWork = []
         selectedWork = nil
+        reconcileWarmth()
+    }
+
+    func prepareForQuit() {
+        quitting = true
+        for task in openings.values { task.cancel() }
+        openings.removeAll()
+        surfaces.clearFocus()
     }
 
     /// Closing the window ends its terminal viewers; Work and history remain.
     func closePresentation() {
+        guard !quitting else { return }
+        presentationClosed = true
+        recentTasks = []
+        restoreCandidates = []
+        saveWarmIntent()
+        for task in openings.values { task.cancel() }
+        openings.removeAll()
         for workspace in workspaces.values { workspace.present(false) }
         surfaces.clearFocus()
+        onPreparationFinished?()
     }
 
     func present(open: [WorkWorkspaceKey]) {
-        for workspace in workspaces.values where !open.contains(workspace.key) { workspace.present(false) }
+        presentationClosed = false
         openWork = open
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
             surfaces.clearFocus()
         }
+        reconcileWarmth()
     }
 
     /// Work shown in the window, in slot fill order: readback, not an arrangement owner.
     private(set) var openWork: [WorkWorkspaceKey] = []
+    private var presentationClosed = false
+    var visibleWork: [WorkWorkspaceKey] { presentationClosed ? [] : openWork }
 
     private(set) var selectedWork: WorkWorkspaceKey?
 
@@ -496,18 +795,35 @@ final class SessionsWorkspaceRegistry {
     func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
 
     @discardableResult
-    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, deliberate: Bool = true) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
         openWork = [key]
-        focus(key)
+        focus(key, deliberate: deliberate)
         return workspace
     }
 
-    func focus(_ key: WorkWorkspaceKey) {
+    func focus(_ key: WorkWorkspaceKey, deliberate: Bool = true) {
         guard openWork.contains(key) else { return }
+        presentationClosed = false
         if selectedWork != key { surfaces.clearFocus() }
         selectedWork = key
-        for workspace in workspaces.values { workspace.present(workspace.key == key) }
+        workspaces[key]?.lastVisit = Date()
+        if let terminal = workspaces[key]?.multiplexer.sessionPane?.terminal { surfaces.scrollToBottom(terminal) }
+        if deliberate { closedConversations.remove(key) }
+        if deliberate, let workspace = workspaces[key], workspace.conversationClosed {
+            workspace.conversationClosed = false
+            if let id = workspace.multiplexer.sessionPane?.sessionId {
+                workspace.multiplexer.reveal(sessionId: id, location: workspace.location)
+            }
+        }
+        if key.kind == .task, !completedTasks.contains(key), !closedConversations.contains(key) {
+            recentTasks.removeAll { $0 == key }
+            recentTasks.insert(key, at: 0)
+        } else if key.kind != .task, deliberate, !warmPrimaries.contains(key) {
+            warmPrimaries.append(key)
+        }
+        reconcileWarmth()
+        if let sessions { openWarmConversations(store: sessions) }
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -617,7 +933,7 @@ final class SessionsWorkspaceRegistry {
                 let belongs: Bool?
                 switch workspace.key.kind {
                 case .task:
-                    let tasks = Set(record.taskIds + [record.workspace?.taskId, record.work?.kind == .task ? record.work?.id : nil].compactMap { $0 })
+                    let tasks = record.taskMemberships
                     belongs = tasks.isEmpty ? nil : tasks.contains(workspace.key.id)
                 case .wave: belongs = record.waveId.map { $0 == workspace.key.id }
                 case .repository: belongs = nil
@@ -642,6 +958,12 @@ final class SessionsWorkspaceRegistry {
         workspace.multiplexer.reveal(sessionId: record.id, location: record.workspace?.identity)
     }
 
+    func presentSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
+        revealSession(record, in: workspace)
+        workspace.presentation.selectedSessionId = record.id
+        workspace.presentation.content = .terminals
+    }
+
     func reassociateRepository(from previous: String, to repository: String) {
         for key in keys where key.repository == previous {
             canonicalize(key, as: WorkWorkspaceKey(repository: repository, kind: key.kind,
@@ -658,6 +980,12 @@ final class SessionsWorkspaceRegistry {
         workspace.key = key
         workspaces[key] = workspace
         openWork = openWork.map { $0 == previous ? key : $0 }
+        recentTasks = recentTasks.map { $0 == previous ? key : $0 }
+        warmPrimaries = warmPrimaries.map { $0 == previous ? key : $0 }
+        restoreCandidates = restoreCandidates.map { $0 == previous ? key : $0 }
+        if closedConversations.remove(previous) != nil { closedConversations.insert(key) }
+        if completedTasks.remove(previous) != nil { completedTasks.insert(key) }
+        saveWarmIntent()
         if selectedWork == previous { selectedWork = key }
     }
 
@@ -669,6 +997,11 @@ final class SessionsWorkspaceRegistry {
         }
         let workspace = SessionsWorkspace(key: key, title: title, location: location,
             localMachineId: localMachineId, surfaces: surfaces)
+        workspace.conversationClosed = closedConversations.contains(key)
+        workspace.onConversationClosed = { [weak self, weak workspace] in
+            guard let workspace else { return }
+            self?.closeConversation(in: workspace.key)
+        }
         workspaces[key] = workspace
         return workspace
     }
@@ -683,6 +1016,7 @@ struct SessionItem: Identifiable, Equatable {
         case prepared
         case live
         case failed(String)
+        case unavailable(String)
         case ended(String)
     }
 
@@ -690,6 +1024,7 @@ struct SessionItem: Identifiable, Equatable {
     var state: State
     var agentOverride: String?
     var launchId = UUID()
+    var lastScreen: String?
 
     var id: String { record.id }
     var presentationProvider: String? { agentOverride ?? record.provider }
@@ -701,7 +1036,7 @@ struct SessionItem: Identifiable, Equatable {
     var surface: SessionRecord? {
         switch state {
         case .prepared, .live: record
-        case .pending, .elsewhere, .opening, .failed, .ended: nil
+        case .pending, .elsewhere, .opening, .failed, .unavailable, .ended: nil
         }
     }
 
@@ -710,33 +1045,31 @@ struct SessionItem: Identifiable, Equatable {
         return message
     }
 
-    mutating func adoptPreparation(_ record: SessionRecord, intent: Preparation) {
+    /// Reveal stopping at missing history is no failure once the Task may start one.
+    func opensAutomatically(intent: SessionOpenIntent) -> Bool {
+        if case .unavailable = state { return intent == .start }
+        return state == .pending
+    }
+
+    mutating func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent) {
         self.record = record
-        // Showing a pane reattaches only a conversation no terminal shows; an
-        // active one waits for Move here, an ended one for an explicit open.
-        if intent == .attach {
-            state = switch record.state {
-            case .detached: .prepared
-            case .active: .elsewhere
-            case .closed, .unknown: .pending
-            }
+        if intent != .resume, let retry = record.launchRetry {
+            state = .failed(retry.help)
+        } else if intent == .reveal {
+            if record.heldElsewhere { state = .elsewhere }
+            else if let action = record.action(.reveal) {
+                state = action.unavailableReason.map(State.unavailable) ?? .prepared
+            } else { state = .failed("Reveal preparation is unavailable") }
         } else if record.openArgv.isEmpty {
             // Nothing to start: retained work attaches when shown.
             state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
-        } else if intent != .moveHere, record.action(.moveHere) != nil {
+        } else if intent != .resume, record.heldElsewhere {
             state = .elsewhere
         } else {
-            state = record.action(intent == .moveHere ? .moveHere : .open)?
+            state = record.action(intent == .resume ? .moveHere : .open)?
                 .unavailableReason.map(State.failed) ?? .prepared
         }
     }
-}
-
-/// What a pane asked for. Every preparation is `lf resume --prepare`; attaching
-/// launches it only for a detached conversation, so showing a pane never starts
-/// a provider or displaces another terminal.
-enum Preparation {
-    case attach, open, moveHere
 }
 
 @MainActor
@@ -769,6 +1102,18 @@ final class SessionsStore {
         executionLocations[record.id] == nil ? checkout : repoPath
     }
 
+    func release(_ id: String) {
+        guard let index = _index(id) else { return }
+        if let machine = sessions[index].record.workspace?.machineId {
+            // Shells retain their own lifetime, including agents launched inside them.
+            let terminal = TerminalIdentity.session(id, machineId: machine)
+            sessions[index].lastScreen = surfaces.screen(terminal) ?? sessions[index].lastScreen
+            surfaces.release(terminal)
+        }
+        sessions[index].state = .pending
+        sessions[index].launchId = UUID()
+    }
+
     private let metrics: SessionsLatencyMetrics
     @ObservationIgnored private var hasRecordedSessionsLoad = false
 
@@ -795,10 +1140,12 @@ final class SessionsStore {
         // and every pane reads this array.
         var next = sessions
         for record in records {
-            let observedState: SessionItem.State = localTerminal(for: record) != nil
-                ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
+            let observedState: SessionItem.State = if localTerminal(for: record) != nil { .live }
+                else if let retry = record.launchRetry { .failed(retry.help) }
+                else if record.heldElsewhere { .elsewhere }
+                else { .pending }
             if let index = next.firstIndex(where: { $0.id == record.id }) {
-                // Keep a prepared command until the retained native view consumes it.
+                // Keep the command and connecting state until the relay confirms input.
                 if case .prepared = next[index].state {
                     var observed = record
                     observed.openArgv = next[index].record.openArgv
@@ -812,6 +1159,9 @@ final class SessionsStore {
                 if case .opening = next[index].state { continue }
                 if observedState == .pending {
                     switch next[index].state {
+                    case .unavailable:
+                        next[index].state = record.action(.reveal)?.unavailableReason.map(SessionItem.State.unavailable) ?? .pending
+                        continue
                     case .failed, .ended: continue
                     default: break
                     }
@@ -825,18 +1175,19 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private func prepare(_ id: String, intent: Preparation) async {
+    private func prepare(_ id: String, intent: SessionOpenIntent) async {
         guard let index = _index(id) else { return }
-        let replacing = intent == .moveHere
-        if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
+        if intent == .resume, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended:
+        case .pending, .failed, .unavailable, .ended:
             sessions[index].state = .opening
-        case .elsewhere where intent != .open:
+        case .elsewhere where intent != .start:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
         }
+        // Release, reset and provider switches invalidate preparation and its surface together.
+        let generation = sessions[index].launchId
         do {
             let record = sessions[index].record
             let executionQuery = query(for: record)
@@ -846,50 +1197,68 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
-            let stage = intent == .attach ? "attach_prepare" : "connect_prepare"
+            let stage = intent == .reveal ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath)
+            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath, intent: intent)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
-            guard let latest = _index(id) else { return }
+            guard let latest = _index(id), sessions[latest].launchId == generation else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].adoptPreparation(surface, intent: intent)
+                startTerminal(id)
             }
         } catch {
-            guard let latest = _index(id) else { return }
-            sessions[latest].state = .failed(error.localizedDescription)
+            guard let latest = _index(id), sessions[latest].launchId == generation else { return }
+            sessions[latest].state = Task.isCancelled ? .pending : .failed(error.localizedDescription)
         }
     }
 
-    func adoptPreparation(_ record: SessionRecord) {
+    func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent = .start) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended, .elsewhere:
-            sessions[index].adoptPreparation(record, intent: .open)
+        case .pending, .failed, .unavailable, .ended, .elsewhere:
+            sessions[index].adoptPreparation(record, intent: intent)
+            startTerminal(record.id)
         case .opening, .prepared, .live:
             break
         }
     }
 
-    func select(_ id: String) async {
+    /// A prepared Session's terminal starts at once, shown or not: warm Work runs
+    /// before any pane mounts, and the pane later mounted adopts the running view.
+    private func startTerminal(_ id: String) {
+        guard let index = _index(id), case .prepared = sessions[index].state else { return }
+        let item = sessions[index]
+        guard let workspace = item.record.workspace, workspace.unavailable == nil else { return }
+        surfaces.start(TerminalIdentity.session(id, machineId: workspace.machineId),
+            workingDirectory: presentationDirectory(for: item.record, checkout: workspace.worktree),
+            argv: item.launchArguments,
+            onSurfaceCreated: { [weak self] in
+                Perf.agentInput("surface_created", session: id)
+                self?.beginPaneLoad(id)
+            },
+            onSurfaceFailed: { [weak self] reason in self?.recordPaneFailure(id, reason: reason) })
+    }
+
+    func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
         guard let index = _index(id) else { return }
         if localTerminal(for: sessions[index].record) != nil {
+            if sessions[index].state == .prepared { return }
             sessions[index].state = .live
             return
         }
         if case .live = sessions[index].state {
-            sessions[index].state = sessions[index].record.action(.moveHere) != nil
-                ? .elsewhere : .pending
+            sessions[index].state = sessions[index].record.heldElsewhere ? .elsewhere : .pending
         }
-        await prepare(id, intent: .attach)
+        await prepare(id, intent: intent)
     }
 
-    func resume(_ id: String) async {
-        await prepare(id, intent: .open)
+    func start(_ id: String) async {
+        await prepare(id, intent: .start)
     }
 
     func moveHere(_ id: String) async {
-        await prepare(id, intent: .moveHere)
+        await prepare(id, intent: .resume)
     }
 
     @discardableResult
@@ -899,7 +1268,7 @@ final class SessionsStore {
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
         let prepared = try await query(for: previous.record).prepareSession(
-            id: id, agent: agent, cwd: repoPath)
+            id: id, agent: agent, cwd: repoPath, intent: .resume)
         if let reason = prepared.action(.moveHere)?.unavailableReason {
             throw RegistryQueryError(reason)
         }
@@ -909,6 +1278,7 @@ final class SessionsStore {
         sessions[current].agentOverride = agent
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
+        startTerminal(id)
         return prepared
     }
 
@@ -923,6 +1293,7 @@ final class SessionsStore {
         sessions[current].record = restarted
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
+        startTerminal(id)
         return restarted
     }
 
@@ -939,6 +1310,7 @@ final class SessionsStore {
     }
 
     func recordPaneLive(_ id: String) {
+        Perf.agentInput("input_ready", session: id)
         metrics.recordPaneLive(id)
         if let index = _index(id), case .prepared = sessions[index].state {
             sessions[index].state = .live
@@ -957,11 +1329,12 @@ final class SessionsStore {
               !surfaces.hasSurface(terminal),
               let index = _index(id), sessions[index].record.workspace?.machineId == machineId
         else { return }
+        sessions[index].lastScreen = output ?? sessions[index].lastScreen
         switch sessions[index].state {
         case .prepared, .live:
-            sessions[index].state = sessions[index].record.action(.moveHere) != nil
+            sessions[index].state = sessions[index].record.heldElsewhere
                 ? .elsewhere : .ended(output ?? "Terminal output is unavailable.")
-        case .pending, .elsewhere, .opening, .failed, .ended:
+        case .pending, .elsewhere, .opening, .failed, .unavailable, .ended:
             break
         }
     }
@@ -1076,8 +1449,13 @@ private struct SessionsReconciler: View {
                 store.reconcile(records)
                 if model.sessions.errorMessage == nil {
                     if let selection = workspaces.reconcileMembership(records) { model.select(selection) }
-                    model.revealPrimaryConversation()
+                    model.openWarmConversations()
                 }
+            }
+            .onChange(of: model.roadmap.value) { _, _ in
+                guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
+                      model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil else { return }
+                model.openWarmConversations()
             }
     }
 }
@@ -1134,7 +1512,14 @@ struct SessionsContentView: View {
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
-            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
+            && showsTerminals(currentKey, fileTask?.task, workspace)
+    }
+
+    /// Every primary shows terminals; a Task's show once it is working or once a
+    /// person chose them. A finished Task shows its record until a reveal presents
+    /// its conversation; who owns it says nothing about what there is to show.
+    private func showsTerminals(_ key: WorkWorkspaceKey, _ task: RoadmapTask?, _ entry: SessionsWorkspace) -> Bool {
+        key.kind != .task || task?.conversationIntent == .start || entry.presentation.content == .terminals
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1266,6 +1651,12 @@ struct SessionsContentView: View {
         }
         .background { SessionsReconciler(model: model, store: store, workspaces: workspaces) }
 
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttySessionReady)) { notification in
+            guard let terminal = notification.object as? TerminalIdentity,
+                  case .session(let id, _) = terminal,
+                  notification.userInfo?["surface"] as? String == store.surfaces.surfaceIncarnation(for: terminal) else { return }
+            store.recordPaneLive(id)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
             store.noteSurfaceClosed(terminal, output: notification.userInfo?["output"] as? String)
@@ -1312,7 +1703,7 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
+        let terminals = showsTerminals(key, task?.task, entry)
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
@@ -1368,6 +1759,9 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
+        .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
+            if let completed { workspaces.updateCompletion(key, completed: completed) }
+        }
     }
 
     /// A workspace's panes, with a retry when its conversation failed to open.
@@ -1379,11 +1773,7 @@ struct SessionsContentView: View {
                 if let error = entry.conversationError {
                     HStack {
                         Text(error).textSelection(.enabled)
-                        Button("Retry") {
-                            if key.kind == .task, let work = key.reference { openTask(work) }
-                            else if let work = key.reference { openWaveConversation(work) }
-                            else { openRepositoryConversation() }
-                        }
+                        Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
                     }.foregroundStyle(theme.palette.text)
                         .padding(8).background(theme.terminal.background.color)
                 }
@@ -1451,30 +1841,6 @@ struct SessionsContentView: View {
 
     private func openSession(_ record: SessionRecord) {
         model.openSession(record, store: store)
-    }
-
-    private func openTask(_ work: WorkReference) {
-        let trace = UUID().uuidString
-        Perf.$inputTrace.withValue(trace) {
-            Perf.agentInput("task_click", task: work.id)
-            Task { await model.openTaskConversation(work.id) }
-        }
-    }
-
-    private func openRepositoryConversation() {
-        guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        model.select(nil)
-        navigation.content = .terminals
-        let entry = workspace
-        Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
-    }
-
-    private func openWaveConversation(_ work: WorkReference) {
-        guard let wave = model.wave(id: work.id)?.wave else { return }
-        model.select(work)
-        navigation.content = .terminals
-        let entry = workspace
-        Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
     }
 
     /// An independent conversation with Task context in the Task's checkout.

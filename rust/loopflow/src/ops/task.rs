@@ -1108,6 +1108,7 @@ async fn restore_task_checkout(
         args.extend([worktree.display().to_string(), task.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    crate::git::mark_lf_created(worktree, &|_| {});
     finish_task_checkout(store, task).await
 }
 

@@ -196,6 +196,9 @@ pub fn run(
         }) if !preview => Some(connection),
         _ => None,
     };
+    let replace = connection.is_none_or(|connection| {
+        connection.intent() == crate::lf::commands::write::SessionOpenIntent::Resume
+    });
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
@@ -233,7 +236,7 @@ pub fn run(
                 !record.open_argv.is_empty(),
                 "Session has no viewer launch command"
             );
-            crate::transport::relay_over(&record.open_argv)?;
+            crate::transport::relay_over(&record.open_argv, replace)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
             let bytes = runtime.block_on(request(
@@ -261,6 +264,11 @@ pub fn run(
                 ],
             );
         }
+        if !replace && !record.open_argv.is_empty() {
+            record
+                .open_argv
+                .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
+        }
         if connection.json || cli.json {
             println!("{}", serde_json::to_string(&record)?);
         } else {
@@ -285,7 +293,7 @@ pub fn run(
     }
     let preamble = build_preamble(&cmd, &extra_env);
     if viewer {
-        crate::transport::relay_over(&ssh_argv(&target.route, forward_agent, &preamble)?)
+        crate::transport::relay_over(&ssh_argv(&target.route, forward_agent, &preamble)?, replace)
     } else {
         run_ssh(&target.route, forward_agent, &preamble)
     }

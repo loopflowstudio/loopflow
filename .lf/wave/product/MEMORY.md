@@ -419,19 +419,15 @@ no comparison time; hook review remains in total elapsed time. Neither draw/focu
 nor CPU samples prove readiness or explain waiting. Six native cases, paired
 before/after and stable-hook approval across Tasks/resume/compaction remain open.
 
-## Session working set and Waiting (2026-10-03, revised 2026-10-06)
+## Session working set and status (reconciled 2026-11-04)
 
-Jack Heart requested unfinished interactive participation in ordinary API and
-Desktop Session navigation (LOO-372). Task association still includes all work.
-Filtered absence cannot release native surfaces or clear drafts and selection.
-Explicit completion remains separate from turn completion.
-
-October 7's #1490 (`d8ec7c4fe`) supersedes stream-only Waiting: validated OSC 7501
-reports observed by Desktop override stream inference in Rust. LOO-384 remains
-for non-reporters; reading Claude's transcript is Jack's open choice. Detached
-observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
-Provider adoption and composed native-pane acceptance remain unproven; this does
-not establish status in cmux or herdr.
+Jack Heart requested unfinished interactive participation in navigation (LOO-372).
+Task association includes all work; filtered absence cannot release surfaces or
+clear drafts. Explicit completion differs from turn completion.
+720/#1809 now supplies provider status across reconnects; its candidate Claude/Rex/
+Desktop demo passed, not installed or live Codex/OpenCode acceptance. Earlier
+Waiting mechanisms and deferred allocations remain at
+`a32c385044:.lf/wave/product/MEMORY.md`, **Session working set and Waiting**.
 
 ## Current Tasks and completion history (reconciled 2026-10-17)
 
@@ -459,21 +455,11 @@ its caller without creating a Wave or conversation. Known failed work stays
 stopped until explicit recovery; retry retains the Flow position and conversation.
 
 Jack clarified “no, Task sessions stay”: Task conversations and authored human
-reviews retain their feedback and completion contract. Persistent versus one-off
-Task conversations remains open. Historical Ask rows become ordinary conversations
-without replacing the Wave chat or granting Flow settlement authority. Older Ask
-identity and caller-release notes below describe the retired model.
-
-The local Ask removal implements this boundary with provider simulations and
-store recovery coverage; full Rust and Desktop acceptance remains with gate.
-A successful provider turn is not reclassified from prose alone. This records
-Product’s shared Session contract, not a Task or Wave placement decision.
-
-Converted Ask history follows ordinary conversation rules; its former kind alone
-creates no attention obligation. Conversion itself never completes a Session.
-Later confirmed owning-attachment exits can retire unassigned, non-primary
-conversations; Task/Wave conversations and Flow reviews remain open. Missing
-process evidence grants neither retirement nor Flow settlement. Full Desktop acceptance remains unproved.
+reviews retain their feedback and completion contract. Historical Ask rows become
+ordinary conversations with no attention obligation, Flow settlement authority or
+completion; confirmed owning-attachment exits may retire unassigned non-primary
+conversations only. Coverage and proof limits: `83b3d64a93:.lf/wave/product/MEMORY.md`,
+this heading.
 
 ## Task workspace and primary Sessions (updated 2026-10-01)
 
@@ -972,25 +958,36 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 `ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
 `scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
-## Sessions projection and native resume (reconciled 2026-10-15)
+## Sessions projection and native resume (reconciled 2026-11-05)
 
-October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
-`16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
+Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 
-- `lf session list --json` owns the shared Session projection; Desktop owns no
-  second queue, title store, liveness model or resolution state.
-- LOO-491: Jack Heart requested Task entry expose **Move here**, never a failing
-  Retry loop. `session connect --prepare --json --try` returns external ownership;
-  Desktop installs its pane and treats `.elsewhere` as usable. Fresh preparation
-  can discover ownership absent from the cached record. Only the explicit click
-  prepares `--takeover`; preparation does not stop the client. Resume preserves
-  provider history, not unsent input. Closing a pane resolves nothing.
-- Desktop retains terminals across selection, with explicit splits and reversible
-  Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
-  Canonical Git common-directory identity keeps Task checkouts out of repo roots.
-- LOO-491's headless tests cover Task entry/link placement, warning, click and
-  prepared argv, not native transfer or interactive provider readiness.
-  LOO-251/284/291 retain native, shared-action and planning proof obligations.
+Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
+explicit **Take back** over the last screen; no Fork button or shared input, CLI
+fork remains. Selected-first admission honors Close;
+saved display grants no retention. Eight warm/two preparations stay provisional; visible/protected work survives.
+
+Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
+of this task”), ruled out any normal “unopened” state on November 5, then extended
+it: “auto open everything *AND* prefetch everything”. Started idle/active/moving
+Tasks, owned or not (opening claims nothing), and the repository and Wave primaries
+create their Session and start or resume the provider during load, before
+selection; primaries stay warm beside the Task bound. An unstarted Task has no
+checkout: its pane offers Start, since placing one starts the Task. One placeholder
+and one opener serve every Work, pane or any presented board's tile, the repository
+page and Wave views included; a finished Task shows its
+record until a reveal presents its conversation, whoever owns it. Any primary's first turn without a request reads
+and reports, launching no Graph or operator; each start spends one provider turn. Start keeps non-replacing intent through argv, execution and claim; only Take back
+replaces input; Close fences late results. A consumed first launch with no history
+costs one Try again. `.hidden()` panes never mount, so prepared Sessions start their terminal from the
+store and the pane adopts it.
+`lf task run` on a graph without an interactive step approves Auto-Ship and
+recovery restarts it; fixtures end in `interactive: default`.
+
+Local retention uses the local query; remote presence uses observed remote
+identity (peer lookup of the local Machine fails “is not added”). The November 5
+candidate proved four providers live on load with no Graph; primaries,
+drafts, cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
 
 ### Task observation and retired Watch
 
@@ -1021,7 +1018,8 @@ LOO-293's unproved native scope and retired Watch/FlowPosition history:
 - LOO-416's October 16 local foundation retains repository registries across
   window close, not app death; composed native proof remains. Earlier window-owned
   lifetime and global-surface failure: `463c5803a2:.lf/wave/product/MEMORY.md`,
-  this heading. Never share an NSView between windows or evict hidden live surfaces.
+  this heading. Never share an NSView between windows. LOO-672 evicts hidden
+  Session views through the bounded warm set.
 - Session identity, provider process, local opening/error state, terminal view,
   and pane placement have different lifetimes. `.prepared` bridges opening and
   surface creation; failures stay visible until retried or superseded. Task-owned
@@ -1050,8 +1048,8 @@ LOO-293's unproved native scope and retired Watch/FlowPosition history:
 - The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
   the automated real-PTY correction passes but its final reviewer confirmation is
-  still pending. No all-provider matrix exists. JSON prepare-without-kill
-  has source/Swift contract coverage but no focused Rust behavioral proof yet.
+  still pending. LOO-672 adds prepared-command contention proof; native
+  all-provider coverage remains open.
 
 ### Shell command blocks and build fidelity (2026-09-22, revised 2026-10-05)
 

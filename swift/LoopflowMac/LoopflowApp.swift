@@ -13,14 +13,17 @@ private func enrichProcessPathForGUILaunch() {
 
 @MainActor
 final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
-    weak var workspaces: RepositoryWorkspaces?
+    let workspaces = RepositoryWorkspaces(
+        localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId,
+        runtime: .shared)
     private var quitting = false
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !quitting else { return .terminateLater }
         quitting = true
+        workspaces.prepareForQuit()
         Task { @MainActor in
-            await workspaces?.releaseViewersForQuit()
+            await workspaces.releaseViewersForQuit()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -32,7 +35,7 @@ struct LoopflowApp: App {
     @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var delegate
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
-    @State private var workspaces: RepositoryWorkspaces
+    private var workspaces: RepositoryWorkspaces { delegate.workspaces }
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
@@ -56,8 +59,6 @@ struct LoopflowApp: App {
             AppUpdates.adoptIfUpdated()
         }
         bootstrapLoopflowApp()
-        _workspaces = State(initialValue: RepositoryWorkspaces(
-            localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
@@ -101,7 +102,6 @@ struct LoopflowApp: App {
                     }
                 }
             }
-            .task { delegate.workspaces = workspaces }
             .modifier(AppAppearance(appearance: appearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()

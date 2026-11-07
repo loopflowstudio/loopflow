@@ -1184,9 +1184,7 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
-    if let Err(error) = _mark_lf_created(path, inherit) {
-        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
-    }
+    mark_lf_created(path, inherit);
     Ok(())
 }
 
@@ -1194,7 +1192,15 @@ pub(crate) fn worktree_add_inheriting(
 /// the worktree; the working tree never sees it.
 const LF_CREATED_MARKER: &str = "loopflow-created";
 
-fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+/// Record that lf just created the worktree at `path`. Every creation calls
+/// this; a checkout lf adopted stays unmarked and keeps Claude's own dialog.
+pub(crate) fn mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) {
+    if let Err(error) = _write_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
+}
+
+fn _write_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     let marker = git_stdout_inheriting(
         path,
         &["rev-parse", "--git-path", LF_CREATED_MARKER],

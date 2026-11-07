@@ -305,6 +305,27 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
     assert!(script.contains("/remote/private home"), "{script}");
     assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
+    for intent in ["--start-if-free", "--reveal-existing"] {
+        let automatic = fixture.json(&[
+            "--machine",
+            "mini",
+            "session",
+            "resume",
+            &id,
+            intent,
+            "--prepare",
+            "--json",
+        ]);
+        let automatic = automatic["open_argv"].as_array().unwrap();
+        assert_eq!(
+            &automatic[..2],
+            &[
+                serde_json::json!("/usr/bin/env"),
+                serde_json::json!("LF_RELAY_IF_FREE=1")
+            ]
+        );
+        assert_eq!(&automatic[2..], opened["open_argv"].as_array().unwrap());
+    }
 }
 
 #[test]

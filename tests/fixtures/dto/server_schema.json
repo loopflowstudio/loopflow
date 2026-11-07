@@ -852,6 +852,46 @@
         },
         {
           "additionalProperties": false,
+          "description": "Task brief and workflow, independent of associated Graph processes.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The exact comparison, independent of its host's renderer.",
+          "properties": {
+            "comparison": {
+              "$ref": "#/$defs/ChangeComparison"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "changes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "comparison"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "id": {
               "type": "string"
@@ -909,6 +949,75 @@
         "Loopflow"
       ],
       "type": "string"
+    },
+    "ChangeComparison": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "working_tree",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "base"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "type": "string"
+            },
+            "head": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "branch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "base",
+            "head"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "type": "string"
+            },
+            "head": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "pull_request",
+              "type": "string"
+            },
+            "number": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "number",
+            "base",
+            "head"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Check": {
       "properties": {
@@ -6849,10 +6958,16 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task changes <issue> --base <base>`: a Task's changed files.",
+          "description": "`lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.",
           "properties": {
             "base": {
               "type": "string"
+            },
+            "head": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "issue": {
               "type": "string"
@@ -6865,7 +6980,8 @@
           "required": [
             "kind",
             "issue",
-            "base"
+            "base",
+            "head"
           ],
           "type": "object",
           "x-result": {
@@ -6880,6 +6996,12 @@
               "type": "string"
             },
             "draft": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "head": {
               "type": [
                 "string",
                 "null"
@@ -6904,7 +7026,8 @@
             "issue",
             "path",
             "base",
-            "draft"
+            "draft",
+            "head"
           ],
           "type": "object",
           "x-result": {
@@ -11291,6 +11414,12 @@
         "binary": {
           "type": "boolean"
         },
+        "head_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "issue_identifier": {
           "type": "string"
         },
@@ -11314,6 +11443,7 @@
         "issue_identifier",
         "task_id",
         "base_commit",
+        "head_commit",
         "path",
         "patch",
         "binary",

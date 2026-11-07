@@ -8,6 +8,7 @@ use serde_yaml_ng::Value;
 use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
+use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -190,6 +191,16 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         if !["stable", "preview", "dev"].contains(&stream) {
             return Err(invalid("stream must be stable, preview or dev"));
         }
+    }
+    // The same check a launch makes, so an unusable layout fails where it is written.
+    if let Some(template) = &parsed.task_layout {
+        template
+            .instantiate(WorkWorkspaceKey {
+                repository: String::new(),
+                kind: WorkWorkspaceKind::Task,
+                id: String::new(),
+            })
+            .map_err(|error| invalid(format!("task_layout: {error}")))?;
     }
     if !["gh", "local"].contains(&parsed.land.as_str()) {
         return Err(invalid("land must be gh or local"));
@@ -1280,6 +1291,34 @@ mod tests {
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");
         }
+    }
+    #[test]
+    fn task_layout_is_validated_where_it_is_set() {
+        let pane =
+            |id: &str, content: &str| format!("{{kind: pane, id: {id}, content: {content}}}");
+        let layout = |session: &str| {
+            format!(
+                "{{tree: {{kind: split, axis: vertical, ratio: 0.5, first: {{kind: split, axis: horizontal, ratio: 0.5, first: {}, second: {}}}, second: {}}}}}",
+                pane("conversation", &format!("{{kind: session, session_id: {session}, location: null}}")),
+                pane("changes", "{kind: browser, location: null, tabs: [{kind: changes, id: changes, comparison: {kind: working_tree, base: parent}}], selected: changes}"),
+                pane("shell", "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"),
+            )
+        };
+        assert!(super::parse_value("task_layout", &layout("null")).is_ok());
+        let captured = super::parse_value("task_layout", &layout("abc")).unwrap_err();
+        assert!(
+            captured.to_string().contains("cannot capture a Session"),
+            "{captured}"
+        );
+        // A tree without Desktop's three Task panes is unusable at launch.
+        let partial = format!(
+            "{{tree: {}}}",
+            pane(
+                "shell",
+                "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"
+            )
+        );
+        assert!(super::parse_value("task_layout", &partial).is_err());
     }
     #[test]
     fn composed_occurrences_keep_their_settings_and_match_launch_preparation() {

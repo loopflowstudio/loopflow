@@ -1063,6 +1063,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
+        TaskCommand::View { issue, once } => {
+            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
+        }
         TaskCommand::Status { issue, json, watch } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
             if *watch {
@@ -1132,8 +1135,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Changes { issue, base, json } => {
-            let snapshot = loopflow::ops::task::task_changes(issue, base)?;
+        TaskCommand::Changes {
+            issue,
+            base,
+            head,
+            json,
+        } => {
+            let snapshot = loopflow::ops::task::task_changes(issue, base, head.as_deref())?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.files.is_empty() {
@@ -1162,21 +1170,21 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             issue,
             path,
             base,
+            head,
             draft,
             json,
+            difftool,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
-            let snapshot =
-                loopflow::ops::task::task_diff(issue, path.as_deref(), base, content.as_deref())?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&snapshot)?);
-            } else {
-                print!("{}", snapshot.patch);
-                if snapshot.truncated {
-                    eprintln!("\n[diff truncated at 1 MB]");
-                }
-            }
-            Ok(())
+            loopflow::lf::commands::task_diff::run(
+                issue,
+                path.as_deref(),
+                base,
+                head.as_deref(),
+                content.as_deref(),
+                *json,
+                *difftool,
+            )
         }
         TaskCommand::Files {
             issue,
@@ -1682,9 +1690,11 @@ fn run() -> anyhow::Result<()> {
         && !cli.may_launch_agent()
         && !matches!(
             cli.command,
-            Some(Commands::Config {
-                cmd: loopflow::lf::ConfigCommand::Settings { .. }
-            })
+            Some(
+                Commands::Config {
+                    cmd: loopflow::lf::ConfigCommand::Settings { .. }
+                } | Commands::Open(_)
+            )
         )
     {
         eprintln!("This command does not start an agent; --agent has no effect.");

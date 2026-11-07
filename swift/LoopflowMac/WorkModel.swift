@@ -231,19 +231,21 @@ final class WorkModel {
                               primaries: WorkspaceIdentity(machineId: machine, worktree: repoPath))
         let store = registry.sessionStore(repository: repository, repoPath: repoPath, query: query)
         store.reconcile(records)
-        for key in registry.warmWork {
-            guard let workspace = registry.retained(key) else { continue }
-            if key.kind == .task, let task = task(id: key.id)?.task {
-                // A refused reveal does not outlive the Task that can now start.
-                if workspace.conversationIntent == .reveal, task.conversationIntent == .start {
-                    workspace.conversationError = nil
-                    workspace.conversationStart = nil
-                }
-                workspace.conversationIntent = task.conversationIntent
-                workspace.location = taskWorkspaceIdentity(task)
-                registry.updateCompletion(key, completed: task.isCompleted)
+        let warm = registry.warmWork
+        // Off-page tiles too: focusing one opens it from this state, with no refresh between.
+        for key in Set(warm + registry.openWork) where key.kind == .task {
+            guard let workspace = registry.retained(key), let task = task(id: key.id)?.task else { continue }
+            // A refused reveal does not outlive the Task that can now start.
+            if workspace.conversationIntent == .reveal, task.conversationIntent == .start {
+                workspace.conversationError = nil
+                workspace.conversationStart = nil
             }
-            guard !workspace.conversationClosed else { continue }
+            workspace.conversationIntent = task.conversationIntent
+            workspace.location = taskWorkspaceIdentity(task)
+            registry.updateCompletion(key, completed: task.isCompleted)
+        }
+        for key in warm {
+            guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
             workspace.startPersistence(query: query, repoPath: repoPath)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
                let record = records.first(where: { record in
@@ -787,7 +789,7 @@ final class WorkModel {
         let key = workspace.key
         // A presented board: a Dashboard, Working Tasks, a Wave view or the repository page.
         let boardShown = selectedViewPlan != nil || navigation.waveView != nil
-        let inTile = boardShown && workspaceRegistry?.visibleWork.contains(key) == true
+        let inTile = boardShown && workspaceRegistry?.openWork.contains(key) == true
         guard key.kind == .task, !inTile else {
             guard let registry = workspaceRegistry else { return }
             switch key.kind {
@@ -887,7 +889,7 @@ final class WorkModel {
         let doneDays = WaveStandupDefaults.doneDays
         let tiles = boardTiles(view)
         let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
-        let page = min(navigation.wavePages[view] ?? 0, pages.count - 1)
+        let page = pageIndex(view, of: pages)
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
         return [
@@ -2952,11 +2954,20 @@ extension WorkModel {
     }
 
     /// Turn a Wave view's footer to the page holding `work`; positions count the whole list.
-    /// Only Wave views read the page; a Dashboard's grid keeps its own.
     private func showWaveTile(_ work: WorkReference, in view: WorkNavigation.Board) {
         guard let plan = boardPlan(view),
               let index = taskIDs(in: boardTiles(view)).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
-        navigation.wavePages[view] = index / max(1, plan.slots.count)
+        navigation.boardPages[view] = index / max(1, plan.slots.count)
+    }
+
+    /// Arriving tiles open; departing ones return to the warm bound.
+    func turnPage(_ board: WorkNavigation.Board?, to page: Int) {
+        navigation.boardPages[board] = page
+        if let plan = selectedViewPlan { presentView(plan) } else { presentWaveTiles() }
+    }
+
+    private func pageIndex(_ board: WorkNavigation.Board?, of pages: [[WorkMemberRef]]) -> Int {
+        min(navigation.boardPages[board] ?? 0, pages.count - 1)
     }
 
     /// A board's Task tiles: a Dashboard's visible ones in arrangement order, a Wave's
@@ -2978,29 +2989,23 @@ extension WorkModel {
     /// The Wave view stays selected; its Tasks open after it, in tile order, so a
     /// script addresses them as it does a Dashboard's.
     private func presentWaveTiles() {
-        guard let registry = workspaceRegistry, let view = navigation.waveView,
-              let key = registry.selectedWork, key.kind != .task, let plan = boardPlan(view) else { return }
-        let tiles = boardTiles(view).map(\.work)
-        openTiles(plan, tiles, in: registry)
-        registry.present(open: [key] + tiles)
-        openWarmConversations()
+        guard let view = navigation.waveView, let key = workspaceRegistry?.selectedWork, key.kind != .task,
+              let plan = boardPlan(view) else { return }
+        presentBoard(plan, boardTiles(view), on: view, after: [key])
     }
 
     private func presentView(_ plan: WorkViewPlan) {
-        guard let registry = workspaceRegistry else { return }
         // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
-        let open: [WorkWorkspaceKey] = if case .workingTasks = navigation.destination {
-            workingTaskMembers.map(\.work)
-        } else {
-            plan.projection.visible.map(\.work)
-        }
-        openTiles(plan, open, in: registry)
-        registry.present(open: open)
-        openWarmConversations()
+        let members = if case .workingTasks = navigation.destination { workingTaskMembers } else { plan.projection.visible }
+        presentBoard(plan, members, on: navigation.trailBoard)
     }
 
-    private func openTiles(_ plan: WorkViewPlan, _ open: [WorkWorkspaceKey], in registry: SessionsWorkspaceRegistry) {
-        for content in plan.contents where open.contains(content.work) {
+    /// Every tile gets a workspace for `lf desktop` addressing; only the current page counts as shown.
+    private func presentBoard(_ plan: WorkViewPlan, _ members: [WorkMemberRef], on board: WorkNavigation.Board?,
+                              after lead: [WorkWorkspaceKey] = []) {
+        guard let registry = workspaceRegistry else { return }
+        let tiles = members.map(\.work)
+        for content in plan.contents where tiles.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
             if let primary = content.primarySession, entry.multiplexer.sessionPane?.sessionId == nil {
@@ -3008,6 +3013,9 @@ extension WorkModel {
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }
+        let pages = plan.slots.pages(members)
+        registry.present(open: lead + tiles, shown: lead + pages[pageIndex(board, of: pages)].map(\.work))
+        openWarmConversations()
     }
 
     func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {

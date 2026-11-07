@@ -54,8 +54,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case desktopPlans(directory: String)
     case desktopSessions(directory: String, headless: Bool)
     case desktopTask(directory: String, issue: String)
-    case taskChanges(issue: String, base: String)
-    case taskDiff(issue: String, path: String?, base: String, draft: String?)
+    case taskChanges(issue: String, base: String, head: String?)
+    case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String)
     case waves
     case machineId
@@ -116,11 +116,11 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
         case .desktopTask(_, let issue):
             return ["task", "show", issue, "--json"]
-        case .taskChanges(let issue, let base):
-            return ["task", "changes", issue, "--base", base, "--json"]
-        case .taskDiff(let issue, let path, let base, let draft):
+        case .taskChanges(let issue, let base, let head):
+            return ["task", "changes", issue, "--base", base, "--json"] + (head.map { ["--head", $0] } ?? [])
+        case .taskDiff(let issue, let path, let base, let head, let draft):
             return ["task", "diff", issue] + (path.map { [$0] } ?? []) + ["--base", base, "--json"]
-                + (draft == nil ? [] : ["--draft"])
+                + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
         case .waves:
@@ -207,7 +207,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     }
 
     public var input: String? {
-        if case .taskDiff(_, _, _, let draft) = self { return draft }
+        if case .taskDiff(_, _, _, _, let draft) = self { return draft }
         return nil
     }
 
@@ -219,10 +219,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": nil, "limit": nil])
         case .desktopTask(let directory, let issue):
             TaggedFields("task.get", ["directory": directory, "issue": issue])
-        case .taskChanges(let issue, let base):
-            TaggedFields("task.changes", ["issue": issue, "base": base])
-        case .taskDiff(let issue, let path, let base, let draft):
-            TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "draft": draft])
+        case .taskChanges(let issue, let base, let head):
+            TaggedFields("task.changes", ["issue": issue, "base": base, "head": head])
+        case .taskDiff(let issue, let path, let base, let head, let draft):
+            TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path):
             TaggedFields("task.file", ["issue": issue, "path": path])
         case .waves: TaggedFields("wave.list")
@@ -1064,8 +1064,8 @@ public struct RegistryQuery: Sendable {
 
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
-    public func taskChanges(issue: String, base: String = "parent") async throws -> TaskChangesSnapshot {
-        let stdout = try await serve(.taskChanges(issue: issue, base: base))
+    public func taskChanges(issue: String, base: String = "parent", head: String? = nil) async throws -> TaskChangesSnapshot {
+        let stdout = try await serve(.taskChanges(issue: issue, base: base, head: head))
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
@@ -1199,9 +1199,10 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String?,
         base: String = "parent",
+        head: String? = nil,
         draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
-        let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, draft: draft))
+        let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft))
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 

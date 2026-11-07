@@ -121,14 +121,10 @@ scene, owner, stdin and drafts; transport classification prevents local affordan
 No replay, local fallback or filesystem CAS. Two-CLI/seeded fixtures establish
 neither running Flows nor configured SSH/native acceptance; mixed exchange and admission remain.
 
-Jack Heart (October 10) accepted Rex conventions in LOO-427: ordinary
-`--repo`/`--task`/`--pane`, then verified caller-terminal inference within Work,
-then one eligible pane; ambiguity never follows focus. Caller inference requires the original PTY. Mutations return affected
-pane IDs, including created/reused companions, not readiness. `help --json` derives
-syntax and Desktop result schemas from Clap/Rust DTOs; installed support and current
-Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
-Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
-and LOO-453 (readiness/events).
+LOO-427 Rex pane conventions (Jack Heart, October 10; caller inference needs the
+original PTY, ambiguity never follows focus) are archived at
+`e38da0fff4:.lf/wave/product/MEMORY.md`, this heading; "Native host workspaces"
+below supersedes their reuse model. LOO-397 is unstarted; LOO-452/453 follow-ups stand.
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 October 13 replaced their visible strip with sidebar switching, retaining ownership.
@@ -227,8 +223,6 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 - A domain follows what a write changes on screen, not its table. Transcript
   lines were 164,192 of 168,336 daily Session events; counting them would
   re-read everything for ten hours a day.
-- A reading restates when it was taken in several fields. Comparing bytes
-  without removing them sends a frame for every reading.
 - Git facts are not commits. Jack (2026-10-05): show them within seconds,
   by watching, not a tighter clock. A linked worktree commits without
   touching a file in its checkout: watch its Git metadata directory too.
@@ -237,10 +231,10 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   1,270 displayed rows a day. Exempt the types readers skip. Usage moves
   its own revision, which only Wave detail reads, at most every 10 s.
 - An unreadable store must not read empty.
-- Merged October 6 (#1452): one `lf monitor work --watch` per window (renamed by #1463)
+- Merged October 6 (#1452): one `lf monitor work --watch` per window
   replaces every timer loop. Reader on a copy of Jack's store: commit to
   frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
-  checkout about 2 s. The window was not re-measured.
+  checkout about 2 s.
 - Measure before merging readers: the second reader per window, listed as
   a taboo, used 0.2% of a core and 25 MB. It stayed.
 - Jack (2026-10-05): which Waves and Tasks are current must be simple and
@@ -569,6 +563,36 @@ Home, preserving historical authors and review authority.
 LOO-297's read failed without Linear credentials; local absence is not remote
 absence, so repairs need a fresh authorized read. These records changed no Task.
 
+## Native host workspaces (LOO-498/717, revised 2026-11-05)
+
+Jack Heart selected Rex first, bounded Herdr second, then on November 5 a fresh
+launch on every `lf open` with no LF persistence of hosts, host workspaces or
+occurrences anywhere. Config `task_layout` owns templates, the DB
+owns Desktop's sticky Task layouts, Rex owns sessions, tabs, splits, shells and
+restoration. Repository or Wave → session, Task → tab, workspace → splits; a Task
+joins the caller's container (cmux: its group). Reuse, copies, holds and marker
+recovery are superseded (`9187804aee`). One in-memory follower serves every
+Machine's arrivals; closed tabs stay closed; an uncertain create is reported once, never retried. Native IDs never prove continuity or authorize
+replay; invalid cwd falls back home, so LF checks the checkout first. Rex inventory
+exposes block label, window and owner plus per-block `pwd`/`process`, never argv.
+
+Jack (November 5): a cwd-less raw split landing in HOME is no verdict; the app
+inherits the source terminal's reported or process directory. Tool panes report
+their checkout; controllers withdraw on leaving; shells never report. App Split,
+cmux and two-Machine opens are unproved; the November 4–5 demos failed on store
+skew and a vanished session.
+
+Jack superseded Rex away/native-settlement: retained Task Session terminals prevent
+cleanup regardless of focus; confirmed final removal releases, unknown does not.
+LF cleans Desktop-owned shells only. LOO-717 (#1811) still persists
+`task_host_occurrences` leases; Jack's prohibition covers them (settled), so its
+API must become stateless for LOO-498. Requested work finishes first; unfinished
+checkouts survive Close; deleted-checkout reconstruction is excluded. Desktop
+keeps 717's 2/15-minute grace; return cancels.
+
+#1818 protects active input on failed attachment; #1807 binding keeps the provider's
+cwd; later attachments report the selected directory. Contract: docs/workspaces.md.
+
 ## Workspace redesign decisions
 
 Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
@@ -793,42 +817,13 @@ caps, and keep missing ownership evidence explicit.
   an unavailable desktop. Resolve appearance at the window so native controls and
   custom foreground/background colors agree.
 
-### Measurements and acceptance (reconciled 2026-10-07)
+### Measurements and acceptance (reconciled 2026-11-03)
 
-Jack Heart retired arbitrary numeric performance targets, soak requirements and
-further optimization while the product surface changes (LOO-408, comment
-`1e58addc-7bac-4fb8-bb38-1f8e36c7f45b`). LOO-304 closed; LOO-371/376/375 retain
-only supported settlement after installation, with their historical uncertain
-Session/Process evidence preserved. LOO-378 is explicitly paused, its substantial
-unpublished work retained. Earlier p95, twenty-trial and soak obligations below
-are historical evidence, not instructions to restart that work. This does not
-rewrite the chapter's authored KRs or claim native/provider acceptance.
-October 13 renewed targeted input profiling/optimization above, without numeric
-or soak acceptance.
-
-Keep hierarchy navigation and Task-workspace interaction as separate observations,
-with exact identities, source/build/population, rendered endpoint, retained input
-and failed attempts. The opt-in desktop-performance runner remains a useful
-instrument: synthetic Work, three owned cat PTYs, forced bitmap/text
-capture and PTY replies. They establish neither compositor hitches nor provider
-continuation. Its Monitor scenarios no longer compare because that pane was deleted.
-
-Jack rejected the accumulated composition; earlier captures are not acceptance of
-its replacement. Configured provider continuation, retained draft/focus and combined
-pane behavior remain separate proof. AX role, input focus, lock and permissions
-are different facts. LOO-291's original trial ledger, D2 obligations, LOO-300
-performance allocation, observer corrections and failed attempts are preserved at
-`35e759aaf:wave/product/MEMORY.md`, this heading; do not silently revive retired
-performance acceptance from that ledger. Ask completion proof was superseded by
-Jack's October 1 removal; Task conversations retain ordinary review judgment.
-
-LOO-185 remains parked without human-selected Discord friction. LOO-284's shared
-contract and LOO-293's passive output/history/provider continuity were not completed
-merely by integrating primitives. Their dated allocation and evidence are in the
-same archive; adapt remaining views to current Task panes, never restore Monitor
-or the retired Watch route. Historical inventory does not belong in current
-navigation and must not be deleted. Earlier authorized removal of `engbot` grants
-no new store-cleanup or installation authority.
+Jack Heart retired numeric/soak acceptance October 7; October 13 renewed targeted
+input profiling only. LOO-378 remains paused. Earlier obligations and failures:
+`cc607dc3e1:.lf/wave/product/MEMORY.md`, this heading; no new authority or closure.
+Synthetic PTYs, screenshots, AX focus and fixtures do not prove configured
+provider continuation, retained input or composed native interaction.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
@@ -991,7 +986,7 @@ Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
 explicit **Take back** over the last screen; no Fork button or shared input, CLI
 fork remains. Selected-first admission honors Close;
-saved display grants no retention. Eight warm/two preparations stay provisional; visible/protected work survives.
+saved display grants no retention. Sixteen warm/two preparations stay provisional; visible/protected work survives.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
 of this task”), ruled out any normal “unopened” state on November 5, then extended
@@ -1011,15 +1006,18 @@ store and the pane adopts it.
 recovery restarts it; fixtures end in `interactive: default`.
 
 Local retention uses the local query; remote presence uses observed remote
-identity (peer lookup of the local Machine fails “is not added”). The November 5
-candidate proved four providers live on load with no Graph; primaries,
-drafts, cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
+identity (peer lookup of the local Machine fails “is not added”).
+
+November 7, real Claude: 23 conversations opened in 8s, no click or Graph; 14
+stopped on the trust dialog: booting Claudes hold `~/.claude.json.lock` past
+lf's 2s wait (now 30s), and `preparationLimit` ends before Claude boots. Claude
+~300 MB each; eviction stops no provider; no budget stated. Take back click unverified.
 
 ### Task observation and retired Watch
 
 Jack Heart selected Session posts plus an expandable run page for LOO-711
 (2026-11-02): minimal default, combined position/readiness, Files owning the diff.
-The wait-only proposal is superseded. `db5cdbbd14` implements four native provider
+`db5cdbbd14` implements four native provider
 paths and grouped history, repairing `dd2bb7bc21`'s latest-run-only reports.
 Compare reportable facts by durable run identity and settle gaps per run: a newer
 helper must not hide an older worker's failure. Existing receipts retain compact
@@ -1035,9 +1033,6 @@ substitute for delivery.
 
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.
-
-LOO-293's unproved native scope and retired Watch/FlowPosition history:
-`2c23acbb8:wave/product/MEMORY.md`, **Task observation and Watch**.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

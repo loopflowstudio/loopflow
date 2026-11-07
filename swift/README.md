@@ -73,7 +73,13 @@ changing the open workspace.
 
 The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
 
-Each Work keeps one pane layout and document store. Repository and Wave
+Each Work keeps one pane layout and document store. The browser offers Files,
+Changes, Task & workflow, Graph processes and web pages. A Task with no saved
+layout inherits its Wave's semantic default; later Wave edits leave saved Task
+layouts alone. Rex reads those defaults for new windows and owns its active
+native layout independently.
+
+Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
 full Task inventory, followed by their metrics. **Project history** and **Workflow**
@@ -99,8 +105,10 @@ selecting the Work shows the running terminal. A small **Connecting…** indicat
 remains until the live relay accepts input.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
-any additional visible panes; a Task shown as a Dashboard tile stays warm after the
-Dashboard leaves. Repository and Wave conversations stay warm beside that bound.
+any additional panes on screen; a Task admitted from a Dashboard tile stays warm after
+the Dashboard leaves. A board's other pages wait: past the bound, a tile opens when its
+page turns up or it is selected, and a tile that leaves returns to the bound.
+Repository and Wave conversations stay warm beside that bound.
 Return lands at the bottom. Older conversations reconnect or resume the same
 provider history automatically. After relaunch, the saved selected Work opens
 first, then the bounded warm set reconnects with at most two preparations at once.

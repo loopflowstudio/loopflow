@@ -426,7 +426,7 @@ pub enum SessionAvailability {
     Available,
 }
 
-fn session_state(session: &crate::session::SessionSummary) -> SessionState {
+pub(crate) fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     match session.agent_process_evidence {
         crate::journal::ProcessIdentityEvidence::Live
             if session.interactive && session.unviewed =>

@@ -499,7 +499,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
+    /// Open Work in Desktop, this Rex/Herdr/cmux/tmux host or a terminal
     Open(commands::open::OpenArgs),
     /// Run an inline prompt
     #[command(name = ":")]
@@ -1176,6 +1176,7 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
+            | Self::View { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
             | Self::Context { .. }
@@ -2258,23 +2259,39 @@ until `lf ship`."
         #[arg(long)]
         watch: bool,
     },
+    /// Browse the Task brief, workflow and recorded runs without starting work
+    View {
+        issue: Option<String>,
+        /// Print once, including when stdout is a terminal
+        #[arg(long)]
+        once: bool,
+    },
     /// Show this Task's patch
     Diff {
         issue: String,
         path: Option<String>,
         #[arg(long, default_value = "parent")]
         base: String,
+        /// Compare to this resolved commit instead of the working tree
+        #[arg(long)]
+        head: Option<String>,
         /// Compare a UTF-8 draft read from stdin without writing the worktree
         #[arg(long, requires = "path")]
         draft: bool,
         #[arg(long)]
         json: bool,
+        /// Open the comparison in Git's configured difftool (tracked files only)
+        #[arg(long, conflicts_with_all = ["draft", "json"])]
+        difftool: bool,
     },
     /// List this Task's changed paths and comparison revisions
     Changes {
         issue: String,
         #[arg(long, default_value = "parent")]
         base: String,
+        /// Compare to this resolved commit instead of the working tree
+        #[arg(long)]
+        head: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2439,6 +2456,7 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
+            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -2473,6 +2491,7 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
+            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }

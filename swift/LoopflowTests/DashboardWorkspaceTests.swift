@@ -171,7 +171,7 @@ struct DashboardWorkspaceTests {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
         for focus in [nil, 0, 5] as [Int?] {
             let frames = SlotFrames()
-            let grid = DashboardSlotGrid(members: members, focused: focus.map { members[$0].work }, layout: Self.golden) { member in
+            let grid = DashboardSlotGrid(members: members, focused: focus.map { members[$0].work }, layout: Self.golden, page: .constant(0)) { member in
                 let index = members.firstIndex(of: member)!
                 ZStack {
                     // Slot 1's content asks for nearly the whole window.

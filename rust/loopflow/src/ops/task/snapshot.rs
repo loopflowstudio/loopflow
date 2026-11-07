@@ -200,11 +200,15 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
 /// Maximum byte length for Task file content, drafts and returned patches.
 pub const MAX_FILE_BYTES: usize = 1_000_000;
 
-pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
+pub fn task_changes(issue: &str, base: &str, head: Option<&str>) -> OpsResult<TaskChangesSnapshot> {
     let (checkout, base) = comparison_context(issue, base)?;
+    let head = head
+        .map(|head| resolve_file_base(&checkout.worktree, &base, head))
+        .transpose()?;
     changes_snapshot(TaskComparison {
         checkout: TaskWorkspace::from(&checkout),
         base_commit: &base,
+        head_commit: head.as_deref(),
     })
 }
 
@@ -216,38 +220,51 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
             "diff",
             "--name-only",
             "-z",
-            &format!("{}..HEAD", workspace.base_commit),
+            &format!(
+                "{}..{}",
+                workspace.base_commit,
+                workspace.head_commit.unwrap_or("HEAD")
+            ),
         ],
         &mut files,
         |file| file.committed = true,
     )?;
-    record_changed_paths(
+    if workspace.head_commit.is_none() {
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["diff", "--cached", "--name-only", "-z"],
+            &mut files,
+            |file| file.staged = true,
+        )?;
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["diff", "--name-only", "-z"],
+            &mut files,
+            |file| file.unstaged = true,
+        )?;
+        record_changed_paths(
+            workspace.checkout.worktree,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+            &mut files,
+            |file| file.untracked = true,
+        )?;
+    }
+    let head_commit = git_output(
         workspace.checkout.worktree,
-        &["diff", "--cached", "--name-only", "-z"],
-        &mut files,
-        |file| file.staged = true,
-    )?;
-    record_changed_paths(
-        workspace.checkout.worktree,
-        &["diff", "--name-only", "-z"],
-        &mut files,
-        |file| file.unstaged = true,
-    )?;
-    record_changed_paths(
-        workspace.checkout.worktree,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        &mut files,
-        |file| file.untracked = true,
-    )?;
-    let head_commit = git_output(workspace.checkout.worktree, &["rev-parse", "HEAD"])?
-        .trim()
-        .to_string();
+        &["rev-parse", workspace.head_commit.unwrap_or("HEAD")],
+    )?
+    .trim()
+    .to_string();
     let net = net_changed_paths(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
         net.contains_key(path) || file.untracked
     });
-    let (scratch, scratch_truncated) = scratch_paths(workspace.checkout.worktree)?;
+    let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
+        scratch_paths(workspace.checkout.worktree)?
+    } else {
+        (Vec::new(), false)
+    };
     let recovery = file_save::recovery_directory(workspace.checkout)?;
     Ok(TaskChangesSnapshot {
         recovery_directory: recovery
@@ -267,12 +284,22 @@ pub fn task_diff(
     issue: &str,
     path: Option<&str>,
     base: &str,
+    head: Option<&str>,
     draft: Option<&str>,
 ) -> OpsResult<TaskDiffSnapshot> {
     let (checkout, base) = comparison_context(issue, base)?;
+    if head.is_some() && draft.is_some() {
+        return Err(task_error(
+            "A commit comparison cannot include a working-tree draft",
+        ));
+    }
+    let head = head
+        .map(|head| resolve_file_base(&checkout.worktree, &base, head))
+        .transpose()?;
     let workspace = TaskComparison {
         checkout: TaskWorkspace::from(&checkout),
         base_commit: &base,
+        head_commit: head.as_deref(),
     };
     match draft {
         Some(draft) => draft_snapshot(
@@ -293,13 +320,9 @@ pub(super) fn diff_snapshot(
         Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
         None => None,
     };
-    let mut args = vec![
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        workspace.base_commit,
-        "--",
-    ];
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", workspace.base_commit];
+    args.extend(workspace.head_commit);
+    args.push("--");
     // Both sides of a rename are needed for Git to preserve its identity.
     if let Some(old) = &old_path {
         args.push(old);
@@ -308,7 +331,11 @@ pub(super) fn diff_snapshot(
         args.push(path);
     }
     let mut patch = git_output_bytes(workspace.checkout.worktree, &args)?;
-    let untracked = untracked_paths(workspace.checkout.worktree)?;
+    let untracked = if workspace.head_commit.is_none() {
+        untracked_paths(workspace.checkout.worktree)?
+    } else {
+        Vec::new()
+    };
     let include_untracked = untracked
         .into_iter()
         .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
@@ -485,18 +512,17 @@ pub(super) fn resolve_file_base(
 }
 
 fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
-    let output = git_output_bytes(
-        workspace.checkout.worktree,
-        &[
-            "diff",
-            "--name-status",
-            "--no-ext-diff",
-            "--find-renames",
-            "-z",
-            workspace.base_commit,
-            "--",
-        ],
-    )?;
+    let mut args = vec![
+        "diff",
+        "--name-status",
+        "--no-ext-diff",
+        "--find-renames",
+        "-z",
+        workspace.base_commit,
+    ];
+    args.extend(workspace.head_commit);
+    args.push("--");
+    let output = git_output_bytes(workspace.checkout.worktree, &args)?;
     let entries = nul_paths(&output);
     let mut entries = entries.into_iter();
     let mut paths = BTreeMap::new();
@@ -569,6 +595,7 @@ fn patch_snapshot(
         issue_identifier: workspace.checkout.issue_identifier.to_string(),
         task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
+        head_commit: workspace.head_commit.map(str::to_owned),
         path,
         patch,
         binary,

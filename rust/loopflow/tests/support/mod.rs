@@ -18,6 +18,8 @@ use tempfile::TempDir;
 use time::OffsetDateTime;
 
 pub mod ambient;
+#[cfg(unix)]
+pub mod rex;
 
 /// Agent shells such as Codex export the developer's real provider home
 /// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap

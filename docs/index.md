@@ -137,7 +137,7 @@ Read in order; each page starts from what the one before it left you with.
 | Hand off many Tasks, steer them, and keep a longer objective moving | [Work](work.md) |
 | Come back to any conversation, after a crash or from another terminal | [Sessions](sessions.md) |
 | Land, repair CI, release, and run on other machines and logins | [PRs, checkouts, machines and accounts](ops.md) |
-| See Work in Desktop, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
+| See Work in Desktop, Rex, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
 | Connect Desktop, check its server, and recover after an update | [Connect clients](server.md) |
 | See what agents did and what it cost | [Telemetry](telemetry.md) |
 | Write Skills and Graphs and pick the agent for each step | [Orchestration](orchestration.md) |

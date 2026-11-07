@@ -118,7 +118,7 @@ You want to do something; here's how through `lf`.
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf session usage --weekly` |
 | see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf session history linear` |
-| open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
+| open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |
 | cut a release | `lf repo release run <version>` |

@@ -42,6 +42,33 @@ struct ServerClientTests {
         #expect(!reading.contains("late"))
     }
 
+    @Test func unansweredReadsExpireThenEndAStalledConnection() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            if message["type"] as? String == "watch" {
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+            }
+            return true // Reads are never answered.
+        }
+        let watch = ServerClient.watch(.allPlans, location: peer.location)
+        var frames = watch.lines.makeAsyncIterator()
+        peer.waitForMessage { $0["type"] as? String == "watch" }
+        for _ in 0..<ServerLink.stalledReads {
+            do {
+                _ = try await ServerClient.read(.machineId, location: peer.location, deadline: .milliseconds(20))
+                Issue.record("An unanswered read returned")
+            } catch {
+                #expect(error.localizedDescription.contains("did not answer in time"))
+            }
+        }
+        do {
+            _ = try await frames.next()
+            Issue.record("A stalled connection kept its watch")
+        } catch {
+            #expect(!(error is CancellationError))
+        }
+    }
+
     @Test func refusedWriteThrowsItsCodeAndWritesReturnTheirValue() async throws {
         let peer = try ServerPeer()
         let refused = Mutex<Bool>(false)

@@ -6,9 +6,16 @@ import Loopflow
 /// Shared Work operations use the server over one connection per location;
 /// service errors remain visible.
 enum ServerClient {
+    /// How long a read may go unanswered. A read has no effect to lose, so it
+    /// can give up; writes wait, because their outcome would become unknown.
+    static let readDeadline = Duration.seconds(60)
+
     /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
-    static func read(_ query: ServedRead, location: ServerLocation = .shared) async throws -> String {
-        let value = try await request(.read(query), location: location)
+    static func read(_ query: ServedRead, location: ServerLocation = .shared,
+                     deadline: Duration = readDeadline) async throws -> String {
+        try Task.checkCancellation()
+        let link = try await links.link(for: location)
+        let value = try await link.read(.read(query), deadline: deadline)
         if case .string(let text) = value { return text }
         return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
     }
@@ -143,6 +150,7 @@ final class ServerLink: @unchecked Sendable {
     private var pending: [String: CheckedContinuation<JSONValue, any Error>] = [:]
     private var watches: [String: ServerWatch] = [:]
     private var failure: (any Error)?
+    private var unansweredReads = 0
     private var reader: LineReader
 
     /// Connect, say hello and read welcome off the caller's executor.
@@ -186,6 +194,36 @@ final class ServerLink: @unchecked Sendable {
     }
 
     var isClosed: Bool { state.withLock { failure != nil } }
+
+    /// Reads in a row that went unanswered before the link counts as stalled.
+    static let stalledReads = 3
+
+    /// `request` within `deadline`. The server may hang on one read and serve
+    /// the rest; only `stalledReads` in a row end the connection, which fails
+    /// its watches too, so a stalled server shows as unavailable, not as current.
+    func read(_ operation: ServerOperation, deadline: Duration) async throws -> JSONValue {
+        struct Expired: Error {}
+        do {
+            let value = try await withThrowingTaskGroup(of: JSONValue.self) { group in
+                group.addTask { try await self.request(operation) }
+                group.addTask {
+                    try await Task.sleep(for: deadline)
+                    throw Expired()
+                }
+                defer { group.cancelAll() }
+                return try await group.next()!
+            }
+            state.withLock { unansweredReads = 0 }
+            return value
+        } catch is Expired {
+            let stalled = state.withLock {
+                unansweredReads += 1
+                return unansweredReads >= Self.stalledReads
+            }
+            if stalled { writes.withLock { _ = Darwin.shutdown(fd, SHUT_RDWR) } }
+            throw RegistryQueryError("Loopflow server did not answer in time; check `lf server status`")
+        }
+    }
 
     /// One request and its answer. Cancelling the task sends `cancel` and
     /// releases the wait; a command already dispatched may still complete.

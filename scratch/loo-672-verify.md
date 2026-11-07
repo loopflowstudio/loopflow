@@ -60,7 +60,7 @@ can drop the earlier one's fresh lock. One trust entry can then be lost with no 
 that conversation shows the dialog. Not seen in a run; proper-lockfile has the same window.
 
 Follow-ups: 634c19 (memory budget), d0071b (Wave links), 85c699 (first launch, no default agent).
-Fixture left behind: `durable/` under `~/.lf/demos/loo672-12923a08ac`, `-21be4cca92` and `-8f72197490`,
+Fixture left behind: `durable/` under `~/.lf/demos/loo672-12923a08ac`, `-21be4cca92`, `-8f72197490` and `-826bc2d6e2`,
 plus their entries in `~/.claude.json`. Runtime removed, all fixture processes stopped.
 
 ## Warm bound, November 7
@@ -124,10 +124,47 @@ Two limits, left alone: a slot freed by a finished Task stays empty once every o
 released, until a visit; if `lf desktop focus` leaves a Task selected on a Wave view, a page turn skips
 `presentWaveTiles`, so a tile past the bound waits. A click can't get there: Wave tiles don't take focus.
 
+## Headless demo, November 7
+
+Run at the demo step with no person present; the decision was made standing in for Jack Heart, so
+nothing here is his acceptance. Candidate built from `9253b35a4` (lf and Desktop), fresh fixture
+`~/.lf/demos/loo672-826bc2d6e2`, real Claude: 21 Tasks, one Wave. `screencapture` and AX are denied, so
+results come from `lf desktop state/capture/send`, `lf ps`, process lists and Claude transcripts.
+
+| Claim | Observed |
+|---|---|
+| Load opens conversations, nothing selected | 10 owners at 6s, 18 at 16s, stable to 57s: 16 Tasks, repository, Wave. Warm 04–08 wait |
+| Live before selection | Warm 01 captured, never selected, its first turn on screen; `lf session list` reads 18 active |
+| Repository and Wave | Both reported status in their transcripts. Panes not captured, see below |
+| Focus on an off-page tile past the bound (left open by the verify pass) | `lf desktop focus -p "Warm 06/session"`: Task entered, owners 18 → 19, surface live, `lf desktop send` text at its prompt |
+| Page turn | Pages 7, 6, 1: owners 22, 23, 23; `open_work` stays 22 |
+| No unrequested work | 19 first turns: 62 Bash calls, no Edit or Write, no `lf task run`, no commits on any branch; `lf wt prune` was a dry run, 23 worktrees stay. Stopped Task keeps 3 stopped Graph processes; `lf ps` shows no Graph node |
+| Trust | 23 of 23 worktrees trusted, none showed the dialog in what was captured |
+
+`lf session rename` ran twice (repository, Wave), which the launch guidance asks for. An untracked
+13-byte `.gitignore` (`.lf/prompts/`) appears in each launched checkout at launch; it is not an agent's.
+
+Read and cleared: `lf desktop state` lists Take back on a conversation Desktop itself shows,
+because the record's holder is its owner process. `localTerminal` wins in `SessionsView`, so the
+item stays `.live` and the terminal stays mounted; capture and send confirm it. Not seen rendered.
+
+Not reached: the Wave and repository panes on screen. `capture -p session` needs a Task, and
+`lf open` of the Wave or its Session lands on the repository (d0071b). Close, relaunch, reboot-like and
+Take back were not rerun on this build; the November 7 runs above are the latest native results for them.
+
+Decision: advance. Next: gate, then the running `lf ship`.
+
+## Gate, November 7
+
+On `9253b35a4`. No code changed; diff, docs and PR #1842 copy read against each other and left alone.
+
+- `scripts/test.py --reuse-passing --rust-filter 'test(harness::claude_trust::)'`: architecture, rustfmt, nextest (8), clippy pass.
+- Swift: 732 of 734 pass, which covers every test this branch changed. The two failures are `TaskFiles` `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead`, again when run alone.
+- Cause is this Mac: `fseventsd` pinned at 100% and a bare FSEvents stream, no repository code, got no event in 20s. No branch change reaches `TaskFiles`. Not passed: CI's `macos` job owns these two; it has not run on this head (skipped so far).
+- `check_swift_multiplatform_boundaries.py`, skipped by the Swift failure, passes on its own.
+
 ## Remaining
 
-- Gate runs the affected suites.
-- `lf desktop focus` on an off-page tile is covered by the Swift test only; the native run above predates that repair. Demo checks it.
 - The trust-lock, warm-bound and eviction-order fixes publish as a new PR with #1816 as history.
 - Proposed `.lf/wave/product/MEMORY.md` change (memory is at its token limit, and this pass leaves it unedited): in the November 7 note, after "no click or Graph", add "before the page bound (now sixteen Tasks, page included, plus primaries: 18 at load)".
 

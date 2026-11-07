@@ -1254,7 +1254,6 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
-            isolate: None,
             chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
@@ -1263,6 +1262,7 @@ mod tests {
             skill_invocation: None,
             output_schema: None,
             agent: Some("opencode".to_string()),
+            fallback_agents: Vec::new(),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,
             resume_token: None,

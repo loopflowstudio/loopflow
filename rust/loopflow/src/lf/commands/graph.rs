@@ -857,6 +857,10 @@ impl RunningGraph<'_> {
         // An interrupt during an operation takes effect once it has finished.
         if signalled || self.interrupted() {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
+            // Someone stopped it: a wait it was in no longer starts it again.
+            if let Some(step) = &step {
+                self.store.sqlite.end_agent_limit_wait(step)?;
+            }
             return Ok((StepExit::Interrupted, step));
         }
         match status.code() {

@@ -431,7 +431,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
 /// Credentials and account choices a new Session must receive explicitly.
 const SESSION_AUTH_ENV: &[&str] = &[
     crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-    crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
     DISCORD_TOKEN_ENV,
     "GH_TOKEN",
     "OPENCODE_API_KEY",
@@ -521,7 +520,7 @@ mod tests {
             lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
@@ -557,7 +556,7 @@ mod tests {
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
 
@@ -593,7 +592,7 @@ mod tests {
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}${LF_ACCOUNT_ISOLATION-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}\"".into(),
             ],
             &[],
         );
@@ -603,7 +602,6 @@ mod tests {
             .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
             .env("LF_ACCOUNT_SELECTION", "parent-selection")
-            .env("LF_ACCOUNT_ISOLATION", "isolated")
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -630,7 +628,7 @@ mod tests {
         );
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));

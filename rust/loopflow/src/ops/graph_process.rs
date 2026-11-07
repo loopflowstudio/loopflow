@@ -11,6 +11,22 @@ use crate::process::LfProcess;
 /// one Graph can share notes under it. It configures nothing in lf.
 pub(crate) const GRAPH_ID_ENV: &str = "LF_GRAPH_ID";
 
+/// Whether this process is a Graph's step. A session a transport owner serves
+/// starts without the Graph's environment, so the Process ancestry decides.
+pub(crate) fn in_graph() -> bool {
+    let Some(process) = crate::journal::current_lf_process_id() else {
+        return false;
+    };
+    let under_graph = || -> anyhow::Result<bool> {
+        let path = crate::store::database_path_from_env()?;
+        Ok(crate::store::sqlite::SqliteStore::new(&path)?.process_under_graph(&process)?)
+    };
+    under_graph().unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read this process's ancestry");
+        false
+    })
+}
+
 /// The Task's latest interrupt when its Task run began. Each Graph attempt
 /// compares later interrupts against it; steps never inherit it.
 pub(crate) const TASK_INTERRUPT_CURSOR_ENV: &str = "LF_TASK_INTERRUPT_CURSOR";

@@ -725,6 +725,7 @@ fn prepare(
         Login::GitHub,
         None,
         None,
+        false,
         batch,
     ))?;
     runtime.block_on(super::machine_credentials::connect_claude_accounts(
@@ -739,6 +740,7 @@ fn prepare(
             Login::Linear,
             None,
             None,
+            false,
             batch,
         ))?;
     }

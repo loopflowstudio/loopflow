@@ -530,6 +530,28 @@ pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
     })
 }
 
+/// Start `lf <args>` again in `worktree`, outliving this process, under `agent`
+/// when the run had one. Recovery runs inside any read, so the reader's own
+/// agent choice and settings are cleared rather than inherited.
+pub(super) fn restart_lf_in(
+    worktree: &std::path::Path,
+    agent: Option<&str>,
+    args: &[&str],
+) -> OpsResult<()> {
+    let context = crate::os_process::execution_context().map_err(task_error)?;
+    let mut argv = vec![context.lf_bin.to_string_lossy().to_string()];
+    if let Some(agent) = agent {
+        argv.extend(["--agent".to_string(), agent.to_string()]);
+    }
+    argv.extend(args.iter().map(ToString::to_string));
+    let env = [
+        (crate::config::AGENT_OVERRIDE_ENV, ""),
+        ("LF_SETTINGS", "{}"),
+    ];
+    crate::os_process::start_lf_session(worktree, &argv, &env, &|_| {}).map_err(task_error)?;
+    Ok(())
+}
+
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
 /// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
 /// After a failure the restart waits, longer each time in a row; a process
@@ -558,18 +580,16 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            let context = crate::os_process::execution_context().map_err(task_error)?;
-            let argv = [
-                context.lf_bin.to_string_lossy().to_string(),
-                "--task".into(),
-                task.identifier.clone(),
-                "ship".into(),
-            ];
             if failure.is_some() {
                 store.sqlite.count_ship_restart(&id).map_err(task_error)?;
             }
-            crate::os_process::start_lf_session(worktree, &argv, &[], &|_| {})
-                .map_err(task_error)?;
+            let wait =
+                super::limit_recovery::waiting_on_limit(&store.sqlite, &id).map_err(task_error)?;
+            restart_lf_in(
+                worktree,
+                wait.as_ref().and_then(|wait| wait.agent.as_deref()),
+                &["--task", &task.identifier, "ship"],
+            )?;
             tracing::info!("restarted the ship process for {}", task.identifier);
         }
         Ok(())

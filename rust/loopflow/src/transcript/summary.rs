@@ -136,7 +136,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                     HarnessKind::Claude => Provider::Claude,
                     _ => Provider::Codex,
                 };
-                match conversation_home(store, provider, thread, session.account.as_ref())? {
+                match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
                         let home = homes
@@ -287,14 +287,8 @@ mod tests {
             "claude" => Provider::Claude,
             _ => Provider::Codex,
         };
-        store
-            .pin_provider_session_route(
-                route,
-                &thread.into(),
-                &ProviderAccountId::parse(provider).unwrap(),
-                true,
-            )
-            .unwrap();
+        // It ran in the account's own home, before every launch shared one.
+        store.record_account_home_conversation(route, thread, provider);
         for (kind, payload) in [
             (SessionEventKind::Started, serde_json::json!({})),
             (

@@ -259,6 +259,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, id: String, agent: String?)
+    /// Move the open Sessions the selector names to an agent or a login.
+    case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
     case newChapter(directory: String, name: String, plan: String, preview: Bool)
@@ -294,6 +296,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
             Self.prepared(agent, ["session", "new", id], repo: nil)
+        case .sessionMove(_, let blocked, let on, let agent):
+            ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
+                + Self.option("--on", on) + ["--json"]
         case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
         case .newChapter(_, let name, _, let preview):
@@ -368,6 +373,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                             "agent": agent, "intent": intent.rawValue])
         case .sessionNew(let directory, let id, let agent):
             TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
+        case .sessionMove(let directory, let blocked, let on, let agent):
+            TaggedFields("session_move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
         case .waveAdd(let directory, let wave, let objective):
             TaggedFields("wave_add", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
@@ -998,6 +1005,14 @@ public struct RegistryQuery: Sendable {
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
+    }
+
+    /// Move the open Sessions whose login cannot take their model now to
+    /// `agent` (`harness[:model]`) or `account`: idle ones at their next open,
+    /// busy ones after their turn. The report says which went where.
+    public func moveBlockedSessions(agent: String, cwd: String?) async throws -> SessionMoveReport {
+        try Self.decode(SessionMoveReport.self, from: await write(
+            .sessionMove(directory: cwd ?? "/", blocked: true, on: nil, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.

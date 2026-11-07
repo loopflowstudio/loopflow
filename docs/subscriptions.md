@@ -8,24 +8,40 @@ title: Subscription Management
 Connect Claude and Codex logins once, then route each repository through them:
 
 ```bash
-lf account connect claude personal@example.com --chrome-profile personal@example.com
-lf account connect codex work@example.com --chrome-profile work@example.com
+lf account connect claude=personal@example.com --chrome-profile personal@example.com
+lf account connect codex=work@example.com --chrome-profile work@example.com
 lf account
 
 lf set account.claude personal@
 lf set account.codex work@,personal@
-lf account route
+lf account next
+```
+
+```
+$ lf account
+  claude  personal@  ━━━━━───────────   31% left  Wed 12:00  ● active
+                     fable out until Wed 12:00
+  codex   work@      ━━━━━━━━━───────   60% left  Wed 16:04  ● active
+  codex   spare@     ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌    ? left             14h ago
+
+  ! codex spare@ needs a login   lf account connect codex=spare@
 ```
 
 Loopflow manages Claude and Codex subscription logins as separate identities.
 OpenCode Zen, GitHub, and Linear each use one effective credential instead of a
 routable subscription catalog.
 
-`lf account` refreshes managed identity and capacity, then reports next actions.
-Use `lf account --cached` for offline inspection with no provider
-contact and no state writes. Unknown capacity stays unknown. JSON retains dated
-observations and reset times; expired observations do not prove current capacity.
-`lf account PROVIDER` limits the report to one provider.
+`lf account` shows one row per stored login: its weekly window as a bar and
+percent left, when the window resets, `● active` for the login the provider's
+home is signed in as, `held` and `paused`, and a reading's age once it is more
+than 15 minutes old. It reads the cache and asks the provider only about logins
+whose reading is stale. `?` means unknown, never zero. Lines starting with `!`
+name something to fix and the command that fixes it. `lf account --cached`
+contacts no provider and writes nothing.
+
+A login is its email or an unambiguous prefix (`work@`). When Claude and Codex
+both have one by that name, say which: `claude=work@`, the same spelling
+`--account` takes.
 
 ## Connect an identity
 
@@ -33,11 +49,11 @@ observations and reset times; expired observations do not prove current capacity
 Claude or Codex account.
 
 ```bash
-lf account connect claude personal@example.com --chrome-profile personal@example.com
-lf account connect codex work@example.com --chrome-profile work@example.com
+lf account connect claude=personal@example.com --chrome-profile personal@example.com
+lf account connect codex=work@example.com --chrome-profile work@example.com
 
-lf account connect claude personal@example.com --import # adopt the ambient Claude login
-lf disconnect claude personal@
+lf account connect claude=personal@example.com --import # adopt the ambient Claude login
+lf account disconnect personal@
 ```
 
 Connect creates a **local managed identity**, not a new Claude or Codex account:
@@ -55,7 +71,8 @@ Connect creates a **local managed identity**, not a new Claude or Codex account:
 4. The verified provider credential moves into
    `~/.lf/accounts/<provider>/<account-id>/`.
 5. Loopflow writes the observed email, user identity, plan and operating state to
-   `~/.lf/loopflow.db`.
+   `~/.lf/loopflow.db`, then reads the login's usage once, so routing ranks it
+   on its real quota from its first launch.
 
 Codex requests a callback URL from `account/login/start` in its app-server,
 which disables Codex's own browser opening. Loopflow opens that URL in the saved
@@ -73,7 +90,7 @@ Select a Chrome profile once for each target:
 ```bash
 lf account connect linear --chrome-profile Work
 lf account connect linear              # reuse Work
-lf account connect claude personal@    # reuse this account's profile
+lf account connect personal@           # reuse this account's profile
 ```
 
 Saved names and ordered profile choices remain reusable. A first interactive
@@ -83,10 +100,10 @@ login. Existing expected-login constraints remain enforced. Browser selection is
 remembered only after successful authorization, independently for each target.
 
 If verification fails, the staging login is discarded and an existing identity
-is left unchanged. `lf account connect claude <email> --import` is the explicit
+is left unchanged. `lf account connect claude=<email> --import` is the explicit
 exception: it copies
 the ambient Claude login from `~/.claude` or the macOS Keychain into a new
-isolated account home, then performs the same login verification.
+stored account profile, then performs the same login verification.
 
 The provider home holds the provider CLI's authentication and session state.
 Loopflow may link shared settings, skills, and plugins from `~/.claude` or
@@ -103,9 +120,9 @@ credential whose observed email disagrees.
 An access profile records which Chrome profile can authenticate an identity:
 
 ```bash
-lf account set claude personal@ --chrome-profile Personal --chrome-profile Work
+lf account set personal@ --chrome-profile Personal --chrome-profile Work
 lf account set linear --chrome-profile Work
-lf account --details
+lf account personal@
 ```
 
 The profile is an authentication venue, not the identity that spends provider
@@ -113,34 +130,39 @@ usage. It is never a run-time account selector.
 
 Claude and Codex conversations run in the provider's ordinary home, signed in as
 one stored account at a time, so plain `claude --resume` and `codex resume` find
-them. See [Switch the shared account](#switch-the-shared-account). Launches
-under `--isolate` run in the selected account's own home through
-`CLAUDE_CONFIG_DIR` or `CODEX_HOME`; the provider CLI reads and refreshes its
-credential there. Loopflow records health and session ownership against the
-account ID, and reopens each conversation in the home it started in.
+them. See [Switch the shared account](#switch-the-shared-account). Stored
+profiles under `~/.lf/accounts/` hold logins to switch between; nothing runs
+in them. Loopflow records health and the account each conversation ran on. A
+conversation that ran in an account's own home, before every launch shared one,
+moves into the shared home when it resumes.
 
 ## Inspect account state
 
 ```bash
-lf account                       # refresh managed identity and usage
-lf account claude                # refresh one provider
-lf account --cached              # offline managed and local evidence
-lf account --details --json      # sources, saved browsers, full timestamps
+lf account                       # one row per login; stale rows refresh
+lf account work@                 # every window, its age and source, saved browsers
+lf account claude                # the same for every Claude login and Claude's local credentials
+lf account --cached              # offline: no provider contact, no writes
+lf account --json                # every login and local service as one document
 ```
 
-Status lists stable account IDs beside full usable logins. Codex rows show the
-credential's observed login, and report mismatches or shared
-logins with a reconnect command even during cached inspection. Verification only
-accepts usage after the server and native identity agree. Managed accounts and
-local service credentials have separate sections: an expired local token says
-nothing about a managed account. Missing local tokens leave ambient auth
-uninspected. Cached inspection reads account state without starting a provider,
-decrypting local tokens or creating an encryption key. The CLI records the
-command's Process in its Machine; this can initialize an empty store, but creates no
-account, route or conversation. Local token metadata is cached evidence, not server acceptance;
-live status reports local server verification unavailable.
+Naming a login or a provider asks the provider about each one shown.
 
-`auth status` persists recognized managed subscription windows before
+`lf account` shows one row per login, then a line per thing to fix with the
+command that fixes it. Naming a login or provider shows stable account IDs
+beside full logins. Codex rows show the credential's observed login, and report mismatches
+or shared logins with a reconnect command even during cached inspection.
+Verification only accepts usage after the server and native identity agree.
+That long form lists managed accounts and local service credentials in
+separate sections: an expired local token says nothing about a managed account.
+Missing local tokens leave ambient auth uninspected. Cached inspection reads
+account state without starting a provider, decrypting local tokens or creating
+an encryption key. The CLI records the command's Process in its Machine; this
+can initialize an empty store, but creates no account, route or conversation.
+Local token metadata is cached evidence, not server acceptance; live status
+reports local server verification unavailable.
+
+`lf account` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
@@ -150,8 +172,9 @@ reports recorded provider token/cost usage separately.
 
 JSON contains `accounts` and optional `browser` details. Each row has `scope`
 (`managed` or `local`), provider, account ID, login, cached
-credential state, verification, windows, diagnostic, recovery and
-`long_lived_token_expires_at`. Verification
+credential state, verification, windows, diagnostic, recovery,
+`expires_at` (a rental's access token, which the laptop renews), `active` and
+`held`. Verification
 is `accepted`, `rejected`, `unavailable`, or `not_checked`. Window rows retain
 `observed_at`, `resets_at`, source and plan; `verified_windows` identifies only
 this invocation's new observations. Null means unknown. A successful report
@@ -180,19 +203,23 @@ account configuration. Provider routes skip missing, disabled, cooling and
 limited accounts and continue to the next candidate.
 
 A credential replacement detected during verification makes that result
-unavailable and retains prior account evidence. Claude refresh coordination with
-native sessions is still under development; these comparisons do not serialize
-native refresh or credential writes.
+unavailable and retains prior account evidence. A switch holds Claude's own
+refresh lock (`<home>/.oauth_refresh.lock`) while it saves the outgoing login
+and installs the next, so a running Claude cannot refresh in between; status
+reads do not take it.
 
-Eligible accounts are ordered by plan, then room: Codex Pro leads Plus, then
-the account whose most-used window (not yet reset) is lowest leads; declared
-route order decides ties. In shared
-mode the signed-in account also wins ties, so a launch switches every running
-Claude only when another account has more room. A provider session stays
-pinned to the account that created it so a resume does not silently switch
-identities. Naming another login moves the conversation there and re-pins it:
-`lf resume --account <email> -a claude`. A named login that cannot launch
-fails rather than falling back to another account.
+Eligible accounts are ordered by plan, then by how fast each must be used to
+spend its quota before it resets: Codex Pro leads Plus, then the account with
+the most weekly quota left per hour until its weekly window resets leads, so no
+account resets with quota unused. 70% left with 3 hours to go leads 40% left
+with 5 days to go. The weekly window counts its model's own limit when there
+is one; the short window decides only whether an account has room. A window
+past its reset, and an account with no weekly reading, count as a full week to
+spend (100% over 168 hours); declared route order decides ties. Every launch takes the top account, whichever is signed in,
+so the shared login switches, and every running Claude follows, whenever
+another account ranks ahead. A resumed conversation runs on the active login;
+the account it began under is history. A named login that cannot launch fails
+rather than falling back to another account.
 
 Claude's cached identity is bound to the credential bytes checked by the profile
 endpoint. Cached status reports changed or previously unverified credentials as
@@ -203,20 +230,20 @@ Recorded Claude and Codex launches both require their owning account catalog.
 
 Account state remains in the Machine database.
 
-Control automatic routing per account:
+Take a login out of rotation, or bill it:
 
 ```bash
-lf account set claude personal@ --paid-through 2026-08-14
-lf account set claude personal@ --routing explicit-only
-lf account set claude personal@ --clear-cooldown
+lf account pause personal@                   # out of rotation; --account still launches it
+lf account unpause personal@
+lf account set personal@ --paid-through 2026-08-14
+lf account set personal@ --clear-cooldown
 ```
 
-Clearing cooldown retains credential state, aggregate utilization and every
-observed window. It does not reset provider quota.
-
-An `explicit-only` identity runs only when a route or command selects it.
-`disabled` identities never run. Once `paid-through` passes, an otherwise
-automatic account behaves as `explicit-only` until the date is cleared.
+Pausing the active login switches the Machine to the route's next login at
+once, and every open Claude follows; with no other login, it stays and says
+so. Clearing cooldown retains credential state, aggregate utilization and every
+observed window. It does not reset provider quota. Once `paid-through` passes,
+an otherwise automatic login behaves as paused until the date is cleared.
 
 ## Route a repository
 
@@ -228,8 +255,22 @@ lf set account.claude personal@,work@
 lf --wave billing set account.codex work@
 lf set account.codex work@ --global
 lf unset account.codex
-lf account route --json
+lf account next
 ```
+
+```
+$ lf account next
+  claude  personal@example.com     the only login ready for this launch
+  codex   manabot-eng@example.com  this repository's order names only it
+                                   without that order: work@example.com, 60% left
+```
+
+`next` is a dry run of the next launch: which login each provider takes, and
+why. It exits 0 when both can launch, 2 when one is blocked until a reset, and
+3 when one needs a login. `--json` reports the same per provider, with
+`outcome` `ready`, `blocked`, `login_needed` or `ambient`. `--default` ignores
+repository and Wave orders. An order that names fewer logins than are in
+rotation shows in `lf account` as a `!` line.
 
 Account order uses the personal global, repository or Wave scope. Repository and
 Wave declarations live in the clone's `lf.config.local.yaml`; linked Task worktrees
@@ -289,21 +330,89 @@ Steps have no account overrides. Native Session affinity remains authoritative w
 Local choices use the Machine's catalog directly and survive the initiating CLI's
 exit, including logins installed on a remote machine.
 
+## When an account runs out
+
+A Graph step keeps going by itself:
+
+```bash
+lf task status LOO-1
+#   implement went on under another claude account after: provider_rate_limited: rejected: five_hour
+#   implement is waiting for claude capacity until Nov 5 14:00: ... It goes on by itself.
+```
+
+| What happens | What the step does |
+|---|---|
+| Its account hits a limit, another is eligible | Continues the same conversation under that account |
+| Every eligible account is held back and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
+| Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
+| Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
+| No account will free up | Fails with the limit, like any other failure |
+| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given |
+
+Only accounts in the resolved route take a step on. An explicit `harness:model`
+stays on its model and changes only accounts; a bare harness may change model;
+only a preference list (`lf set default_agent claude,codex`, no explicit
+`agent`) lets a step change provider. Nothing is written to your preferences.
+Commit messages and PR text fail at once, because someone is waiting for them.
+
+A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
+limit, holds back only launches of that model: Sonnet on the same account keeps
+going, and a launch that names no model waits for every scope on the account.
+
+Open Claude Sessions need nothing either. When one hits a limit in shared mode,
+the login moves to the eligible account that ranks first, and every open Claude
+follows at its next request. Send your next message where you left off. A running
+Codex keeps its login until you `lf resume` it. Naming another login with
+`lf --account codex=<login> resume <session>` restarts it there, and the old
+terminal says where the conversation went. A running Claude stays put:
+`lf --account claude=<login> resume <session>` switches the Machine's login,
+which every open Claude follows, and attaches.
+
+To see what would fail next, and move it in one go:
+
+```bash
+lf session list --blocked                       # Sessions whose login cannot take their model now
+lf session list --on claude:fable               # every open Fable Session
+lf session list --on codex=work@                # every open Session using that login
+lf session move --blocked -a claude:opus        # continue them on Opus: idle ones at their next open, busy ones after their turn
+lf account pause jack@                          # stop routing to a login; when it is active, the Machine switches off it now
+lf account unpause jack@                        # route to it again
+```
+
+`--blocked` and `--on` are the one Session selector; `list` previews what
+`move` acts on. A move never writes preferences. Taking the active login out
+of automatic routing switches the Machine to the route's next login, and every
+open Claude follows; `lf account use` switches by hand and holds there. In the Desktop, View → Move Blocked Sessions… runs the same move.
+
 ## Switch the shared account
 
 ```bash
 lf -a codex : "say hi"                    # runs in ~/.codex as the active account
 codex resume                              # plain Codex sees that conversation
-lf account codex use work@                # ~/.codex is now work@, for lf and codex
-lf account route                          # shows the mode and the active account
-lf --isolate --account codex=work@ -a codex : "say hi"   # stays in work@'s own home
-lf account claude use work@               # the same for ~/.claude and plain claude
+lf account use codex=work@                # ~/.codex is now work@, for lf and codex
+lf account                                # ● active marks it
+lf account use claude=work@               # the same for ~/.claude and plain claude
+lf account use auto                       # launches go back to the top-ranked login
 ```
 
-`lf account <provider> use` signs the provider's home in as a stored account.
-It first saves the current login back to its
-stored account, so a token the provider refreshed while active is kept; a login
-Loopflow has never seen is kept as a new explicit-only account.
+```
+$ lf account use work@
+work@ is both claude and codex: lf account use claude=work@
+$ lf account use codex=work@
+codex is now signed in as work@example.com; open Sessions follow when resumed
+codex stays on work@example.com until it fills up, or lf account use auto
+```
+
+`lf account use` signs the provider's home in as a stored login and holds every
+launch of that provider there, whatever a repository or Wave order says and
+paused or not, until the login is full (a cooldown or a limit on every model) or
+`lf account use auto` releases it. A limit on one model sends only that model's
+launches to the order, and `--account` still wins. Pausing the held login also
+releases it.
+It exits 2 when the login is out until a reset and 3 when it needs a login,
+changing nothing. It first saves the current login back to its stored account,
+so a token the provider refreshed while active is kept; a login Loopflow has
+never seen is kept as a new paused account.
 
 When Codex's native and stored copies name the same login but disagree, live
 status checks the native copy first. Only a definite authentication rejection
@@ -318,14 +427,12 @@ For Codex, `use` also restarts its shared background app-server if it still hold
 another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
-terminals use `--no-daemon` and keep their own login until restarted.
+terminals run their own private app-server and keep their login until restarted.
 An unreadable daemon login returns an error without restarting it; the selected
 login remains installed. Failed activity checks keep the grace period rather than
 ending it early. Expiry warns that restarting may interrupt remaining turns.
 Cancelling during the wait leaves the installed login in place; repeat `use` to
 reconcile the daemon later.
-This flag was verified with codex-cli 0.161.0; older versions without it reject
-lf's terminal launches.
 
 | | Codex | Claude |
 |---|---|---|
@@ -339,16 +446,18 @@ Loopflow asks Claude whose it is before the next launch or switch and brings
 that account's stored copy up to date. If it cannot ask, a switch keeps the
 unrecognized login beside the stored accounts rather than discarding it.
 
-A shared launch moves the home to the eligible account with the most room,
-staying on the active account when nothing has more.
+A shared launch moves the home to the eligible account that ranks first, even
+when the active account could take it.
+A parked Claude login whose access token has expired must refresh first: a
+rejected grant leaves it needing a login, and an unreachable token endpoint
+skips it for that launch. Open Claudes stay where they are either way.
 `--account codex=work@` makes that account active before launching.
 These launch-time switches do not restart Codex's shared daemon. If plain
-`codex` keeps the old login, run `lf account codex use` with the selected account.
+`codex` keeps the old login, run `lf account use codex=<login>` with the selected account.
 
-`--isolate` runs the invocation and its children in the selected account's own
-home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the
-default, and `--shared` overrides it for one invocation. A Graph's steps keep
-the mode it was launched with.
+Every launch runs in the shared home; `isolate:` in `.lf/config.yaml` is read
+and ignored. Load spreads across accounts over time, as each launch takes the
+login with the most quota to spend before its reset.
 
 Codex's own conversation ID works wherever a Session ID does:
 
@@ -364,18 +473,19 @@ close its Codex process, leaving saved history available to plain `codex resume`
 the old attachment's exit cannot close the new owner's Codex process. Codex allows one
 writer per conversation, so use `lf resume` while it is still running.
 
-`lf account route --json` reports `isolated` and `active_account` per provider.
+`lf account --json` reports `active` per login.
 
 A Codex home whose `config.toml` sets `cli_auth_credentials_store` to anything
-but `file` cannot be switched; set it to `file` or launch with `--isolate`.
+but `file` cannot be switched; set it to `file`.
 
 ## Banked Codex resets
 
 ```bash
 lf account codex
-lf account redeem-reset codex work@example.com
+lf account redeem-reset codex=work@example.com
 # Retry an interrupted attempt with the key printed before its request:
-lf account redeem-reset codex work@example.com --idempotency-key <same-key>
+lf account redeem-reset codex=work@example.com --idempotency-key <same-key>
+
 ```
 
 Live status shows the provider's available reset count and any returned credit
@@ -416,22 +526,38 @@ gets a fresh device grant approved in the laptop's browser, an API key is
 copied. OpenCode Zen must accept it; a different working OpenCode login on the
 target is left unchanged.
 
-Claude installs the account's long-lived subscription token, so every machine
-after the first needs no browser approval:
+Claude on an owned Machine works the same way: a fresh full login, approved in
+the laptop's browser, which the Machine holds and refreshes as its own, so
+`/usage` and every other feature work there.
+
+A rental gets an access token instead, so renting needs no browser approval:
 
 ```bash
-lf account token claude personal@example.com            # claude setup-token in the account's Chrome profile
-lf account token claude personal@example.com --file -   # or one minted by hand, from stdin
+lf machine connect rental-3 claude personal@example.com   # first time: approve the laptop's rental login
+lf --machine rental-3 account                             # access token until <time>
 ```
 
-The token is stored encrypted on the laptop account and lasts a year from
-when lf stored it; `lf account` shows `long-lived token until <date>` or
-`expired <date>`, and running `lf account token` again renews it.
-Only `sk-ant-oat` subscription tokens are accepted; an API key bills per token.
-It cannot read the account profile, so the target registers the identity the
-laptop verified, and usage for that account reads unavailable there. A connect
-with no current token mints one in the foreground; a background run skips the
-account, and `-b --rent` refuses before renting when no account has one.
+The laptop holds one Claude login per account for rentals, apart from its own,
+and never sends it. Each connect refreshes it when its access token is within
+two hours of expiry and sends the access token only; a rental keeps it in its
+shared home, where running Claude picks it up. A Claude access token lasts
+about 8 hours, so a rental's Claude stops about that long after the laptop last
+renewed it. A connect, by hand or before a launch, sends the next token once
+the rental's is within two hours of expiry, and so does the install schedule
+every 2 hours (`lf machine credentials renew`; nothing when no rental is
+live). After a refresh, the laptop sends the new token to every live rental at
+once. The rental registers the identity the laptop verified. Only `sk-ant-oat`
+subscription tokens are accepted; an API key bills per token. A background run
+skips an account whose rental login still needs an approval, and `-b --rent`
+refuses before renting when no account has one.
+
+```bash
+lf machine connect rental-3 claude personal@example.com --owned   # its own login; runs without the laptop
+```
+
+`--owned` gives one rental what an owned Machine has: a fresh full login, one
+browser approval, that it refreshes itself. It replaces the access token, and
+renewal leaves that rental's login alone.
 
 An account-selected launch connects the requested account if missing. Invocation selectors resolve
 against the laptop's managed logins;
@@ -442,8 +568,10 @@ Read commands without account selectors do not connect accounts.
 
 Transfers run in the foreground. `--batch` never starts a missing login, even
 with a terminal attached. A headless launch needing a missing login reports
-the connect command; it does not start browser authorization. SSH launches use
-isolated, file-backed account homes, including on macOS. The target needs its own
+the connect command; it does not start browser authorization. SSH launches run
+in the target's shared provider home, switched to the selected login like any
+launch; without a Keychain login there, Claude keeps it in `.credentials.json`.
+The target needs its own
 provider CLI. Credential bytes travel on SSH stdin, never in argv or an exported
 variable. `machine credentials inspect/receive` supplies the public receiving
 commands. No broker, forwarded socket or laptop process owns the installed login.
@@ -461,7 +589,7 @@ lf account connect opencode --api-key
 ```
 
 Its stored credential applies to local OpenCode launches.
-Subscription polling, repository account routes, and room ordering do not apply.
+Subscription polling, repository account routes, and login ranking do not apply.
 
 ## Rust API migration
 

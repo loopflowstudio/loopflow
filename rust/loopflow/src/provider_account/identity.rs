@@ -5,9 +5,12 @@ use std::path::Path;
 use secrecy::ExposeSecret;
 use sha2::{Digest, Sha256};
 
+use super::activation::{claude_credential_home, native_home, observe_active_account};
 use crate::provider_auth::{codex_identity_from_home, Provider};
-use crate::store::ProviderAccount;
-use crate::subscription::SubscriptionError;
+use crate::store::{CredentialState, ProviderAccount, SharedStore};
+use crate::subscription::{
+    acquire_claude_refresh_lock, claude_identity, claude_token_due, SubscriptionError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccountIdentity {
@@ -28,13 +31,13 @@ pub(crate) fn validate_identity(
     accounts: &[ProviderAccount],
 ) -> Result<(), String> {
     let recovery = format!(
-        "lf account connect {} {}",
+        "lf account connect {}={}",
         account.provider,
         super::account_login(account)
     );
     let expected = account.login_email.as_ref().ok_or_else(|| {
         format!(
-            "account '{}' needs an expected email first: lf account set {} {} --login-email <email>",
+            "account '{}' needs an expected email first: lf account set {}={} --login-email <email>",
             account.account_id, account.provider, account.account_id
         )
     })?;
@@ -68,7 +71,7 @@ pub(crate) fn validate_identity(
         });
         if let Some(other_identity) = other_identity {
             if identity.same_login(&other_identity) {
-                return Err(format!("account '{}' and account '{}' share login {}; disconnect the duplicate with lf account disconnect {} {}, then {recovery}",
+                return Err(format!("account '{}' and account '{}' share login {}; disconnect the duplicate with lf account disconnect {}={}, then {recovery}",
                     account.account_id, other.account_id, identity.email, other.provider, super::account_login(other)));
             }
         }
@@ -94,12 +97,14 @@ pub(crate) async fn validate_observed_identity(
         if let Some(home) = other
             .home
             .as_deref()
+            .map(claude_credential_home)
             .filter(|home| claude_login(home).is_some())
         {
-            let observed = crate::subscription::claude_identity(home).await?;
+            let observed = claude_identity(&home, None).await?;
             other.observed_email = Some(observed.email);
             other.observed_subject = Some(observed.subject);
             other.observed_credential_digest = observed.credential_digest;
+            other.home = Some(home);
         }
     }
     validate_identity(account, identity, &catalog).map_err(SubscriptionError::NeedsLogin)
@@ -195,22 +200,90 @@ pub(crate) async fn check_current_identity(
     if account.provider != Provider::Claude.as_str() {
         return check_account_identity(account, accounts).map_err(SubscriptionError::NeedsLogin);
     }
-    let identity = match cached_identity(account) {
-        Some(identity) => identity,
+    let profile = account
+        .home
+        .as_deref()
+        .ok_or_else(|| SubscriptionError::NeedsLogin("account has no credential home".into()))?;
+    let (identity, home) = match cached_identity(account) {
+        Some(identity) => (identity, profile.to_path_buf()),
         None => {
-            let home = account.home.as_deref().ok_or_else(|| {
-                SubscriptionError::NeedsLogin("account has no credential home".into())
-            })?;
-            crate::subscription::claude_identity(home).await?
+            let home = claude_credential_home(profile);
+            (claude_identity(&home, None).await?, home)
         }
     };
     validate_observed_identity(account, &identity, accounts).await?;
-    if current_credential_digest(account) != identity.credential_digest {
+    if claude_login(&home).map(|login| credential_digest(&login)) != identity.credential_digest {
         return Err(SubscriptionError::Unavailable(
             "credential changed during identity verification; retry".into(),
         ));
     }
     Ok(())
+}
+
+/// What a route asks of a login it may move every open Claude onto: its
+/// identity and, for a parked Claude login, a grant that still refreshes.
+pub(crate) async fn check_routable_identity(
+    store: &SharedStore,
+    account: &ProviderAccount,
+    accounts: &[ProviderAccount],
+) -> Result<(), SubscriptionError> {
+    let Some(identity) = refresh_parked_login(store, account).await? else {
+        return check_current_identity(account, accounts).await;
+    };
+    validate_observed_identity(account, &identity, accounts).await?;
+    // Bound to the new bytes, so the next launch needs no network.
+    store
+        .record_provider_account_identity(
+            &account.provider,
+            &account.account_id,
+            &identity.email,
+            &identity.subject,
+            account.observed_plan.as_deref(),
+            identity.credential_digest.as_deref(),
+        )
+        .await
+        .map_err(|error| SubscriptionError::Unavailable(error.to_string()))
+}
+
+/// Refresh a parked Claude login whose access token is due, and read who it
+/// is; `None` for any other login. An unchanged digest says nothing about a
+/// revoked grant, and activating one breaks every open Claude, so a rejected
+/// grant marks the login Missing here. The active login is left to Claude:
+/// refreshing its stored copy would rotate the grant under a running Claude.
+async fn refresh_parked_login(
+    store: &SharedStore,
+    account: &ProviderAccount,
+) -> Result<Option<AccountIdentity>, SubscriptionError> {
+    let Some(profile) = account.home.as_deref().filter(|home| {
+        account.provider == Provider::Claude.as_str()
+            && account.credential_state == CredentialState::Connected
+            && claude_token_due(home)
+    }) else {
+        return Ok(None);
+    };
+    // A fully rotated active login matches no stored copy until it is placed.
+    let native = native_home(Provider::Claude, None);
+    observe_active_account(store, Provider::Claude, &native)
+        .await
+        .map_err(|error| SubscriptionError::Unavailable(error.to_string()))?;
+    // `activate` installs under this lock, so it cannot copy the bytes this
+    // refresh is about to spend into the shared home.
+    let _installs_wait = acquire_claude_refresh_lock(&native).await?;
+    if claude_credential_home(profile) != profile {
+        return Ok(None);
+    }
+    let identity = claude_identity(profile, None).await;
+    if matches!(identity, Err(SubscriptionError::NeedsLogin(_))) {
+        store
+            .update_provider_account_credential_state(
+                &account.provider,
+                &account.account_id,
+                CredentialState::Missing,
+            )
+            .await
+            .map_err(|error| SubscriptionError::Unavailable(error.to_string()))?;
+    }
+    identity.map(Some)
 }
 
 /// Serialize duplicate detection and credential installation across managed accounts.
@@ -233,7 +306,7 @@ pub(crate) fn acquire_identity_install_lock(account_home: &Path) -> anyhow::Resu
 pub(crate) mod tests {
     use super::{check_account_identity, same_claude_grant, validate_identity};
     use crate::profile::EmailAddress;
-    use crate::provider_account::{new_account, order_accounts_by_room};
+    use crate::provider_account::{new_account, order_accounts_by_urgency};
     use crate::provider_auth::{codex_identity_from_home, Provider};
     use crate::store::ProviderAccountId;
     use base64::prelude::*;
@@ -357,8 +430,10 @@ pub(crate) mod tests {
             plan: Some("pro".into()),
             observed_at: 99,
             source: "poll".into(),
+            model: None,
+            limited_until: None,
         };
-        order_accounts_by_room(&mut accounts, &[limit], 100);
+        order_accounts_by_urgency(&mut accounts, &[limit], None, 100);
         assert_eq!(accounts, vec![pro, plus]);
     }
 }

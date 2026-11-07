@@ -414,12 +414,16 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
+        let model = config
+            .agent
+            .as_deref()
+            .and_then(|agent| crate::config::parse_agent(agent).1);
         let account_route = resolve_provider_account_exact(
             Provider::Claude,
             requested_session.as_ref(),
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
-            config.isolate,
+            model.as_deref(),
         )
         .await?;
         self.account_route = account_route;
@@ -790,7 +794,6 @@ mod tests {
                 let (tx, _rx) = mpsc::unbounded_channel();
                 let mut harness = ClaudeHarness::new(tx);
                 harness.config = Some(AgentConfig {
-                    isolate: None,
                     agent: settings.agent,
                     chrome: settings.chrome,
                     skip_permissions: settings.yolo,
@@ -893,7 +896,6 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
-            isolate: None,
             chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
@@ -902,6 +904,7 @@ mod tests {
             skill_invocation: None,
             output_schema: None,
             agent: None,
+            fallback_agents: Vec::new(),
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             resume_token: None,
@@ -1172,7 +1175,6 @@ cat > /dev/null
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
-            isolate: None,
             chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
@@ -1181,6 +1183,7 @@ cat > /dev/null
             skill_invocation: None,
             output_schema: None,
             agent: Some("claude".into()),
+            fallback_agents: Vec::new(),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,
             resume_token: None,

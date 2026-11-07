@@ -103,6 +103,8 @@ fn limit_window(value: &Value, plan: Option<&str>) -> Option<crate::store::Accou
             .and_then(Value::as_i64)
             .map(normalize_timestamp),
         plan: plan.map(str::to_string),
+        model: None,
+        limited_until: None,
     })
 }
 
@@ -161,6 +163,7 @@ fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
         limited: reached.is_some(),
         reason: reached.unwrap_or("rate limit update").to_string(),
         windows,
+        model: None,
     })
 }
 

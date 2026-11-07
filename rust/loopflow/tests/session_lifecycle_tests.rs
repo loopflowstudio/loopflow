@@ -71,6 +71,8 @@ impl Fixture {
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("PATH", path.unwrap())
+            // A routed launch signs the provider's shared home in; keep it in the fixture.
+            .env("CODEX_HOME", home.join(".codex"))
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -642,7 +644,6 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     // its Graph registers, so wait for it to stop there.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
-        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");

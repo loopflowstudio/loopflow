@@ -293,11 +293,13 @@ them.
 
 **Rust tests:**
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
-- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
+- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
 - Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
+- Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.
+- Every test binary runs with `HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.

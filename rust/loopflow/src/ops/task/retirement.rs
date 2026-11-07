@@ -49,7 +49,7 @@ fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option
             ViewerHold::Viewed(at) => {
                 if !owner.ended
                     && now < at + VIEWER_OBSERVATION_GRACE
-                    && crate::journal::process_evidence(store, &owner.owner)
+                    && crate::journal::lf_evidence(store, &owner.owner)
                         != ProcessIdentityEvidence::Dead
                 {
                     return Ok(Some(ViewerHold::Viewed(at)));
@@ -271,9 +271,7 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
             .session_transport(session.id.as_str())
             .map_err(task_error)?
         {
-            if crate::journal::process_evidence(&store.sqlite, &owner)
-                == ProcessIdentityEvidence::Dead
-            {
+            if crate::journal::lf_evidence(&store.sqlite, &owner) == ProcessIdentityEvidence::Dead {
                 continue;
             }
             if store
@@ -295,7 +293,11 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .map_err(task_error)?;
     for (process, _) in crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?
     {
-        let mut current = Some(process.id.clone());
+        // An agent's owners are lf processes, so its walk starts at its parent.
+        let mut current = match process {
+            crate::process::ProcessEntry::Lf(process) => Some(process.id.clone()),
+            crate::process::ProcessEntry::Agent(process) => process.parent_lf_process_id.clone(),
+        };
         let mut visited = HashSet::new();
         let mut owned = false;
         while let Some(id) = current.filter(|id| visited.insert(id.clone())) {
@@ -305,14 +307,14 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
             }
             current = store
                 .sqlite
-                .process(&id)
+                .lf_process(&id)
                 .map_err(task_error)?
                 .and_then(|p| p.parent_lf_process_id);
         }
         if !owned {
             return Err(task_error(format!(
                 "Process {} still has live or unresolved work",
-                process.id
+                process.id()
             )));
         }
     }

@@ -94,8 +94,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             "Shell startup was not acknowledged; execution is unknown. No replacement was started"
         )
     })?;
-    if crate::journal::process_evidence(&store, &owner)
-        == crate::journal::ProcessIdentityEvidence::Dead
+    if crate::journal::lf_evidence(&store, &owner) == crate::journal::ProcessIdentityEvidence::Dead
     {
         crate::transport::shell_history(&owner)?;
         anyhow::bail!(

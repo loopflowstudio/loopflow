@@ -114,6 +114,16 @@ Read and left alone: `pages` returns `[[]]` for an empty board, so `presentBoard
 after a window Close only a visit readmits a Task, as on #1816, and the comment on `releasedTasks`
 says so.
 
+## Concept review, November 7 (third pass)
+
+Nothing to change and no product choice open. Read against the code, not run: load, a visit past
+sixteen, a page turn and back, Close, relaunch, a second repository, a finished Task. Sixteen is in
+place, preparations stay at two, and no doc still says eight.
+
+Two limits, left alone: a slot freed by a finished Task stays empty once every other Task has been
+released, until a visit; if `lf desktop focus` leaves a Task selected on a Wave view, a page turn skips
+`presentWaveTiles`, so a tile past the bound waits. A click can't get there: Wave tiles don't take focus.
+
 ## Remaining
 
 - Gate runs the affected suites.

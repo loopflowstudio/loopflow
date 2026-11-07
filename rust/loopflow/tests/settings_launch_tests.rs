@@ -1100,7 +1100,7 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
         )
         .unwrap();
         assert_eq!(prepared.config.agent().unwrap(), expected);
-        assert_eq!(prepared.config.chrome, wave.is_some());
+        assert_eq!(prepared.config.chrome, wave.is_some().then_some(true));
         assert_eq!(inspection[0]["settings"]["agent"]["value"], expected);
     };
     check(None, "codex:project");

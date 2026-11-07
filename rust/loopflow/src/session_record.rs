@@ -94,7 +94,7 @@ pub struct AgentProcessRequest {
     pub write_scope: crate::agent::AgentWriteScope,
     pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
-    pub chrome: bool,
+    pub chrome: Option<bool>,
 }
 
 impl AgentProcessRequest {
@@ -2002,8 +2002,16 @@ impl CaptureHandle {
     /// its launcher left. Settling it writes the same terminal receipt and
     /// attempt facts the launcher would have.
     pub(crate) fn adopt(handoff: CaptureHandoff) -> StoreResult<Self> {
-        let (dir, manifest) =
-            resolve_manifest(&crate::store::lf_home_dir(), &handoff.key).map_err(record_error)?;
+        // The handoff names the exact capture, so its directory needs no store:
+        // the terminal receipt is written even when the store is unavailable.
+        let dir = record_dir(&crate::store::lf_home_dir(), &handoff.key).ok_or_else(|| {
+            record_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid capture key",
+            ))
+        })?;
+        let manifest = read_manifest(&dir).map_err(record_error)?;
+        validate_manifest_path(&dir, &manifest).map_err(record_error)?;
         let mut capture = SessionCapture::from_manifest(manifest, dir);
         capture.attempt = handoff.attempt;
         capture.attempt_started = handoff.attempt_started;
@@ -2277,30 +2285,32 @@ impl SessionCapture {
             result_ref: None,
         };
         let terminal = write_terminal(&self.dir, terminal)?;
+        // The receipt file is the settlement; its store observation and the
+        // attachment's end are records that must never fail the exit.
         if self.manifest.harness != "loopflow" {
-            let store = row_store(&self.dir).map_err(std::io::Error::other)?;
             let input = &self.manifest.artifact_key;
-            if let Some(session) = store
-                .session_for_artifact(input)
-                .map_err(std::io::Error::other)?
-            {
-                store
-                    .retain_session_observation(
-                        &session,
-                        &crate::session::SessionObservation {
-                            artifact_key: input.clone(),
-                            source: "terminal.json".into(),
-                            observed_at: terminal.ended_at.unix_timestamp(),
-                            task_id: session.task_id.clone(),
-                            wave_id: session.wave_id.clone(),
-                            payload: serde_json::json!({
-                                "input_id": input,
-                                "source": "terminal.json",
-                                "evidence": terminal,
-                            }),
-                        },
-                    )
-                    .map_err(std::io::Error::other)?;
+            let observed = row_store(&self.dir).and_then(|store| {
+                let Some(session) = store.session_for_artifact(input)? else {
+                    return Ok(());
+                };
+                store.retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: input.clone(),
+                        source: "terminal.json".into(),
+                        observed_at: terminal.ended_at.unix_timestamp(),
+                        task_id: session.task_id.clone(),
+                        wave_id: session.wave_id.clone(),
+                        payload: serde_json::json!({
+                            "input_id": input,
+                            "source": "terminal.json",
+                            "evidence": terminal,
+                        }),
+                    },
+                )
+            });
+            if let Err(error) = observed {
+                tracing::warn!(%error, artifact_key = %input, "terminal receipt written; its Session observation was not recorded");
             }
         }
         self.settled_outcome = Some(outcome.to_string());
@@ -2321,7 +2331,9 @@ impl SessionCapture {
                 .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(std::io::Error::other(error)),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         Ok(())
@@ -3307,7 +3319,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
             isolate: None,
-            chrome: true,
+            chrome: Some(true),
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
             agent: Some("codex:gpt-5.6".to_string()),

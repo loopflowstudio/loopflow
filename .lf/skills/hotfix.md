@@ -11,7 +11,7 @@ as a PR to main in the same run.
   the fix needs one, stop: it belongs in a release.
 - No index of the live store's rows by hand, no `sqlite3` writes to
   `~/.lf/loopflow.db`. Reproduce and measure on the clone.
-- `lf repo release` cuts from main only. Don't use it for a hotfix.
+- `lf release` cuts from main only. Don't use it for a hotfix.
 - `~/.lf/bin/hotfix-*` are leftovers from an earlier hand-made hotfix. Ignore them.
 
 ## 1. Worktree from the installed commit
@@ -121,9 +121,12 @@ bundle and its helper reports the same build and opens the store.
 
 ## 6. Roll over stale processes
 
-Running lf processes keep their binary until they exit. Count them by binary:
+Running lf processes keep their binary until they exit. Record what runs before
+the promote and after it; the promote itself prints the live processes before it
+changes anything and its result last:
 
 ```bash
+lf monitor rollover --dry-run    # what would move, what stays and why
 ps -axo comm= | grep -E '/\.lf/bin/lf-|Loopflow\.app/Contents/MacOS/lf' | sort | uniq -c
 ```
 

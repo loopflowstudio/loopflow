@@ -432,6 +432,14 @@ impl CodexDecoder {
         out
     }
 
+    /// The person's client started this turn on its own connection, so no
+    /// request here answers for it; it still takes its origin from this attachment.
+    pub(super) fn client_turn(&mut self, turn: &str) {
+        self.observe(turn)
+            .request
+            .get_or_insert_with(|| format!("client:{turn}"));
+    }
+
     /// A turn already in progress when this connection resumed its thread;
     /// turn-less notifications report under it.
     pub(super) fn resume_turn(&mut self, turn: Option<String>) {

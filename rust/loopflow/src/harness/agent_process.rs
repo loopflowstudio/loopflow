@@ -185,6 +185,20 @@ pub(crate) fn exec_native(
     error
 }
 
+/// Become a client of the provider running beside this process. The client
+/// takes over holding the provider's lifeline, so the provider outlives lf.
+pub(crate) fn exec_client(
+    mut command: std::process::Command,
+    launch_lock: Option<std::fs::File>,
+) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    if let Err(error) = crate::os_process::inherit_lifelines() {
+        return error;
+    }
+    drop(launch_lock);
+    command.exec()
+}
+
 /// Failed terminal setup still owns an admitted child. Serialize its cleanup
 /// with takeover and record only an exact successful wait. A remote client has
 /// no provider attachment; ending it must not settle the surviving provider.

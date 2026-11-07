@@ -38,7 +38,7 @@ pub struct DesktopWindowInspection {
     pub session: Option<DesktopSessionInspection>,
     /// The sidebar's Tasks in ⌘1–9 order; `-t N` selects position N.
     pub list: Vec<DesktopListEntry>,
-    /// Every action `lf desktop do` can name, from Desktop's registry.
+    /// Every action an `lf desktop` subcommand can name, from Desktop's registry.
     pub actions: Vec<DesktopActionDescriptor>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
     /// Work shown in this window, in slot fill order; retained workspaces outside it

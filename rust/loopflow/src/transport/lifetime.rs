@@ -2,12 +2,10 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn, pending request, running Graph or headless Run). An owner
-//! whose lf executable is removed, replaced or superseded (a worktree deleted,
-//! a build relinked, Dev.app rebuilt, another installed build selected) ends once
-//! its Sessions hold no work or input and its command has been quiet for one poll,
-//! even while viewed. Its attached viewers
-//! are told why and follow the resume command through the lf entry. Ending
+//! holding it (a turn, pending request, running Graph or headless Run). Nothing
+//! else ends an owner on its own: a removed, rebuilt or superseded lf executable
+//! leaves it serving (Jack Heart, 2026-11-05), and `lf resume` or
+//! `lf monitor rollover` move it when a person or operator decides to. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history.
 //!
@@ -16,20 +14,20 @@
 //! next time; the policy never stops on an error.
 
 use std::io::Write;
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
-use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
+use crate::store::sqlite::sessions::OwnerRetention;
+use crate::store::RecordingGap;
 
-/// How often an owner looks at the clock and its executable.
-const POLL: Duration = Duration::from_secs(2);
+/// How often an owner looks at the clock.
+pub(super) const POLL: Duration = Duration::from_secs(2);
 
 /// Activity accepted by the serving owner. Revisions include changes whose
 /// notification is still queued or throttled on its way to the policy.
@@ -51,11 +49,10 @@ impl Activity {
     }
 }
 
-/// An ending candidate carries the activity the policy actually judged.
+/// An ending candidate carries the activity the policy actually judged when
+/// the detached grace expired.
 #[derive(Debug)]
 pub(super) struct Ending {
-    /// None means the detached grace expired.
-    pub change: Option<(Change, PathBuf)>,
     pub activity: Activity,
 }
 
@@ -63,8 +60,8 @@ impl Ending {
     pub fn may_end(&self, activity: Activity, input_queued: bool) -> bool {
         !input_queued
             && activity.output == self.activity.output
-            && (self.change.is_some()
-                || (!activity.viewed && activity.viewers == self.activity.viewers))
+            && !activity.viewed
+            && activity.viewers == self.activity.viewers
     }
 
     /// Recheck the serving owner's current evidence before preparing its exit.
@@ -73,53 +70,23 @@ impl Ending {
         owner: &LfProcessId,
         activity: Activity,
         input_queued: bool,
-    ) -> Result<Option<Event>> {
+    ) -> Result<bool> {
         if !self.may_end(activity, input_queued) {
-            return Ok(None);
+            return Ok(false);
         }
         let store = crate::journal::process_ledger()?;
         if store.owner_retention(owner)?.is_some() {
-            return Ok(None);
+            return Ok(false);
         }
-        let (notice, successor) = match &self.change {
-            Some((change, path)) => {
-                let Some(session) = store.owner_sessions(owner)?.into_iter().next() else {
-                    return Ok(None);
-                };
-                let successor = crate::os_process::resolve_lf_binary().ok().map(|entry| {
-                    vec![
-                        entry.to_string_lossy().into_owned(),
-                        "session".into(),
-                        "resume".into(),
-                        session.clone(),
-                    ]
-                });
-                tracing::warn!(%owner, ?path, "ending a Session whose lf was {change}");
-                (
-                    Some(format!(
-                        "This Session's lf was {change}; reopening it as `lf resume {session}`"
-                    )),
-                    successor,
-                )
-            }
-            None => {
-                tracing::info!(%owner, "ending a Session nobody has viewed");
-                (None, None)
-            }
-        };
-        Ok(Some(Event::Control {
-            held: false,
-            notice,
-            successor,
-        }))
+        tracing::info!(%owner, "ending a Session nobody has viewed");
+        Ok(true)
     }
 }
 
-/// Record activity sent on the first channel. Once the executable is gone or
-/// the owner has gone unviewed and quiet past its limit, send the second
-/// channel a candidate for the serve loop to confirm before ending the owner.
-/// Only a terminal owner (`terminal`) ends for want of viewers;
-/// a pipe owner is a headless Run.
+/// Record activity sent on the first channel. Once the owner has gone unviewed
+/// and quiet past its limit, send the second channel a candidate for the serve
+/// loop to confirm before ending the owner. Only a terminal owner (`terminal`)
+/// ends for want of viewers; a pipe owner is a headless Run.
 pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
@@ -129,18 +96,10 @@ pub(super) fn spawn(
     if let Some(channels) = super::lifetime_tests::channels() {
         return channels;
     }
-    let executable = Executable::current();
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
-        watch(
-            &owner,
-            executable.as_ref(),
-            terminal,
-            &changes,
-            &end,
-            &waker,
-        );
+        watch(&owner, terminal, &changes, &end, &waker);
     });
     (activity, ending)
 }
@@ -175,34 +134,27 @@ impl Grace {
 
 fn watch(
     owner: &LfProcessId,
-    executable: Option<&Executable>,
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
     end: &mpsc::Sender<Ending>,
     mut waker: &UnixStream,
 ) {
     let mut store = None;
-    let mut store_failure = None;
+    let mut store_failure = RecordingGap::default();
     let mut recorded_viewed = None;
-    let mut viewer_failure = None;
-    let mut repository_failure = None;
-    let mut decision = None;
+    let mut viewer_failure = RecordingGap::default();
+    let mut repository_failure = RecordingGap::default();
+    let mut retention_failure = RecordingGap::default();
+    let mut retained: Option<OwnerRetention> = None;
     let mut next_poll = Instant::now() + POLL;
-    let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
         activity: Activity::default(),
-        quiet_since: last_output,
+        quiet_since: SystemTime::now(),
     };
     loop {
         match changes.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
-            Ok(activity) => {
-                let now = SystemTime::now();
-                if activity.output != grace.activity.output {
-                    last_output = now;
-                }
-                grace.note(activity, now);
-            }
+            Ok(activity) => grace.note(activity, SystemTime::now()),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
@@ -215,8 +167,7 @@ fn watch(
         if store.is_none() {
             store = report_result(
                 &mut store_failure,
-                owner,
-                "open Session store",
+                "Session store",
                 crate::journal::process_ledger(),
             );
         }
@@ -227,8 +178,7 @@ fn watch(
         if recorded_viewed != Some(viewed)
             && report_result(
                 &mut viewer_failure,
-                owner,
-                "record Session viewers",
+                "Session viewers",
                 store.record_owner_viewers(owner, viewed),
             )
             .is_some()
@@ -238,54 +188,36 @@ fn watch(
         if terminal && grace.limit.is_none() {
             grace.limit = report_result(
                 &mut repository_failure,
-                owner,
-                "load Session repository",
+                "Session repository",
                 store.process(owner),
             )
             .flatten()
             .map(|process| limit(process.repo.as_deref()));
         }
         let now = SystemTime::now();
-        let change = executable
-            .and_then(|executable| executable.change().map(|change| (change, &executable.path)));
-        // Native turns may leave only terminal output. Viewers never prolong a
-        // vanished build, so their activity cannot reset this quiet interval.
-        let quiet = match change {
-            Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
-            None => grace.expired(now),
-        };
-        let retained = |reason: &dyn std::fmt::Display| match change {
-            Some((change, path)) => format!(
-                "retaining Session whose lf at {} was {change}: {reason}",
-                path.display()
-            ),
-            None => format!("retaining detached Session past its limit: {reason}"),
-        };
-        if !quiet {
-            // Inside the limit nothing is being retained, so a reason held
-            // past it stays one line however often the grace restarts.
-            if change.is_some() {
-                warn_changed(&mut decision, owner, retained(&"command output"));
-            }
+        if !grace.expired(now) {
             continue;
         }
-        match store.owner_retention(owner) {
-            Ok(None) => decision = None,
-            // Retained work counts as activity: the grace runs again from here.
-            Ok(Some(reason)) => {
-                warn_changed(&mut decision, owner, retained(&reason));
-                grace.quiet_since = now;
-                continue;
+        let Some(retention) = report_result(
+            &mut retention_failure,
+            "Session retention, retrying",
+            store.owner_retention(owner),
+        ) else {
+            continue;
+        };
+        if retained != retention {
+            if let Some(reason) = retention {
+                tracing::warn!(%owner, "retaining detached Session past its limit: {reason}");
             }
-            Err(error) => {
-                let message = format!("cannot judge Session retention; retrying: {error}");
-                warn_changed(&mut decision, owner, message);
-                continue;
-            }
+            retained = retention;
+        }
+        // Retained work counts as activity: the grace runs again from here.
+        if retention.is_some() {
+            grace.quiet_since = now;
+            continue;
         }
         if end
             .send(Ending {
-                change: change.map(|(change, path)| (change, path.clone())),
                 activity: grace.activity,
             })
             .is_err()
@@ -298,100 +230,17 @@ fn watch(
     }
 }
 
-/// Keep each operation's warning until that operation succeeds. Other policy
-/// work can succeed during an outage without making the same error log again.
+/// Each operation keeps its own gap until that operation succeeds. Other policy
+/// work can succeed during an outage without closing or reopening it.
 pub(super) fn report_result<T>(
-    previous: &mut Option<String>,
-    owner: &LfProcessId,
-    operation: &str,
+    gap: &mut RecordingGap,
+    what: &str,
     result: Result<T, impl std::fmt::Display>,
 ) -> Option<T> {
     result
-        .inspect(|_| *previous = None)
-        .inspect_err(|error| {
-            warn_changed(
-                previous,
-                owner,
-                format!("cannot {operation}; retrying: {error}"),
-            );
-        })
+        .inspect(|_| gap.recovered())
+        .inspect_err(|error| gap.note(what, error))
         .ok()
-}
-
-/// One line per changed condition, however often a poll or retry repeats it.
-pub(super) fn warn_changed(previous: &mut Option<String>, owner: &LfProcessId, message: String) {
-    if previous.as_ref() != Some(&message) {
-        tracing::warn!(%owner, "{message}");
-        *previous = Some(message);
-    }
-}
-
-/// The file this owner runs from, as it was when the owner started.
-#[derive(Debug)]
-struct Executable {
-    path: PathBuf,
-    identity: (u64, u64, u64, i64, i64),
-}
-
-/// What became of the owner's executable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Change {
-    Removed,
-    Replaced,
-    /// The entry now dispatches to another build.
-    Superseded,
-}
-
-impl std::fmt::Display for Change {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Change::Removed => "removed",
-            Change::Replaced => "replaced",
-            Change::Superseded => "superseded",
-        })
-    }
-}
-
-impl Executable {
-    /// `None` when the running executable cannot be read; that owner keeps only
-    /// the detached limit.
-    fn current() -> Option<Self> {
-        let read = || -> std::io::Result<Self> {
-            let path = crate::journal::current_executable()?;
-            let identity = identity(&std::fs::metadata(&path)?);
-            Ok(Self { path, identity })
-        };
-        read()
-            .inspect_err(
-                |error| tracing::warn!(%error, "Session owner cannot watch its executable"),
-            )
-            .ok()
-    }
-
-    /// Removed or replaced once the file at the path is no longer this one;
-    /// superseded once the entry dispatches to another build. Any other read
-    /// error is transient and judged again next time.
-    fn change(&self) -> Option<Change> {
-        match std::fs::metadata(&self.path) {
-            Ok(metadata) if identity(&metadata) != self.identity => return Some(Change::Replaced),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Some(Change::Removed)
-            }
-            Err(_) => return None,
-        }
-        crate::installation::superseded(&self.path).then_some(Change::Superseded)
-    }
-}
-
-fn identity(metadata: &std::fs::Metadata) -> (u64, u64, u64, i64, i64) {
-    (
-        metadata.dev(),
-        metadata.ino(),
-        metadata.len(),
-        metadata.mtime(),
-        metadata.mtime_nsec(),
-    )
 }
 
 /// The detached limit configured for `repo`. An unreadable configuration
@@ -410,32 +259,23 @@ fn limit(repo: Option<&str>) -> DetachedLimit {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{Activity, Change, DetachedLimit, Ending, Grace};
-
-    fn ending(idle: bool, activity: Activity) -> Ending {
-        Ending {
-            change: (!idle).then(|| (Change::Replaced, "replaced".into())),
-            activity,
-        }
-    }
+    use super::{Activity, DetachedLimit, Ending, Grace};
 
     #[test]
     fn queued_endings_require_current_output_and_idle_viewer_evidence() {
-        for idle in [true, false] {
-            let mut activity = Activity::default();
-            let candidate = ending(idle, activity);
-            assert!(candidate.may_end(activity, false));
-            activity.view(true);
-            assert_eq!(candidate.may_end(activity, false), !idle);
-            activity.view(false);
-            // Attaching and leaving again still restarts the idle grace.
-            assert_eq!(candidate.may_end(activity, false), !idle);
-            activity.output += 1;
-            assert!(!candidate.may_end(activity, false));
-            let fresh = ending(idle, activity);
-            assert!(fresh.may_end(activity, false));
-            assert!(!fresh.may_end(activity, true));
-        }
+        let mut activity = Activity::default();
+        let candidate = Ending { activity };
+        assert!(candidate.may_end(activity, false));
+        activity.view(true);
+        assert!(!candidate.may_end(activity, false));
+        activity.view(false);
+        // Attaching and leaving again still restarts the idle grace.
+        assert!(!candidate.may_end(activity, false));
+        activity.output += 1;
+        assert!(!candidate.may_end(activity, false));
+        let fresh = Ending { activity };
+        assert!(fresh.may_end(activity, false));
+        assert!(!fresh.may_end(activity, true));
     }
 
     #[test]
@@ -461,7 +301,7 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, None, false, &changes, &end, &waker);
+                super::watch(&watched, false, &changes, &end, &waker);
             });
         });
         activity
@@ -493,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn output_restarts_both_policies_then_quiet_allows_ending() {
+    fn output_restarts_the_grace_then_quiet_allows_ending() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let owner = store.test_lf_process();
@@ -509,54 +349,43 @@ mod tests {
             "session:\n  end_detached_after: 2s\n",
         )
         .unwrap();
-        for removed in [false, true] {
-            if !removed {
-                // An unreadable Process must not latch the global grace in
-                // place of the repository's setting. Repair it without activity.
-                conn.execute(
-                    "UPDATE processes SET trace_id='unreadable' WHERE id=?1",
-                    [&owner],
-                )
-                .unwrap();
-            }
-            let executable = removed.then(|| super::Executable {
-                path: guard.home().join("removed"),
-                identity: (0, 0, 0, 0, 0),
+        // An unreadable Process must not latch the global grace in place of
+        // the repository's setting. Repair it without activity.
+        conn.execute(
+            "UPDATE processes SET trace_id='unreadable' WHERE id=?1",
+            [&owner],
+        )
+        .unwrap();
+        let (activity, changes) = std::sync::mpsc::channel();
+        let (end, ending) = std::sync::mpsc::channel();
+        let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let watched = owner.clone();
+        let policy = std::thread::spawn(move || {
+            crate::journal::with_test_ledger(db, || {
+                super::watch(&watched, true, &changes, &end, &waker);
             });
-            let (activity, changes) = std::sync::mpsc::channel();
-            let (end, ending) = std::sync::mpsc::channel();
-            let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-            let watched = owner.clone();
-            let db = db.clone();
-            let policy = std::thread::spawn(move || {
-                crate::journal::with_test_ledger(db, || {
-                    super::watch(&watched, executable.as_ref(), true, &changes, &end, &waker);
-                });
-            });
-            if !removed {
-                assert!(matches!(
-                    ending.recv_timeout(super::POLL * 2),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                ));
-                conn.execute("UPDATE processes SET trace_id=?1 WHERE id=?1", [&owner])
-                    .unwrap();
-            }
-            let candidate = ending.recv_timeout(Duration::from_secs(8)).unwrap();
-            let observed = Activity {
-                output: 1,
-                ..Activity::default()
-            };
-            assert!(!candidate.may_end(observed, false));
-            activity.send(observed).unwrap();
-            assert!(matches!(
-                ending.recv_timeout(Duration::from_secs(1)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            ));
-            let fresh = ending.recv_timeout(Duration::from_secs(8)).unwrap();
-            assert!(fresh.may_end(observed, false));
-            drop(activity);
-            policy.join().unwrap();
-        }
+        });
+        assert!(matches!(
+            ending.recv_timeout(super::POLL * 2),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        conn.execute("UPDATE processes SET trace_id=?1 WHERE id=?1", [&owner])
+            .unwrap();
+        let candidate = ending.recv_timeout(Duration::from_secs(8)).unwrap();
+        let observed = Activity {
+            output: 1,
+            ..Activity::default()
+        };
+        assert!(!candidate.may_end(observed, false));
+        activity.send(observed).unwrap();
+        assert!(matches!(
+            ending.recv_timeout(Duration::from_secs(1)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        let fresh = ending.recv_timeout(Duration::from_secs(8)).unwrap();
+        assert!(fresh.may_end(observed, false));
+        drop(activity);
+        policy.join().unwrap();
     }
 
     #[test]

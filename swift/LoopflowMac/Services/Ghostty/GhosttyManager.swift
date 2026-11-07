@@ -80,7 +80,7 @@ enum GhosttyRuntimeResources {
 }
 
 // Resource bytes travel with creation, so a remote Machine needs no app bundle.
-func taskShellBootstrap() throws -> String {
+func desktopShellBootstrap() throws -> String {
     guard let root = GhosttyRuntimeResources.directoryURL else {
         throw RegistryQueryError("Desktop shell integration is unavailable")
     }

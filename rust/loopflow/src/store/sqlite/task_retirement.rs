@@ -7,7 +7,7 @@ use crate::id::LfProcessId;
 use crate::store::{StoreError, StoreResult};
 
 pub(crate) const WORKSPACE_GRACE: i64 = 15 * 60;
-pub(crate) const VIEWED: &str = "Retained by an open Task Session viewer";
+const VIEWED: &str = "Retained by an open Task Session viewer";
 
 /// What a serving owner knows about its own viewers, recorded on its Process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,12 @@ pub(crate) enum ViewerHold {
 }
 
 impl ViewerHold {
+    fn at(self) -> i64 {
+        match self {
+            Self::Viewed(at) | Self::Absent(at) => at,
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Viewed(_) => "viewed",
@@ -64,9 +70,7 @@ impl SqliteStore {
             params![
                 owner.as_str(),
                 hold.map(ViewerHold::as_str),
-                hold.map(|h| match h {
-                    ViewerHold::Viewed(at) | ViewerHold::Absent(at) => at,
-                }),
+                hold.map(ViewerHold::at),
                 matches!(hold, Some(ViewerHold::Viewed(_))),
             ],
         )?;
@@ -133,15 +137,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// `hold` names why a viewer still retains the checkout. Holds clear any
-    /// deadline; release starts one fifteen-minute interval that later work
-    /// completion does not restart.
+    /// Viewing clears the deadline; absence starts one fifteen-minute interval
+    /// that later work completion does not restart.
     pub(crate) fn reconcile_task_retirement(
         &self,
         task: &TaskId,
         now: i64,
-        hold: Option<&str>,
-        absent_since: Option<i64>,
+        hold: Option<ViewerHold>,
     ) -> StoreResult<Option<TaskRetirement>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
@@ -150,8 +152,9 @@ impl SqliteStore {
             WHERE id=?1 AND planning_completed=1 AND planning_completed_at IS NOT NULL AND worktree IS NOT NULL
             ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,WORKSPACE_GRACE])?;
         match hold {
-            Some(reason) => hold_retirement(&tx, task, Some(reason))?,
-            None => {
+            Some(ViewerHold::Viewed(_)) => hold_retirement(&tx, task, Some(VIEWED))?,
+            absent => {
+                let absent_since = absent.map(ViewerHold::at);
                 // A viewer can reconnect and leave between cleanup passes,
                 // including after shell closure was queued. Revoke that work too.
                 let renewed: bool = tx.query_row(
@@ -215,7 +218,7 @@ impl SqliteStore {
         let mut query = conn.prepare(&format!("SELECT h.task_id FROM task_retirements h
             WHERE h.phase='closing' AND (
                 EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.transport_lf_process_id=?1)
-                OR EXISTS(SELECT 1 FROM task_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
+                OR EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
         let tasks = query
             .query_map([owner], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -251,10 +254,7 @@ fn hold_viewer_retirements(
 // A returning viewer cancels only retirement's queued shell closes, never
 // explicit Close. Keep both writes in the caller's retirement transaction.
 fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE task_shells SET close_requested=0 WHERE task_id=?1 AND close_requested=2",
-        [task.as_str()],
-    )?;
+    crate::desktop::shells::cancel_retirement(conn, task)?;
     conn.execute(
         "UPDATE task_retirements SET due_at=NULL,phase='waiting',reason=?2,retry_at=NULL,failures=0
          WHERE task_id=?1 AND phase!='retired'
@@ -295,21 +295,36 @@ mod tests {
             .collect()
     }
 
+    fn close_requested(store: &SqliteStore, shell: &str) -> i64 {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT close_requested FROM desktop_shells WHERE id=?1",
+                [shell],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
     #[test]
     fn returning_viewers_revoke_closes_and_retry_without_a_sweep() {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
             let (_home, store, task) = fixture();
             let viewer = session_owner(&store, &task, "passive");
             for shell in ["automatic", "explicit"] {
-                store.create_task_shell(shell, &task, "/repo.task").unwrap();
+                store
+                    .create_desktop_shell(shell, &task, "/repo.task")
+                    .unwrap();
             }
             let intent = store
-                .reconcile_task_retirement(&task, 100, None, None)
+                .reconcile_task_retirement(&task, 100, None)
                 .unwrap()
                 .unwrap();
             store.retirement_progress(&intent, "closing", None).unwrap();
-            store.close_task_shells(&task).unwrap();
-            store.close_task_shell("explicit").unwrap();
+            crate::desktop::shells::request_retirement(&store, &task).unwrap();
+            store.close_desktop_shell("explicit").unwrap();
             store
                 .fail_retirement(&task, 1100, "owner not settled")
                 .unwrap();
@@ -330,20 +345,8 @@ mod tests {
                 (returned.due_at, returned.retry_at, returned.failures),
                 (None, None, 0)
             );
-            assert!(
-                !store
-                    .task_shell("automatic")
-                    .unwrap()
-                    .unwrap()
-                    .close_requested
-            );
-            assert!(
-                store
-                    .task_shell("explicit")
-                    .unwrap()
-                    .unwrap()
-                    .close_requested
-            );
+            assert_eq!(close_requested(&store, "automatic"), 0);
+            assert_eq!(close_requested(&store, "explicit"), 1);
             store
                 .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
                 .unwrap();
@@ -353,7 +356,7 @@ mod tests {
             );
             // Only now does a later pass date the new deadline from departure.
             let next = store
-                .reconcile_task_retirement(&task, 1500, None, Some(1201))
+                .reconcile_task_retirement(&task, 1500, Some(ViewerHold::Absent(1201)))
                 .unwrap()
                 .unwrap();
             assert_eq!(next.due_at, Some(1201 + WORKSPACE_GRACE));
@@ -365,14 +368,14 @@ mod tests {
         let (_home, store, task) = fixture();
         let viewer = session_owner(&store, &task, "session");
         store
-            .create_task_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap();
         let intent = store
-            .reconcile_task_retirement(&task, 100, None, None)
+            .reconcile_task_retirement(&task, 100, None)
             .unwrap()
             .unwrap();
         store.retirement_progress(&intent, "closing", None).unwrap();
-        store.close_task_shells(&task).unwrap();
+        crate::desktop::shells::request_retirement(&store, &task).unwrap();
         store
             .conn
             .lock()
@@ -384,7 +387,7 @@ mod tests {
             .unwrap();
         let record = || store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)));
         assert!(record().is_err());
-        assert!(store.task_shell("shell").unwrap().unwrap().close_requested);
+        assert_eq!(close_requested(&store, "shell"), 2);
         let recorded: bool = store
             .conn
             .lock()
@@ -403,7 +406,7 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_cancel")
             .unwrap();
         record().unwrap();
-        assert!(!store.task_shell("shell").unwrap().unwrap().close_requested);
+        assert_eq!(close_requested(&store, "shell"), 0);
     }
 
     #[test]
@@ -454,40 +457,30 @@ mod tests {
     fn workspace_retirement_holds_cancel_deadlines_and_work_does_not_restart_them() {
         let (_home, store, task) = fixture();
         let held = store
-            .reconcile_task_retirement(
-                &task,
-                100,
-                Some("Retained by an open Task Session viewer"),
-                None,
-            )
+            .reconcile_task_retirement(&task, 100, Some(ViewerHold::Viewed(100)))
             .unwrap()
             .unwrap();
         assert_eq!(held.due_at, None);
         let left = store
-            .reconcile_task_retirement(&task, 110, None, None)
+            .reconcile_task_retirement(&task, 110, None)
             .unwrap()
             .unwrap();
         assert_eq!(left.due_at, Some(110 + WORKSPACE_GRACE));
         // The two-minute agent policy does not add two minutes to this deadline.
         assert_eq!(
             store
-                .reconcile_task_retirement(&task, 230, None, None)
+                .reconcile_task_retirement(&task, 230, None)
                 .unwrap()
                 .unwrap()
                 .due_at,
             left.due_at
         );
         store
-            .create_task_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap();
-        store.close_task_shells(&task).unwrap();
+        crate::desktop::shells::request_retirement(&store, &task).unwrap();
         let returned = store
-            .reconcile_task_retirement(
-                &task,
-                900,
-                Some("Retained by an open Task Session viewer"),
-                None,
-            )
+            .reconcile_task_retirement(&task, 900, Some(ViewerHold::Viewed(900)))
             .unwrap()
             .unwrap();
         assert_eq!(returned.due_at, None);
@@ -495,10 +488,10 @@ mod tests {
             .reason
             .unwrap()
             .contains("open Task Session viewer"));
-        assert!(!store.task_shell("shell").unwrap().unwrap().close_requested);
+        assert_eq!(close_requested(&store, "shell"), 0);
         assert_eq!(
             store
-                .reconcile_task_retirement(&task, 920, None, None)
+                .reconcile_task_retirement(&task, 920, None)
                 .unwrap()
                 .unwrap()
                 .due_at,
@@ -510,38 +503,38 @@ mod tests {
     fn disconnect_deadline_uses_observed_absence_not_later_cleanup_or_agent_exit() {
         let (_home, store, task) = fixture();
         store
-            .reconcile_task_retirement(&task, 100, Some("viewed"), None)
+            .reconcile_task_retirement(&task, 100, Some(ViewerHold::Viewed(100)))
             .unwrap();
         let lost = store
-            .reconcile_task_retirement(&task, 400, None, Some(110))
+            .reconcile_task_retirement(&task, 400, Some(ViewerHold::Absent(110)))
             .unwrap()
             .unwrap();
         assert_eq!(lost.due_at, Some(1010));
         let ended = store
-            .reconcile_task_retirement(&task, 900, None, Some(110))
+            .reconcile_task_retirement(&task, 900, Some(ViewerHold::Absent(110)))
             .unwrap()
             .unwrap();
         assert_eq!(ended.due_at, lost.due_at);
         // A short reconnect may begin and end between cleanup passes,
         // after retirement has already queued shell closes.
         store
-            .create_task_shell("shell", &task, "/repo.task")
+            .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap();
         store.retirement_progress(&lost, "closing", None).unwrap();
-        store.close_task_shells(&task).unwrap();
+        crate::desktop::shells::request_retirement(&store, &task).unwrap();
         let returned = store
-            .reconcile_task_retirement(&task, 1310, None, Some(1300))
+            .reconcile_task_retirement(&task, 1310, Some(ViewerHold::Absent(1300)))
             .unwrap()
             .unwrap();
         assert_eq!(returned.due_at, Some(2200));
         assert_eq!(returned.phase, "waiting");
-        assert!(!store.task_shell("shell").unwrap().unwrap().close_requested);
+        assert_eq!(close_requested(&store, "shell"), 0);
         store
-            .reconcile_task_retirement(&task, 1950, Some("reconnected"), None)
+            .reconcile_task_retirement(&task, 1950, Some(ViewerHold::Viewed(1950)))
             .unwrap();
         assert_eq!(
             store
-                .reconcile_task_retirement(&task, 2050, None, Some(2000))
+                .reconcile_task_retirement(&task, 2050, Some(ViewerHold::Absent(2000)))
                 .unwrap()
                 .unwrap()
                 .due_at,
@@ -553,7 +546,7 @@ mod tests {
     fn retry_backoff_is_bounded_and_returning_viewer_revokes_it() {
         let (_home, store, task) = fixture();
         let initial = store
-            .reconcile_task_retirement(&task, 100, None, None)
+            .reconcile_task_retirement(&task, 100, None)
             .unwrap()
             .unwrap();
         for (attempt, seconds) in [60, 120, 240, 480, 960, 1920, 3600, 3600]
@@ -562,7 +555,7 @@ mod tests {
         {
             store.fail_retirement(&task, 2000, "offline").unwrap();
             let failed = store
-                .reconcile_task_retirement(&task, 2000, None, None)
+                .reconcile_task_retirement(&task, 2000, None)
                 .unwrap()
                 .unwrap();
             assert_eq!(failed.retry_at, Some(2000 + seconds));
@@ -571,7 +564,7 @@ mod tests {
             assert_eq!(failed.reason.as_deref(), Some("offline"));
         }
         let returned = store
-            .reconcile_task_retirement(&task, 2100, Some("viewed"), None)
+            .reconcile_task_retirement(&task, 2100, Some(ViewerHold::Viewed(2100)))
             .unwrap()
             .unwrap();
         assert_eq!(returned.retry_at, None);
@@ -583,7 +576,7 @@ mod tests {
     fn workspace_retirement_reopen_and_checkout_replacement_revoke_queued_work() {
         let (_home, store, task) = fixture();
         let old = store
-            .reconcile_task_retirement(&task, 100, None, None)
+            .reconcile_task_retirement(&task, 100, None)
             .unwrap()
             .unwrap();
         store
@@ -597,12 +590,12 @@ mod tests {
             .unwrap();
         assert!(!store.retirement_progress(&old, "closing", None).unwrap());
         assert!(store
-            .reconcile_task_retirement(&task, 200, None, None)
+            .reconcile_task_retirement(&task, 200, None)
             .unwrap()
             .is_none());
         store.conn.lock().unwrap().execute("UPDATE tasks SET planning_completed=1,planning_completed_at='completion-2' WHERE id=?1", [task.as_str()]).unwrap();
         let next = store
-            .reconcile_task_retirement(&task, 300, None, None)
+            .reconcile_task_retirement(&task, 300, None)
             .unwrap()
             .unwrap();
         assert_eq!(next.due_at, Some(1200));
@@ -617,45 +610,5 @@ mod tests {
             )
             .unwrap();
         assert!(!store.retirement_progress(&next, "closing", None).unwrap());
-    }
-
-    #[test]
-    fn workspace_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
-        let (_home, store, task) = fixture();
-        assert!(store
-            .create_task_shell("shell", &task, "/repo.task")
-            .unwrap());
-        assert!(!store
-            .create_task_shell("shell", &task, "/repo.task")
-            .unwrap());
-        assert!(store.task_shell("shell").unwrap().unwrap().owner.is_none());
-        let owner = store.test_lf_process();
-        store.bind_task_shell("shell", &owner).unwrap();
-        assert!(store.bind_task_shell("shell", &owner).is_err());
-        assert_eq!(store.shell_owner(&owner).unwrap(), Some(0));
-        // Desktop shell ownership adds no checkout hold; the Task Session supplies it.
-        store
-            .record_owner_viewer_hold(&owner, Some(ViewerHold::Viewed(100)))
-            .unwrap();
-        assert!(held(&store, &task).is_empty());
-        store.record_owner_viewer_hold(&owner, None).unwrap();
-        store.close_task_shell("shell").unwrap();
-        assert_eq!(store.shell_owner(&owner).unwrap(), Some(1));
-        assert!(!store
-            .create_task_shell("shell", &task, "/repo.task")
-            .unwrap());
-        assert_eq!(
-            store.task_shell("shell").unwrap().unwrap().owner,
-            Some(owner.clone())
-        );
-        store.settle_shell_jobs(&owner).unwrap();
-        assert!(store
-            .create_task_shell("unacknowledged", &task, "/repo.task")
-            .unwrap());
-        store.close_task_shell("unacknowledged").unwrap();
-        assert!(store
-            .bind_task_shell("unacknowledged", &store.test_lf_process())
-            .is_err());
-        assert!(store.task_shell_jobs_settled(&task).unwrap());
     }
 }

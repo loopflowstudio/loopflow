@@ -9,7 +9,7 @@ use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
-    sqlite::{SqliteStore, TaskRetirement, ViewerHold, VIEWED},
+    sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
 use crate::work::task::Task;
@@ -42,11 +42,7 @@ fn lock_file(name: &str) -> OpsResult<File> {
 /// owner cannot keep a completed checkout forever with its last cached boolean.
 pub(crate) const VIEWER_OBSERVATION_GRACE: i64 = 30;
 
-fn viewer_hold(
-    store: &SqliteStore,
-    task: &TaskId,
-    now: i64,
-) -> OpsResult<(Option<&'static str>, Option<i64>)> {
+fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option<ViewerHold>> {
     let mut absent_since = None;
     for owner in store.task_viewer_holds(task).map_err(task_error)? {
         let at = match owner.hold {
@@ -56,7 +52,7 @@ fn viewer_hold(
                     && crate::journal::process_evidence(store, &owner.owner)
                         != ProcessIdentityEvidence::Dead
                 {
-                    return Ok((Some(VIEWED), None));
+                    return Ok(Some(ViewerHold::Viewed(at)));
                 }
                 at + VIEWER_OBSERVATION_GRACE
             }
@@ -64,14 +60,14 @@ fn viewer_hold(
         };
         absent_since = Some(absent_since.map_or(at, |old: i64| old.max(at)));
     }
-    Ok((None, absent_since))
+    Ok(absent_since.map(ViewerHold::Absent))
 }
 
 fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirement>> {
     let now = now();
-    let (hold, absent_since) = viewer_hold(store, task, now)?;
+    let hold = viewer_hold(store, task, now)?;
     store
-        .reconcile_task_retirement(task, now, hold, absent_since)
+        .reconcile_task_retirement(task, now, hold)
         .map_err(task_error)
 }
 
@@ -80,9 +76,12 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
 pub(crate) fn owner_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
     let now = now();
     for task in store.owner_retiring_tasks(owner).map_err(task_error)? {
-        let (hold, absent_since) = viewer_hold(store, &task, now)?;
-        if hold.is_some() {
-            continue;
+        match viewer_hold(store, &task, now)? {
+            Some(ViewerHold::Viewed(_)) => continue,
+            Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
+                continue;
+            }
+            _ => {}
         }
         // Read intent after viewing: a concurrent return revokes this phase,
         // including a return that has already left again.
@@ -90,10 +89,7 @@ pub(crate) fn owner_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsRes
             .task_retirement(&task)
             .map_err(task_error)?
             .is_some_and(|intent| {
-                intent.phase == "closing"
-                    && intent.due_at.is_some_and(|due| due <= now)
-                    && absent_since
-                        .is_none_or(|at| at + crate::store::sqlite::WORKSPACE_GRACE <= now)
+                intent.phase == "closing" && intent.due_at.is_some_and(|due| due <= now)
             })
         {
             return Ok(true);
@@ -224,10 +220,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     {
         return Ok(());
     }
-    store
-        .sqlite
-        .close_task_shells(&task.id)
-        .map_err(task_error)?;
+    crate::desktop::shells::request_retirement(&store.sqlite, &task.id).map_err(task_error)?;
     // The existing owner policy sees the closing intent and rechecks active
     // work and queued input in the serving loop before ending the provider.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
@@ -238,11 +231,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
             .map_err(task_error)?;
         return Ok(());
     }
-    if !store
-        .sqlite
-        .task_shell_jobs_settled(&task.id)
-        .map_err(task_error)?
-    {
+    if !crate::desktop::shells::jobs_settled(&store.sqlite, &task.id).map_err(task_error)? {
         return Err(task_error(
             "Shell owner ended without confirmed job cleanup; retained checkout",
         ));
@@ -266,10 +255,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
 }
 
 fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let shells = store
-        .sqlite
-        .task_shell_owners(&task.id)
-        .map_err(task_error)?;
+    let shells = crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)?;
     let mut allowed: HashSet<_> = shells.into_iter().collect();
     for session in store
         .sqlite

@@ -233,23 +233,20 @@ its surface; replacement providers begin with an empty observation.
 
 ## Task shells and completed workspaces
 
-```sh
-lf task shell TASK --checkout /recorded/checkout --id SHELL --create
-lf task shell TASK --checkout /recorded/checkout --list
-lf task shell TASK --checkout /recorded/checkout --id SHELL
-lf task shell TASK --checkout /recorded/checkout --id SHELL --close
-```
+Desktop creates a shell once, on the Task's recorded Machine. Its private
+runtime in `desktop::shells` owns execution receipts, startup, reconnect and
+Close. It runs on headless Linux too, without an app server. Machine routing
+carries the same viewer protocol across SSH; the transport owns the PTY.
+There is no Task shell command or external-host shell registry.
 
-Choose a fresh shell identity once. Creation accepts literal initial argv after
-`--`, followed by the destination login shell; repeating that identity never runs
-its initial command again. Attachment, Hide and Desktop exit leave the shell
-running. Close ends its ordinary foreground, background and stopped jobs, even
-when job control assigned them separate process groups. Deliberately daemonized
+Attachment, Hide and Desktop exit leave execution running. Creation consumes
+initial argv and Desktop's supplied integration once; reconnect never replays
+startup. Close ends ordinary foreground, background and stopped jobs, even when
+job control assigned them separate process groups. Deliberately daemonized
 processes that created a different OS session are outside the shell's ownership.
 Ended shells retain their identity and saved screen. Undo restores that history;
 New Shell deliberately starts different execution. An unavailable destination
-never opens a local successor prompt. Prefix these commands with `--machine` to
-use the same operations on the Task's recorded Machine.
+never opens a local successor prompt.
 
 Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
 viewers count, passive ones too; input control is separate. Closing the last
@@ -305,10 +302,5 @@ other queued Tasks. Overlapping passes serialize, and interrupted effects can be
 retried. `lf task retire <task>` runs one pass for a specific Task. Reopening a
 retired Task never silently recreates a checkout.
 
-Task shell creation accepts an optional `--bootstrap` JSON object with a `script`
-and relative UTF-8 `files`. Desktop supplies its bundled Ghostty integration;
-the generic launcher selects no terminal integration. Resource contents cross
-SSH and are materialized on the destination under the Machine's `shell-resources`
-cache, keyed by payload digest. The startup script sees `LF_SHELL_RESOURCES`,
-`SHELL`, and terminal identity after the literal initial command finishes.
-Only creation applies it; reattachment never reruns startup.
+Desktop's private [shell runtime](../desktop/README.md) carries startup resources
+on creation; the viewer transport does not select terminal integration.

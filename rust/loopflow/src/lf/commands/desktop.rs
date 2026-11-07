@@ -1055,6 +1055,9 @@ pub(super) fn present_files(
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     match command {
+        DesktopCommand::Shell { .. } => {
+            unreachable!("shell runtime dispatch precedes Desktop control")
+        }
         DesktopCommand::Layout {
             work, save: false, ..
         } => {
@@ -1575,7 +1578,8 @@ impl Verb {
                     target.clone(),
                 )
             }
-            DesktopCommand::View { .. }
+            DesktopCommand::Shell { .. }
+            | DesktopCommand::View { .. }
             | DesktopCommand::Plans { .. }
             | DesktopCommand::Plan { .. }
             | DesktopCommand::Done { .. }
@@ -1753,12 +1757,13 @@ struct TileRequest {
     edit: TileEdit,
 }
 
-/// Commands that never contact Desktop, so they run on any platform: saved
-/// intent, view plans and tile verbs naming a saved record's tile.
+/// Commands that never contact the app: saved intent, view plans, saved tile
+/// verbs and the Desktop shell runtime on its execution Machine.
 pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     match command {
-        DesktopCommand::View { .. }
+        DesktopCommand::Shell { .. }
+        | DesktopCommand::View { .. }
         | DesktopCommand::Plans { .. }
         | DesktopCommand::Plan { .. }
         | DesktopCommand::Done { .. }

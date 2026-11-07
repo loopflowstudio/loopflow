@@ -77,7 +77,7 @@ server package. On macOS, run that command directly with `-- --ignored`:
 Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
 tests are explicitly ignored in its default suite. Linux runs them normally
 inside network isolation. No system SSH configuration, keys or installed lf are used.
-Twenty cycles exercise the public Machine route, abrupt transport loss,
+Twenty cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
 reattachment to the same shell, Close and process/PTY/socket settlement;
 a separate case covers failed authentication, stale checkout and shell exit.
 These are real SSH protocol checks on one Machine, not a two-Machine or installed
@@ -88,7 +88,7 @@ remote. Scheduled-pass tests cover interrupted closing, retry/backoff, an empty
 queue and failure isolation across Tasks. Installation schedule fixtures use fake
 launchctl and disposable files; never register a real cleanup job for a test.
 Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
-public CLI, then reattach without replay. The generic local case has no Ghostty
+private Desktop runtime, then reattach without replay. The generic local case has no Ghostty
 resources or environment.
 `session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
 records a real owner's hold through leave, reconnect grace and connection loss.

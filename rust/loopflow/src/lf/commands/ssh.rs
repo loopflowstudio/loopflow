@@ -48,13 +48,14 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
-                | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Save { .. }
                 | crate::lf::TaskCommand::Create { run: false, .. }
+        }) | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Shell { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })
@@ -272,13 +273,9 @@ pub fn run(
     }) || (!preview
         && matches!(
             &cli.command,
-            Some(crate::lf::Commands::Task {
-                cmd: crate::lf::TaskCommand::Shell {
-                    close: false,
-                    list: false,
-                    ..
-                },
-            })
+            Some(crate::lf::Commands::Desktop {
+                cmd: crate::lf::DesktopCommand::Shell { args },
+            }) if !args.close
         ));
     if viewer {
         extra_env.push((crate::transport::STREAM_ENV, "1"));

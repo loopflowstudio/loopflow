@@ -223,9 +223,9 @@ final class SessionsWorkspace {
         let id = tab ?? pane.content.selectedTabID
         let replaced: ClosedOccurrence?
         if case .shell(let tabs, _) = pane.content, let id, let shell = tabs.first(where: { $0.id == id }) {
-            if let location = shell.location {
+            if shell.location != nil {
                 do {
-                    let argv = try shellCommand(id: id, at: location, execution: shell.execution)
+                    let argv = try shellCommand(shell)
                     Task { [weak self] in
                         do {
                             _ = try await LocalWaveAgentLauncher.queryLf(Array(argv.dropFirst()) + ["--close"], cwd: nil)
@@ -266,23 +266,23 @@ final class SessionsWorkspace {
     }
 
     /// Both local and remote shells are owned on their recorded Machine.
-    func shellCommand(id: String, at identity: WorkspaceIdentity, execution: TaskLocationObservation? = nil) throws -> [String] {
-        let observed = execution ?? multiplexer.layout.allPanes.first { $0.content.location == identity }?.executionLocation
+    private func shellCommand(_ tab: ShellTab) throws -> [String] {
+        guard let identity = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
+        let observed = tab.execution ?? multiplexer.layout.allPanes.first { $0.content.location == identity }?.executionLocation
         let task: String
         if let observed, observed.machineID == identity.machineId,
            case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
             task = recorded
         } else { task = key.id }
         return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
-         "--repository", key.repository, "task", "shell", task,
-         "--checkout", identity.worktree, "--id", id]
+         "--repository", key.repository, "desktop", "shell", task,
+         "--checkout", identity.worktree, "--id", tab.id]
     }
 
     func shellAttachment(_ tab: ShellTab) throws -> [String] {
-        guard let location = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
-        var argv = try shellCommand(id: tab.id, at: location, execution: tab.execution)
+        var argv = try shellCommand(tab)
         if let initial = tab.command {
-            argv += ["--create", "--bootstrap", try taskShellBootstrap()]
+            argv += ["--create", "--bootstrap", try desktopShellBootstrap()]
             if !initial.isEmpty { argv += ["--"] + initial }
         }
         return argv
@@ -463,8 +463,7 @@ final class SessionsWorkspaceRegistry {
     }
 
     func clearPresentation() {
-        for workspace in workspaces.values { workspace.present(false) }
-        surfaces.clearFocus()
+        closePresentation()
         openWork = []
         selectedWork = nil
     }

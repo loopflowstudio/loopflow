@@ -748,6 +748,12 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    #[command(hide = true)]
+    Shell {
+        #[command(flatten)]
+        args: crate::desktop::shells::ShellArgs,
+    },
     /// Show a Work selection, or derive a passive plan for external hosts
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
@@ -1151,7 +1157,6 @@ impl TaskCommand {
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
-            Self::Shell { list, .. } => !list,
             Self::Retire { .. } => true,
             Self::Comment { message, .. } => message.is_some(),
             Self::Sweep { apply, .. } => *apply,
@@ -1231,6 +1236,7 @@ impl SkillCommand {
 impl DesktopCommand {
     pub fn changes_work(&self) -> bool {
         match self {
+            Self::Shell { .. } => true,
             Self::View { .. }
             | Self::Plans { .. }
             | Self::Plan { .. }
@@ -2119,30 +2125,6 @@ until `lf ship`."
         #[arg(long)]
         json: bool,
     },
-    /// Open a shell in an existing Task checkout, without preparing work
-    Shell {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        /// Stable Desktop shell identity; attachment never creates execution
-        #[arg(long, required_unless_present = "list")]
-        id: Option<String>,
-        /// List retained shell identities, including ended shells
-        #[arg(long, conflicts_with_all = ["id", "create", "close", "command"])]
-        list: bool,
-        /// Create once, then attach; retrying the same identity never replays it
-        #[arg(long, conflicts_with = "close")]
-        create: bool,
-        /// End this shell and its ordinary jobs
-        #[arg(long)]
-        close: bool,
-        /// Host startup JSON (script and relative UTF-8 files); applied only at creation
-        #[arg(long, requires = "create")]
-        bootstrap: Option<String>,
-        /// Initial command, followed by the destination login shell
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
     /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
     Retire { issue: Option<String> },
@@ -2304,8 +2286,7 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2333,8 +2314,7 @@ impl TaskCommand {
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Shell { issue, .. }
-            | Self::WatchFiles { issue, .. }
+            Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -3111,6 +3091,34 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
+        assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
+        let cli = Cli::try_parse_from([
+            "lf",
+            "desktop",
+            "shell",
+            "task-id",
+            "--checkout",
+            "/checkout",
+            "--id",
+            "shell-id",
+            "--create",
+        ])
+        .unwrap();
+        let Some(Commands::Desktop { cmd }) = cli.command else {
+            panic!("Desktop runtime command");
+        };
+        assert!(crate::lf::commands::desktop::runs_without_desktop(&cmd));
+        assert!(cmd.changes_work());
+        assert!(!cmd.is_read());
+        let mut command = Cli::command();
+        let task = command.find_subcommand_mut("task").unwrap();
+        assert!(task.find_subcommand("shell").is_none());
+        let desktop = command.find_subcommand_mut("desktop").unwrap();
+        assert!(!desktop.render_help().to_string().contains("shell runtime"));
+    }
 
     #[test]
     fn only_changes_to_work_record_a_process() {

@@ -3053,6 +3053,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(checkout, "/repo.task");
+        conn.execute("INSERT INTO desktop_shells(id,task_id,checkout,created_at) VALUES('shell','task_workspace','/repo.task',100)", []).unwrap();
+        let shell: (String, Option<String>, bool) = conn
+            .query_row(
+                "SELECT checkout,owner,jobs_settled FROM desktop_shells WHERE id='shell'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(shell, ("/repo.task".into(), None, false));
+        assert!(!conn.table_exists(None, "task_shells").unwrap());
+
         conn.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase) SELECT id,planning_completed_at,worktree,branch,900,'waiting' FROM tasks WHERE id='task_workspace'", []).unwrap();
         let retry: (Option<i64>, i64) = conn
             .query_row("SELECT retry_at,failures FROM task_retirements", [], |r| {

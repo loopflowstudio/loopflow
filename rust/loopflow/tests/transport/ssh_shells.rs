@@ -1,4 +1,4 @@
-//! Real loopback OpenSSH, separate Machine stores, and the public routed shell CLI.
+//! Real loopback OpenSSH, separate Machine stores, and Desktop's routed runtime.
 //! Keys, daemon, configuration and known-hosts are disposable; no system service.
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -133,7 +133,7 @@ impl Ssh {
         self.source_command(&[
             "--machine",
             &self.machine,
-            "task",
+            "desktop",
             "shell",
             TASK,
             "--checkout",
@@ -287,8 +287,8 @@ impl Drop for Ssh {
         if let Ok(sql) =
             rusqlite::Connection::open(self.destination.home.path().join("loopflow.db"))
         {
-            let _ = sql.execute("UPDATE task_shells SET close_requested=1", []);
-            if let Ok(mut query) = sql.prepare("SELECT p.pid FROM processes p WHERE p.id IN (SELECT owner FROM task_shells UNION SELECT transport_lf_process_id FROM agent_sessions) AND p.completed_at IS NULL AND p.pid IS NOT NULL") {
+            let _ = sql.execute("UPDATE desktop_shells SET close_requested=1", []);
+            if let Ok(mut query) = sql.prepare("SELECT p.pid FROM processes p WHERE p.id IN (SELECT owner FROM desktop_shells UNION SELECT transport_lf_process_id FROM agent_sessions) AND p.completed_at IS NULL AND p.pid IS NOT NULL") {
                 let owners: Vec<i32> = query.query_map([], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
                 for pid in &owners {
                     // SAFETY: these are the owners launched in this fixture's store.
@@ -537,7 +537,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
             .destination
             .sql()
             .query_row(
-                "SELECT jobs_settled FROM task_shells WHERE id=?1",
+                "SELECT jobs_settled FROM desktop_shells WHERE id=?1",
                 [&id],
                 |r| r.get(0),
             )
@@ -549,7 +549,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         .destination
         .sql()
         .query_row(
-            "SELECT count(*),sum(jobs_settled) FROM task_shells",
+            "SELECT count(*),sum(jobs_settled) FROM desktop_shells",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

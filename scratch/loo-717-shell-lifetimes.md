@@ -1,5 +1,104 @@
 # LOO-717 — Shell lifetime and Task Session viewers
 
+## Accepted revision — Desktop owns shell persistence
+
+Jack Heart requested on November 6: “yeah, lets remove that API and put it in
+the desktop.” This supersedes the general `lf task shell` surface described in
+the implementation history below. Shell persistence is a Desktop feature;
+Task Session viewing independently owns checkout retention.
+
+Remove `lf task shell`, its Task command dispatch/routing, documentation and
+callers. Do not keep a compatibility alias or merely hide the old Task command.
+Move shell create/attach/reconnect/Close policy, execution receipts and startup
+handling behind a Desktop-owned interface and implementation. Desktop's Swift
+workspace consumes that interface. Reuse LF's existing transport, Machine routing,
+PTY ownership and process evidence rather than introducing another transport,
+server or shell manager. A destination-side runtime entry point may live in the
+cross-platform binary for remote Linux execution; it must belong to Desktop,
+work without a running GUI, and not route through macOS-only Desktop UI control.
+The implementation should choose the smallest existing Desktop boundary that
+meets this requirement, not a new general-purpose public shell API.
+
+Preserve the accepted experience: Desktop shell state and jobs survive hide,
+switch, quit and network loss; reconnect attaches to the same execution; explicit
+Close ends its ordinary jobs; Undo restores history without restarting execution;
+new execution is explicit; creation scripts and initial argv never replay.
+Keep Desktop's supplied Ghostty integration and no local fallback on remote error.
+Rex continues owning its ordinary shells with no LF wrapper or inventory.
+
+LF retains Task Session viewer evidence, the existing scheduled retirement queue,
+and checkout/branch cleanup. Shell attachments add no checkout hold. Eligible
+cleanup must still settle Desktop-owned shell executions through the narrow
+Desktop lifecycle boundary before removing their checkout, while never closing
+Rex shells. Preserve cancellation on returning Session viewing, explicit Close,
+active work/draft protections, deadlines and retry behavior. Avoid duplicating
+retirement policy in Desktop or requiring the app to be open for remote cleanup.
+
+Delete replaced functions/modules and update all CLI, SSH, Swift, tests and docs
+together. If receipt/schema names change, edit this Task's unreleased migration
+in place; no live-store migration or installation is authorized. Validate the
+removed Task command, Desktop's actual local and loopback-SSH launch/reattach/Close
+path, same PID/state, no startup replay, quit/disconnect recovery and Session-only
+retirement including between-sweep cancellation. Run relevant formatting, Clippy
+and affected checks, sync and publish the existing PR, then stop at feature/demo.
+Earlier checks do not validate this new ownership boundary. No shipping approval.
+
+### Desktop ownership cut — November 6
+
+Delete — do not maintain: `TaskCommand::Shell`, its selector/dispatch/SSH cases,
+`ops::task::workspace::{task_shell,list_shells,ShellBootstrap,shell_command}`,
+`ops/task/workspace-shell.sh`, `store/sqlite/task_shells.rs`, the `TaskShell`
+export and Task-shell command examples/list-only assertion. Transport's inline
+Close policy and `shell_holds_work` input policy move into Desktop too. File observation stays
+in Task workspace. Lifecycle, no-replay, history and cleanup tests move to the
+Desktop path. Rename the unreleased receipt table to `desktop_shells` in this
+Task's existing migration; no compatibility table or second migration.
+
+Implemented boundary: hidden `desktop shell` runtime in the existing command tree,
+backed by `desktop::shells` for create/attach/Close, startup and receipt storage.
+It dispatches before repository/UI binding, declares that it needs no Desktop
+app and uses resident Machine routing plus the existing viewer stream. Swift
+supplies its bundled startup resources. Shared transport delegates shell Close
+judgment to Desktop; scheduled Task retirement calls Desktop settlement and
+cancellation functions. No new service, protocol or per-Task worker.
+
+The deletion cut is complete. One private Desktop runtime and one receipt table
+remain; file observation stays under Task. Required behavior tests now use that
+runtime. No migration, installation or schedule registration touched the live
+Machine.
+
+The cleanup reader and store now share `ViewerHold` instead of a reason string
+and independent absence timestamp; viewing and absence cannot contradict each
+other at this API. Receipt reads carry only checkout and owner, with cancellation
+tests reading exact Close intent directly. Desktop startup parsing is private;
+its wire fixture no longer requires a public Rust bootstrap type. The leftover
+public Task workspace module and process-start timestamp accessor are removed.
+Swift derives launch and Close argv from the shell tab itself and shares its
+presentation-release path. No deletion target remains.
+
+Focused checks (inherited `LF_*` cleared; disposable stores and built CLI):
+
+- `cargo test -p loopflow --lib desktop_shell` — two passed (removed Task API, GUI-independent runtime, create once).
+- `cargo build -p loopflow --bin lf`; `cargo test -p loopflow --test transport_tests shell` — build and four local checks passed, including twenty lifecycle cycles and between-sweep cancellation; three SSH checks explicitly ignored on macOS. Log: `/tmp/loo717-desktop-local.log`.
+- `cargo test -p loopflow --test transport_tests ssh_shells::ssh_shell_ -- --ignored` — two passed, including twenty real SSH cycles, PID/state retention, no replay, Close/settlement and failure behavior. Log: `/tmp/loo717-desktop-ssh.log`.
+- Focused `--lib` checks `task_workspace_upgrade_preserves_checkout_and_adds_retry_queue`, `returning_viewers_revoke_closes_and_retry_without_a_sweep`, `automatic_shell_close_rechecks_task_viewing_before_consuming_stale_intent` — all three passed. Log: `/tmp/loo717-desktop-retirement.log`.
+- `uv run python scripts/check_migrations.py` — passed; one unreleased migration, edited in place.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'remoteOpeningKeepsLocalPlanningAndRetainedDrafts|GhosttyShellBlockTests'` — app/FFI built; seven headless tests passed, including five remote-location cases. Log: `/tmp/loo717-desktop-swift.log`.
+- `cargo fmt --all -- --check`; `git diff --check`; `lf context` — passed; scratch fits both limits.
+- `cargo test -p loopflow --lib retirement` — 16 passed after the `ViewerHold` reduction; `/tmp/loo717-compress-retirement.log`.
+- `cargo nextest run -p loopflow --lib -E 'test(automatic_shell_close_) | test(desktop_shell_)'` — three passed; `/tmp/loo717-compress-shell-policy.log`.
+- `cargo nextest run -p loopflow --test transport_tests -E 'test(returning_task_viewer_cancels_shell_close_without_another_sweep) | test(desktop_shell_reconnects_without_replay_and_close_settles_its_jobs)'` — CLI built and both passed, including generic and integrated shell variants; `/tmp/loo717-compress-transport.log`.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'remoteOpeningKeepsLocalPlanningAndRetainedDrafts|departureEndsTerminalViewers|companionSwitchRetainsViews|undoCloseReturnsTheClosedShellTab'` — app/FFI built, four headless tests passed (remote opening includes five cases); `/tmp/loo717-compress-swift.log`.
+
+The Rust compact-unwind linker warning and existing Swift deployment/deprecation
+warnings remain. These checks do not demonstrate native hosts or a physical peer.
+
+Remaining: the existing Graph's refresh/review and publication steps. Publication owns Clippy, affected suites,
+sync and PR #1811 update; feature stops at interactive demo. Add
+`desktop::shells::` and the CLI removal check to the prior gate selection, replacing
+its removed `store::sqlite::task_shells::` filter. Native and physical remote
+Machine acceptance remains unproved.
+
 Jack Heart selected option 1 on November 6, 2026: carry the existing viewer
 protocol across SSH and remove the additional remote terminal relay. Implementation
 and review publication are authorized; shipping, installation and live-store
@@ -159,7 +258,7 @@ protected work permits. A second connected viewer keeps the checkout throughout.
 | --- | --- | --- |
 | View or passively observe a Task Session | Session-associated viewer | Transport Attach/Resume, separate input claim |
 | Hide a still-open native view | Same connection | No host focus report |
-| Open a shell | Shell execution receipt | task shell create/attach/Close; no checkout hold |
+| Open a shell | Desktop shell execution receipt | Desktop create/attach/Close runtime; no checkout hold |
 | Leave or lose the last connection | Dated absence | Serving Process viewer evidence |
 | Complete and leave | One pinned retirement | Task completion/checkout/branch; scheduled Machine sweep |
 | Cleanup becomes eligible | Owned execution and Git resources | Work checks, Desktop shell settlement, Git safeguards |
@@ -441,7 +540,7 @@ scheduler registration, credential change or live-store migration occurred.
 
 Remaining work:
 
-- Review publication: update PR #1811 for the scheduled-sweep/generic-launch
+- Review publication: update PR #1811 for the Desktop shell ownership
   revision after the required checks. The prior `scratch/pr-review.html`
   walkthrough describes `a1067c99cc` and predates both November 6 replacements.
 - Demo: local and real remote Desktop reconnect/Close, orderly Quit delivery,

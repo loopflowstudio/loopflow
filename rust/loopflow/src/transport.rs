@@ -781,7 +781,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let shell = std::env::var("LF_DESKTOP_SHELL").ok();
     std::env::remove_var("LF_DESKTOP_SHELL");
     if let Some(shell) = &shell {
-        crate::journal::process_ledger()?.bind_task_shell(shell, &id)?;
+        crate::journal::process_ledger()?.bind_desktop_shell(shell, &id)?;
     }
     let path = endpoint(&id).context("Prepare transport socket")?;
     let listener = UnixListener::bind(&path)
@@ -1286,8 +1286,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if let Some(input) = input.as_mut() {
             // Typing at an idle shell prompt is not an agent draft: retain only
             // input that work running inside the shell could receive.
-            let record =
-                terminal && (shell.is_none() || pending_input.is_empty() || shell_holds_work(&id));
+            let record = terminal
+                && (shell.is_none()
+                    || pending_input.is_empty()
+                    || crate::desktop::shells::holds_input(&id));
             pending_input.forward(input, &id, record);
         }
         if end_input && pending_input.is_empty() {
@@ -1646,23 +1648,6 @@ fn release_viewer_hold(owner: &LfProcessId, previous: Option<ViewerHold>) {
     if let Err(error) = recorded {
         tracing::warn!(%error, %owner, "cannot record Session viewer release; last observation expires");
     }
-}
-
-/// Whether work inside shell `owner` could receive typed input. An idle shell
-/// clears any draft it recorded earlier; an unreadable store keeps recording.
-fn shell_holds_work(owner: &LfProcessId) -> bool {
-    let holds = crate::journal::process_ledger().and_then(|store| {
-        let holds = store.shell_holds_work(owner)?;
-        if !holds {
-            store.clear_owner_input(owner)?;
-        }
-        Ok(holds)
-    });
-    holds
-        .inspect_err(
-            |error| tracing::warn!(%error, %owner, "cannot judge shell work; retaining input"),
-        )
-        .unwrap_or(true)
 }
 
 /// Send the ending event even when no more output can complete a sequence.

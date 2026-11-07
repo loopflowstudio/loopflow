@@ -6,7 +6,7 @@ use std::sync::Arc;
 use loopflow_test_support::TestRepo;
 use rusqlite::params;
 
-use super::{advance, now, sweep, VIEWED};
+use super::{advance, now, sweep};
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::store::sqlite::ViewerHold;
@@ -51,7 +51,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
         let intent = fixture.intent();
         assert_eq!(
             (intent.due_at, intent.reason.as_deref()),
-            (None, Some(VIEWED))
+            (None, Some("Retained by an open Task Session viewer"))
         );
         // A passive or hidden viewer is still an attached viewer: its exit alone releases.
         fixture
@@ -117,7 +117,11 @@ fn retirement_lost_viewers_and_crashed_owners_expire_without_reopening() {
             fixture
                 .store
                 .sqlite
-                .reconcile_task_retirement(&fixture.task.id, now() - 1000, Some("viewed"), None)
+                .reconcile_task_retirement(
+                    &fixture.task.id,
+                    now() - 1000,
+                    Some(ViewerHold::Viewed(now() - 1000)),
+                )
                 .unwrap();
             let owner = fixture.session_owner("lost", Some(hold));
             fixture
@@ -139,7 +143,7 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
         fixture
             .store
             .sqlite
-            .create_task_shell(
+            .create_desktop_shell(
                 "shell",
                 &fixture.task.id,
                 fixture.checkout.to_str().unwrap(),
@@ -148,7 +152,7 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
         fixture
             .store
             .sqlite
-            .bind_task_shell("shell", &shell)
+            .bind_desktop_shell("shell", &shell)
             .unwrap();
         fixture
             .sql()
@@ -282,7 +286,7 @@ impl Workspace {
     fn due(&self) {
         self.store
             .sqlite
-            .reconcile_task_retirement(&self.task.id, now() - 901, None, None)
+            .reconcile_task_retirement(&self.task.id, now() - 901, None)
             .unwrap();
     }
 

@@ -106,7 +106,7 @@ struct GhosttyShellBlockTests {
     @Test("the default-prompt shell gets a context header and reports a failed command")
     func zshBootstrapMarksHeaderAndFailure() throws {
         let resources = try #require(GhosttyRuntimeResources.directoryURL)
-        let payload = try #require(try JSONSerialization.jsonObject(with: Data(taskShellBootstrap().utf8)) as? [String: Any])
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(desktopShellBootstrap().utf8)) as? [String: Any])
         let files = try #require(payload["files"] as? [String: String])
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("loopflow-zsh-\(UUID().uuidString)", isDirectory: true)

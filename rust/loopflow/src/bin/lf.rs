@@ -1050,7 +1050,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             Ok(())
         }
         TaskCommand::Retire { .. }
-        | TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => {
             unreachable!("workspace commands dispatch before repository binding")
@@ -1944,34 +1943,13 @@ fn run() -> anyhow::Result<()> {
             journal::admit_process(&std::env::current_dir()?, &args);
             return loopflow::ops::task::retirement::run(issue.as_deref()).map_err(Into::into);
         }
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Shell {
-                    issue,
-                    checkout,
-                    id,
-                    list,
-                    create,
-                    close,
-                    command,
-                    bootstrap,
-                },
+        Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
-            if *list {
-                return loopflow::ops::task::workspace::list_shells(issue, checkout);
-            }
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow::ops::task::task_shell(
-                issue,
-                checkout,
-                id.as_deref().expect("Clap requires shell identity"),
-                *create,
-                *close,
-                command,
-                bootstrap.as_deref(),
-            );
+            return loopflow::desktop::shells::run(shell);
         }
         Some(Commands::Task {
             cmd:

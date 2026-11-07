@@ -31,6 +31,30 @@ aggregate run. Publication precedes demo review.
 No ship, installation or live-store migration
 approval is implied.
 
+## November 6 — Desktop shell ownership revision
+
+Jack Heart requested removal of `lf task shell` and moving that feature into
+Desktop. The current design's “Accepted revision — Desktop owns shell persistence”
+is authoritative over older Task-shell API descriptions. Preserve persistent
+Desktop shells and shared local/SSH transport; remove the general Task shell API
+and move its lifecycle behind a Desktop-owned interface. Task Session viewers
+remain the sole checkout holds, and scheduled LF cleanup still settles only
+Desktop-owned shells. Implement, verify, sync and publish in LOO-717, returning
+to demo review. No merge, install, live-store or scheduler registration approval.
+The ownership cut is implemented in the working tree. Focused local and real
+loopback-SSH lifecycle checks, schema/cancellation regressions and seven headless
+Swift checks pass. The design records the commands. Existing Graph steps still
+own compression, review, broader checks, sync and publication.
+
+Desktop ownership choice, November 6: use the existing `desktop` command namespace
+for a hidden destination runtime, independent of macOS UI control. Move execution
+receipts/startup/Close policy into `desktop::shells`; keep PTY and Machine transport
+shared. Remove the unused public shell listing surface; ended history remains
+available through Desktop reattachment. Rename only the unreleased receipt table.
+Product memory proposal for refresh: Desktop owns persistent shell receipts and
+startup/Close policy; the Task shell API is removed. LF retains Session viewing
+and scheduled checkout retirement, delegating Desktop shell settlement.
+
 Implementation choices, November 6: retry delay starts at sixty seconds, doubles
 per cleanup failure and caps at one hour. A returning viewer clears retry state;
 absence timing stays separate. The account's normal installation provisions the

@@ -4186,7 +4186,7 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
     let base = [
-        "task",
+        "desktop",
         "shell",
         task,
         "--checkout",
@@ -4257,14 +4257,14 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
         assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
         let paused = PausedOwner(pid);
         fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;
-            UPDATE task_shells SET close_requested=2;").unwrap();
+            UPDATE desktop_shells SET close_requested=2;").unwrap();
         let mut passive = fixture.viewer(&session_owner, false);
         wait_hold(&fixture, &session_owner, Some("viewed"));
         let state: (String, Option<i64>, Option<i64>, i64, i64) = fixture
             .sql()
             .query_row(
                 "SELECT h.phase,h.due_at,h.retry_at,h.failures,s.close_requested
-             FROM task_retirements h JOIN task_shells s ON s.task_id=h.task_id",
+             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
@@ -4308,7 +4308,7 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
     let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled FROM task_shells WHERE owner=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
             [&shell],
             |r| r.get(0),
         )
@@ -4337,7 +4337,7 @@ impl Fixture {
 
     fn shell_owner(&self, id: &str) -> String {
         self.sql()
-            .query_row("SELECT owner FROM task_shells WHERE id=?1", [id], |r| {
+            .query_row("SELECT owner FROM desktop_shells WHERE id=?1", [id], |r| {
                 r.get(0)
             })
             .unwrap()
@@ -4345,7 +4345,7 @@ impl Fixture {
 
     fn shell_count(&self) -> u32 {
         self.sql()
-            .query_row("SELECT count(*) FROM task_shells", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM desktop_shells", [], |r| r.get(0))
             .unwrap()
     }
 }
@@ -4391,10 +4391,10 @@ fn desktop_shell_bootstrap() -> String {
             std::fs::read_to_string(root.join(source)).unwrap(),
         );
     }
-    serde_json::to_string(&loopflow::ops::task::workspace::ShellBootstrap {
-        script: std::fs::read_to_string(root.join("task-shell.sh")).unwrap(),
-        files,
-    })
+    serde_json::to_string(&json!({
+        "script": std::fs::read_to_string(root.join("task-shell.sh")).unwrap(),
+        "files": files,
+    }))
     .unwrap()
 }
 
@@ -4414,7 +4414,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
     )
     .unwrap();
     let base = [
-        "task",
+        "desktop",
         "shell",
         task,
         "--checkout",
@@ -4510,7 +4510,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
     let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled FROM task_shells WHERE owner=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
             [&owner],
             |r| r.get(0),
         )
@@ -4531,19 +4531,6 @@ fn shell_reconnects_and_settles(integrated: bool) {
                 .trim()
                 .starts_with('Z')
     );
-    let listed = fixture
-        .command(&[
-            "task",
-            "shell",
-            task,
-            "--checkout",
-            fixture.repo.path().to_str().unwrap(),
-            "--list",
-        ])
-        .output()
-        .unwrap();
-    assert!(listed.status.success(), "{listed:?}");
-    assert!(String::from_utf8_lossy(&listed.stdout).contains("desktop-shell\tended"));
     // History remains readable after retirement removed the recorded directory.
     let checkout = fixture.repo.path().to_path_buf();
     let retired = checkout.with_extension("retired");
@@ -4569,7 +4556,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
     for cycle in 0..20 {
         let id = format!("cycle-{cycle}");
         let base = [
-            "task",
+            "desktop",
             "shell",
             task,
             "--checkout",
@@ -4636,7 +4623,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
         let settled: bool = fixture
             .sql()
             .query_row(
-                "SELECT jobs_settled FROM task_shells WHERE id=?1",
+                "SELECT jobs_settled FROM desktop_shells WHERE id=?1",
                 [&id],
                 |r| r.get(0),
             )
@@ -4646,7 +4633,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
     let (total, settled): (u32, u32) = fixture
         .sql()
         .query_row(
-            "SELECT count(*),sum(jobs_settled) FROM task_shells WHERE task_id=?1",
+            "SELECT count(*),sum(jobs_settled) FROM desktop_shells WHERE task_id=?1",
             [task],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

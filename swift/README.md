@@ -1120,7 +1120,8 @@ same owner and never replays startup or creates replacement execution.
 Task shell views attach to a retained owner on the Task's recorded Machine.
 Desktop supplies its existing Ghostty startup script and resource bytes when
 creating the shell; destination creation installs those resources, while reconnect
-only attaches. The shared Task shell launcher has no Ghostty dependency.
+only attaches. Desktop owns the shell runtime and execution receipts; shared transport has no Ghostty dependency.
+Its private destination runtime works without the GUI, including on Linux.
 Hide, switching Work and app exit detach presentation. Close ends that shell and
 its ordinary jobs; Undo restores its identity and history. Use Reconnect for
 transport loss and New Shell for fresh execution. No remote failure opens a

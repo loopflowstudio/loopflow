@@ -1,8 +1,8 @@
 pub(crate) mod adoption;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
-pub mod workspace;
-pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
+mod workspace;
+pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,

@@ -200,3 +200,17 @@ Use your terminal app to restore its tabs after a restart. Restoring a layout ma
 start fresh shells; it does not necessarily preserve running programs. Closing a
 view does not delete the Task. LF closes only its Desktop-owned shells; external
 terminal apps own theirs.
+
+## Keep a completed Task's worktree
+
+A Conversation pane keeps a completed Task's worktree, focused or not. Task &
+workflow and shells do not, so a tab without a Conversation can lose its directory
+while you use it. Run `lf open --task <task>` to open a Conversation before you
+finish work there.
+
+With no Conversation pane open, LF deletes a merged Task's worktree and any
+uncommitted files in it about 15 minutes after the Task completes or the last
+Conversation pane closes, whichever is later. A conversation whose process stops
+responding counts as closed about 30 seconds after its last report. Opening a
+Conversation cancels the countdown; closing it starts a new one. Requested work
+finishes first. Task and conversation history remain.

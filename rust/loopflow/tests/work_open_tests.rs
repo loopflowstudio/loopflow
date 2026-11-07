@@ -2016,6 +2016,49 @@ fn a_conversation_running_lf_open_stays_where_it_is() {
 }
 
 #[test]
+fn a_task_conversation_stays_put_when_the_task_has_no_primary() {
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let caller = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Unchosen conversation",
+        1,
+        0,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+        rusqlite::params![
+            caller,
+            registered.task.id.as_str(),
+            registered.task.wave_id.as_ref().unwrap().as_str()
+        ],
+    )
+    .unwrap();
+
+    let env = agent_caller_env(home.path(), &caller);
+    let (_, created) = rex_open(
+        home.path(),
+        repo.path(),
+        bin.path(),
+        &[("LF_AGENT_CALLER", &env)],
+        &[&["open", "--task", "INF-123"], FIXTURE_REX].concat(),
+    );
+
+    assert!(created.contains("Task & workflow"), "{created}");
+    assert!(!created.contains("resume"), "{created}");
+}
+
+#[test]
 fn a_session_without_a_task_opens_one_conversation_tab_here() {
     let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-498 · What lf open resumes</title>
+<title>LOO-498 · What keeps a Rex tab's worktree</title>
 <style>
 :root{color-scheme:light dark;--bg:#faf9f5;--fg:#252b28;--muted:#636e67;--line:#d3d9d1;--fill:#edf0e8;--accent:#3e6753}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}
@@ -10,42 +10,46 @@ h1{font-size:34px;line-height:1.15;letter-spacing:-.8px;margin:30px 0 18px}h2{fo
 p{margin:10px 0}li{margin:10px 0}
 .table{overflow-x:auto}table{width:100%;border-collapse:collapse;margin:18px 0;font-size:15px}
 th,td{text-align:left;vertical-align:top;padding:11px 12px 11px 0;border-bottom:1px solid var(--line)}th{font-weight:600}
-pre{padding:18px;background:var(--fill);white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.7 ui-monospace,monospace}
+blockquote{margin:18px 0;padding:14px 18px;background:var(--fill)}
 code{font-size:.85em;overflow-wrap:anywhere}
 .decision{border-left:3px solid var(--accent);padding-left:18px}
 .proposed{color:var(--accent);font-weight:600}
 @media(prefers-color-scheme:dark){:root{--bg:#1b211e;--fg:#e1e8df;--muted:#a6b2a8;--line:#414d44;--fill:#263028;--accent:#9bc5a8}}
 @media(max-width:600px){main{margin-top:24px}h1{font-size:29px}table{font-size:13px}}
 </style></head><body><main>
-<header>LOO-498 · concept-review · November 7, 2026 · headless, no person took part<br>
-Built from: scratch/rex-workspace.md, scratch/questions.md, docs/workspaces.md, open.rs, open/workspace.rs, open/workspace/layout.rs, work_open_tests.rs, on 210da42d7.</header>
+<header>LOO-498 · concept-review, second pass · November 7, 2026 · headless, no person took part<br>
+Built from: scratch/rex-workspace.md, scratch/questions.md, docs/workspaces.md, open.rs, open/rex.rs, open/workspace.rs, open/workspace/layout.rs, task_view.rs, ops/task/retirement.rs, transport/README.md, on 746bb5fca plus the realign fix.</header>
 
-<h1>The selection decides what resumes. A conversation stays with its caller.</h1>
-<div class="decision"><p>One choice needs you: should a repository or Wave opening move a conversation that is live somewhere else? It does today. Question 1 below. The fixes on this page do not wait on it.</p></div>
+<h1>A Rex tab can look open while its worktree is on a clock.</h1>
+<div class="decision"><p>Decide question 3: should a tab showing Task &amp; workflow keep a completed Task's worktree? It does not today. Questions 1 and 2 from the first pass are still open and repeated below. Last pass's three fixes are built and hold.</p></div>
 
 <h2>Actions, concepts, APIs</h2>
-<p>Text marked <span class="proposed">next</span> is direction for implement. Everything else exists on this tree.</p>
+<p>This is what each Rex pane does for a merged, completed Task. This comes from reading the code; it was not run.</p>
 <div class="table"><table>
-<tr><th>What you do</th><th>What is selected</th><th>What a Conversation pane does today</th><th>After</th></tr>
-<tr><td><code>lf open --task ENG-123</code></td><td>One Task</td><td><code>lf resume</code>, starting a conversation if there is none</td><td>Same</td></tr>
-<tr><td><code>lf open</code> or <code>--wave</code></td><td>Started, unfinished Tasks</td><td>Reconnects a running provider; otherwise Task &amp; workflow</td><td>Same, pending question 1</td></tr>
-<tr><td>A Task starts while the Workspace tab runs</td><td>That Task, automatically</td><td>Task &amp; workflow, input left alone</td><td>Same</td></tr>
-<tr><td>An agent runs <code>lf open</code> on its own conversation</td><td>The caller's Task or Wave</td><td><code>lf resume &lt;itself&gt;</code>: its pane moves mid-turn</td><td><span class="proposed">next:</span> tab opens, Task &amp; workflow in that slot, caller stays</td></tr>
-<tr><td><code>lf open --session &lt;id&gt;</code>, no Task</td><td>One Session</td><td>Every started Task tab runs <code>lf resume &lt;id&gt;</code>, and a follower starts</td><td><span class="proposed">next:</span> one Conversation tab, nothing else</td></tr>
-<tr><td><code>lf -a claude open --task</code></td><td>One Task and a harness</td><td>Fails with several harnesses installed; panes never receive <code>-a</code></td><td><span class="proposed">next:</span> starts the first conversation on it</td></tr>
+<tr><th>Pane in the tab</th><th>Runs</th><th>Keeps the worktree</th><th>Docs say</th></tr>
+<tr><td>Conversation</td><td><code>lf resume</code>, a Session viewer with <code>viewer_hold</code></td><td>Yes, focused or not</td><td>Nothing today. <span class="proposed">Proposed:</span> the sentence below</td></tr>
+<tr><td>Task &amp; workflow</td><td><code>lf task view</code>, no Process record</td><td>No</td><td>Nothing today. <span class="proposed">Proposed:</span> the sentence below</td></tr>
+<tr><td>Shell, Files, Changes</td><td>Native Rex terminal</td><td>No, as accepted for ordinary shells</td><td>“external terminal apps own theirs”</td></tr>
 </table></div>
 
 <h2>The mismatch that matters</h2>
-<p>The older opening path already knows a conversation cannot open itself:</p>
-<pre>{label} is this conversation; continue here. Nothing was opened.</pre>
-<p>The native branch returns before that check, at <code>open.rs:1653</code>, so Rex, Herdr and cmux never reach it. Refusing is the wrong repair: the November 3 scope says <code>lf open</code> must work from an agent's tool shell and preserve input authority. So the tab opens and the caller keeps its conversation.</p>
-<p>This and the <code>--session</code> row come from reading the code; neither was run. Implement writes the failing test first. If a test passes unchanged, drop that item.</p>
-
-<h2>Challenged and kept</h2>
+<p>When the passive viewer existed, a tab opened in the background held the worktree: “Hidden or unfocused viewers count, passive ones too”. The November 5 simplification removed that viewer, and Task &amp; workflow took its slot without a hold. Three routes now produce a tab with no Conversation:</p>
 <ul>
-<li><strong>Three <code>Resume</code> values.</strong> They match three actors: background arrival, broad opening, selected Work. Question 1 answered (b) removes one.</li>
-<li><strong>The follower's flags.</strong> Holding its state in argv is why LF records no host inventory.</li>
-<li><strong>Fresh tabs on every open.</strong> Accepted November 5; returning to an existing tab is a host action. A lost tab recovers by opening again.</li>
+<li>A repository or Wave opening, for a Task with no running provider.</li>
+<li>A newly started Task arriving in the Workspace tab.</li>
+<li>An agent running <code>lf open</code> on its own Task, though that agent's own viewer usually holds it.</li>
+</ul>
+<p>So: open a Wave, work in a Task's shell, the PR merges and the Task completes. Fifteen minutes after the first cleanup sweep, the worktree and its uncommitted files are deleted under that shell. Uncommitted files not stopping cleanup is accepted. A person not being told is the part to fix.</p>
+
+<h2>What changes</h2>
+<p><span class="proposed">Proposed</span> for <code>docs/workspaces.md</code>, prose only:</p>
+<blockquote>A Conversation pane keeps a completed Task's worktree, focused or not. Fifteen minutes after the last one closes, LF deletes a merged Task's worktree and any uncommitted files in it. Requested work finishes first. Task &amp; workflow and shells do not keep the worktree, so run <code>lf open --task &lt;task&gt;</code> before you finish work in a tab without a Conversation. Task and conversation history remain.</blockquote>
+
+<h2>Checked and left alone</h2>
+<ul>
+<li><strong>Host routing.</strong> The current viewer outranks startup environment, and a stale Rex placement is refused.</li>
+<li><strong>A running conversation that is not the Task's primary.</strong> A broad open shows Task &amp; workflow. The pane judges the Session it names.</li>
+<li><strong>Two broad opens, two followers.</strong> Each session is its own view of the same Work.</li>
 </ul>
 
 <h2>Questions</h2>
@@ -56,5 +60,8 @@ Built from: scratch/rex-workspace.md, scratch/questions.md, docs/workspaces.md, 
 <li>Auto-Ship shows approved at 12:44:43Z, and what set it is not recorded. For this tree:
 <br>(a) it stands.
 <br>(b) hold for review, with <code>lf ship --stop</code>.</li>
+<li>A Rex tab shows Task &amp; workflow and no Conversation, on a completed Task.
+<br>(a) It does not keep the worktree; the docs say so. Built this way.
+<br>(b) It keeps it, which needs a viewer record for <code>lf task view</code>.</li>
 </ol>
 </main></body></html>

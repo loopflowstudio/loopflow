@@ -709,7 +709,9 @@ struct WorkspaceSessionLifecycleTests {
         registry.openWarmConversations(store: store)
         let deadline = ContinuousClock.now + .seconds(3)
         while await reads.ids.count < 2, ContinuousClock.now < deadline { await Task.yield() }
-        #expect(await reads.ids == ["c", "b"])
+        // Slots go out in this order; arrival at the query crosses actors and may swap.
+        #expect(registry.warmWork.map(\.id) == ["c", "b", "a"])
+        #expect(await reads.ids.sorted() == ["b", "c"])
         #expect(registry.preparationCount == 2)
         workspaces[0].closePane(workspaces[0].multiplexer.sessionPane!.id)
         workspaces[2].closePane(workspaces[2].multiplexer.sessionPane!.id)
@@ -719,7 +721,7 @@ struct WorkspaceSessionLifecycleTests {
         #expect(item(store, "c")?.surface == nil)
         #expect(item(store, "a")?.surface == nil)
         #expect(item(store, "unseen")?.surface == nil)
-        #expect(await reads.ids == ["c", "b"])
+        #expect(await reads.ids.sorted() == ["b", "c"])
     }
 
     @Test("Cancellation after preparation cannot create a late viewer")

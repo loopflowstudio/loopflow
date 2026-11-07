@@ -5,11 +5,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use super::{account_held_until, now_unix, ProviderAccountError};
+use super::{account_held_until, ProviderAccountError};
 use crate::provider_auth::Provider;
-use crate::store::{
-    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, SharedStore,
-};
+use crate::store::{AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId};
 
 fn path(provider: Provider) -> PathBuf {
     crate::store::lf_home_dir()
@@ -46,41 +44,49 @@ pub(crate) fn release(provider: Provider) -> Result<bool, ProviderAccountError> 
     }
 }
 
-/// Whether a held `account` can take a launch of `model`. Unlike routing, this
-/// asks nothing about a pause.
-pub(crate) fn can_take(
-    account: &ProviderAccount,
+/// The held login, when it can take a launch of `model`. Unlike routing, this
+/// asks nothing about an order or a pause.
+pub(crate) fn ready<'a>(
+    provider: Provider,
+    accounts: &'a [ProviderAccount],
     limits: &[AccountLimitRow],
     model: Option<&str>,
     now: i64,
-) -> bool {
-    account.credential_state == CredentialState::Connected
-        && account_held_until(account, limits, model, now).is_none()
+) -> Option<&'a ProviderAccount> {
+    let held = held(provider)?;
+    accounts
+        .iter()
+        .find(|account| account.account_id == held)
+        .filter(|account| {
+            account.credential_state == CredentialState::Connected
+                && account_held_until(account, limits, model, now).is_none()
+        })
 }
 
 /// A held login that cannot take this launch keeps its hold while only a
 /// model-scoped window holds it back; once the whole login is out (a cooldown
-/// or an account-wide window), it is full and the hold ends.
-pub(crate) async fn end_when_full(
-    store: &SharedStore,
+/// or an account-wide window) or gone, the hold ends.
+pub(crate) fn end_when_full(
     provider: Provider,
-    held: &ProviderAccountId,
+    accounts: &[ProviderAccount],
+    limits: &[AccountLimitRow],
+    now: i64,
 ) -> Result<(), ProviderAccountError> {
-    let Some(account) = store.get_provider_account(provider.as_str(), held).await? else {
-        release(provider)?;
+    let Some(held) = held(provider) else {
         return Ok(());
     };
-    let now = now_unix();
-    let limits = store
-        .provider_account_limits(Some(provider.as_str()))
-        .await?;
-    let account_wide = account.cooldown_until.is_some_and(|until| until > now)
-        || limits.iter().any(|limit| {
-            limit.account_id == *held
-                && limit.model.is_none()
-                && limit.limited_until.is_some_and(|until| until > now)
+    let full = accounts
+        .iter()
+        .find(|account| account.account_id == held)
+        .is_none_or(|account| {
+            account.cooldown_until.is_some_and(|until| until > now)
+                || limits.iter().any(|limit| {
+                    limit.account_id == held
+                        && limit.model.is_none()
+                        && limit.limited_until.is_some_and(|until| until > now)
+                })
         });
-    if account_wide {
+    if full {
         tracing::info!(%held, "{provider} hold ends: the held login is full");
         release(provider)?;
     }

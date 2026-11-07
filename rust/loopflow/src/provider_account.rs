@@ -1080,28 +1080,22 @@ async fn select_route(
         }
         return Ok(None);
     };
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
     // A launch pins its login, then resolves that pin, so naming the held login
     // is still the hold.
     if exact_account_id.is_none_or(|id| hold::held(provider).as_ref() == Some(id)) {
-        if let Some(held) = held_login(&store, provider, model).await? {
-            return shared_route(provider, held, store, exact_account_id.is_some());
+        if let Some(held) = held_login(&store, provider, &accounts, model).await? {
+            let route = shared_route(provider, held.clone(), store, exact_account_id.is_some())?;
+            return Ok(Some(route));
         }
     }
 
     let routed_repo_id = current_repo_id()?;
-    let Some(candidates) =
-        provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider).await?
-    else {
-        if let Some(account_id) = exact_account_id {
-            return Err(ProviderAccountError::NoEligibleAccount {
-                provider,
-                accounts: format!("'{account_id}' is outside the configured account route"),
-                retry_at: None,
-            });
-        }
-        return Ok(None);
-    };
-
+    let candidates = provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider)
+        .await?
+        .unwrap_or_default();
     if candidates.is_empty() {
         if let Some(account_id) = exact_account_id {
             return Err(ProviderAccountError::NoEligibleAccount {
@@ -1121,9 +1115,6 @@ async fn select_route(
         }
         None => candidates,
     };
-    let accounts = store
-        .list_provider_accounts(Some(provider.as_str()))
-        .await?;
     let mut rejected = Vec::new();
     let mut eligible = Vec::new();
     for id in &candidates {
@@ -1153,9 +1144,6 @@ async fn select_route(
         .select_provider_account(provider, &eligible, model)
         .await?;
     let Some(selection) = selection else {
-        let accounts = store
-            .list_provider_accounts(Some(provider.as_str()))
-            .await?;
         let limits = store
             .provider_account_limits(Some(provider.as_str()))
             .await?;
@@ -1182,12 +1170,13 @@ async fn select_route(
             retry_at: earliest_release(cooling, &limits, model, now),
         });
     };
-    shared_route(
+    let route = shared_route(
         provider,
         selection.account,
         store,
         exact_account_id.is_some(),
-    )
+    )?;
+    Ok(Some(route))
 }
 
 fn shared_route(
@@ -1195,7 +1184,7 @@ fn shared_route(
     account: ProviderAccount,
     store: SharedStore,
     explicit: bool,
-) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+) -> Result<ProviderAccountRoute, ProviderAccountError> {
     let account_id = account.account_id;
     let Some(home) = account.home else {
         return Err(ProviderAccountError::Runtime(format!(
@@ -1204,41 +1193,33 @@ fn shared_route(
     };
     let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     ensure_account_home_at(&operator_home, &home, provider)?;
-    Ok(Some(ProviderAccountRoute::shared(
+    Ok(ProviderAccountRoute::shared(
         provider, account_id, store, home, explicit,
-    )))
+    ))
 }
 
 /// The login `lf account use` holds, when it can take this launch. A hold
 /// answers to no order and no pause: a model it cannot run goes to the order
 /// and keeps the hold, and a full login ends it.
-async fn held_login(
+async fn held_login<'a>(
     store: &SharedStore,
     provider: Provider,
+    accounts: &'a [ProviderAccount],
     model: Option<&str>,
-) -> Result<Option<ProviderAccount>, ProviderAccountError> {
-    let Some(held) = hold::held(provider) else {
-        return Ok(None);
-    };
-    let accounts = store
-        .list_provider_accounts(Some(provider.as_str()))
-        .await?;
+) -> Result<Option<&'a ProviderAccount>, ProviderAccountError> {
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
         .await?;
-    let Some(account) = accounts
-        .iter()
-        .find(|account| account.account_id == held)
-        .filter(|account| hold::can_take(account, &limits, model, now_unix()))
-    else {
-        hold::end_when_full(store, provider, &held).await?;
+    let now = now_unix();
+    let Some(account) = hold::ready(provider, accounts, &limits, model, now) else {
+        hold::end_when_full(provider, accounts, &limits, now)?;
         return Ok(None);
     };
-    if let Err(error) = identity::check_current_identity(account, &accounts).await {
+    if let Err(error) = identity::check_current_identity(account, accounts).await {
         tracing::warn!("skipping held account: {error}");
         return Ok(None);
     }
-    Ok(Some(account.clone()))
+    Ok(Some(account))
 }
 
 async fn resolve_selected_provider_account(
@@ -1568,13 +1549,8 @@ pub(crate) async fn inspect_provider_route(
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
         .await?;
-    let held = hold::held(provider).and_then(|held| {
-        accounts
-            .iter()
-            .find(|account| account.account_id == held)
-            .filter(|account| hold::can_take(account, &limits, None, now))
-            .filter(|account| identity::check_account_identity(account, &accounts).is_ok())
-    });
+    let held = hold::ready(provider, &accounts, &limits, None, now)
+        .filter(|account| identity::check_account_identity(account, &accounts).is_ok());
     if ids.is_none() && held.is_none() {
         return Ok(None);
     }

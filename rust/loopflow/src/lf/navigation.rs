@@ -244,7 +244,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                         .find_subcommand(owner)
                         .expect("resolved child exists");
                 }
-                values_before_subcommand.clear();
                 output.extend(expansion.clone());
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
@@ -409,7 +408,6 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
                 .find_subcommand(owner)
                 .expect("resolved child exists");
         }
-        values_before_subcommand.clear();
         canonical.extend(expansion);
     }
     Ok((current, canonical))

@@ -346,6 +346,10 @@ async fn set_rotation(raw: &str, routing: RoutingState) -> Result<()> {
 /// Machine's login, so the login moves and the client stays. Nothing is held.
 /// The line goes to stderr, beside what a resume reports on stdout.
 pub(crate) async fn switch_to_named_login(store: &SharedStore, provider: Provider) -> Result<()> {
+    // Reading the active login can save it back, which a plain resume never asked for.
+    if crate::provider_account::selection::AccountSelection::from_env()?.is_default() {
+        return Ok(());
+    }
     let native = crate::provider_account::activation::native_home(provider, None);
     let active =
         crate::provider_account::activation::observe_active_account(store, provider, &native)

@@ -29,6 +29,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .stdin(Stdio::null())
         .current_dir(repo)
         .env("LF_HOME", home)
+        .env("CODEX_HOME", home.join("native-codex"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .env("HTTP_PROXY", "http://127.0.0.1:1");

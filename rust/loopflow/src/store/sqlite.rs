@@ -1630,22 +1630,24 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Whether a launch has run this conversation, on any account.
-    pub fn provider_session_routed(
+    /// The account a launch last ran this conversation on.
+    pub fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT 1 FROM provider_session_accounts
-                 WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), agent_session],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), agent_session],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
     }
 
     pub fn record_provider_account_switch(

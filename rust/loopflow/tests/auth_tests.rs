@@ -663,6 +663,7 @@ fn cached_auth_leaves_no_process_or_account_state() {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(temp.path())
         .env_clear()
+        .env("HOME", temp.path())
         .env("LF_HOME", &lf_home)
         .env("PATH", "/nonexistent")
         .args(["account", "--cached", "--json"])

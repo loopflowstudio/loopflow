@@ -194,6 +194,17 @@ pub(crate) fn departure_notice(
         Departure::Terminal { to: None } => {
             "This conversation moved to another terminal on this Machine.".into()
         }
+        Departure::Account { account } => {
+            let label = store
+                .session(session)?
+                .and_then(|session| session.provider)
+                .map(|provider| store.get_provider_account(&provider, &account))
+                .transpose()?
+                .flatten()
+                .and_then(|account| account.login_email.map(|email| email.to_string()))
+                .unwrap_or_else(|| account.to_string());
+            format!("This conversation moved to account {label}: lf resume {session}")
+        }
         Departure::Machine { machine, task } => {
             let label = store
                 .machine_by_id(&machine)?

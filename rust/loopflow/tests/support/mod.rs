@@ -25,15 +25,32 @@ pub mod ambient;
 /// before `main`, while no other thread can read the environment. Fixtures
 /// that need a provider home set one explicitly.
 ///
+/// `~/.codex` and `~/.claude` are reachable through `HOME` the same way, so
+/// the binary also moves `HOME` into a temp directory, keeping Cargo's and
+/// rustup's own homes for fixtures that build `lf`. A fixture that clears the
+/// environment sets its own `HOME`: with none, `lf` asks the OS for the
+/// account's real one.
+///
 /// A fixture `lf` that signs a Claude home in on macOS runs `security`, so
 /// the Keychain stand-in also goes first on PATH for the whole binary: a
 /// fixture that forgets its own would otherwise leave a real Keychain item
 /// per run. Fixtures that replace PATH outright find no `security` at all.
 #[ctor::ctor(unsafe)]
-fn scrub_inherited_provider_homes() {
+fn isolate_from_the_developers_machine() {
     env::remove_var("CODEX_HOME");
     env::remove_var("CLAUDE_CONFIG_DIR");
-    let bin = env::temp_dir().join(format!("lf-test-security-{}", std::process::id()));
+    let root = env::temp_dir().join(format!("lf-test-{}", std::process::id()));
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("create the test binary's home");
+    if let Some(developer) = env::var_os("HOME").map(std::path::PathBuf::from) {
+        for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            if env::var_os(name).is_none() {
+                env::set_var(name, developer.join(directory));
+            }
+        }
+    }
+    env::set_var("HOME", home);
+    let bin = root.join("bin");
     fs::create_dir_all(&bin).expect("create the Keychain stand-in directory");
     write_executable(&bin, "security", FAKE_SECURITY);
     let path = env::var_os("PATH").unwrap_or_default();

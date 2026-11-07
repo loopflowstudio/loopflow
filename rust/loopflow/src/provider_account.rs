@@ -1000,6 +1000,32 @@ async fn record_native_limit(
     }
 }
 
+/// The `provider` login this launch's `--account` names when it differs from
+/// the one conversation `agent_session` last ran on: a request to move it.
+pub(crate) async fn names_another_account(
+    store: &SharedStore,
+    provider: Provider,
+    agent_session: &AgentSessionId,
+) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
+    let selection = selection::AccountSelection::from_env()?;
+    if selection.is_default() {
+        return Ok(None);
+    }
+    let named = selection
+        .resolved_accounts(&store.list_provider_accounts(None).await?)?
+        .into_iter()
+        .filter(|(selected, _)| *selected == provider)
+        .map(|(_, account_id)| account_id)
+        .collect::<Vec<_>>();
+    let ran_on = store
+        .provider_session_account(provider, agent_session)
+        .await?;
+    if ran_on.is_some_and(|account| named.contains(&account)) {
+        return Ok(None);
+    }
+    Ok(named.into_iter().next())
+}
+
 /// The route a launch in `wave_id`'s work takes, if any. A conversation it resumes is brought into the
 /// route's home first, whichever account held it before.
 pub(crate) async fn resolve_provider_account_exact(
@@ -1031,7 +1057,10 @@ async fn select_route(
     let store = route_store().await?;
     let resumed = match (&store, agent_session) {
         (Some(store), Some(session_id)) => {
-            store.provider_session_routed(provider, session_id).await?
+            store
+                .provider_session_account(provider, session_id)
+                .await?
+                .is_some()
         }
         _ => false,
     };

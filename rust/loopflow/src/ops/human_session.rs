@@ -844,6 +844,20 @@ pub(crate) async fn open(
         session
     };
     drop(progress);
+    // A running Codex keeps the login it started with, so naming another one
+    // stops it and relaunches here. Claude follows the switched login and
+    // attaches like any resume.
+    let moving = match (&provider_session, session.provider.as_deref()) {
+        (Some(native), Some("codex")) if resume => {
+            crate::provider_account::names_another_account(
+                store,
+                crate::provider_auth::Provider::Codex,
+                &native.agent_session,
+            )
+            .await?
+        }
+        _ => None,
+    };
     // An agent that already exited, whose identity was never recorded, has
     // nothing to stop.
     let running = || -> Result<bool> {
@@ -855,8 +869,19 @@ pub(crate) async fn open(
                     == crate::journal::ProcessIdentityEvidence::Live
             }))
     };
+    if let Some(account) = &moving {
+        if running()? {
+            crate::harness::agent_process::stop_session_agent(
+                &store.sqlite,
+                &session.id,
+                crate::process::Departure::Account {
+                    account: account.clone(),
+                },
+            )?;
+        }
+    }
     if resume {
-        if session.interactive {
+        if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && attaches(&store.sqlite, session, &owner)?

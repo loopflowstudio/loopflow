@@ -810,14 +810,14 @@ impl Store {
         .await
     }
 
-    pub async fn provider_session_routed(
+    pub async fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let agent_session = agent_session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.provider_session_routed(provider, &agent_session)
+            store.provider_session_account(provider, &agent_session)
         })
         .await
     }

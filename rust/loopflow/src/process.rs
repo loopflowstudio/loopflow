@@ -182,6 +182,11 @@ pub(crate) enum Departure {
     /// Another terminal on this Machine, on the same login, named as people
     /// see it (`Desktop`, `tmux %3`, `ttys004`) when the mover knew.
     Terminal { to: Option<String> },
+    /// This Machine, relaunched on another login: a running Codex keeps the
+    /// login it started with, so naming another one restarts it.
+    Account {
+        account: crate::store::ProviderAccountId,
+    },
     Machine {
         machine: crate::durable::MachineId,
         task: Option<TaskId>,

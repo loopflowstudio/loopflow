@@ -96,6 +96,10 @@ elif os.path.basename(sys.argv[0]) == 'codex':
         let machine = self.home.path().join("machine");
         if let Ok(params) = fs::read(machine.join("native-config.json")) {
             received["params"] = serde_json::from_slice(&params).unwrap();
+            received["server"] = serde_json::from_slice(
+                &fs::read(machine.join("native-server-config.json")).unwrap(),
+            )
+            .unwrap();
             received["turns"] =
                 serde_json::from_slice(&fs::read(machine.join("native-turns.json")).unwrap())
                     .unwrap();
@@ -187,7 +191,12 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             }
             assert_eq!(
                 value["params"]["approvalPolicy"],
-                if enabled { "never" } else { "on-request" },
+                // Unset leaves the person's own Codex configuration in charge.
+                if enabled {
+                    Value::from("never")
+                } else {
+                    Value::Null
+                },
                 "{value}"
             );
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
@@ -800,6 +809,82 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
 }
 
 #[test]
+fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
+    let fixture = Fixture::new("codex");
+    let machine = fixture.home.path().join("machine");
+    support::register_codex_account(&machine);
+    support::register_codex_login(&machine, "other");
+    let idling = machine.join("idling");
+    // The one idle client ignores losing its server, as Codex 0.164 does.
+    fs::write(machine.join("idle-terminal"), "").unwrap();
+    let mut first = fixture
+        .command()
+        .args(["-i", "--account", "fixture@example.com", ":", "hello"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while fs::read_to_string(&idling).map_or(true, |pid| pid.is_empty()) {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "first launch ended early"
+        );
+        assert!(std::time::Instant::now() < deadline, "client never idled");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let client: libc::pid_t = fs::read_to_string(&idling).unwrap().parse().unwrap();
+    let session = fixture.session();
+    let thread = fs::read_to_string(machine.join("native-thread")).unwrap();
+    success(
+        &fixture
+            .command()
+            .args(["--account", "codex=other@example.com", "resume", &session])
+            .output()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while first.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            let _ = first.kill();
+            panic!("the moved terminal stayed open");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let first = first.wait_with_output().unwrap();
+    // The owner reports a client's exit in the terminal it ran in.
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(first.status.success(), "{:?}: {printed}", first.status);
+    assert!(
+        printed.contains(&format!(
+            "This conversation moved to account other@example.com: lf resume {session}"
+        )),
+        "{printed}"
+    );
+    // SAFETY: signal 0 only probes whether the fixture's client still exists.
+    assert_ne!(unsafe { libc::kill(client, 0) }, 0, "client still running");
+    assert_eq!(
+        fs::read_to_string(machine.join("native-thread")).unwrap(),
+        thread
+    );
+    assert_eq!(fixture.session(), session);
+    // The old launcher's exit leaves the new login's pin in place.
+    let pinned: String = rusqlite::Connection::open(machine.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT account_id FROM provider_session_accounts WHERE provider_session_id=?1",
+            [&thread],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pinned, "other");
+}
+
+#[test]
 fn native_resume_preserves_the_selected_account_in_the_shared_home() {
     for selection in ["--account", "--only-account"] {
         let fixture = Fixture::new("codex");
@@ -871,7 +956,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         for received in [first, resumed] {
             let arguments = args(&received);
             let root = if provider == "codex" {
-                received["params"]["config"]["sandbox_workspace_write.writable_roots"]
+                received["server"]["sandbox_workspace_write.writable_roots"]
                     .as_array()
                     .unwrap()
                     .iter()

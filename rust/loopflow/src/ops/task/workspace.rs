@@ -1,4 +1,4 @@
-//! Retained-checkout companions. Neither operation prepares or starts Task work.
+//! File observation in a retained Task checkout; never prepares or starts work.
 use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -38,22 +38,6 @@ fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
         "The recorded Task checkout is unavailable"
     );
     Ok(checkout)
-}
-
-pub fn task_shell(issue: &str, expected: &Path) -> Result<()> {
-    let checkout = pinned_checkout(issue, expected)?;
-    if crate::transport::delegate_current(false)? {
-        return Ok(());
-    }
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
-    let status = std::process::Command::new(shell)
-        .arg("-l")
-        .current_dir(checkout.worktree)
-        .status()?;
-    if !status.success() {
-        return Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into());
-    }
-    Ok(())
 }
 
 /// The existing owned-line transport keeps stdin open and closes it on cancellation.

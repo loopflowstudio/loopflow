@@ -11,8 +11,25 @@ private func enrichProcessPathForGUILaunch() {
     }
 }
 
+@MainActor
+final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
+    weak var workspaces: RepositoryWorkspaces?
+    private var quitting = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !quitting else { return .terminateLater }
+        quitting = true
+        Task { @MainActor in
+            await workspaces?.releaseViewersForQuit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct LoopflowApp: App {
+    @NSApplicationDelegateAdaptor(DesktopAppDelegate.self) private var delegate
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
     @State private var workspaces: RepositoryWorkspaces
@@ -84,6 +101,7 @@ struct LoopflowApp: App {
                     }
                 }
             }
+            .task { delegate.workspaces = workspaces }
             .modifier(AppAppearance(appearance: appearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()

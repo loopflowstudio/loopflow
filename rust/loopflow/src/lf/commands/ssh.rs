@@ -48,13 +48,14 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
-                | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Save { .. }
                 | crate::lf::TaskCommand::Create { run: false, .. }
+        }) | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Shell { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })
@@ -187,16 +188,25 @@ pub fn run(
         print!("{}", String::from_utf8(bytes)?);
         return Ok(());
     }
-    let preparation = match &cli.command {
+    let connection = match &cli.command {
         Some(crate::lf::Commands::Session {
             cmd:
                 crate::lf::SessionCommand::Resume { connection, .. }
                 | crate::lf::SessionCommand::New { connection, .. },
-        }) if connection.prepare && !preview => Some(connection),
+        }) if !preview => Some(connection),
         _ => None,
     };
-    if let Some(connection) = preparation {
-        if !connection.json {
+    // Only a person at a terminal views the remote Session; scripts and pipes
+    // keep the plain SSH command, whose stdin reaches the provider directly.
+    let attended = !cli.batch && std::io::stdin().is_terminal();
+    if let Some(connection) = connection.filter(|connection| {
+        connection.prepare
+            || ((connection.json || cli.json) && attended && connection.message.is_none())
+    }) {
+        if !connection.prepare {
+            cmd.push("--prepare".into());
+        }
+        if !connection.json && !cli.json {
             cmd.push("--json".into());
         }
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
@@ -211,11 +221,47 @@ pub fn run(
         if !record.open_argv.is_empty() {
             let script = build_preamble(
                 &record.open_argv,
-                &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
+                &[
+                    (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+                    (crate::transport::STREAM_ENV, "1"),
+                ],
             );
-            record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
+            record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
         }
-        if connection.json {
+        if !connection.prepare {
+            anyhow::ensure!(
+                !record.open_argv.is_empty(),
+                "Session has no viewer launch command"
+            );
+            crate::transport::relay_over(&record.open_argv)?;
+            // Read the returned Session without repeating New/fork or starting
+            // another provider. JSON belongs after the terminal has returned.
+            let bytes = runtime.block_on(request(
+                &target,
+                &[
+                    "session".into(),
+                    "resume".into(),
+                    record.id.to_string(),
+                    "--prepare".into(),
+                    "--json".into(),
+                ],
+                None,
+            ))?;
+            print!("{}", String::from_utf8(bytes)?);
+            return Ok(());
+        }
+        if !record.open_argv.is_empty() {
+            record.open_argv.splice(
+                0..0,
+                [
+                    std::env::current_exe()?.to_string_lossy().into_owned(),
+                    "session".into(),
+                    "attach".into(),
+                    "--".into(),
+                ],
+            );
+        }
+        if connection.json || cli.json {
             println!("{}", serde_json::to_string(&record)?);
         } else {
             println!(
@@ -225,8 +271,24 @@ pub fn run(
         }
         return Ok(());
     }
+    let viewer = connection
+        .is_some_and(|connection| !connection.prepare && connection.message.is_none() && attended)
+        || (!preview
+            && matches!(
+                &cli.command,
+                Some(crate::lf::Commands::Desktop {
+                    cmd: crate::lf::DesktopCommand::Shell { args },
+                }) if !args.close
+            ));
+    if viewer {
+        extra_env.push((crate::transport::STREAM_ENV, "1"));
+    }
     let preamble = build_preamble(&cmd, &extra_env);
-    run_ssh(&target.route, forward_agent, &preamble)
+    if viewer {
+        crate::transport::relay_over(&ssh_argv(&target.route, forward_agent, &preamble)?)
+    } else {
+        run_ssh(&target.route, forward_agent, &preamble)
+    }
 }
 
 fn resident_args(
@@ -440,20 +502,8 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
 }
 
 /// Carry the script as an argument: stdin belongs to file drafts or terminal input.
-fn ssh_argv(
-    dest: &str,
-    forward_agent: bool,
-    preamble: &str,
-    terminal: bool,
-) -> anyhow::Result<Vec<String>> {
-    let mut args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
-    if terminal {
-        for arg in &mut args {
-            if arg == "-T" {
-                *arg = "-tt".into();
-            }
-        }
-    }
+fn ssh_argv(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<Vec<String>> {
+    let args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
     let mut argv = vec!["ssh".into()];
     argv.extend(args);
     argv.push(preamble.into());
@@ -461,12 +511,14 @@ fn ssh_argv(
 }
 
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let argv = ssh_argv(
-        dest,
-        forward_agent,
-        preamble,
-        std::io::stdin().is_terminal(),
-    )?;
+    let mut argv = ssh_argv(dest, forward_agent, preamble)?;
+    if std::io::stdin().is_terminal() {
+        for arg in &mut argv {
+            if arg == "-T" {
+                *arg = "-t".into();
+            }
+        }
+    }
     let status = Command::new(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::inherit())

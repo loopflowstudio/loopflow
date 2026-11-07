@@ -2,7 +2,7 @@ pub(crate) mod adoption;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
-pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
+pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -18,7 +18,8 @@ mod handoff;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
-pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub mod retirement;
+pub(crate) use lifecycle::{notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod delivery;
 pub(crate) use delivery::{
@@ -1958,6 +1959,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let _retirement = retirement::lock(&task.id)?;
         let task = store
             .sqlite
             .reopen_task(&task.id, note)
@@ -2099,7 +2101,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         let repo = repository_for_task(store, task)?;
         super::planning_sync::sync_after_save(store, &repo.to_string_lossy()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
-        cleanup_completed_task(store, task).await?;
+        retirement::schedule(store, task).await?;
         Ok(())
     }
     .await;

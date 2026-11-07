@@ -1255,6 +1255,33 @@ fn portable_help_describes_exact_kind_selection() {
 }
 
 #[test]
+fn structured_help_describes_desktop_shell_as_private_runtime() {
+    use loopflow::lf::navigation::describe_command;
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "desktop", "shell", "--json"],
+    ));
+    let runtime: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(runtime["definition"]["command"], "lf desktop shell");
+    assert_eq!(
+        runtime["definition"].get("result_schema"),
+        Some(&serde_json::Value::Null)
+    );
+    assert!(!home.path().join(".lf").exists());
+    for recursive in [false, true] {
+        let desktop = describe_command(&["desktop".into()], recursive).unwrap();
+        assert!(!desktop["definition"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["command"] == "lf desktop shell"));
+    }
+}
+
+#[test]
 fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     use loopflow::lf::navigation::describe_command;
     let repo = fixture();

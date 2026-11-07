@@ -1118,7 +1118,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         if crate::ops::task::task_work_status(store, &task).await?
             == crate::durable::WorkStatus::Done
         {
-            return crate::ops::task::cleanup_completed_task(store, &task).await;
+            return crate::ops::task::retirement::schedule(store, &task).await;
         }
         eprintln!("Task {} has merged; retained its checkout until completion. Inspect remaining work with `lf task status {}`.", task.identifier, task.identifier);
         return Ok(());

@@ -41,7 +41,9 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
+        SessionCommand::Serve { .. } => {
+            unreachable!("serve owns its process before any runtime")
+        }
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
             let author = crate::config::participant_name()?

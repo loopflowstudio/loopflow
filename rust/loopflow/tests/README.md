@@ -69,6 +69,35 @@ past the detached grace and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
+`cargo test -p loopflow --test transport_tests ssh_shells::` starts a disposable
+loopback sshd with generated keys, pinned known-hosts and two isolated Machine
+stores. It requires OpenSSH client/server binaries (`/usr/bin/ssh`,
+`/usr/sbin/sshd`, `ssh-keygen`; Ubuntu also needs `/run/sshd`). CI installs the
+server package. On macOS, run that command directly with `-- --ignored`:
+Apple's sshd sandbox cannot nest inside `test_network.py`'s sandbox, so these
+tests are explicitly ignored in its default suite. Linux runs them normally
+inside network isolation. No system SSH configuration, keys or installed lf are used.
+Twenty cycles exercise the Desktop runtime through Machine routing, abrupt transport loss,
+reattachment to the same shell, Close and process/PTY/socket settlement;
+a separate case covers failed authentication, stale checkout and shell exit.
+These are real SSH protocol checks on one Machine, not a two-Machine or installed
+Desktop demonstration. `ops::task::retirement::tests` covers Session viewer
+holds, bounded disconnected absence, cancellation, unconfirmed job cleanup and
+scheduled retry after partial Git deletion with disposable worktrees and a bare
+remote. Scheduled-pass tests cover interrupted closing, retry/backoff, an empty
+queue and failure isolation across Tasks. Installation schedule fixtures use fake
+launchctl and disposable files; never register a real cleanup job for a test.
+Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
+private Desktop runtime, then reattach without replay. The generic local case has no Ghostty
+resources or environment.
+`session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
+records a real owner's hold through leave, reconnect grace and connection loss.
+`viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under
+continuous output, with a healthy passive viewer and resumed stream. The SSH
+prepared-viewer case exercises the returned production launch command, healthy
+idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
+its process inventory rejects an additional remote PTY.
+
 `transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
 holds a SQLite writer while typing and returning to the viewer. Control stays
 responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery

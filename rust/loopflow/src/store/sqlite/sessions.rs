@@ -657,20 +657,6 @@ impl SqliteStore {
         )?)
     }
 
-    /// Record whether a viewer is attached to execution owner `owner`.
-    pub(crate) fn record_owner_viewers(
-        &self,
-        owner: &crate::id::LfProcessId,
-        viewed: bool,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE processes SET viewed=?2 WHERE id=?1",
-            params![owner.as_str(), viewed],
-        )?;
-        Ok(())
-    }
-
     /// What keeps execution owner `owner` running. None means its standalone
     /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
     pub(crate) fn owner_retention(

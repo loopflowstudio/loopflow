@@ -482,7 +482,7 @@ fn execute(
                 .get_task(task)
                 .await?
                 .context("Graph Task disappeared")?;
-            crate::ops::task::cleanup_completed_task(&running.store, &task).await?;
+            crate::ops::task::retirement::schedule(&running.store, &task).await?;
         }
         Ok(outcome)
     })?)

@@ -21,6 +21,17 @@ final class RepositoryWorkspaces {
 
     init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
 
+    func releaseViewersForQuit() async {
+        let pools = repositories.values.map(\.surfaces)
+        for pool in pools { pool.detachForQuit() }
+        // Let leave cross SSH before AppKit tears down the PTYs. If delivery
+        // fails, the remote connection's bounded absence policy owns cleanup.
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline && pools.contains(where: \.hasRunningRelays) {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     func registry(for repository: String) -> SessionsWorkspaceRegistry {
         if let retained = repositories[repository] { return retained }
         let registry = SessionsWorkspaceRegistry(localMachineId: localMachineId)

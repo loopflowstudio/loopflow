@@ -20,7 +20,7 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (c0b373, reconciled 2026-11-06)
+## Limit recovery (c0b373, reconciled 2026-11-07)
 
 c0b373 (PR #1828): work moves on when an account or model runs out.
 `provider_rate_limited` types the failure. Limits keep the
@@ -33,17 +33,20 @@ changes accounts only. `lf task run` restarts at a step that died waiting;
 `restarts_by_itself` decides sweep and status. Running Claude re-reads its
 login only on a `.credentials.json` mtime change (2.1.318), so `activate`
 touches it. One selector (`--blocked`, `--on`) serves `session list` and
-`session move -a`; `--routing explicit-only` on the active login switches
-away. Busy Sessions move at their Stop hook; moves never write preferences;
-the repo pins no provider.
+`session move -a`; `lf account pause` on the active login switches away, and
+`lf account use` holds until that login is full or `use auto`. `lf resume
+--account` restarts a running Codex on another login; Claude attaches. Busy
+Sessions move at their Stop hook; moves never write preferences; the repo pins
+no provider.
 
 One shared home and login per provider per Machine, no isolation; a login
 switch moves (and reports) every open Session of that provider. Remote logins
 are fresh; rentals get laptop-refreshed Claude access tokens (~8h), resent
 every 2h by `lf install schedule`; no long-lived tokens. Lessons: a thread
 without a transcript gets a seeded one; provider words cool an account only on
-a failed exit; the pin follows the real launch. Open: overage cooling an
-account, unbounded waits, prompt-cache cost of a switch, LOO-435.
+a failed exit; the pin follows the real launch. Jack Heart, November 7: overage
+cooling and unbounded waits stay as built. Open: prompt-cache cost of a switch,
+LOO-435.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
@@ -786,9 +789,8 @@ unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
-Main #1511 (`e69d5103f`): Codex terminals used `--no-daemon` (0.161.0-verified; #1552 removed it).
-Explicit account selection, not launch-time switching, reconciles the shared daemon
-with five-minute turn grace. Configured acceptance remains open.
+`lf account use`, not a launch-time switch, reconciles Codex's shared daemon with
+five-minute turn grace. Configured acceptance remains open.
 
 LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
 merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
@@ -807,16 +809,6 @@ of a completed Session retains retirement and prior captures; fresh atomic input
 attachment admission still rejects stale completion snapshots and live owners.
 Public status/launch/resume fixtures prove stand-in continuity, not real-provider
 inference or installed recovery.
-
-## Account auth consolidation (LOO-320, curated 2026-10-10)
-
-Jack Heart approved delivery, excluding cross-account continuation, native refresh
-coordination and headroom ranking. Selected account precedes native history;
-usage proves no login or capacity. Browser login, first connection, remembered
-Linear profile and live usage windows remain unproved. Branch binaries never
-migrate the installed Home.
-[Mechanics](../../../docs/subscriptions.md); constraints and proof limits: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading and its
-`b2228bce8` archive.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-10)
 

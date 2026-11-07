@@ -420,14 +420,12 @@ For Codex, `use` also restarts its shared background app-server if it still hold
 another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
-terminals use `--no-daemon` and keep their own login until restarted.
+terminals run their own private app-server and keep their login until restarted.
 An unreadable daemon login returns an error without restarting it; the selected
 login remains installed. Failed activity checks keep the grace period rather than
 ending it early. Expiry warns that restarting may interrupt remaining turns.
 Cancelling during the wait leaves the installed login in place; repeat `use` to
 reconcile the daemon later.
-This flag was verified with codex-cli 0.161.0; older versions without it reject
-lf's terminal launches.
 
 | | Codex | Claude |
 |---|---|---|

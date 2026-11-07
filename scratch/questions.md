@@ -4,8 +4,8 @@ Assumptions made in the headless implement step, each reversible.
 
 1. **Interactive continuation.** The login moves by itself; the interrupted turn continues on the person's next message. Nothing types into a terminal, to keep active input safe. Automatic continuation of idle Sessions would need a reliable "no draft in progress" signal. Answered at demo: shared Sessions follow the login (the `.credentials.json` mtime fix); everything else moves through `lf session move -a`. `lf account drain` and `session move --account` are deleted (Jack, November 6).
 2. **No model or harness fallback.** Preferences hold one resolved agent with no ordered alternates, so any fallback would invent policy. A model-scoped limit cools the whole account. Overturned at demo: limits are scoped and headless steps fall through account, model, provider (Accepted at demo, items 2–3).
-3. **A rejected event cools the account until its reset**, including `seven_day_overage_included`. If overage rejection leaves the plan's own quota usable, this cools too much.
-4. **Waits have no upper bound.** A weekly limit can hold a step for days, in one idle process, until someone interrupts it.
+3. **A rejected event cools the account until its reset**, including `seven_day_overage_included`. If overage rejection leaves the plan's own quota usable, this cools too much. Stays as built (Jack Heart, November 7: "none of this concersn me").
+4. **Waits have no upper bound.** A weekly limit can hold a step for days, in one idle process, until someone interrupts it. Stays as built (same answer).
 
 # Jack's direction at demo (November 5, 2026; under discussion, not yet accepted design)
 
@@ -58,7 +58,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 7. **A launch with no model** (bare `claude`) is held back by every scoped limit on an account, since lf cannot tell which model Claude would pick. Model fall-through then names one.
 8. **Ordered preferences** are a comma list in `default_agent` (`lf set default_agent claude,codex`), mirroring account routes. The first entry is the agent; the rest are providers a headless step may fall through to.
 9. **Claude model rungs** are `opus`, `sonnet`, `haiku` in that order, skipping the model already running; Codex limits are account-wide, so it has no model rungs.
-10. **Busy Sessions** move at their next Stop hook rather than mid-turn; a Session whose program status reports a draft is skipped and listed.
+10. **Busy Sessions** move at their next Stop hook rather than mid-turn.
 - Remote isolation (`lf ssh`, `f72bc3ab9d` #1493): set only when a launch selects accounts. Two reasons: a laptop-selected account must not switch the target's shared login under the target's own work, and SSH launches need file-backed credentials (the macOS Keychain is generally unusable from SSH). Jack doubts it is essential. Both look replaceable on Jack's own Machines: a shared home can hold a file login (Claude falls back to a plaintext `.credentials.json`; mtime change is what running Claude watches). That would make isolation deletable everywhere, pending Jack's choice.
 - Comps for remote credentials (Paseo, Omnara, Warp): none forward subscription logins; detail in git at 400ab22ea.
 
@@ -74,7 +74,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.
 15. **Items 7–9 built (November 5).** Choices made headless, each reversible:
     - Replay keeps running in the recorded capture's profile (`AccountLogin::Replayed`): switching this Machine's shared login to another catalog's account would record a switch and move every open Session.
-    - `lf resume --account <email>` no longer stops a running agent; the account names the login a fresh launch switches to. Moving open Sessions was `lf session move --account` (deleted November 6; every launch now switches to the top login).
+    - `lf resume --account <email>` names the login a fresh launch switches to; a running Codex restarts on it (16), a running Claude attaches (28).
     - Rentals use the laptop-held rental login by default, with no per-rental "owned" option yet; an owned Machine is any non-rental and gets its own fresh login.
     - The laptop renews a rental's token when it is within 2 hours of expiry (tokens last ~8h); after any refresh it resends to every live rental, since whether a refresh cancels earlier tokens is unverified.
     - `provider_session_accounts.isolated` stays as "transcript still in an account home"; column removal is Task e1f359 with the long-lived token columns and `isolate:`.

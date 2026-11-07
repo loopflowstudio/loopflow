@@ -10,11 +10,29 @@ use crate::id::TraceId;
 
 thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static WRITING: Cell<bool> = const { Cell::new(false) };
     static DIAGNOSTICS: RefCell<Option<Diagnostics>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn active() -> bool {
     ACTIVE.with(Cell::get)
+}
+
+/// This thread carries a served write, which sees and changes the world as it
+/// stands: nothing a watch retained answers for it.
+pub(crate) fn writing() -> bool {
+    WRITING.with(Cell::get)
+}
+
+fn scope_writing<T>(writing: bool, run: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WRITING.with(|slot| slot.set(self.0));
+        }
+    }
+    let _restore = Restore(WRITING.with(|slot| slot.replace(writing)));
+    run()
 }
 
 /// Block-on operations run on this worker. Never install this scope on a
@@ -25,27 +43,29 @@ pub(crate) fn run<T>(
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     isolate(|| {
-        let started = Instant::now();
-        let span = tracing::info_span!(target: "loopflow::server::request", "server_request", trace_id = %trace, target = %target);
-        let _entered = span.enter();
-        tracing::info!(target: "loopflow::server::request", "request started");
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
-            Ok(result) => {
-                let code = super::command_exit_code(&result);
-                let error = result.as_ref().err().map(|error| format!("{error:#}"));
-                tracing::info!(target: "loopflow::server::request", duration_ms = started.elapsed().as_millis(), code, error, "request finished");
-                result
+        scope_writing(true, || {
+            let started = Instant::now();
+            let span = tracing::info_span!(target: "loopflow::server::request", "server_request", trace_id = %trace, target = %target);
+            let _entered = span.enter();
+            tracing::info!(target: "loopflow::server::request", "request started");
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+                Ok(result) => {
+                    let code = super::command_exit_code(&result);
+                    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+                    tracing::info!(target: "loopflow::server::request", duration_ms = started.elapsed().as_millis(), code, error, "request finished");
+                    result
+                }
+                Err(panic) => {
+                    let error = panic
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("request panicked");
+                    tracing::error!(target: "loopflow::server::request", duration_ms = started.elapsed().as_millis(), code = 101, error, "request panicked; outcome unknown");
+                    std::panic::resume_unwind(panic)
+                }
             }
-            Err(panic) => {
-                let error = panic
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("request panicked");
-                tracing::error!(target: "loopflow::server::request", duration_ms = started.elapsed().as_millis(), code = 101, error, "request panicked; outcome unknown");
-                std::panic::resume_unwind(panic)
-            }
-        }
+        })
     })
 }
 
@@ -98,6 +118,7 @@ where
     T: Send + 'static,
 {
     let active = active();
+    let writing = writing();
     let diagnostics = DIAGNOSTICS.with(|sink| sink.borrow().clone());
     let settings = crate::config::settings::invocation_values();
     let span = tracing::Span::current();
@@ -105,7 +126,7 @@ where
         let _entered = span.enter();
         scope(active, diagnostics, || {
             let _settings = crate::config::settings::replace_invocation(settings);
-            run()
+            scope_writing(writing, run)
         })
     })
 }

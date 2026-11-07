@@ -1,5 +1,15 @@
 # LOO-717 — Shell lifetime and Task Session viewers
 
+## Delivery direction — November 6
+
+Jack Heart: “ok, lg2m, ship it”. The primary conversation's comment
+`62c4fa16-c780-4492-af33-9f01cc16876d` authorizes shipping LOO-717 / PR #1811
+and supersedes the earlier no-shipping statements below. LOO-498 is excluded.
+This live run finishes publication; the primary Task operator invokes `lf ship`
+after it returns to demo, then verifies merge and completion. Native/physical
+remote demonstrations remain unproved. No installation or live-store/scheduler
+migration is requested.
+
 ## Accepted revision — Desktop owns shell persistence
 
 Jack Heart requested on November 6: “yeah, lets remove that API and put it in
@@ -561,40 +571,40 @@ before product suites. Those broader suites remain unverified, not failed produc
 assertions. The full commands, counts, warnings and prior transport checks remain
 at that reference; they do not validate the follow-up by inheritance.
 
-### Publication checks — November 6, `3c57ec3bf`
+### Earlier publication checks — November 6, `3c57ec3bf`
 
-`lf sync` merged cleanly against `c8d7a7f4a8`. The affected-suite runner passed
-resource preflight this time. Its first aggregate result was **failed**, exposing
-two publication fixtures relying on ambient account/agent selection, one old
-transport diagnostic assertion, and three Swift assertions expecting the old
-shell/surface retention behavior. The four test files were repaired; no production
-code changed during publication. Publication fixtures now use their own account,
-agent and cwd. Swift checks require disconnected history and release on departure
-while retaining Session/layout/draft identity. Focused reruns passed.
+The full commands, initial failures, repairs and logs remain at
+`eaf88994c:scratch/loo-717-shell-lifetimes.md`, **Publication checks — November 6,
+3c57ec3bf**. That pre-Desktop-cut run passed all 496 selected Rust checks across
+its original and repair runs, 72 website checks, seven repaired Swift checks
+following an initially failed 687-test run, three loopback-SSH cases, Clippy and
+the disposable Linux 0.14.3 upgrade. It had no fresh all-green aggregate rerun
+and supplies no proof for the later ownership cut by inheritance.
 
-- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | binary(transport_tests) | test(ops::task::) | test(store::sqlite::task_retirement::) | test(store::sqlite::task_shells::) | test(store::migrations::) | test(lf::commands::install::published::) | test(lf::commands::ssh::) | test(machine_commands::) | test(land_tests::) | binary(lf)'` — architecture and 72 website tests passed; Rust 419/422 passed initially; full headless Swift run reported 687 tests with three stale assertions. Original log: `.lf/tmp/gate/run-89859/`. This aggregate run did not pass.
-- Network-isolated nextest boundary/repair selection — 75/77 passed, including startup, journal, Task Graph launch, Git cleanup, revision coverage and the corrected transport diagnostic; the two publication fixtures needed cwd isolation as well. Log: `/tmp/loo717-publish-boundaries.log`.
-- Network-isolated nextest `test(final_preparation_preserves_published_copy_only_for_the_same_head) | test(land_generates_copy_when_cached_pr_copy_is_stale)` — both passed after cwd isolation. Log: `/tmp/loo717-publish-copy-repair.log`. Across the original and focused runs, all 496 selected Rust checks passed; there was no fresh all-green aggregate rerun.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'SessionsPolishTests|WorkCLISubscriptionTests'` — seven tests passed, including both lifecycle arguments; app/FFI rebuilt. Log: `/tmp/loo717-publish-swift-repair.log`. Display diagnostics remain skipped.
-- `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` with built `LOOPFLOW_TEST_LF` — three passed, including twenty lifecycle cycles. Log: `/tmp/loo717-publish-ssh.log`.
-- `uv run python scripts/check_migrations.py`; `uv run python scripts/check_swift_multiplatform_boundaries.py`; `cargo fmt --all`; `cargo clippy --all-targets -- -D warnings`; `git diff --check` — passed.
-- `uv run python scripts/test_task_installation.py --repository-upgrade` — disposable Linux release build and populated 0.14.3 upgrade passed: Task/Session identity, history, edits, move and retry. Container removed. Log: `/tmp/loo717-publish-upgrade.log`.
+### Publication checks — November 6, Desktop ownership cut
 
-Tests ran with inherited `LF_*` cleared and stdin closed. Native compact-unwind
-and existing Swift/deployment-target build warnings remain. No live installation,
-scheduler registration, credential change or live-store migration occurred.
+`lf sync` completed cleanly against `origin/main` at `c8d7a7f4a8`, checkpointing
+reconciliation notes at `eaf88994c`. PR #1811 targets `main`. Review found the
+Desktop shell architecture row listed the shared Process table as another owner;
+the architecture check rejected that duplicate. The row now points to LfProcess
+for execution/viewer evidence, leaving Desktop responsible for its receipts.
+No production code changed during this publication pass.
+
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | binary(transport_tests) | test(ops::task::) | test(store::sqlite::task_retirement::) | test(desktop::shells::) | test(desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed) | test(lf::commands::desktop::) | test(cli_discovery::) | test(store::migrations::) | test(lf::commands::install::published::) | test(lf::commands::ssh::) | test(machine_commands::) | test(land_tests::) | binary(lf)'` — 471 Rust checks, formatting, Clippy, 72 website tests, app/FFI build, 687 headless Swift tests and Swift boundaries passed. The aggregate reports FAIL for the initial architecture-map error; it was not rerun. Log: `/tmp/loo717-publication-current.log`; phase logs: `.lf/tmp/gate/run-94140/`.
+- `uv run python scripts/check_architecture.py`; `uv run python scripts/check_migrations.py` — passed after the documentation correction; all 76 tables mapped and one unreleased migration.
+- Network-isolated `cargo nextest run -p loopflow --lib --test integration --build-jobs 4 --test-threads 4 -E 'test(agent_startup_tests::) | test(journal::tests::) | test(task_graph_launch_tests::) | test(ops::wt::) | test(os_process::terminal_jobs_tests::) | test(store::sqlite::revisions::tests::store_revisions_cover_every_table)'` — 74 passed. Log: `/tmp/loo717-publication-boundaries.log`.
+- `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` — three real loopback-SSH checks passed, including twenty lifecycle cycles, same execution/state, no replay, prepared viewing, failures and process/PTY/socket settlement. Log: `/tmp/loo717-publication-ssh.log`.
+- `uv run python scripts/test_task_installation.py --repository-upgrade` — disposable Linux release-provenance build and populated 0.14.3 upgrade passed: Task/Session identity, history, edits, move and retry. Rust 1.99.1; container removed. Log: `/tmp/loo717-publication-upgrade.log`.
+
+Inherited `LF_*` was cleared and stdin closed for execution checks; the built
+CLI was pinned for Rust fixtures. The native compact-unwind and existing Swift
+build warnings remain. Display diagnostics were skipped. No live installation,
+schedule registration, credentials change or live-store migration occurred.
+Publication updates the existing PR for review; it neither arms merge nor completes
+this Task. The historical walkthrough predates these replacements.
 
 Remaining work:
 
-- Review publication: update PR #1811 for the Desktop shell ownership
-  revision and committed metadata repair after affected suites. Metadata
-  regressions and Clippy passed at `57e0eb180`. The gate selection
-  includes `desktop::shells::` and
-  `desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed` in place of the
-  removed `store::sqlite::task_shells::` filter, plus the Desktop command and
-  `cli_discovery::` metadata tests. Sync/publication belong to the
-  existing Graph; feature stops at interactive demo. The historical walkthrough
-  at `a1067c99cc:scratch/pr-review.html` predates the November 6 replacements.
 - Demo: local and real remote Desktop reconnect/Close, orderly Quit delivery,
   Rex end-to-end Session viewing, lost connection/return and survivor inventory
   for processes, PTYs and sockets. Exercise fifteen-minute eligibility plus the
@@ -603,5 +613,6 @@ Remaining work:
   in `loo-717-demo.md`. No private demo app/provider has launched.
 
 No product choice is open. Native and physical remote-Machine acceptance remain
-unproved. Publication, merge and Task completion are separate; this work has no
-shipping, installation or live-store migration authorization.
+unproved. Publication, merge and Task completion are separate. Shipping is now
+authorized through the primary Task operator; installation and live-store/scheduler
+migration remain outside scope.

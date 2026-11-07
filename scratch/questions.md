@@ -1,9 +1,12 @@
 # LOO-717 — Decisions and remaining review
 
 The authoritative contract is [shell lifetimes](loo-717-shell-lifetimes.md).
-No product question is open. Implementation and review publication are authorized;
-the feature Graph stops at interactive demo. Shipping, installation, live-store
-migration, credentials changes and live scheduler registration are outside this run.
+No product question is open. Jack Heart: “ok, lg2m, ship it” (November 6, comment
+`62c4fa16-c780-4492-af33-9f01cc16876d`). Shipping LOO-717 / PR #1811 is now
+authorized, superseding the earlier restriction; LOO-498 is excluded. This run
+finishes publication and returns to demo. The primary Task operator invokes
+`lf ship`, then verifies merge and completion. Installation, live-store/scheduler
+migration and credential changes remain outside scope.
 
 ## Accepted decisions
 
@@ -76,16 +79,22 @@ Three focused tests passed, covering exact inspection, public-list exclusion and
 schemas. Reconciliation confirmed the source, README and saved logs agree.
 Concept review at `57e0eb180` found nothing further to change and no open product choice.
 Compression passed 23 selected checks and Clippy; the design records
-the nextest leak warning and clean isolated rerun. Broader checks and PR #1811
-publication remain in the Graph.
+the nextest leak warning and clean isolated rerun. Publication checks now passed
+471 selected Rust checks, 74 boundary checks, three real SSH checks, 687 headless
+Swift tests, 72 website tests, Clippy and the disposable Linux upgrade. The
+aggregate initially failed on a duplicate architecture-map owner; its one-line
+documentation correction passed the architecture recheck. There was no fresh
+all-green aggregate rerun. The design records commands and logs for PR #1811.
 Native Desktop/Rex and physical remote-Machine proof remain at interactive demo.
 LF-owned SSH heartbeat tests do not establish external hosts' loss detection.
 
 The private demo app/provider has not launched. Rebuild the old candidate and keep
 its history/runtime roots and input-release contract in [the demo record](loo-717-demo.md).
-The local upstream inspected during reconciliation was `c8d7a7f4a8`, without a
-fresh fetch. An earlier `lf task status LOO-717 --json` produced no result before
-it was stopped; this pass made no new Work query or publication/completion claim.
+`lf sync` completed cleanly against `c8d7a7f4a8` during publication and
+checkpointed the reconciliation notes at `eaf88994c`. An earlier
+`lf task status LOO-717 --json` produced no result before it was stopped.
+PR #1811 remains this publication target; the primary Task operator owns the
+subsequent authorized shipping and completion checks.
 Product memory includes Desktop ownership and the runtime/GUI metadata distinction;
 no child Product memories were found.
 

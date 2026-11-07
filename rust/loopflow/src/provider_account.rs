@@ -1000,12 +1000,12 @@ async fn record_native_limit(
     }
 }
 
-/// The `provider` login this launch's `--account` names when it differs from
-/// the one conversation `agent_session` last ran on: a request to move it.
+/// The `provider` login this launch's `--account` names when `current` is not
+/// among them: a request to move to it.
 pub(crate) async fn names_another_account(
     store: &SharedStore,
     provider: Provider,
-    agent_session: &AgentSessionId,
+    current: Option<ProviderAccountId>,
 ) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
     let selection = selection::AccountSelection::from_env()?;
     if selection.is_default() {
@@ -1017,10 +1017,7 @@ pub(crate) async fn names_another_account(
         .filter(|(selected, _)| *selected == provider)
         .map(|(_, account_id)| account_id)
         .collect::<Vec<_>>();
-    let ran_on = store
-        .provider_session_account(provider, agent_session)
-        .await?;
-    if ran_on.is_some_and(|account| named.contains(&account)) {
+    if current.is_some_and(|account| named.contains(&account)) {
         return Ok(None);
     }
     Ok(named.into_iter().next())
@@ -1083,6 +1080,13 @@ async fn select_route(
         }
         return Ok(None);
     };
+    // A launch pins its login, then resolves that pin, so naming the held login
+    // is still the hold.
+    if exact_account_id.is_none_or(|id| hold::held(provider).as_ref() == Some(id)) {
+        if let Some(held) = held_login(&store, provider, model).await? {
+            return shared_route(provider, held, store, exact_account_id.is_some());
+        }
+    }
 
     let routed_repo_id = current_repo_id()?;
     let Some(candidates) =
@@ -1142,24 +1146,12 @@ async fn select_route(
             retry_at: None,
         });
     }
-    // A login `lf account use` holds takes every launch it has room for.
-    let mut selection = None;
-    if let Some(held) = hold::held(provider).filter(|held| eligible.contains(held)) {
-        selection = store
-            .select_provider_account(provider, std::slice::from_ref(&held), model)
-            .await?;
-        if selection.is_none() {
-            hold::end_when_full(&store, provider, &held).await?;
-        }
-    }
-    // Else the most urgent eligible account, whichever login is active: the
-    // shared login switches, and every open conversation follows, whenever
-    // another account ranks ahead.
-    if selection.is_none() {
-        selection = store
-            .select_provider_account(provider, &eligible, model)
-            .await?;
-    }
+    // The most urgent eligible account, whichever login is active: the shared
+    // login switches, and every open conversation follows, whenever another
+    // account ranks ahead.
+    let selection = store
+        .select_provider_account(provider, &eligible, model)
+        .await?;
     let Some(selection) = selection else {
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
@@ -1190,26 +1182,63 @@ async fn select_route(
             retry_at: earliest_release(cooling, &limits, model, now),
         });
     };
-    let account_id = selection.account.account_id.clone();
-    let home = match selection.account.home.as_deref() {
-        Some(home) => {
-            let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            ensure_account_home_at(&operator_home, home, provider)?;
-            home.to_path_buf()
-        }
-        None => {
-            return Err(ProviderAccountError::Runtime(format!(
-                "managed {provider}/{account_id} has no credential home"
-            )))
-        }
-    };
-    Ok(Some(ProviderAccountRoute::shared(
+    shared_route(
         provider,
-        account_id,
+        selection.account,
         store,
-        home,
         exact_account_id.is_some(),
+    )
+}
+
+fn shared_route(
+    provider: Provider,
+    account: ProviderAccount,
+    store: SharedStore,
+    explicit: bool,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    let account_id = account.account_id;
+    let Some(home) = account.home else {
+        return Err(ProviderAccountError::Runtime(format!(
+            "managed {provider}/{account_id} has no credential home"
+        )));
+    };
+    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    ensure_account_home_at(&operator_home, &home, provider)?;
+    Ok(Some(ProviderAccountRoute::shared(
+        provider, account_id, store, home, explicit,
     )))
+}
+
+/// The login `lf account use` holds, when it can take this launch. A hold
+/// answers to no order and no pause: a model it cannot run goes to the order
+/// and keeps the hold, and a full login ends it.
+async fn held_login(
+    store: &SharedStore,
+    provider: Provider,
+    model: Option<&str>,
+) -> Result<Option<ProviderAccount>, ProviderAccountError> {
+    let Some(held) = hold::held(provider) else {
+        return Ok(None);
+    };
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let Some(account) = accounts
+        .iter()
+        .find(|account| account.account_id == held)
+        .filter(|account| hold::can_take(account, &limits, model, now_unix()))
+    else {
+        hold::end_when_full(store, provider, &held).await?;
+        return Ok(None);
+    };
+    if let Err(error) = identity::check_current_identity(account, &accounts).await {
+        tracing::warn!("skipping held account: {error}");
+        return Ok(None);
+    }
+    Ok(Some(account.clone()))
 }
 
 async fn resolve_selected_provider_account(
@@ -1531,9 +1560,7 @@ pub(crate) async fn inspect_provider_route(
     let Some(store) = store else {
         return Ok(None);
     };
-    let Some(ids) = provider_route_account_ids(store, repo_id, None, provider).await? else {
-        return Ok(None);
-    };
+    let ids = provider_route_account_ids(store, repo_id, None, provider).await?;
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
@@ -1541,8 +1568,19 @@ pub(crate) async fn inspect_provider_route(
     let limits = store
         .provider_account_limits(Some(provider.as_str()))
         .await?;
+    let held = hold::held(provider).and_then(|held| {
+        accounts
+            .iter()
+            .find(|account| account.account_id == held)
+            .filter(|account| hold::can_take(account, &limits, None, now))
+            .filter(|account| identity::check_account_identity(account, &accounts).is_ok())
+    });
+    if ids.is_none() && held.is_none() {
+        return Ok(None);
+    }
     let mut available = ids
         .iter()
+        .flatten()
         .filter_map(|id| accounts.iter().find(|a| a.account_id == *id))
         .filter(|account| account_route_eligible(account, &limits, None, now))
         .filter(
@@ -1557,6 +1595,10 @@ pub(crate) async fn inspect_provider_route(
         .cloned()
         .collect::<Vec<_>>();
     order_accounts_by_urgency(&mut available, &limits, None, now);
+    if let Some(held) = held {
+        available.retain(|account| account.account_id != held.account_id);
+        available.insert(0, held.clone());
+    }
     Ok(Some(available))
 }
 
@@ -3458,6 +3500,58 @@ mod account_first_tests {
         store.upsert_provider_account(&second).await.unwrap();
         assert_eq!(launch().await, "first@example.com");
         assert_eq!(hold::held(Provider::Codex), None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_model_the_held_login_cannot_take_goes_to_the_order_and_keeps_the_hold() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Codex,
+                accounts: vec![parse_account_id("first").unwrap()],
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let second = parse_account_id("second").unwrap();
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &second,
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly:opus".to_string(),
+                    used_percent: 100,
+                    resets_at: Some(now_unix() + 600),
+                    plan: None,
+                    model: Some("opus".to_string()),
+                    limited_until: Some(now_unix() + 600),
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
+        hold::hold(Provider::Codex, &second).unwrap();
+        let launch = |model: &'static str| {
+            let native = native.clone();
+            async move {
+                let route =
+                    resolve_provider_account_exact(Provider::Codex, None, None, None, Some(model))
+                        .await
+                        .unwrap()
+                        .unwrap();
+                route.launch_as(&mut Command::new("codex")).await.unwrap();
+                codex_login(&native)
+            }
+        };
+        assert_eq!(launch("opus").await, "first@example.com");
+        assert_eq!(hold::held(Provider::Codex), Some(second));
+        assert_eq!(launch("sonnet").await, "second@example.com");
     }
 
     #[allow(clippy::await_holding_lock)]

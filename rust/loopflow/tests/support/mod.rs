@@ -303,6 +303,49 @@ pub fn register_codex_login(home: &Path, name: &str) {
         .unwrap();
 }
 
+/// A connected synthetic Claude login `<name>@example.com`, account id `<name>`.
+/// Its token is `<name>-token`, so a stand-in Keychain shows who is signed in.
+/// Signing in on macOS needs `FAKE_SECURITY` first on PATH and `USER` set.
+#[allow(dead_code)]
+pub fn register_claude_login(home: &Path, name: &str) {
+    let account_home = home.join("accounts/claude").join(name);
+    fs::create_dir_all(&account_home).unwrap();
+    let credential = serde_json::json!({"claudeAiOauth": {
+        "accessToken": format!("{name}-token"),
+        "expiresAt": 4102444800000i64
+    }})
+    .to_string();
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
+    let email = format!("{name}@example.com");
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "claude".into(),
+            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+            observed_email: Some(email),
+            observed_subject: Some(name.into()),
+            observed_credential_digest: Some({
+                use sha2::Digest;
+                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
+            }),
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+}
+
 pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,

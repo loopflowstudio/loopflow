@@ -844,16 +844,15 @@ pub(crate) async fn open(
     };
     drop(progress);
     // A running Codex keeps the login it started with, so naming another one
-    // stops it and relaunches here. Claude follows the switched login and
-    // attaches like any resume.
+    // stops it and relaunches here. A running Claude follows the Machine's
+    // login, so that moves below and the resume attaches.
     let moving = match (&provider_session, session.provider.as_deref()) {
         (Some(native), Some("codex")) if resume => {
-            crate::provider_account::names_another_account(
-                store,
-                crate::provider_auth::Provider::Codex,
-                &native.agent_session,
-            )
-            .await?
+            let provider = crate::provider_auth::Provider::Codex;
+            let ran_on = store
+                .provider_session_account(provider, &native.agent_session)
+                .await?;
+            crate::provider_account::names_another_account(store, provider, ran_on).await?
         }
         _ => None,
     };
@@ -878,6 +877,13 @@ pub(crate) async fn open(
                 },
             )?;
         }
+    }
+    if resume && session.provider.as_deref() == Some("claude") && running()? {
+        crate::lf::commands::account::switch_to_named_login(
+            store,
+            crate::provider_auth::Provider::Claude,
+        )
+        .await?;
     }
     if resume {
         if session.interactive && moving.is_none() {

@@ -342,6 +342,30 @@ async fn set_rotation(raw: &str, routing: RoutingState) -> Result<()> {
     switch_away(&store, provider, &account).await
 }
 
+/// `lf --account claude=b@ resume` on a running Claude: the client reads the
+/// Machine's login, so the login moves and the client stays. Nothing is held.
+/// The line goes to stderr, beside what a resume reports on stdout.
+pub(crate) async fn switch_to_named_login(store: &SharedStore, provider: Provider) -> Result<()> {
+    let native = crate::provider_account::activation::native_home(provider, None);
+    let active =
+        crate::provider_account::activation::observe_active_account(store, provider, &native)
+            .await?;
+    let Some(named) =
+        crate::provider_account::names_another_account(store, provider, active).await?
+    else {
+        return Ok(());
+    };
+    let account = store
+        .get_provider_account(provider.as_str(), &named)
+        .await?
+        .ok_or_else(|| anyhow!("{provider} login {named} disappeared"))?;
+    eprintln!(
+        "{}",
+        install_login(store, provider, &account, &native).await?
+    );
+    Ok(())
+}
+
 /// Sign a provider's shared home in as a stored account.
 /// Codex agents Loopflow launched keep their login until they
 /// restart; Codex's own background app-server is restarted to adopt it.
@@ -351,11 +375,33 @@ async fn switch_login(
     account: &ProviderAccount,
 ) -> Result<()> {
     let native = crate::provider_account::activation::native_home(provider, None);
+    println!(
+        "{}",
+        install_login(store, provider, account, &native).await?
+    );
+    let login = account_login(account);
+    // The login is installed; launches must not wait on the daemon's turns.
+    if provider == Provider::Codex {
+        restart_stale_codex_daemon(&native, login).await.with_context(|| {
+            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account use codex={login}`", native.display())
+        })?;
+    }
+    Ok(())
+}
+
+/// Sign `native` in as `account`, releasing the credential lock. What happened,
+/// in a line for the person.
+async fn install_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    native: &Path,
+) -> Result<String> {
     let switched = crate::provider_account::activation::activate(
         store,
         provider,
         &account.account_id,
-        &native,
+        native,
         crate::provider_account::activation::SwitchCause::Person,
     )
     .await?;
@@ -366,19 +412,11 @@ async fn switch_login(
         } else {
             "open Sessions follow when resumed"
         };
-    if switched.is_some() {
-        println!("{provider} is now signed in as {login}; {follow}");
+    Ok(if switched.is_some() {
+        format!("{provider} is now signed in as {login}; {follow}")
     } else {
-        println!("{provider} is already signed in as {login}");
-    }
-    // The login is installed; launches must not wait on the daemon's turns.
-    drop(switched);
-    if provider == Provider::Codex {
-        restart_stale_codex_daemon(&native, login).await.with_context(|| {
-            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account use codex={login}`", native.display())
-        })?;
-    }
-    Ok(())
+        format!("{provider} is already signed in as {login}")
+    })
 }
 
 /// A bare `codex` attaches to the home's background app-server, which keeps

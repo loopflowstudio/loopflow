@@ -233,7 +233,12 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if !boundary {
-            if let Some(expansion) = resolve_child(current, value, &path)? {
+            let child = if values_before_subcommand.is_empty() {
+                resolve_child(current, value, &path)?
+            } else {
+                None
+            };
+            if let Some(expansion) = child {
                 for owner in &expansion {
                     current = current
                         .find_subcommand(owner)
@@ -248,8 +253,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                     boundary = true;
                 }
             } else if leading_value(current, &values_before_subcommand, value) {
-                // `lf account codex use`: the provider is a value, not an owner.
+                // `lf account codex --cached`: the provider is a value, not an owner.
                 values_before_subcommand.push(value.clone());
+                path.push(value.clone());
                 output.push(value.clone());
             } else {
                 // Keep unknown owner children in help requests too: they must
@@ -350,9 +356,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     })())
 }
 
-/// Whether `word` is the next positional value a command takes before naming
-/// its subcommand, as the provider in `lf account codex use`. The root's skill
-/// name is not one, and a value the positional rejects is an unknown child.
+/// Whether `word` is the next positional value of a command that also has
+/// subcommands, as the provider in `lf account codex --cached`. No subcommand
+/// follows a value. The root's skill name is not one, and a value the
+/// positional rejects is an unknown child.
 fn leading_value(command: &Command, taken: &[String], word: &str) -> bool {
     if command.get_name() == "lf"
         || command.is_args_conflicts_with_subcommands_set()
@@ -372,7 +379,11 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
     let mut canonical = Vec::new();
     let mut values_before_subcommand = Vec::new();
     for name in path {
-        let expansion = resolve_child(current, name, &canonical)?;
+        let expansion = if values_before_subcommand.is_empty() {
+            resolve_child(current, name, &canonical)?
+        } else {
+            None
+        };
         if expansion.is_none() && leading_value(current, &values_before_subcommand, name) {
             values_before_subcommand.push(name.clone());
             continue;
@@ -382,9 +393,13 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
                 clap::error::ErrorKind::InvalidSubcommand,
                 format!(
                     "unknown command: lf {}",
-                    [canonical.as_slice(), std::slice::from_ref(name)]
-                        .concat()
-                        .join(" ")
+                    [
+                        canonical.as_slice(),
+                        values_before_subcommand.as_slice(),
+                        std::slice::from_ref(name)
+                    ]
+                    .concat()
+                    .join(" ")
                 ),
             )
             .into());

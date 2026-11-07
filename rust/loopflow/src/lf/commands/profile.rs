@@ -129,11 +129,7 @@ async fn next_launch(
         .await?
         .unwrap_or_default();
     let held = crate::provider_account::hold::held(provider);
-    let Some(chosen) = held
-        .as_ref()
-        .and_then(|held| ready.iter().find(|account| account.account_id == *held))
-        .or_else(|| ready.first())
-    else {
+    let Some(chosen) = ready.first() else {
         let candidates =
             crate::provider_account::provider_route_account_ids(store, repo_id, None, provider)
                 .await?

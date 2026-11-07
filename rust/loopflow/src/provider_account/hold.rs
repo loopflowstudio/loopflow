@@ -5,9 +5,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use super::{now_unix, ProviderAccountError};
+use super::{account_held_until, now_unix, ProviderAccountError};
 use crate::provider_auth::Provider;
-use crate::store::{ProviderAccountId, SharedStore};
+use crate::store::{
+    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, SharedStore,
+};
 
 fn path(provider: Provider) -> PathBuf {
     crate::store::lf_home_dir()
@@ -42,6 +44,18 @@ pub(crate) fn release(provider: Provider) -> Result<bool, ProviderAccountError> 
             "release {provider} hold: {error}"
         ))),
     }
+}
+
+/// Whether a held `account` can take a launch of `model`. Unlike routing, this
+/// asks nothing about a pause.
+pub(crate) fn can_take(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> bool {
+    account.credential_state == CredentialState::Connected
+        && account_held_until(account, limits, model, now).is_none()
 }
 
 /// A held login that cannot take this launch keeps its hold while only a

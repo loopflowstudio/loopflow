@@ -173,3 +173,10 @@ Still true from the first pass:
 ## Concept review (November 6, 2026, headless, after the CLI pass)
 The concepts hold. One correction:
 - **Every lf refresh of the shared Claude login takes Claude's refresh lock.** Built in b840306cf: `fresh_claude_token` holds `ClaudeRefreshLock`, re-reading the login once held; `activate`/`observe_active_account` pass their lock through `save_back`.
+
+## Concept review (November 7, 2026, headless, after the November 7 pass)
+Found three places where lf said one thing and did another; all built:
+1. **`lf account use` beats scoped orders** (questions 30). `held_login` runs before the order in `select_route`; `inspect_provider_route` puts the held login first, so `next`, pause's replacement and the rental pick agree. `hold::can_take` asks nothing about a pause. A launch pins its login and resolves that pin, so naming the held login counts as the hold; else every hold outside the order failed with "outside the configured account route". Counterexample, accepted as reversible: a repository order that keeps a client's work on its own login is overridden while a hold stands.
+2. **`lf --account claude=b@ resume <running Claude>` switches, then attaches** (questions 28). `switch_to_named_login` compares with the active login and shares `install_login` with `switch_login`; the line goes to stderr so `--json` stays clean. A Claude that is not running gets the login from its launch.
+3. **Old spelling.** No subcommand follows a value in `normalize_args`/`resolve_path`, so `lf help account claude use` and `lf account codex use --help` fail as unknown; `lf account codex --help`, `--cached` work. `lf ops account` is the only command with a positional beside subcommands.
+Checks (empty cwd, isolated `HOME`, `LF_*` unset): `session_launch_contract` 29, integration `cli_discovery:: auth_tests::` 82, lib `provider_account:: lf::commands::profile lf::commands::account lf::navigation ops::human_session` 120 plus 2 that fail only sharing libtest's process (cwd and `LF_HOME` races; pass alone, nextest isolates them). Branch binary, isolated home: the four help and `--cached` forms above. Gate owns the full suites.

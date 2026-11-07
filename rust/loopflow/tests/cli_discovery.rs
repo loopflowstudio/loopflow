@@ -546,23 +546,35 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
-fn help_skips_a_provider_named_before_its_subcommand() {
+fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "--cached"]),
+        ["lf", "ops", "account", "codex", "--cached"]
+    );
     assert_eq!(
         normalized(&["lf", "account", "codex", "use", "a@example.com"]),
         ["lf", "ops", "account", "codex", "use", "a@example.com"]
     );
-    assert_eq!(
-        normalized(&["lf", "account", "codex", "use", "--help"]),
-        ["lf", "help", "ops", "account", "use"]
-    );
     let tree = loopflow::lf::navigation::command_tree();
-    let path = ["account", "codex", "use"].map(String::from);
-    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &path).unwrap();
-    assert_eq!(canonical, ["ops", "account", "use"]);
-    let unknown = ["account", "codex", "nosuch"].map(String::from);
-    assert!(loopflow::lf::navigation::resolve_path(&tree, &unknown).is_err());
+    let help = normalized(&["lf", "account", "codex", "--help"]);
+    assert_eq!(help, ["lf", "help", "ops", "account", "codex"]);
+    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &help[2..]).unwrap();
+    assert_eq!(canonical, ["ops", "account"]);
+
+    let verb = normalized(&["lf", "account", "codex", "use", "--help"]);
+    let error = loopflow::lf::navigation::resolve_path(&tree, &verb[2..]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown command: lf ops account codex use"),
+        "{error}"
+    );
+    for path in [["account", "codex", "use"], ["account", "codex", "nosuch"]] {
+        let path = path.map(String::from);
+        assert!(loopflow::lf::navigation::resolve_path(&tree, &path).is_err());
+    }
 }
 
 #[test]

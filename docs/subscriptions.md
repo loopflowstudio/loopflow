@@ -362,7 +362,9 @@ the login moves to the eligible account that ranks first, and every open Claude
 follows at its next request. Send your next message where you left off. A running
 Codex keeps its login until you `lf resume` it. Naming another login with
 `lf --account codex=<login> resume <session>` restarts it there, and the old
-terminal says where the conversation went.
+terminal says where the conversation went. A running Claude stays put:
+`lf --account claude=<login> resume <session>` switches the Machine's login,
+which every open Claude follows, and attaches.
 
 To see what would fail next, and move it in one go:
 
@@ -399,9 +401,11 @@ codex stays on work@example.com until it fills up, or lf account use auto
 ```
 
 `lf account use` signs the provider's home in as a stored login and holds every
-launch of that provider there until the login is full (a cooldown or a limit on
-every model) or `lf account use auto` releases it; a limit on one model sends
-only that model's launches elsewhere. Pausing the held login also releases it.
+launch of that provider there, whatever a repository or Wave order says and
+paused or not, until the login is full (a cooldown or a limit on every model) or
+`lf account use auto` releases it. A limit on one model sends only that model's
+launches to the order, and `--account` still wins. Pausing the held login also
+releases it.
 It exits 2 when the login is out until a reset and 3 when it needs a login,
 changing nothing. It first saves the current login back to its stored account,
 so a token the provider refreshed while active is kept; a login Loopflow has

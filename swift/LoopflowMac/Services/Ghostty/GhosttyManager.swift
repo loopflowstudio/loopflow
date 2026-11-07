@@ -20,6 +20,7 @@ extension Notification.Name {
     static let loopflowThemeChanged = Notification.Name("loopflow.themeChanged")
     static let ghosttyCopyConfirmation = Notification.Name("loopflow.ghosttyCopyConfirmation")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
+    static let ghosttySessionReady = Notification.Name("loopflow.ghosttySessionReady")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
 }
@@ -300,6 +301,18 @@ final class GhosttyManager: ObservableObject {
             if action.tag == GHOSTTY_ACTION_SET_TITLE,
                let title = action.action.set_title.title {
                 let value = String(cString: title)
+                if value == "loopflow:input-ready" {
+                    guard case .session = terminal else { return true }
+                    let incarnation = MainActor.assumeIsolated {
+                        Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                            .programStatus.incarnation.uuidString.lowercased()
+                    }
+                    Task { @MainActor in
+                        NotificationCenter.default.post(name: .ghosttySessionReady, object: terminal,
+                            userInfo: ["surface": incarnation])
+                    }
+                    return true
+                }
                 MainActor.assumeIsolated {
                     Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminalTitle = value
                 }

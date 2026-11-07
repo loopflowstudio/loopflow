@@ -29,6 +29,12 @@
       "label": "Open here",
       "help": "Open this Session in a terminal",
       "unavailable_reason": null
+    },
+    {
+      "kind": "reveal",
+      "label": "Show conversation",
+      "help": "Continue existing history without taking another terminal's input",
+      "unavailable_reason": null
     }
   ],
   "graph_membership": {

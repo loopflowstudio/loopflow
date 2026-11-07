@@ -273,7 +273,7 @@ loss needs no EOF. Other connected viewers still hold. Attach/Resume restarts th
 heartbeat deadline, and the same stream carries input, resize, ownership and Leave.
 An ordinary external SSH connection uses its host's connection-loss detection; LF's bounded heartbeat applies to its own remote path.
 
-Desktop departure, window close and orderly Quit send Ctrl+] to release their
+Leaving Desktop’s warm set, window close and orderly Quit send Ctrl+] to release their
 relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
 back to connection-loss cleanup. Only actual Session viewing retains the checkout.
 An owner's dated observation expires too if it crashes, so a stale Process row
@@ -304,3 +304,19 @@ retired Task never silently recreates a checkout.
 
 Desktop's private [shell runtime](../desktop/README.md) carries startup resources
 on creation; the viewer transport does not select terminal integration.
+
+Desktop keeps viewers open for visible Tasks and a bounded recent set of
+unfinished conversations, so those hold their checkouts; leaving the set,
+Close and window close detach them.
+
+Desktop's automatic opening uses a non-replacing input claim: working Tasks use
+Start, which permits first-thread creation; other Work uses reveal, which requires
+existing history. Their prepared commands retain that distinction through launch.
+If another viewer wins before attachment, the owner returns Busy and keeps that
+viewer's input.
+Only Take back uses ordinary resume to replace a holder; Try again on a consumed
+first launch uses it on a Session no client holds. The live relay announces
+native input readiness to Desktop after its owner acknowledges the native client;
+saved screen bytes never provide that announcement. A successful automatic attach
+records its Desktop terminal association after the handshake, preserving current
+provider status without claiming another viewer's input during preparation.

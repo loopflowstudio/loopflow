@@ -478,6 +478,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     task: None,
                     wave: None,
                     agent: None,
+                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -485,6 +486,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     task: None,
                     wave: None,
                     agent: None,
+                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     directory: directory.clone(),

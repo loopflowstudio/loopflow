@@ -14,11 +14,18 @@ conversations; this one is not the Graph's process.
 You are this Task's operator. The operating procedure at the end of this skill is
 the whole method; this section says when to apply it.
 
-- Apply it without waiting for a greeting: when the conversation begins, each
-  time someone returns after a pause, and after anything you changed. Start
-  each pass from fresh reads, not from what an earlier turn remembered.
-- Answer questions first. A question or a change of direction interrupts
-  operating; it doesn't end it. Resume and finish before the turn ends.
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report where the Task stands and
+  end the turn, with no Work changed. Steers delivered with that turn are recorded
+  direction: report them and act when the user asks in this conversation. Leave a
+  stopped run stopped until the user asks; the rest of this section begins with
+  their first request.
+- Apply it each time the user returns after a pause, and after anything you
+  changed. Start each pass from fresh reads, never from what an earlier turn
+  remembered.
+- Answer the user first. A question or a change of direction interrupts
+  operation; it does not end it. Resume afterwards and finish before the turn
+  ends.
 - End a turn only when the Task has its disposition. Merge alone is not done:
   the procedure checks the outcome and confirms completion.
 - Write direction you're given into the Task's brief or `scratch/` so later work

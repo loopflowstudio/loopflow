@@ -40,6 +40,20 @@ pub(crate) fn accept_created_worktree(command: &Command) {
     }
 }
 
+/// Whether Claude will stop on its folder-trust dialog in this launch's cwd. Claude
+/// honors an entry on any ancestor. An unreadable config claims nothing.
+pub(crate) fn awaits_dialog(command: &Command) -> bool {
+    let cwd = command.get_current_dir().map(Path::canonicalize);
+    let (Some(Ok(cwd)), Some(config)) = (cwd, _config_path(command)) else {
+        return false;
+    };
+    let Ok(root) = _read(&config) else {
+        return false;
+    };
+    !cwd.ancestors()
+        .any(|dir| dir.to_str().is_some_and(|key| _trusted(&root, key)))
+}
+
 /// The global config Claude reads: a non-empty legacy `.config.json` in its
 /// config dir, else `$CLAUDE_CONFIG_DIR/.claude.json`, else `$HOME/.claude.json`.
 fn _config_path(command: &Command) -> Option<PathBuf> {
@@ -171,7 +185,7 @@ mod tests {
     use serde_json::{json, Value};
     use tempfile::TempDir;
 
-    use super::accept_created_worktree;
+    use super::{accept_created_worktree, awaits_dialog};
     use crate::git::{git_stdout, worktree_add, WorktreeBranch};
 
     struct Fixture {
@@ -326,6 +340,26 @@ mod tests {
             read(&legacy),
             json!({"userID": "u", "projects": {key: {"hasTrustDialogAccepted": true}}})
         );
+    }
+
+    #[test]
+    fn only_a_folder_without_a_trusted_ancestor_awaits_the_dialog() {
+        let fixture = Fixture::new();
+        let repo = fixture.repo.canonicalize().unwrap();
+        let mut command = Command::new("claude");
+        command
+            .current_dir(&repo)
+            .env("HOME", &fixture.home)
+            .env_remove("CLAUDE_CONFIG_DIR");
+        assert!(awaits_dialog(&command));
+
+        let parent = repo.parent().unwrap().display().to_string();
+        let trusted = json!({"projects": {parent: {"hasTrustDialogAccepted": true}}});
+        fs::write(fixture.config(), trusted.to_string()).unwrap();
+        assert!(!awaits_dialog(&command));
+
+        fs::write(fixture.config(), "{not json").unwrap();
+        assert!(!awaits_dialog(&command));
     }
 
     #[test]

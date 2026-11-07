@@ -1363,7 +1363,10 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
         || text.contains("application network policy is unavailable")
     {
         Some(AgentFailure::AccountSwitched)
-    } else if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
+    } else if text.contains("at capacity")
+        || text.contains("capacity temporarily unavailable")
+        || text.contains("capacity issue")
+    {
         Some(AgentFailure::Capacity)
     } else if text.contains("rate limit")
         || text.contains("rate_limit")
@@ -2351,6 +2354,16 @@ trust_level = "trusted"
         assert_eq!(attempts, 1);
         assert_ne!(result.exit_code, 0);
         assert_eq!(result.agent_session, Some("/fixture/pi.jsonl".into()));
+    }
+
+    #[test]
+    fn claude_temporary_capacity_rejection_is_capacity_not_spent_quota() {
+        assert_eq!(
+            classify_retryable_agent_failure(
+                "Request rejected (429) · this may be a temporary capacity issue"
+            ),
+            Some(AgentFailure::Capacity)
+        );
     }
 
     #[test]

@@ -961,4 +961,5 @@ Run outside the network sandbox. The underlying registrar harness is
 `scripts/test_server_registration.py`; its default mode separately checks
 idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
-starts no providers or Graphs, and keeps systemd's control-group cleanup.
+starts no Session owners itself, and its unit uses `KillMode=process` so restarting
+it leaves the owners its detached launches started, as `AbandonProcessGroup` does on macOS.

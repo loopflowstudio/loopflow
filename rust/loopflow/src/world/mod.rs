@@ -47,7 +47,7 @@ const PERSON: &str = "Demo";
 /// (`GUIProcessEnvironment.enrichedPath` in
 /// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
 /// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-const DESKTOP_PATH: [&str; 6] = [
+pub(crate) const DESKTOP_PATH: [&str; 6] = [
     "~/.local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",

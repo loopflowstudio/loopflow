@@ -675,12 +675,15 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
         pane.child.id() as i32,
         owner_pid,
     ]);
+    // Only live processes can own a terminal; zombies can retain its name in ps.
     // The only remote controlling terminal belongs to the execution shell.
     let inventory = fixture.census();
     let remote = fixture.descendants(&[fixture.daemon.id() as i32]);
     let terminals: Vec<_> = inventory
         .iter()
-        .filter(|(pid, _, _, tty)| remote.contains(pid) && tty != "??" && tty != "?")
+        .filter(|(pid, _, state, tty)| {
+            !state.starts_with('Z') && remote.contains(pid) && tty != "??" && tty != "?"
+        })
         .collect();
     assert!(
         terminals.iter().all(|(pid, _, _, _)| *pid == shell_pid),

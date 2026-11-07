@@ -263,9 +263,8 @@ checks do not replace affected suites.
 ## Native shell lifetimes (LOO-717, accepted November 3–6, 2026)
 
 Jack Heart's November 6 revision removes `lf task shell`. Desktop owns receipts,
-startup and Close through a private cross-platform runtime, independent of GUI
-control. Terminal bytes/Close status need no GUI schema or registry action;
-namespace misclassified the runtime.
+startup and Close through a private cross-platform runtime. Terminal bytes/Close
+status need no GUI schema or registry action.
 Shared transport owns PTYs/Machine routing; retirement delegates shell settlement.
 Rex owns shells/layouts; LOO-498 owns native layout creation. LF never closes Rex
 shells. Close ends Desktop jobs; hide/switch/quit retain execution until cleanup.
@@ -282,8 +281,8 @@ grace; expiry never proves client death or adds another fifteen minutes. Owners
 date connection evidence on Processes; LF stores no host/occurrence registry.
 November 6: carry the viewer protocol across SSH. The bridge owns no PTY or
 heartbeat; viewers pulse every ten seconds, owners drop silent viewers at thirty.
-External SSH uses host loss detection. Focused/loopback tests establish no native
-or physical remote-Machine acceptance. Prior designs:
+External SSH uses host loss detection. Loopback tests establish no native or
+physical remote-Machine acceptance. Prior designs:
 `d5cab9ba60:scratch/loo-717-shell-lifetimes.md`.
 
 Jack's November 6 follow-up replaces per-Task waiting workers with one minute-based
@@ -295,6 +294,10 @@ Record return and close cancellation atomically; owners recheck current Task
 retention before consuming automatic closure. Explicit Close remains effective.
 Desktop supplies integration script/resources only on creation; reattachment
 never replays startup. Shared transport selects no integration; Rex owns its own.
+
+Merged verification (November 6): `ps` can retain a tty name on a zombie child.
+PTY assertions must exclude `Z` states, as teardown does, while rejecting extra
+live terminals. The repaired loopback SSH suite passed; native limits remain.
 
 ## Session and operate pairs (2026-10-05)
 

@@ -76,6 +76,17 @@ Uncertain input stays unreplayed: `PendingInput` and the spool are unchanged,
 nothing replays input to a later viewer, and a revoked token still discards
 the frames (the check at `Tag::Input` is untouched).
 
+## Concept review (2026-11-06)
+
+The person-facing contract is one sentence: keystrokes sent before a viewer
+closed reach the program, if that viewer still held control. `Draining` is the
+owner's name for "closed for writing, still has input"; it never surfaces in
+CLI, Desktop or the wire, and replaces the old "first failed write means gone"
+rule rather than adding a second one. `live()`, resume matching, poll interest
+and `stream` all agree on it. No rename or merge is implied; no product choice
+is open in the design. Steer 5b95d9a5's "waits for Jack's go at explore" has no
+recorded answer; see `scratch/questions.md`.
+
 ## Alternatives considered
 
 - **Read until `WouldBlock` every pass.** Fewer bytes left behind, but bytes that

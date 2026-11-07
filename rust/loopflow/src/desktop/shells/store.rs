@@ -55,7 +55,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn shell_owner(&self, owner: &LfProcessId) -> StoreResult<Option<i64>> {
+    pub(crate) fn shell_close_request(&self, owner: &LfProcessId) -> StoreResult<Option<i64>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -151,7 +151,7 @@ mod tests {
         let owner = store.test_lf_process();
         store.bind_desktop_shell("shell", &owner).unwrap();
         assert!(store.bind_desktop_shell("shell", &owner).is_err());
-        assert_eq!(store.shell_owner(&owner).unwrap(), Some(0));
+        assert_eq!(store.shell_close_request(&owner).unwrap(), Some(0));
         // Desktop shell ownership adds no checkout hold; the Task Session supplies it.
         store
             .record_owner_viewer_hold(&owner, Some(ViewerHold::Viewed(100)))
@@ -159,7 +159,7 @@ mod tests {
         assert!(store.task_viewer_holds(&task).unwrap().is_empty());
         store.record_owner_viewer_hold(&owner, None).unwrap();
         store.close_desktop_shell("shell").unwrap();
-        assert_eq!(store.shell_owner(&owner).unwrap(), Some(1));
+        assert_eq!(store.shell_close_request(&owner).unwrap(), Some(1));
         assert!(!store
             .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap());

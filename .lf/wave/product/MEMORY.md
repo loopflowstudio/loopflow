@@ -268,11 +268,13 @@ checks do not replace affected suites.
 
 ## Native shell lifetimes (LOO-717, accepted November 3–6, 2026)
 
-Jack Heart approved building/publication through demo. Rex owns shells/layouts;
-LF closes only Desktop-owned shells. LOO-498 owns native layouts. Close ends
-Desktop shells/jobs; Hide/switch/quit preserve execution until eligible cleanup.
-Undo restores history. No ordinary-shell relay into Rex or deleted-checkout
-restoration.
+Jack Heart's November 6 revision removes `lf task shell`. Desktop owns shell
+receipts, startup and Close through its private cross-platform runtime, independent
+of GUI control. Shared transport owns PTYs and Machine routing; Task retirement
+delegates Desktop shell settlement. Rex owns shells/layouts; LOO-498 owns native
+layout creation. LF never closes Rex shells. Close ends Desktop jobs;
+hide/switch/quit retain execution until eligible cleanup. Undo restores history.
+No deleted-checkout restoration. Publication through demo is authorized, not ship.
 
 Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
 Return cancels cleanup. Work, drafts and pending requests delay cleanup
@@ -286,19 +288,18 @@ date connection evidence on Processes; LF stores no host/occurrence registry.
 November 6: carry the viewer protocol across SSH. The bridge owns no PTY or
 heartbeat; viewers pulse every ten seconds, owners drop silent viewers at thirty.
 External SSH uses host loss detection. Focused/loopback tests establish no native
-or physical remote-Machine acceptance. Prior designs/limits:
+or physical remote-Machine acceptance. Prior designs:
 `d5cab9ba60:scratch/loo-717-shell-lifetimes.md`.
 
 Jack's November 6 follow-up replaces per-Task waiting workers with one minute-based
-OS sweep per Machine over SQLite retirement rows; held rows, interrupted cleanup
-and failures remain recoverable. Backoff stays separate from absence. Fifteen-minute
-eligibility normally reaches a sweep in 15–16 minutes while awake. Cleanup and
-updating have separate installation jobs; fixtures register neither.
+OS sweep per Machine over SQLite retirement rows. Backoff stays separate from
+absence; held/interrupted work remains recoverable. Eligibility reaches a sweep
+in 15–16 minutes while awake. Cleanup and updating have separate installation jobs.
 Review found a queued close could outlive returning viewing between sweeps.
 Record return and close cancellation atomically; owners recheck current Task
 retention before consuming automatic closure. Explicit Close remains effective.
-The generic shell launcher accepts Desktop's integration script/resources only
-on creation; reattachment never replays startup. Rex owns its integration.
+Desktop supplies integration script/resources only on creation; reattachment
+never replays startup. Shared transport selects no integration; Rex owns its own.
 
 ## Session and operate pairs (2026-10-05)
 

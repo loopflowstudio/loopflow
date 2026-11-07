@@ -62,7 +62,7 @@ supplies its bundled startup resources. Shared transport delegates shell Close
 judgment to Desktop; scheduled Task retirement calls Desktop settlement and
 cancellation functions. No new service, protocol or per-Task worker.
 
-The deletion cut is complete. One private Desktop runtime and one receipt table
+The deletion cut is committed at `e8385db949`. One private Desktop runtime and one receipt table
 remain; file observation stays under Task. Required behavior tests now use that
 runtime. No migration, installation or schedule registration touched the live
 Machine.
@@ -93,11 +93,11 @@ Focused checks (inherited `LF_*` cleared; disposable stores and built CLI):
 The Rust compact-unwind linker warning and existing Swift deployment/deprecation
 warnings remain. These checks do not demonstrate native hosts or a physical peer.
 
-Remaining: the existing Graph's refresh/review and publication steps. Publication owns Clippy, affected suites,
-sync and PR #1811 update; feature stops at interactive demo. Add
-`desktop::shells::` and the CLI removal check to the prior gate selection, replacing
-its removed `store::sqlite::task_shells::` filter. Native and physical remote
-Machine acceptance remains unproved.
+Current verification and publication still owed are listed under **Remaining
+work** below. These focused results cover the Desktop ownership cut; older
+publication checks cover the preceding implementation only.
+
+## Accepted decisions and implementation history
 
 Jack Heart selected option 1 on November 6, 2026: carry the existing viewer
 protocol across SSH and remove the additional remote terminal relay. Implementation
@@ -153,12 +153,12 @@ support rather than silently restoring the removed per-Task process.
 
 ### Generic launch, Desktop-owned shell integration
 
-Separate shell execution/lifetime from terminal-host integration. The shared Task
-shell launcher accepts ordinary launch inputs and does not unconditionally select
-Ghostty, materialize its scripts, or reach into the Swift app's resource tree.
-Desktop explicitly supplies/selects its existing Ghostty shell integration through
-the launch boundary; transport carries the needed launch inputs/resources to the
-recorded Machine rather than forwarding a caller-local filesystem path.
+Desktop shell creation accepts ordinary launch inputs and optional startup
+resources; shared transport selects no terminal integration. Swift supplies its
+existing Ghostty integration through the private Desktop launch boundary.
+Machine routing carries the inputs/resources to the recorded Machine rather
+than forwarding a caller-local filesystem path. The later Desktop ownership
+revision removes the general Task launcher without changing these semantics.
 
 Reuse the maintained integration scripts and their prompt/command/cwd markers.
 Do not write a competing shell integration or add a generic plugin/host registry.
@@ -189,8 +189,8 @@ explicit cleanup commands. Scheduled-pass tests cover many Tasks sharing one
 schedule, prompt empty-queue exit, returning viewers and active work, expired/dead
 viewers, interrupted/partial deletion, retry/backoff and failure isolation.
 
-Desktop owns its integration scripts; shared shell creation selects no Ghostty
-bootstrap. Generic creation, Desktop command/cwd integration and local/loopback-SSH
+Desktop owns its integration scripts; its runtime selects no implicit Ghostty
+bootstrap. Creation without integration, Desktop command/cwd integration and local/loopback-SSH
 reattachment must preserve PID/state without reapplying integration. Keep one
 unreleased migration, the shared viewer protocol and existing cleanup safeguards.
 Sync, focused verification, publication and demo review remain the delivery path.
@@ -344,31 +344,55 @@ The Task still has one unreleased migration. Product memory now reflects the
 November 5–6 decisions; no child Product memories exist in this checkout.
 
 The current base `c8d7a7f4a8` changes builtins/Graph guidance, not the shared
-viewer or retirement implementation. Product memory includes the November 6
-scheduled-sweep and generic-launch decisions. LOO-498 and LOO-672 remain separately owned; their native
-behavior is not established by this branch's transport tests.
+viewer or retirement implementation. LOO-498 and LOO-672 remain separately owned;
+their native behavior is not established by this branch's transport tests.
 
-## Concept review — November 6, scheduled follow-up
+## Concept review — November 6
 
-**Current outcome at `6d42ec8ce`: no further design change and no open product
-choice.** Source review follows completion/leave through queued closure, viewer
-return between sweeps, interrupted cleanup and reattachment. The repair below
-implements the required cancellation; the finite queue, shared SSH viewer stream
-and Desktop-supplied startup resources need no additional product concept.
-Existing usage docs describe Close/Undo and recovery consistently. Gate and native
-demonstration remain the next proof; this review reran no execution checks.
+**Design refinement; no open product choice.** At `e8385db949`,
+`desktop::result_schema` classified the private runtime as a GUI action, exposed
+by exact hidden-command inspection. The registry test made the same assumption.
+Lifecycle source inspection found no further mismatch.
+
+Delete — do not maintain: the runtime's GUI result-schema classification and
+its inclusion in GUI action-registry validation. Keep the hidden runtime and
+dispatch; add no stream DTO, GUI action or public shell API.
+
+The working repair returns no runtime result schema, limits registry validation
+to GUI verbs and documents terminal bytes/Close status in `desktop/README.md`.
+Regression coverage checks exact JSON inspection and exclusion from public
+listings alongside existing ordinary-action schemas. Linux/no-app execution,
+no-replay reconnect and between-sweep cancellation paths/tests are unchanged.
+
+Compression names the receipt lookup `shell_close_request`: it returns Close
+intent, not an owner. Retirement records stay crate-private; they are internal
+cleanup state, not another public API. Their reader carries only fields cleanup
+consumes; diagnostic reasons and failure counts remain in SQLite and tests read
+them there. Clippy exposed those unused fields after narrowing visibility.
+The decision notes now link to the design
+instead of repeating its implementation and review history. No deletion target remains.
+
+Review reproductions (before repair; inherited `LF_*` cleared, stdin closed):
+
+- `cargo test -p loopflow --lib every_verb_names_a_registry_action` — failed at `desktop.rs:3686`: `shell is not a registry action`; existing macOS compact-unwind linker warning.
+- `target/debug/lf help desktop shell --json` — preceding CLI build reproduced `DesktopVerbResult` requiring `window`, `pane`, `action`.
+
+Repair checks (inherited `LF_*` cleared, stdin closed):
+
+- `cargo test -p loopflow --lib every_gui_verb_names_a_registry_action` — one passed; existing compact-unwind warning remains.
+- `cargo test -p loopflow --test integration cli_discovery::structured_help_describes_` — two passed, including the built CLI's null runtime schema, public-list exclusion and ordinary GUI schemas.
+- `cargo nextest run -p loopflow --lib --test integration -E 'test(desktop_shell_) | test(every_gui_verb_names_a_registry_action) | test(retirement) | test(automatic_shell_close_) | test(cli_discovery::structured_help_describes_)'` — 23 passed after compression; nextest marked the GUI registry check leaky. Log: `/tmp/loo717-compress-metadata.log`.
+- `cargo nextest run -p loopflow --lib -E 'test(every_gui_verb_names_a_registry_action)'` — isolated rerun passed without the leak warning; no checkout test processes remained. Log: `/tmp/loo717-compress-registry.log`.
+- `cargo clippy --all-targets -- -D warnings` — passed after removing unused read-model fields; diagnostic values remain stored and tested. Log: `/tmp/loo717-compress-clippy.log`.
+- `cargo fmt --all -- --check`; `git diff --check`; `lf context` — passed; memory and scratch fit both limits. Broader suites remain with gate; native proof remains at demo.
+
+The `6d42ec8ce` review predates this ownership cut.
 
 The preceding design refinement required returning viewing to revoke queued
 cleanup independently of the sweep cadence. It follows Jack Heart's accepted
 “return cancels cleanup” contract; it changes neither retention nor timing policy.
 The OS scheduler decides when to attempt cleanup. A persisted `closing` phase
 cannot authorize a later effect after a Task Session viewer has returned.
-
-Normal path: complete the Task, leave its last Session viewer, and let one sweep
-queue Desktop shell closure after the absence deadline. Owners settle their jobs;
-a later pass removes eligible Git resources. The retirement row carries progress
-and retry state across interrupted passes. Desktop supplies startup resources only
-when creating a shell; local/SSH attachment reuses execution without replay.
 
 Counterexample at `d14b32ada0`: a sweep writes `closing` and
 `close_requested=2`, then exits while an owner has not yet consumed that request.
@@ -431,8 +455,9 @@ Focused verification at `6d42ec8ce:scratch/loo-717-shell-lifetimes.md`, this
 section: 21 library and two real transport tests passed after recorder
 consolidation, with formatting clean. The initial nullable-`viewed` rollback
 assertion was corrected and passed; the macOS compact-unwind linker warning
-remains. These results cover the current code and are reused, not rerun for
-prose reconciliation. Broader gate owns Clippy and affected suites.
+remains. These results cover the pre-Desktop-cut repair. The current ownership
+and cancellation regressions above supply the later focused verification;
+broader checks for that cut remain with publication.
 
 ## Scheduled cleanup and generic launch — November 6 implementation
 
@@ -452,12 +477,11 @@ Linux renders both distinct jobs into one crontab update, sharing path quoting;
 launchd shares plist path escaping. The final sweep recheck reads viewing and
 pinned completion/placement together instead of querying the intent twice.
 
-`workspace.rs` no longer selects Ghostty or embeds Swift resources. Its optional
-bootstrap input is a script and relative UTF-8 resource contents. Desktop packages
-its maintained scripts from GhosttyResources; the destination materializes a
-content-addressed resource directory. Only creation evaluates it. Existing
-Desktop-specific wrappers moved out of Rust into Desktop resources; the core
-keeps terminal identity, login shell and literal initial argv.
+`desktop::shells` now owns the optional bootstrap script and relative UTF-8
+resource contents; `ops/task/workspace.rs` retains file observation only. Swift
+packages its maintained scripts from GhosttyResources; the destination materializes
+a content-addressed resource directory. Only creation evaluates it. Desktop's
+launch script keeps terminal identity, login shell and literal initial argv.
 
 The earlier manual retry check is replaced by a scheduled-pass test that records
 backoff after partial Git deletion, lets another Task complete, then recovers on a
@@ -491,15 +515,22 @@ Git references to the superseded handoff and external-host design.
 
 ## Checks and remaining proof
 
-November 6 reconciliation checked the committed repair at `6d42ec8ce`: one
-transaction records viewing and cancels automatic closes, and owners recheck
-Task viewing and retirement intent before consuming automatic closure. The
-no-sweep transport regression covers a passive viewer on another Session and
-brief return/leave; library checks cover ordinary shells, rollback and unreadable
-cleanup state. Explicit Close remains effective. The README's Undo promise is
-corrected. No further bounded implementation mismatch was found. The local
-`origin/main` remains `c8d7a7f4a8`; no newer upstream change is available in that
-reference. Product has no child memory directories in this checkout.
+November 6 reconciliation at `e8385db949` confirms the private Desktop runtime,
+Swift launch/Close callers, GUI-independent dispatch and shared SSH viewer path.
+The removed Task command/module/table have no surviving production references.
+`ViewerHold` now carries dated viewing or absence through the shared retirement
+reader. Renewed Session viewing and close cancellation remain one transaction;
+owners recheck current Task retention before automatic closure. No bounded code
+mismatch was found. Existing compression logs confirm 16 retirement, three shell
+policy/CLI, two real transport and four headless Swift checks passed; no execution
+suite was rerun for this prose reconciliation.
+
+The local `origin/main` remains `c8d7a7f4a8`; this pass did not fetch upstream.
+Product memory now includes the Desktop ownership revision as well as scheduled
+cleanup and one viewer protocol. Filesystem inspection found no Product child
+memory directories. `lf task status LOO-717 --json` returned no result before it
+was stopped; current remote Work state was unavailable, so no new Task/PR state
+is inferred. The supplied feature/refresh context still defines this pass.
 
 Reconciliation check: `git diff --check`; `lf context` — passed; memory and scratch fit both size targets.
 
@@ -541,8 +572,13 @@ scheduler registration, credential change or live-store migration occurred.
 Remaining work:
 
 - Review publication: update PR #1811 for the Desktop shell ownership
-  revision after the required checks. The prior `scratch/pr-review.html`
-  walkthrough describes `a1067c99cc` and predates both November 6 replacements.
+  revision after concept review, Clippy and affected suites. The gate selection
+  includes `desktop::shells::` and
+  `desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed` in place of the
+  removed `store::sqlite::task_shells::` filter, plus the Desktop command and
+  `cli_discovery::` metadata tests. Sync/publication belong to the
+  existing Graph; feature stops at interactive demo. The historical walkthrough
+  at `a1067c99cc:scratch/pr-review.html` predates the November 6 replacements.
 - Demo: local and real remote Desktop reconnect/Close, orderly Quit delivery,
   Rex end-to-end Session viewing, lost connection/return and survivor inventory
   for processes, PTYs and sockets. Exercise fifteen-minute eligibility plus the

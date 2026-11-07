@@ -42,16 +42,14 @@ pub(crate) struct OwnerHold {
 }
 
 #[derive(Debug, Clone)]
-pub struct TaskRetirement {
+pub(crate) struct TaskRetirement {
     pub task_id: TaskId,
     pub completion: String,
     pub checkout: String,
     pub branch: String,
     pub due_at: Option<i64>,
     pub phase: String,
-    pub reason: Option<String>,
     pub retry_at: Option<i64>,
-    pub failures: u32,
 }
 
 impl SqliteStore {
@@ -178,11 +176,11 @@ impl SqliteStore {
         self.task_retirement(task)
     }
 
-    pub fn task_retirement(&self, task: &TaskId) -> StoreResult<Option<TaskRetirement>> {
+    pub(crate) fn task_retirement(&self, task: &TaskId) -> StoreResult<Option<TaskRetirement>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT task_id,completion,checkout,branch,due_at,phase,reason,retry_at,failures
+                "SELECT task_id,completion,checkout,branch,due_at,phase,retry_at
                  FROM task_retirements WHERE task_id=?1",
                 [task.as_str()],
                 |r| {
@@ -193,9 +191,7 @@ impl SqliteStore {
                         branch: r.get(3)?,
                         due_at: r.get(4)?,
                         phase: r.get(5)?,
-                        reason: r.get(6)?,
-                        retry_at: r.get(7)?,
-                        failures: r.get(8)?,
+                        retry_at: r.get(6)?,
                     })
                 },
             )
@@ -308,6 +304,19 @@ mod tests {
             .unwrap()
     }
 
+    fn diagnostics(store: &SqliteStore, task: &TaskId) -> (Option<String>, u32) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT reason,failures FROM task_retirements WHERE task_id=?1",
+                [task.as_str()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    }
+
     #[test]
     fn returning_viewers_revoke_closes_and_retry_without_a_sweep() {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
@@ -342,7 +351,11 @@ mod tests {
             let returned = store.task_retirement(&task).unwrap().unwrap();
             assert_eq!(returned.phase, "waiting");
             assert_eq!(
-                (returned.due_at, returned.retry_at, returned.failures),
+                (
+                    returned.due_at,
+                    returned.retry_at,
+                    diagnostics(&store, &task).1
+                ),
                 (None, None, 0)
             );
             assert_eq!(close_requested(&store, "automatic"), 0);
@@ -484,8 +497,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(returned.due_at, None);
-        assert!(returned
-            .reason
+        assert!(diagnostics(&store, &task)
+            .0
             .unwrap()
             .contains("open Task Session viewer"));
         assert_eq!(close_requested(&store, "shell"), 0);
@@ -559,16 +572,17 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(failed.retry_at, Some(2000 + seconds));
-            assert_eq!(failed.failures as usize, attempt + 1);
+            let (reason, failures) = diagnostics(&store, &task);
+            assert_eq!(failures as usize, attempt + 1);
             assert_eq!(failed.due_at, initial.due_at);
-            assert_eq!(failed.reason.as_deref(), Some("offline"));
+            assert_eq!(reason.as_deref(), Some("offline"));
         }
         let returned = store
             .reconcile_task_retirement(&task, 2100, Some(ViewerHold::Viewed(2100)))
             .unwrap()
             .unwrap();
         assert_eq!(returned.retry_at, None);
-        assert_eq!(returned.failures, 0);
+        assert_eq!(diagnostics(&store, &task).1, 0);
         assert_eq!(returned.due_at, None);
     }
 

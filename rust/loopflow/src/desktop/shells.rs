@@ -170,7 +170,7 @@ pub(crate) fn close_allowed(
     owner: &LfProcessId,
     input_queued: bool,
 ) -> Result<Option<bool>> {
-    let Some(close) = store.shell_owner(owner)? else {
+    let Some(close) = store.shell_close_request(owner)? else {
         return Ok(None);
     };
     let requested = match close {

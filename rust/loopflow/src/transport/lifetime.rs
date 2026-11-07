@@ -227,7 +227,11 @@ fn watch(
         }
         // Shell purpose is fixed at creation. Running lf inside an ordinary
         // shell must never enroll it in the idle-agent policy.
-        match report_result(&mut shell_failure, "Shell owner", store.shell_owner(owner)) {
+        match report_result(
+            &mut shell_failure,
+            "Shell close request",
+            store.shell_close_request(owner),
+        ) {
             Some(Some(1 | 2)) => {
                 if end
                     .send(Ending {

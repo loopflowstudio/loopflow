@@ -1,169 +1,98 @@
 # LOO-717 — Decisions and remaining review
 
-Jack Heart approved implementation and review publication. The authoritative
-contract is [shell lifetimes](loo-717-shell-lifetimes.md). Task remains feature/demo;
-shipping, installation, live-store migration and credentials changes are outside
-this request. No product question is open.
+The authoritative contract is [shell lifetimes](loo-717-shell-lifetimes.md).
+No product question is open. Implementation and review publication are authorized;
+the feature Graph stops at interactive demo. Shipping, installation, live-store
+migration, credentials changes and live scheduler registration are outside this run.
 
-## November 6 follow-up — accepted scheduled cleanup and generic launch
+## Accepted decisions
 
-Jack Heart accepted one minute-based OS cleanup sweep per Machine, with the
-existing retirement rows as its durable queue, replacing the waiting process per
-Task. Eligibility normally begins in 15–16 minutes while awake; existing viewer,
-work and Git safeguards remain. Each invocation exits; later invocations recover
-interrupted work and retry failures with backoff. This includes the previously
-deferred retry finding. Reuse installation's launchd/cron approach without combining
-the updater and cleanup jobs. The development run must not register a live schedule.
+- November 6, Jack Heart: “yeah, lets remove that API and put it in the desktop.”
+  Remove `lf task shell` without an alias. Desktop owns receipts, startup,
+  create/attach/reconnect and Close through a hidden cross-platform runtime in
+  the existing `desktop` namespace. It works on Linux without GUI control.
+  LF supplies shared PTY/Machine transport and scheduled checkout retirement;
+  retirement delegates Desktop shell settlement. Rex owns its ordinary shells.
+- November 6, Jack selected option 1: carry the existing viewer protocol across
+  SSH, deleting `lf session remote` and its additional terminal layer. The bridge
+  forwards bytes, owns no PTY or heartbeat and records no host identity.
+- November 6, Jack accepted one minute-based OS sweep per Machine over SQLite
+  retirement rows, replacing per-Task sleeping workers. Normal installation
+  provisions distinct cleanup and updater jobs; development does not register them.
+  Each pass exits, recovers interrupted work and retries eligible failures with
+  backoff. Fifteen-minute absence normally reaches cleanup in 15–16 awake minutes.
+- November 6, Jack accepted caller-supplied integration: Desktop sends its existing
+  Ghostty startup script and resource contents; shared transport selects none.
+  Creation keeps login startup, literal initial argv, LF availability and command
+  blocks. Reattachment never replays startup. No new integration or host registry.
+- November 5, Jack clarified Session-only retention: passive, hidden and unfocused
+  LF viewers retain a Task checkout; ordinary shells and surviving native tabs do
+  not. LF closes only Desktop-owned shells, never Rex shells. Host layouts and
+  restoration stay native; the existing LF database owns Desktop layouts only.
+- Jack accepted orderly Desktop Quit releasing viewers and detected network loss
+  starting the same fifteen-minute absence window with “sounds good.” Expiry
+  does not prove client death or add another grace window. Return cancels cleanup.
+  Requested work, drafts, pending requests and running Graphs remain protected;
+  finishing work does not restart the clock. Eligible idle agents use two minutes.
+- Desktop hide/switch/quit retain shell execution until eligible cleanup. Close
+  ends its ordinary jobs; Undo restores identity/history. New Shell is deliberate.
+  Remote failure never opens a local prompt. Cleanup may discard uncommitted files
+  but retains existing Git safeguards. Deleted checkouts are not reconstructed.
 
-Jack also accepted a generic shell-launch boundary with Desktop explicitly
-supplying Ghostty integration. Reuse existing scripts and terminal conventions;
-remove hard-coded Ghostty bootstrap selection from shared Task shell launching.
-No new shell integration implementation or host registry. Preserve remote startup,
-command blocks, LF availability and identity; reconnect never replays bootstrap.
+## Implementation choices
 
-The authoritative contract contains the deletion list and verification cases.
-The follow-up is implemented at `d14b32ada0`; focused cleanup, installation,
-local/loopback-SSH shell and headless Desktop checks passed. Subsequent concept
-review found a cancellation gap described below, now repaired at `6d42ec8ce`.
-Publication verification and test repairs passed across the original run and
-focused reruns at `3c57ec3bf`; the design records counts and the initially failed
-aggregate run. Publication precedes demo review.
-No ship, installation or live-store migration
-approval is implied.
+- Hidden `desktop shell` dispatch precedes repository/UI binding. `desktop::shells`
+  owns policy and receipt storage; one unreleased migration renames the receipt
+  table to `desktop_shells`. No compatibility table or public listing surface.
+- A content-addressed destination cache materializes relative UTF-8 resources.
+  Reattachment ignores creation inputs. Swift derives launch and Close argv from
+  the saved shell identity; file observation remains under Task workspace.
+- Existing `Controlled` queries pulse each attached connection every ten seconds;
+  the owner expires silence at thirty. Unattached probes add no retention.
+  The bridge bounds each queue at 4 MiB and drains for at most two seconds after
+  owner closure. Command pipes allow sixty seconds for SSH/destination preparation;
+  local sockets allow five. Saved-history snapshots grant neither input nor a hold.
+- Cleanup retry starts at sixty seconds, doubles to one hour and stays separate
+  from absence. Return clears retry state. Alternate HOME/LF_HOME skips account
+  schedules. Held rows are reconciled so a dead owner cannot retain forever.
+- Viewer return and cancellation of queued automatic shell closes commit together,
+  including a brief return/leave between recorder polls. Owners recheck current
+  Task retention before consuming closure, independently of sweep cadence.
+  Explicit Close remains effective; unreadable cleanup state retains execution.
+  The design records the `d14b32ada0` counterexample and no-intervening-sweep tests.
 
-## November 6 — Desktop shell ownership revision
+## Verification and remaining work
 
-Jack Heart requested removal of `lf task shell` and moving that feature into
-Desktop. The current design's “Accepted revision — Desktop owns shell persistence”
-is authoritative over older Task-shell API descriptions. Preserve persistent
-Desktop shells and shared local/SSH transport; remove the general Task shell API
-and move its lifecycle behind a Desktop-owned interface. Task Session viewers
-remain the sole checkout holds, and scheduled LF cleanup still settles only
-Desktop-owned shells. Implement, verify, sync and publish in LOO-717, returning
-to demo review. No merge, install, live-store or scheduler registration approval.
-The ownership cut is implemented in the working tree. Focused local and real
-loopback-SSH lifecycle checks, schema/cancellation regressions and seven headless
-Swift checks pass. The design records the commands. Existing Graph steps still
-own compression, review, broader checks, sync and publication.
+The Desktop ownership cut is committed at `e8385db949`. Focused local/loopback-SSH
+lifecycle, migration/cancellation and headless Swift checks passed. Earlier
+publication checks at `3c57ec3bf` had an initially failed aggregate followed by
+passing repairs; they do not validate this later cut. The design retains commands,
+counts, warnings and logs, including initial failures.
 
-Desktop ownership choice, November 6: use the existing `desktop` command namespace
-for a hidden destination runtime, independent of macOS UI control. Move execution
-receipts/startup/Close policy into `desktop::shells`; keep PTY and Machine transport
-shared. Remove the unused public shell listing surface; ended history remains
-available through Desktop reattachment. Rename only the unreleased receipt table.
-Product memory proposal for refresh: Desktop owns persistent shell receipts and
-startup/Close policy; the Task shell API is removed. LF retains Session viewing
-and scheduled checkout retirement, delegating Desktop shell settlement.
+November 6 concept review found the hidden runtime incorrectly advertised a GUI
+result schema. The working repair returns no schema, excludes the runtime from
+GUI action validation and documents terminal bytes/Close status. Three focused
+tests passed, covering exact inspection, public-list exclusion and ordinary GUI
+schemas. Compression then passed 23 selected checks and Clippy; the design records
+the nextest leak warning and clean isolated rerun. Broader checks and PR #1811
+publication remain in the Graph.
+Native Desktop/Rex and physical remote-Machine proof remain at interactive demo.
+LF-owned SSH heartbeat tests do not establish external hosts' loss detection.
 
-Implementation choices, November 6: retry delay starts at sixty seconds, doubles
-per cleanup failure and caps at one hour. A returning viewer clears retry state;
-absence timing stays separate. The account's normal installation provisions the
-schedule; alternate HOME or LF_HOME skips account-wide registration. Desktop sends
-a generic JSON startup script plus relative UTF-8 resources, materialized under
-a content-addressed destination cache. Reattachment ignores creation inputs.
+The private demo app/provider has not launched. Rebuild the old candidate and keep
+its history/runtime roots and input-release contract in [the demo record](loo-717-demo.md).
+The local upstream inspected during reconciliation was `c8d7a7f4a8`, without a
+fresh fetch. `lf task status LOO-717 --json` produced no result before it was
+stopped; remote Work state was unavailable. Use the supplied Graph context without
+inferring publication or completion. Product memory includes Desktop ownership;
+no child Product memories were found.
 
-## November 6 — one viewer protocol
-
-Jack Heart selected option 1 after reviewing alternatives: remove the added
-`lf session remote` terminal wrapper and extend the existing viewer protocol
-across SSH, with heartbeat expiry on that connection. A byte-forwarding bridge
-may remain; another PTY or heartbeat protocol may not. The current design contains
-the complete implementation and deletion contract. This changes transport,
-not the accepted cleanup timings, Session-only retention or Rex ownership.
-
-Implementation choice, November 6: the byte bridge keeps at most 4 MiB queued
-in each direction, disconnects a full queue like the owner does, and allows two
-seconds to drain after the owner closes. This bounds a stranded helper when SSH
-stops reading; it supplies no heartbeat and
-owns no Session retention deadline. Remote saved history uses the existing
-snapshot frame before attachment, with no input or retention claim. Command-pipe
-attachment allows sixty seconds for SSH setup and destination resolution; the
-existing five-second bound still applies to a local owner socket.
-The existing `Controlled` query supplies the ten-second liveness pulse on an
-attached connection; unattached control probes refresh no viewer. This keeps
-one protocol and adds no message an already-running owner cannot decode.
-
-The later scheduled-cleanup decision above includes the cleanup-error retry repair.
-The historical PR walkthrough at
-`scratch/pr-review.html` describes the prior published head
-`a1067c99cc`, not this replacement.
-
-## November 5 corrections
-
-Jack clarified that only open LF viewers of Task Sessions retain the checkout.
-Desktop shells already accompany those Sessions and add no hold. Rex owns its
-shells and arrangements. A native tab remaining after its LF viewer exits adds
-no retention, and LF keeps no external-host occurrence registry.
-
-Jack accepted explicit viewer release on orderly Desktop Quit and the same
-fifteen-minute absence window after detected network loss. Reconnect cancels
-cleanup; active requested work, drafts and pending requests remain protected.
-Expiry does not prove a remote client died. There is no extra fifteen-minute
-window after expiry, and no automatic deleted-checkout restoration.
-
-The repair removes shell holds and indefinite unknown viewing. Dated evidence
-on existing Session owners and the shared viewer heartbeat bound disconnects.
-The earlier cleanup executor observes owner disappearance even while a Task is
-viewed; the accepted sweep must preserve that behavior. A quick reconnect/leave
-between cleanup observations starts a new window.
-Desktop Quit delivers the existing leave input and waits briefly for relay exit.
-Tests/builds and native proof limits are recorded in the design.
-
-## Code review findings
-
-The simulated ownership/failure review found concrete repairs: a brief reconnect
-must revoke already queued cleanup, initial terminal dimensions must be applied
-even at 24×80, and a child closing its PTY must not block heartbeat expiry while
-it keeps running. The implementation and focused regressions cover these paths.
-Interrupt cleanup also restores borrowed standard-descriptor flags. No additional
-host state, configuration option or provider-launch path was introduced.
-
-## Review and evidence still needed
-
-Concept review, November 6: design refinement, no open product choice. Returning
-Task Session viewing must revoke queued retirement closes before the next sweep.
-At `d14b32ada0` the viewer wrote only Process evidence, while a separate shell owner
-can still consume `close_requested=2` against the stale `closing` phase. Record
-return and cancellation together and recheck current Task retention when an owner
-consumes automatic closure. Keep explicit Close, Session-only holds, ordinary
-conversation pass-through and the finite scheduled sweep. The working design
-contains the source counterexample and the required no-intervening-sweep test.
-The repair at `6d42ec8ce` records return and cancellation atomically, including a
-brief return/leave coalesced between recorder polls. One dated observation now
-records both the viewer flag and checkout hold, replacing separate writes/retries.
-Owners reuse the sweep's
-viewer judgment before automatic closure; explicit Close remains effective.
-The old Desktop README promise that Undo keeps a closed shell running is corrected.
-Focused regressions passed, including real shell/job survival without an
-intervening sweep. The nullable fixture assertion found during rollback testing
-was corrected and passed. The design links the recorded commands/results; gate and native
-demo remain separate.
-
-Native Desktop and Rex demonstration remains at feature/demo. Framing tests are
-real local PTY/process tests, not a physical remote-Machine demonstration. A
-separately opened external SSH session still relies on its host's disconnect
-detection; LF's heartbeat bound applies to LF-owned remote routing.
-
-The private demo app/provider has not launched. Preserve its durable history and
-runtime roots; see loo-717-demo.md. Earlier review notes are retained at
-`500425244c:scratch/questions.md`; uncommitted pre-realignment evidence is at
-`/Users/jack/.lf/demos/loo717-500425244c/durable/questions-before-repair-realignment.md`.
-The superseded external-host occurrence design remains at
-`b81df60579:scratch/questions.md`.
-
-## November 6 reconciliation
-
-Product memory now also reflects the scheduled sweep and Desktop-supplied shell
-integration, alongside Session-only retention and the single viewer protocol.
-No Product child memories exist in this checkout. Earlier
-credential failures and the proposed memory correction remain at
-`d5cab9ba60:scratch/questions.md`; they add no remaining implementation work.
-Source inspection confirms the committed cancellation repair and README correction;
-no further bounded mismatch was found. Existing focused passes remain applicable.
-The plan separates those passes from the older publication checks, broader gate
-and native demonstration still owed.
-
-Concept-review recheck at `6d42ec8ce`: no further design change or open product
-choice. The working design and `concept-review.html` now distinguish the repaired
-between-sweep cancellation from its historical counterexample. Gate and native
-demonstration remain unverified by this source-only review.
+History: `e8385db949:scratch/questions.md` retains earlier implementation choices;
+`500425244c:scratch/questions.md` retains prior reviews;
+`b81df60579:scratch/questions.md` retains the superseded occurrence design;
+`d5cab9ba60:scratch/questions.md` retains earlier credential failures.
+The prior published walkthrough is `a1067c99cc:scratch/pr-review.html`.
+Uncommitted notes before this compression are in
+`.lf/tmp/loo717-compress/questions-before.md`; the pre-realignment evidence remains
+at `/Users/jack/.lf/demos/loo717-500425244c/durable/questions-before-repair-realignment.md`.
+The design and [Rex coordination](rex-coordination.md) own remaining work and handoff limits.

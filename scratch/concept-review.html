@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-717 — Return cancels cleanup</title>
+<title>LOO-717 — Desktop owns shell execution</title>
 <style>
   :root { color-scheme: light dark; --ink: #242824; --paper: #faf9f5; --muted: #62675e; --line: #c7ccbf; --accent: #516443; }
   @media (prefers-color-scheme: dark) { :root { --ink: #e6e9df; --paper: #1c211d; --muted: #aab4a4; --line: #4c5947; --accent: #b3ce9b; } }
@@ -26,60 +26,63 @@
   <header>
     LOO-717 · concept-review · November 6, 2026<br>
     Built from <a href="loo-717-shell-lifetimes.md">shell lifetimes</a>,
-    <a href="questions.md">decisions</a>, <code>task_retirement.rs</code>,
-    <code>retirement.rs</code>, <code>workspace.rs</code>,
-    <code>transport/lifetime.rs</code>, <code>transport/stream.rs</code>
-    and <code>swift/README.md</code>. Source: <code>6d42ec8ce</code>.
+    <a href="questions.md">decisions</a>, <code>desktop/shells.rs</code>,
+    <code>lf/commands/desktop.rs</code>, <code>lf/navigation.rs</code>,
+    <code>ops/task/retirement.rs</code>, <code>store/sqlite/task_retirement.rs</code>
+    and <code>SessionsView.swift</code>. Source: <code>e8385db949</code>.
   </header>
-  <h1>Return cancels cleanup before the next sweep.</h1>
-  <p><strong>No further design change or open product choice.</strong> The accepted
-    return rule is implemented. Recording renewed viewing revokes queued closure
-    without waiting for the one-minute Machine sweep.</p>
+  <h1>Keep the shell runtime outside GUI actions.</h1>
+  <p><strong>Design refinement; no open product choice.</strong> Desktop owns shell
+    execution through its private destination runtime. The working repair removes
+    the GUI response promise from its metadata without changing the experience.</p>
 
   <h2>The repaired mismatch</h2>
   <blockquote>
-    Before: the sweep queued shell closure and exited. A Task Session viewer
-    returned, but a shell owner could still consume the old request before the
-    next sweep. The checkout survived; the shell state was lost.
+    At <code>e8385db949</code>: <code>lf help desktop shell --json</code> advertised
+    <code>DesktopVerbResult</code> with required window, pane and action fields.
+    The command carries terminal bytes and can run on Linux without the app.
   </blockquote>
-  <p><strong>Now:</strong> one transaction records the Process's dated viewing and
-    cancels automatic closes. <code>Ending::confirm</code> uses current Task
-    retention and retirement intent before closing. A stored <code>closing</code>
-    phase alone cannot authorize the effect.</p>
+  <p><strong>Working repair:</strong> exact runtime inspection returns
+    <code>result_schema: null</code>. The GUI action-registry check covers actual
+    GUI actions. No new <code>shell</code> action, public API or stream DTO.</p>
 
   <h2>Actions → concepts → APIs</h2>
   <dl>
-    <dt>Complete and leave → retirement record → finite sweep</dt>
-    <dd>After fifteen minutes absent, <code>task retire</code> queues owned closure.
-      SQLite keeps progress and retry state; later passes finish interrupted work.</dd>
-    <dt>Return → Session viewer → record and revoke together</dt>
-    <dd><code>record_owner_viewer_hold</code> records viewing and cancels that Task's
-      queued retirement closes together. Passive viewers count.
-      <code>owner_retiring</code> rechecks before automatic closure.</dd>
-    <dt>Reconnect → same shell receipt → attach</dt>
-    <dd>Local and SSH connections reattach without replaying startup. Desktop supplies
-      integration resources only on creation. New Shell creates fresh execution.</dd>
+    <dt>New Shell / reconnect → Desktop receipt → create once / attach</dt>
+    <dd>Before the ownership cut: <code>lf task shell</code>.
+      Implemented: private <code>desktop::shells</code> runtime, shared PTY and SSH
+      viewer stream. Desktop supplies startup resources; reconnect never replays them.</dd>
+    <dt>View / leave → Task Session viewer → dated presence / absence</dt>
+    <dd>Implemented: <code>record_owner_viewer_hold</code> records viewing and revokes
+      queued retirement together. Passive viewers count; shell tabs add no hold.</dd>
+    <dt>Complete and leave → retirement record → scheduled sweep</dt>
+    <dd>Implemented: the minute-based Machine sweep checks the fifteen-minute
+      absence deadline, protects requested work and delegates Desktop job settlement.
+      SQLite keeps interrupted progress and retry state. Rex shells remain native.</dd>
   </dl>
 
-  <h2>Recovery stays the same</h2>
-  <p>One surviving passive viewer retains the checkout. A brief return and leave
-    starts a new absence window. Explicit Close still ends the shell; Undo restores
-    identity and history. Already-ended execution cannot be revived by cancellation.
-    Ordinary shells grant no hold, and LF never closes Rex-owned shells.</p>
-  <p><strong>Current Desktop usage:</strong> “⇧⌘T restores the last closed tab's
-    identity and history. Close ends its shell and jobs; New Shell starts fresh
-    execution.” No new host registry, terminal protocol or cleanup worker is needed.</p>
+  <h2>One interaction, including failure</h2>
+  <p>Open a remote Task shell and set a variable. Hide, quit or lose the connection;
+    reconnect attaches to the same execution. A lost startup acknowledgement does
+    not launch a replacement. Close ends ordinary jobs; Undo restores history.
+    A returning Task Session viewer cancels pending cleanup before another sweep;
+    already-ended execution stays ended. Remote failure never opens a local prompt.</p>
+  <p><strong>Desktop README:</strong> “The destination shell runtime
+    carries terminal bytes and Close status; it is not a GUI action and has no
+    Desktop action-result schema.” Existing usage and skill guidance need no change.</p>
 
   <footer>
-    <strong>Review outcome — no product question pending</strong>
+    <strong>Review outcome — metadata repaired; publication and demo remain</strong>
     <ol>
-      <li>The recorded focused regressions cover shell and job survival after a
-        passive viewer returns, including return/leave without another sweep.
-        This review inspected those paths; it did not rerun the checks.</li>
-      <li>Gate still owns affected suites. Native Desktop/Rex and physical
-        remote-Machine behavior remain unproved.</li>
-      <li>No implementation direction or product decision was added. The following
-        Graph step decides navigation; publication and demo remain separate.</li>
+      <li>Before repair: <code>every_verb_names_a_registry_action</code> failed
+        with “shell is not a registry action.” Exact CLI inspection reproduces
+        the inappropriate GUI result schema.</li>
+      <li>Three focused checks passed: GUI registry validation, null runtime schema
+        and public-list exclusion, and ordinary action schemas. Native Desktop/Rex and
+        physical remote-Machine demonstration remain unproved.</li>
+      <li>Open product questions: none. This correction follows the accepted
+        Desktop ownership decision. Broader checks and publication remain with
+        the Graph; native demonstration stays at interactive demo.</li>
     </ol>
   </footer>
 </main>

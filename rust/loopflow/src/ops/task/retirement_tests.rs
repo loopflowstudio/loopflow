@@ -50,7 +50,7 @@ fn retirement_open_viewers_hold_completed_checkout_and_an_ordinary_shell_does_no
         advance(&fixture.store, &fixture.task).await.unwrap();
         let intent = fixture.intent();
         assert_eq!(
-            (intent.due_at, intent.reason.as_deref()),
+            (intent.due_at, fixture.diagnostics().0.as_deref()),
             (None, Some("Retained by an open Task Session viewer"))
         );
         // A passive or hidden viewer is still an attached viewer: its exit alone releases.
@@ -298,6 +298,16 @@ impl Workspace {
             .unwrap()
     }
 
+    fn diagnostics(&self) -> (Option<String>, u32) {
+        self.sql()
+            .query_row(
+                "SELECT reason,failures FROM task_retirements WHERE task_id=?1",
+                [self.task.id.as_str()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    }
+
     fn assert_retained(&self) {
         assert!(self.checkout.join("discard-me").exists());
         assert!(!git(
@@ -373,12 +383,13 @@ fn retirement_retries_after_remote_deletion_and_worktree_failure() {
             "one failure starved the next Task"
         );
         let failed = fixture.intent();
-        assert_eq!(failed.failures, 1);
+        let (reason, failures) = fixture.diagnostics();
+        assert_eq!(failures, 1);
         assert!(failed.retry_at.unwrap() >= now() + 59);
-        assert!(failed.reason.unwrap().contains("locked"));
+        assert!(reason.unwrap().contains("locked"));
         // The next invocation observes backoff without changing the absence deadline.
         sweep(&fixture.store, &tasks).await.unwrap();
-        assert_eq!(fixture.intent().failures, 1);
+        assert_eq!(fixture.diagnostics().1, 1);
         assert_eq!(fixture.intent().due_at, failed.due_at);
         assert!(error.to_string().contains("locked"), "{error}");
         assert!(git(

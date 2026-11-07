@@ -82,7 +82,7 @@ impl SqliteStore {
         ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
     }
 
-    /// Record that a pass looked for this uncertain creation in the provider.
+    /// Record a look (a pass or `lf task sync`) for this uncertain creation.
     pub(crate) fn observe_planning_export(
         &self,
         owner: PlanningChanges<'_>,

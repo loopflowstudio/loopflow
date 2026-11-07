@@ -5671,8 +5671,6 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             state.lock().await.project_fields = Some(provider);
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work).await.unwrap();
             let before = fixture.store.sqlite.project(task.project_id.as_ref().unwrap()).unwrap().unwrap();
-            conn.execute("UPDATE tasks SET pm_snapshot_synced_at=1 WHERE id=?1", [task.id.as_str()]).unwrap();
-            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
             let task_before = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
             assert_eq!(before.description, "Before.\n\n## Notes\nAfter.");
             for prose in ["  New purpose.\n\n```yaml\nworkflow: example\n```\n  ", ""] {
@@ -5690,13 +5688,8 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
                 assert!(acknowledged);
                 assert_eq!(conflict, None);
             }
-            let task_after = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
-            // The pre-write team check may refresh acquisition time without editing the Task.
-            assert!(task_after.pm_snapshot_synced_at > task_before.pm_snapshot_synced_at);
-            assert_eq!(task_after, crate::work::task::Task {
-                pm_snapshot_synced_at: task_after.pm_snapshot_synced_at,
-                ..task_before
-            });
+            // Writes carry no scope check, so the Task is untouched.
+            assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), task_before);
             assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow_before);
             let outcome: Option<String> = conn.query_row("SELECT outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |r| r.get(0)).unwrap();
             assert_eq!(outcome, None);

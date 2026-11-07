@@ -98,6 +98,13 @@ Wave memory and touched `lf/mod.rs`) without conflicts; `cargo check -p loopflow
 --all-targets` passes on the merge. Realign found code, README, docs and plan in
 agreement; the Wave memory lesson survived main's curation.
 
+Gate (2026-11-06): `scripts/test.py --reuse-passing` over `task_planning_tests`,
+`store::sqlite::{planning_export,linear_team_checks,task_history}`, `store::migrations`
+and `binary(lf)` (minus the three long fixtures) found one failure:
+`project_prose_save_delivers_and_settles_without_changing_managed_fields` required the
+deleted pre-write check to bump `pm_snapshot_synced_at`; it now asserts the Task is
+untouched. Rerun on the fixed module: 81 passed, fmt, clippy, architecture and website PASS.
+
 ## Concept review (2026-11-05, headless)
 
 Accepted experience, now implemented: creating a Task reaches Linear inside its

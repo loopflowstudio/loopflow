@@ -3636,6 +3636,47 @@ mod account_first_tests {
         );
     }
 
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_login_the_provider_cannot_place_spends_no_stored_grant() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let stored = expire_claude_login(&store, temp.path(), "first").await;
+        // `first` may be this rotated login: only the profile endpoint could say.
+        let rotated = serde_json::json!({"claudeAiOauth": {
+            "accessToken": "rotated-access",
+            "refreshToken": "rotated-refresh",
+            "expiresAt": 4102444800000i64
+        }})
+        .to_string();
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        // The profile endpoint is down for both reads of the native login. A
+        // token request for `first` in the second's place would read rejection.
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (503, "{}".into()),
+                (400, r#"{"error":"invalid_grant"}"#.into()),
+            ],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(claude_credential(&temp.path().join("first")), stored);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
+        );
+    }
+
     fn launch_home(command: &Command) -> Option<Option<PathBuf>> {
         command
             .get_envs()

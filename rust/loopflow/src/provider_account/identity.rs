@@ -263,9 +263,18 @@ async fn refresh_parked_login(
     };
     // A fully rotated active login matches no stored copy until it is placed.
     let native = native_home(Provider::Claude, None);
-    observe_active_account(store, Provider::Claude, &native)
+    let placed = observe_active_account(store, Provider::Claude, &native)
         .await
         .map_err(|error| SubscriptionError::Unavailable(error.to_string()))?;
+    // Unplaced because the provider did not answer, this profile may be that
+    // login's spent copy. Unplaced because it was rejected, the check goes on:
+    // a dead native login is when a parked one is needed.
+    if placed.is_none() {
+        if let Err(error @ SubscriptionError::Unavailable(_)) = claude_identity(&native, None).await
+        {
+            return Err(error);
+        }
+    }
     // `activate` installs under this lock, so it cannot copy the bytes this
     // refresh is about to spend into the shared home.
     let _installs_wait = acquire_claude_refresh_lock(&native).await?;

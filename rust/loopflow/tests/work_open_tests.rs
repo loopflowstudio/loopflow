@@ -1237,16 +1237,14 @@ fn repository_open_resumes_running_providers_and_starts_none() {
     rex_peer(bin.path());
     let url = format!("loopflow://{}", folder(repo.path()));
     let open = || {
-        let report = json(&lf(
+        let (report, created) = rex_open(
             home.path(),
             repo.path(),
-            Some(bin.path()),
-            &["open", &url, "--host", "rex", "--no-focus", "--json"],
-        ));
+            bin.path(),
+            &[],
+            &["open", &url, "--host", "rex", "--no-focus"],
+        );
         assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
-        let requests = bin.path().join("session.new_window.requests");
-        let created = std::fs::read_to_string(&requests).unwrap();
-        std::fs::remove_file(requests).unwrap();
         created.lines().next().unwrap().to_owned()
     };
 
@@ -1358,10 +1356,11 @@ fn wave_open_reconnects_its_running_conversation_and_starts_none() {
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     rex_peer(bin.path());
     let open = || {
-        let report = json(&lf(
+        rex_open(
             home.path(),
             repo.path(),
-            Some(bin.path()),
+            bin.path(),
+            &[],
             &[
                 "open",
                 "--wave",
@@ -1369,13 +1368,8 @@ fn wave_open_reconnects_its_running_conversation_and_starts_none() {
                 "--host",
                 "rex",
                 "--no-focus",
-                "--json",
             ],
-        ));
-        let requests = bin.path().join("session.new_window.requests");
-        let created = std::fs::read_to_string(&requests).unwrap();
-        std::fs::remove_file(requests).unwrap();
-        (report, created)
+        )
     };
     let conversation = |report: &serde_json::Value| {
         report["receipts"]
@@ -1386,17 +1380,17 @@ fn wave_open_reconnects_its_running_conversation_and_starts_none() {
     };
 
     let session = live_conversation(home.path(), &provider.0, started, repo.path(), "Wave", 0, 1);
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET primary_scope='wave',wave_id=?2 WHERE id=?1",
-        rusqlite::params![session, registered.task.wave_id.as_ref().unwrap().as_str()],
-    )
-    .unwrap();
+    wave_primary(
+        home.path(),
+        &session,
+        registered.task.wave_id.as_ref().unwrap().as_str(),
+    );
     let (report, created) = open();
     assert!(conversation(&report), "{report}");
     assert!(created.contains(&session), "{created}");
 
     // The provider is gone: the Session stays primary and is not relaunched.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
         [&session],
@@ -1903,6 +1897,306 @@ esac
         .unwrap();
     assert_eq!(retained, (origin, token));
     assert_eq!(sessions(home.path()), 1);
+}
+
+/// Make `session` the primary conversation of `wave`.
+fn wave_primary(home: &Path, session: &str, wave: &str) {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET primary_scope='wave',wave_id=?2 WHERE id=?1",
+            rusqlite::params![session, wave],
+        )
+        .unwrap();
+}
+
+/// `LF_AGENT_CALLER` for an agent running `session`.
+fn agent_caller_env(home: &Path, session: &str) -> String {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let (agent, origin): (String, String) = db
+        .query_row(
+            "SELECT p.id,p.attached_lf_process_id FROM processes p
+             JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1",
+            [session],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    serde_json::json!({
+        "session_id":session, "agent_process_id":agent, "origin_exec_id":origin,
+    })
+    .to_string()
+}
+
+const FIXTURE_REX: &[&str] = &["--host", "rex", "--server", "unix:///fixture/rex.sock"];
+
+/// Run `lf open` against a fixture Rex; its report and the tabs it created.
+fn rex_open(
+    home: &Path,
+    repo: &Path,
+    bin: &Path,
+    env: &[(&str, &str)],
+    args: &[&str],
+) -> (Value, String) {
+    let args = [args, &["--json"]].concat();
+    let report = json(&lf_with(home, repo, Some(bin), env, &args));
+    let requests = bin.join("session.new_window.requests");
+    let created = std::fs::read_to_string(&requests).unwrap_or_default();
+    let _ = std::fs::remove_file(requests);
+    (report, created)
+}
+
+#[test]
+fn a_conversation_running_lf_open_stays_where_it_is() {
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let wave = registered.task.wave_id.as_ref().unwrap().as_str();
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let conversation =
+        |title| live_conversation(home.path(), &provider.0, started, repo.path(), title, 1, 0);
+    let primary = conversation("Task primary");
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+        rusqlite::params![primary, registered.task.id.as_str(), wave],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    let open = |caller: &str, args: &[&str]| {
+        let caller = agent_caller_env(home.path(), caller);
+        rex_open(
+            home.path(),
+            repo.path(),
+            bin.path(),
+            &[("LF_AGENT_CALLER", &caller)],
+            &[args, FIXTURE_REX].concat(),
+        )
+    };
+    let url = format!("loopflow://{}", folder(repo.path()));
+
+    // Its own Task, selected directly and through a repository opening.
+    for args in [&["open", "--task", "INF-123"][..], &["open", &url][..]] {
+        let (_, created) = open(&primary, args);
+        assert!(created.contains("Task & workflow"), "{created}");
+        assert!(!created.contains("resume"), "{created}");
+    }
+
+    // A Graph step on the same Task is another conversation.
+    let step = conversation("Graph step");
+    let (_, created) = open(&step, &["open", "--task", "INF-123"]);
+    assert!(created.contains(&primary), "{created}");
+    assert!(created.contains("resume"), "{created}");
+
+    let wave_session = conversation("Wave conversation");
+    wave_primary(home.path(), &wave_session, wave);
+    let wave_open = ["open", "--wave", "task-pr-tests"];
+    let (report, created) = open(&wave_session, &wave_open);
+    assert!(
+        !report["receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|receipt| receipt["label"] == "Wave conversation"),
+        "{report}"
+    );
+    assert!(!created.contains(&wave_session), "{created}");
+    let (report, created) = open(&step, &wave_open);
+    assert!(report.to_string().contains("Wave conversation"), "{report}");
+    assert!(created.contains(&wave_session), "{created}");
+}
+
+#[test]
+fn a_session_without_a_task_opens_one_conversation_tab_here() {
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    rex_reply(
+        bin.path(),
+        "session.list",
+        serde_json::json!({"sessions":[{"session_id":"session:here"}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{"window_id":"window:here","layers":[{"blocks":[{"block_id":"block:here"}]}]}]}),
+    );
+    let in_rex = [
+        ("REX_SERVER", "unix:///fixture/rex.sock"),
+        ("REX_SESSION", "session:here"),
+        ("REX_BLOCK", "block:here"),
+    ];
+    let side = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Side question",
+        0,
+        1,
+    );
+    let tabs = |created: &str| {
+        created
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let (report, created) = rex_open(
+        home.path(),
+        repo.path(),
+        bin.path(),
+        &in_rex,
+        &["open", "--session", &side, "--host", "rex", "--no-focus"],
+    );
+    let tabs_created = tabs(&created);
+    assert_eq!(tabs_created.len(), 1, "{created}");
+    assert_eq!(tabs_created[0]["session_id"], "session:here");
+    assert_eq!(tabs_created[0]["layout"]["block"]["label"], "Conversation");
+    assert!(created.contains(&side), "{created}");
+    assert!(!created.contains(registered.task.id.as_str()), "{created}");
+    assert_eq!(report["receipts"].as_array().unwrap().len(), 1, "{report}");
+    assert!(!bin.path().join("session.create.requests").exists());
+
+    // Every available conversation with no Task, Wave primaries included.
+    let wave = live_conversation(home.path(), &provider.0, started, repo.path(), "Wave", 0, 1);
+    wave_primary(
+        home.path(),
+        &wave,
+        registered.task.wave_id.as_ref().unwrap().as_str(),
+    );
+    let (_, created) = rex_open(
+        home.path(),
+        repo.path(),
+        bin.path(),
+        &in_rex,
+        &["open", "--available", "--host", "rex", "--no-focus"],
+    );
+    let tabs_created = tabs(&created);
+    assert_eq!(tabs_created.len(), 2, "{created}");
+    assert!(tabs_created
+        .iter()
+        .all(|tab| tab["session_id"] == "session:here"
+            && tab["layout"]["block"]["label"] == "Conversation"));
+    assert!(
+        created.contains(&side) && created.contains(&wave),
+        "{created}"
+    );
+    assert!(!created.contains("--follow"), "{created}");
+
+    // Naming the calling conversation opens nothing. In a Task checkout it
+    // belongs to that Task, which the first test covers.
+    let elsewhere = TestRepo::new();
+    let plain = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        elsewhere.path(),
+        "Plain repository",
+        1,
+        0,
+    );
+    let caller = agent_caller_env(home.path(), &plain);
+    let (report, created) = rex_open(
+        home.path(),
+        elsewhere.path(),
+        bin.path(),
+        &[("LF_AGENT_CALLER", &caller)],
+        &[&["open", "--session", &plain], FIXTURE_REX].concat(),
+    );
+    assert!(created.is_empty(), "{created}");
+    assert!(
+        report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("continue here"),
+        "{report}"
+    );
+}
+
+#[test]
+fn lf_a_reaches_only_a_tasks_first_conversation() {
+    use loopflow::durable::MachineId;
+    use loopflow::store::sqlite::SqliteStore;
+
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    for harness in ["claude", "codex"] {
+        host(bin.path(), harness, "", 0);
+    }
+    let args = [&["-a", "codex", "open", "--task", "INF-123"], FIXTURE_REX].concat();
+    let env = [("LF_SETTINGS", "{}")];
+    let open = || rex_open(home.path(), repo.path(), bin.path(), &env, &args).1;
+    let forwarded = format!(
+        "\"--task\",\"{}\",\"--agent\",\"codex\"",
+        registered.task.id.as_str()
+    );
+
+    let warned = lf_with(home.path(), repo.path(), Some(bin.path()), &env, &args);
+    let stderr = String::from_utf8_lossy(&warned.stderr);
+    assert!(!stderr.contains("has no effect"), "{stderr}");
+    let created = open();
+    assert!(created.contains(&forwarded), "{created}");
+
+    // An ended conversation keeps its harness, though no primary is recorded.
+    let ended = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Ended",
+        0,
+        1,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+        rusqlite::params![
+            ended,
+            registered.task.id.as_str(),
+            registered.task.wave_id.as_ref().unwrap().as_str()
+        ],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
+        [&ended],
+    )
+    .unwrap();
+    let created = open();
+    assert!(created.contains("resume"), "{created}");
+    assert!(!created.contains("--agent"), "{created}");
+
+    // The Task's own Machine starts its conversation.
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = MachineId::new();
+    store
+        .add_machine(&peer, "remote.invalid", "Remote")
+        .unwrap();
+    store.claim_task(&registered.task.id).unwrap();
+    store.handoff_task(&registered.task.id, &peer).unwrap();
+    let requests = host(bin.path(), "ssh", r#"{"receipts":[],"unknown":[]}"#, 0);
+    open();
+    let sent = std::fs::read_to_string(requests).unwrap();
+    assert!(sent.contains("'--agent' 'codex'"), "{sent}");
 }
 
 #[test]

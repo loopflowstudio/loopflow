@@ -257,6 +257,22 @@ enum Resume {
     Any,
 }
 
+impl Resume {
+    /// Whether a pane runs `session`, or starts a conversation when there is
+    /// none. The conversation running this command stays where it is.
+    fn admits(self, store: &SqliteStore, session: Option<&str>) -> Result<bool> {
+        let is_caller = |session: &str| {
+            crate::journal::agent_caller().is_some_and(|caller| caller.session_id == session)
+        };
+        Ok(match (self, session) {
+            (_, Some(session)) if is_caller(session) => false,
+            (Self::None, _) | (Self::Running, None) => false,
+            (Self::Running, Some(session)) => provider_running(store, session)?,
+            (Self::Any, _) => true,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Presentation<'a> {
     session: Option<&'a str>,
@@ -354,6 +370,12 @@ fn open_machines(
     target: &Resolved,
     args: &OpenArgs,
 ) -> Result<OpenReport> {
+    if target.task.is_none() && (args.available || target.session.is_some()) {
+        return Ok(OpenReport {
+            receipts: vec![open_conversation(store, host, target, args)?],
+            unknown: Vec::new(),
+        });
+    }
     let repository = target
         .repository_id
         .as_deref()
@@ -624,6 +646,9 @@ fn remote_open(
     if let Some(session) = &args.session {
         argv.extend(["--session".into(), session.clone()]);
     }
+    if let Some(agent) = crate::config::agent_override() {
+        argv.extend(["--agent".into(), agent]);
+    }
     if args.diff {
         argv.push("--diff".into());
     }
@@ -731,6 +756,52 @@ fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) 
     )
 }
 
+/// A Session with no Task is one conversation, not a selection of Tasks: one
+/// tab in the caller's container, and nothing arrives after it.
+fn open_conversation(
+    store: &SqliteStore,
+    host: OpenHost,
+    target: &Resolved,
+    args: &OpenArgs,
+) -> Result<OpenReceipt> {
+    if let Some(reason) = target.current_conversation() {
+        return Ok(target.receipt(Some(host), None, OpenStatus::Opening, Some(reason)));
+    }
+    let session = target
+        .conversation()
+        .context("This Work has no conversation on this Machine")?;
+    let native = Native::resolve(host, args.server.as_deref())?;
+    let cwd = target.cwd();
+    let mut container = match native.here()? {
+        Some(here) => here,
+        None => {
+            let name = container_name(store, target, &scope(store, target)?)?;
+            native.create_container(&name, cwd)?
+        }
+    };
+    let mut receipt = conversation_tab(&native, &mut container, target, session, cwd);
+    if let (false, Some(tab)) = (args.no_focus, &receipt.destination) {
+        receipt.reason = Some(native.focus(&container, tab));
+    }
+    receipt.container = container.id;
+    Ok(receipt)
+}
+
+fn conversation_tab(
+    native: &Native,
+    container: &mut Container,
+    target: &Resolved,
+    session: &str,
+    cwd: &Path,
+) -> OpenReceipt {
+    let mut receipt = target.receipt(Some(native.open_host()), None, OpenStatus::Opening, None);
+    let opened = lf_argv(cwd, &["resume", session])
+        .map(|argv| native.block("Conversation", cwd, argv))
+        .and_then(|layout| native.add_tab(container, "Conversation", cwd, layout));
+    settle_receipt(&mut receipt, opened);
+    receipt
+}
+
 fn launch(
     store: &SqliteStore,
     native: &Native,
@@ -743,7 +814,6 @@ fn launch(
     let host = native.open_host();
     let repo = target.repository_path.as_path();
     let explicit = target.task.is_some();
-    let arriving = !args.arrive_task.is_empty();
     // An arrival appends to its follower's container. A Task joins the container
     // the caller is in; a repository or Wave gets its own.
     let mut container = if let Some(into) = &args.into {
@@ -757,36 +827,35 @@ fn launch(
             None => native.create_container(&container_name(store, target, selected)?, repo)?,
         }
     };
-    let mut receipts = Vec::new();
-    if let SelectionExpression::Wave { wave } = &selected.expression {
-        match store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))? {
-            Some(session) if !arriving && provider_running(store, session.id.as_str())? => {
-                let mut receipt = target.receipt(Some(host), None, OpenStatus::Opening, None);
-                receipt.label = "Wave conversation".into();
-                let opened = lf_argv(repo, &["resume", session.id.as_str()])
-                    .map(|argv| native.block("Conversation", repo, argv))
-                    .and_then(|layout| {
-                        native.add_tab(&mut container, "Conversation", repo, layout)
-                    });
-                settle_receipt(&mut receipt, opened);
-                receipts.push(receipt);
-            }
-            _ => {}
-        }
-    }
-    let presentation = if arriving {
-        Presentation::default()
-    } else {
+    let presentation = if args.arrive_task.is_empty() {
         Presentation {
             session: target.session.as_deref(),
             diff: args.diff || target.url.diff,
-            resume: if explicit || target.session.is_some() {
+            resume: if explicit {
                 Resume::Any
             } else {
                 Resume::Running
             },
         }
+    } else {
+        Presentation::default()
     };
+    let mut receipts = Vec::new();
+    if let SelectionExpression::Wave { wave } = &selected.expression {
+        match store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))? {
+            Some(session)
+                if presentation
+                    .resume
+                    .admits(store, Some(session.id.as_str()))? =>
+            {
+                let mut receipt =
+                    conversation_tab(native, &mut container, target, session.id.as_str(), repo);
+                receipt.label = "Wave conversation".into();
+                receipts.push(receipt);
+            }
+            _ => {}
+        }
+    }
     let mut templates = Templates {
         store,
         repo,

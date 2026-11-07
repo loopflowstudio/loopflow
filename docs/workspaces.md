@@ -11,8 +11,11 @@ splits. Conversation panes run `lf resume` in the Task's worktree. Return to exi
 terminal app; use its controls to rearrange, rename, close and restore them.
 
 Opening a Task starts its conversation. Opening a repository or Wave starts no
-agents: it reconnects conversations that are still running and shows Task/workflow
-for the rest. Run `lf open --task <task>` to pick one up.
+agents: it reconnects conversations that are still running and shows Task & workflow
+for the rest. Run `lf open --task <task>` to pick one up. A conversation running
+the command stays where it is. A conversation with no Task opens by itself:
+`lf open --session <id>` adds one Conversation tab where you are, and
+`lf open --available` does the same for each such conversation.
 
 From a Task checkout, `lf open` selects that Task. From a repository checkout, it
 selects the repository's started, unfinished Tasks. Use `--task` or `--wave` to
@@ -55,7 +58,7 @@ includes a running conversation reconnected by a repository or Wave open.
 
 1. The Task's saved Desktop arrangement.
 2. Its `task_layout` configuration, including Wave preferences.
-3. The builtin Conversation, Task/workflow and Shell layout.
+3. The builtin Conversation, Task & workflow and Shell layout.
 
 Only visible panes and their selected tabs open. LF recreates the arrangement as
 closely as the host supports and reports tools it cannot display.
@@ -115,11 +118,11 @@ Changing a template affects future launches; existing tabs stay as you arranged 
 
 | Pane | What opens in a terminal host |
 | --- | --- |
-| Conversation | `lf resume <session>` in the Task worktree, or Task/workflow when a repository or Wave open finds no running conversation |
+| Conversation | `lf resume <session>` in the Task worktree, or Task & workflow when a repository or Wave open finds no running conversation |
 | Shell | A fresh shell in the Task worktree |
 | Files | Your file browser or editor |
 | Changes | Git's pager or your diff tool |
-| Task/workflow | The Task brief, workflow and recorded runs |
+| Task & workflow | The Task brief, workflow and recorded runs |
 
 Conversation panes use ordinary resume. If the Task has no conversation, they run
 `lf resume --task <task>` to start one, and that new conversation takes its first
@@ -143,7 +146,7 @@ patches include untracked files; `--difftool` covers tracked files:
 lf diff ENG-123 --base parent --difftool
 ```
 
-Use `--head <commit>` for a committed comparison. In Task/workflow, `n` and `p`
+Use `--head <commit>` for a committed comparison. In Task & workflow, `n` and `p`
 select a step and `l` reads its log. Viewing starts no work.
 
 ## Follow newly started Tasks
@@ -152,7 +155,7 @@ A repository or Wave opened in Rex includes a Workspace tab. Keep it running to
 add newly started Tasks without taking focus or adding backlog Tasks. A Task tab
 you close stays closed while that Workspace tab runs.
 
-New arrivals use the configured splits with Task/workflow information in the
+New arrivals use the configured splits with Task & workflow information in the
 Conversation slot. They leave input in your existing terminals. Run
 `lf open --task <task>` when you want to resume that conversation.
 
@@ -180,9 +183,11 @@ Check the error in the terminal. A successful open receipt means the native tab
 was created; resume may still be connecting or may report its own error there.
 
 Starting a Task's first conversation needs a harness. With no `default_agent` and
-several harnesses installed, the open fails and creates no tab:
+several harnesses installed, the open fails and creates no tab. Choose one for
+this Task, or for every Task:
 
 ```bash
+lf -a claude open --task <task>
 lf set --global default_agent claude
 ```
 

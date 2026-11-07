@@ -1824,9 +1824,11 @@ fn run() -> anyhow::Result<()> {
         && !cli.may_launch_agent()
         && !matches!(
             cli.command,
-            Some(Commands::Config {
-                cmd: loopflow::lf::ConfigCommand::Show { .. }
-            })
+            Some(
+                Commands::Config {
+                    cmd: loopflow::lf::ConfigCommand::Show { .. }
+                } | Commands::Open(_)
+            )
         )
     {
         eprintln!("This command does not start an agent; --agent has no effect.");

@@ -273,6 +273,16 @@ impl Resolved {
         }
     }
 
+    /// Why nothing opens when this Work's conversation is the one calling.
+    fn current_conversation(&self) -> Option<String> {
+        (self.relation().0 == ConversationRelation::CurrentConversation).then(|| {
+            format!(
+                "{} is this conversation; continue here. Nothing was opened.",
+                self.label
+            )
+        })
+    }
+
     /// Compare the calling conversation with this Work's selected destination.
     /// Same Work is not enough: a Graph step and the primary can share a Task.
     fn relation(&self) -> (ConversationRelation, Option<String>) {
@@ -1664,11 +1674,8 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         && std::io::stdout().is_terminal()
         && crate::journal::agent_caller().is_none();
     if let [target] = targets.as_slice() {
-        if target.relation().0 == ConversationRelation::CurrentConversation {
-            bail!(
-                "{} is this conversation; continue here. Nothing was opened.",
-                target.label
-            );
+        if let Some(reason) = target.current_conversation() {
+            bail!(reason);
         }
     }
     let receipts = open_all(&targets, &route, in_place);

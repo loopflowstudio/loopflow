@@ -7,8 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::{
-    lf_argv, provider_running, tool_cwd, tools, wave_config, with_machine_home, Native,
-    Presentation, Resume, SqliteStore, TaskId, ViewContent,
+    lf_argv, tool_cwd, tools, wave_config, with_machine_home, Native, Presentation, Resume,
+    SqliteStore, TaskId, ViewContent,
 };
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
@@ -117,25 +117,17 @@ impl Tools<'_> {
     /// The named Session, else the Task's primary, else a new conversation.
     fn conversation(&self, session: Option<&str>) -> Result<Option<Value>> {
         let session = session.or(self.content.primary_session.as_deref());
-        let resume = match self.resume {
-            Resume::None => false,
-            Resume::Running => match session {
-                Some(session) => provider_running(self.store, session)?,
-                None => false,
-            },
-            Resume::Any => true,
-        };
-        if !resume {
+        if !self.resume.admits(self.store, session)? {
             return Ok(None);
         }
-        let words = match session {
-            Some(session) => vec!["resume", session],
-            None => {
-                self.ensure_harness()?;
-                vec!["resume", "--task", &self.content.work.id]
-            }
+        let task = &self.content.work.id;
+        let argv = match session {
+            Some(session) => lf_argv(self.cwd, &["resume", session])?,
+            None => match self.ensure_harness()? {
+                Some(agent) => lf_argv(self.cwd, &["resume", "--task", task, "--agent", &agent])?,
+                None => lf_argv(self.cwd, &["resume", "--task", task])?,
+            },
         };
-        let argv = lf_argv(self.cwd, &words)?;
         Ok(Some(self.host.block("Conversation", self.cwd, argv)))
     }
 
@@ -146,19 +138,21 @@ impl Tools<'_> {
         }
     }
 
-    /// A Task with no conversation yet starts one on the configured harness.
+    /// A Task with no conversation yet starts one on the selected harness.
     /// Without one the pane would exit and its host would close it, so this
-    /// opening reports the error instead. Earlier conversations keep their own.
-    fn ensure_harness(&self) -> Result<()> {
+    /// opening reports the error instead. Returns this invocation's explicit
+    /// choice for the pane, which does not inherit it; earlier conversations
+    /// keep their own.
+    fn ensure_harness(&self) -> Result<Option<String>> {
         let id = TaskId::parse(&self.content.work.id)?;
         if !self.store.task_conversations(&id)?.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let task = self.store.task(&id)?.context("Task is unavailable")?;
         wave_config(self.store, self.cwd, task.wave_id.as_ref())?
             .unwrap_or_default()
             .agent()?;
-        Ok(())
+        Ok(crate::config::agent_override())
     }
 
     fn shell(&self) -> Value {

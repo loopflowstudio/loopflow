@@ -544,6 +544,26 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
+fn help_skips_a_provider_named_before_its_subcommand() {
+    let normalized =
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
+        ["lf", "account", "codex", "use", "a@example.com"]
+    );
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "--help"]),
+        ["lf", "help", "account", "use"]
+    );
+    let tree = loopflow::lf::navigation::command_tree();
+    let path = ["account", "codex", "use"].map(String::from);
+    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &path).unwrap();
+    assert_eq!(canonical, ["account", "use"]);
+    let unknown = ["account", "codex", "nosuch"].map(String::from);
+    assert!(loopflow::lf::navigation::resolve_path(&tree, &unknown).is_err());
+}
+
+#[test]
 fn help_preserves_location_without_promoting_query_filters() {
     for (args, task) in [
         (

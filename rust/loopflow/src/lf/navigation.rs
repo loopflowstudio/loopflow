@@ -200,6 +200,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut boundary = false;
     // Whether `path` ends in a word the tree does not know.
     let mut unknown = false;
+    let mut values_before_subcommand = Vec::new();
     let mut help = false;
     while index < args.len() {
         let value = &args[index];
@@ -244,6 +245,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                         .expect("resolved child exists");
                 }
                 positions.extend(output.len()..output.len() + expansion.len());
+                values_before_subcommand.clear();
                 output.extend(expansion.clone());
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
@@ -251,6 +253,10 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 {
                     boundary = true;
                 }
+            } else if leading_value(current, &values_before_subcommand, value) {
+                // `lf account codex use`: the provider is a value, not an owner.
+                values_before_subcommand.push(value.clone());
+                output.push(value.clone());
             } else {
                 // Keep unknown owner children in help requests too: they must
                 // fail identically instead of becoming the owner's help page.
@@ -392,11 +398,34 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     })())
 }
 
+/// Whether `word` is the next positional value a command takes before naming
+/// its subcommand, as the provider in `lf account codex use`. The root's skill
+/// name is not one, and a value the positional rejects is an unknown child.
+fn leading_value(command: &Command, taken: &[String], word: &str) -> bool {
+    if command.get_name() == "lf"
+        || command.is_args_conflicts_with_subcommands_set()
+        || command.get_subcommands().next().is_none()
+        || command.get_positionals().nth(taken.len()).is_none()
+    {
+        return false;
+    }
+    let args = std::iter::once(command.get_name())
+        .chain(taken.iter().map(String::as_str))
+        .chain([word]);
+    command.clone().try_get_matches_from(args).is_ok()
+}
+
 pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
     let mut current = tree;
     let mut canonical: Vec<String> = Vec::new();
+    let mut values_before_subcommand = Vec::new();
     for (index, name) in path.iter().enumerate() {
-        let Some(expansion) = resolve_child(current, name, &canonical)? else {
+        let expansion = resolve_child(current, name, &canonical)?;
+        if expansion.is_none() && leading_value(current, &values_before_subcommand, name) {
+            values_before_subcommand.push(name.clone());
+            continue;
+        }
+        let Some(expansion) = expansion else {
             // `lf help <old path>` explains the command it moved to: the old
             // spelling is the canonical path so far plus the words after it.
             for split in index..=path.len() {
@@ -436,6 +465,7 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
                 .find_subcommand(owner)
                 .expect("resolved child exists");
         }
+        values_before_subcommand.clear();
         canonical.extend(expansion);
     }
     Ok((current, canonical))

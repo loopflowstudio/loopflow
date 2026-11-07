@@ -2,20 +2,23 @@
 
 PR #1811 merged as `76a5a30125609f19a3974b371d7431d8b208449e`
 at 2026-11-07 04:51:52 UTC. `lf sync --manual origin/main` brought this
-Task checkout to `c56b38318`; its tree and main's tree are both
-`85b19d3d220d311fbaa6ccd07e7d77d5bda87db6`. Checks below run that tree.
+Task checkout to `c56b38318`; its tree and main's tree were both
+`85b19d3d220d311fbaa6ccd07e7d77d5bda87db6`. The merged checks below ran that tree;
+`debf9de042` then committed the test-only repair and this verification record.
 
-The preceding pass delivered the Desktop-owned runtime, one viewer protocol
-over SSH and one scheduled retirement sweep. This pass checks the merged
-result, not earlier branch test results. The approved shipping steer retained
-native/physical-remote demonstration limits and excluded live installation and
-scheduler migration.
+The merged change delivers the Desktop-owned runtime, one viewer protocol over
+SSH and one scheduled retirement sweep. Jack Heart's November 6 shipping decision,
+"ok, lg2m, ship it", covered LOO-717 / #1811 only. Native/physical-remote
+demonstration limits remain; installation and live-store/scheduler migration
+were not requested. The accepted November 3–6 contract, including the final
+Desktop ownership and scheduled cleanup revisions, is retained in
+`ca4ca6f75a:scratch/loo-717-shell-lifetimes.md` and Product memory.
 
-**Decision: Fix forward / iterate.** The merged runtime passed the checks below,
-but the prepared remote-viewer acceptance test exposed a zombie-inventory
-false positive. The follow-up filters zombies from the terminal assertion using
-the same rule as fixture cleanup. No runtime defect was demonstrated. Publication
-of the correction remains with the current Graph's delivery steps.
+The prepared remote-viewer acceptance test exposed a zombie-inventory false
+positive. The committed repair filters zombies from the terminal assertion using
+the same rule as fixture cleanup; all three SSH checks then passed. No runtime
+defect was demonstrated. No further implementation change or product decision
+is identified by these findings.
 
 ## Checks
 
@@ -38,9 +41,8 @@ here exercise its policy with accelerated intervals.
 
 ## Remaining native observations
 
-No rendering environment or separately configured physical remote Machine is
-available to this headless run. Native Desktop/Rex interaction, orderly GUI
-Quit/relaunch, physical network loss, sleep/logout/reboot and wall-clock
+Native Desktop/Rex interaction, orderly GUI Quit/relaunch, physical network loss,
+sleep/logout/reboot and wall-clock
 15–16-minute cleanup remain unobserved. Loopback SSH and accelerated retirement
 fixtures cannot establish those observations. Follow-up Task `a0dff7`
 (`task_a0dff7ea0ee74b38a0f2f4cd82393abb`) links back to LOO-717 and PR #1811 and
@@ -49,21 +51,16 @@ Creation started no Graph and requested no installation or schedule registration
 
 ## Concrete repair: remote PTY acceptance counts zombies
 
-Delete — do not maintain: replace the state-blind terminal filter in
-`ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave`.
-Keep rejection of additional live terminals and the existing lifecycle checks;
-no runtime, timing, or retry changes are needed.
-
 `ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave`
-failed at `rust/loopflow/tests/transport/ssh_shells.rs:685`:
+originally failed at `rust/loopflow/tests/transport/ssh_shells.rs:685`:
 
 ```text
 extra SSH PTY: [(92404, 92348, "Ss+", "ttys115"), (93264, 92404, "Z", "ttys115")]
 ```
 
 The live shell and its already-exited child have the same terminal name. The
-assertion includes every descendant with a tty and requires every PID to be the
-shell PID, ignoring the process-state column it already collected. The fixture's
+old assertion included every descendant with a tty and required every PID to be
+the shell PID, ignoring the process-state column it already collected. The fixture's
 `assert_baseline` and teardown already exclude `Z` processes. This is a concrete
 false positive in the required remote acceptance route, not a demonstrated second
 live SSH PTY. The assertion happened before the healthy-idle, resize, leave and
@@ -72,14 +69,41 @@ return portions, so those parts did not run in this check.
 The live-terminal filter now excludes `Z` process states while retaining rejection
 of an additional live terminal relay. No sleeps or retries were added. The earlier
 publication reported this test passing; the merged-main run above caught the race.
-The correction needs a follow-up PR, keeping #1811 as merged history.
+The correction is committed in `debf9de042`; #1811 remains merged history.
 
 - `cargo test -p loopflow --test transport_tests ssh_shells::ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave -- --ignored` — passed after repair (44.13 s), including healthy idle, resize, Leave and unchanged execution on return; log `/tmp/loo717-fix-prepared-viewer.log`.
 - `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored` — all three passed after repair (68.98 s), including twenty lifecycle cycles and process/PTY/socket baseline; log `/tmp/loo717-fix-ssh.log`. Inherited `LF_*` cleared and stdin closed for both runs.
-- `cargo fmt --check` and `git diff --check` — passed; Clippy remains with gate before committing.
+- `cargo fmt --check` and `git diff --check` — passed after repair.
+- `git diff --check; lf context` — reconciliation passed; Product memory 15,987/16,000 tokens and 75,725/131,072 bytes; scratch within both limits. Existing SSH results reused; no code changed.
 
-The repair's test runners and disposable SSH fixtures exited. The existing native
-demonstration follow-up and its pending Linear sync are unchanged.
+## Remaining delivery
+
+Concept review (November 6): no design change and no open product choice.
+The current repair changes only the process inventory assertion. The accepted
+actions still map directly to the existing model: Desktop create/attach/Close
+uses its execution receipt and shared transport; Session Attach/Resume/Leave
+updates Process viewing evidence; `task retire` consumes the SQLite cleanup
+queue in one finite Machine sweep. Rex owns its ordinary shells. The Desktop
+and transport READMEs already describe these interactions; no usage or skill
+revision follows from the test repair.
+
+Normal use retains one remote execution through the prepared viewer. Loss of
+that viewer releases its hold without creating a replacement shell; returning
+before eligible cleanup reattaches to the same execution and cancels queued
+cleanup. Close and history-only Undo remain distinct. A second connected
+Session viewer still retains the checkout. The counterexample that must keep
+failing is an additional live remote terminal relay: excluding `Z` states does
+not exempt that process. A zombie's reported tty is neither live execution nor
+a reason to introduce another ownership or retention concept.
+
+No implementation iteration is identified. The next checks remain the gate
+below and the separately recorded native observations; this review supplies
+no new runtime demonstration or shipping action.
+
+The correction still needs gate and a follow-up PR through the current Graph's
+delivery steps. `cargo clippy --all-targets -- -D warnings` remains with gate.
+The native demonstration follow-up `a0dff7` and its pending Linear sync remain
+separate from this test repair. No acceptance requirement was removed.
 
 All commands launched by the merged verification pass exited. Its failed SSH test's shell PID and
 zombie PID were absent from `ps` after fixture teardown. Successful local/SSH

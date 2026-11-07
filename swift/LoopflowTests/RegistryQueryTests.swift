@@ -363,7 +363,7 @@ struct RegistryQueryTests {
           "reason": "resume the parked Task"
         },
         "pr": null,
-        "section": "now"
+        "section": "working"
       }
     ],
     "truncated": false

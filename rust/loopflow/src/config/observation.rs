@@ -1,4 +1,4 @@
-//! File dependencies of a bounded settings read. Subscriptions probe only these
+//! File dependencies of a bounded settings read. Watches probe only these
 //! inputs, including absent files, rather than rebuilding Work on every tick.
 //! Content fingerprints survive editor replacement and timestamp preservation.
 
@@ -63,7 +63,7 @@ impl Files {
 }
 
 /// Carry this reading's dependencies into a bounded worker without observing
-/// unrelated subscriptions or retaining a process-wide list of files.
+/// unrelated watches or retaining a process-wide list of files.
 pub(crate) fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
     let files = READING.with(|reading| reading.borrow().clone());
     move || match files {

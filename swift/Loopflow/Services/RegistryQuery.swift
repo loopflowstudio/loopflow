@@ -96,7 +96,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// Requested reviews and review submissions, each with its commit.
     case prReviews(directory: String, pr: String?)
     /// The Task now and whether it reached `until` (`submitted` or
-    /// `terminal`); subscribed, it ends after the reading that reached it.
+    /// `terminal`); watched, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
 
     /// Rows in one `sessionPage`.

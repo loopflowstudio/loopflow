@@ -3,7 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::watch::{Subscription, Transport};
+use super::watch::{Transport, Watch};
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -655,7 +655,7 @@ pub(crate) fn watch_task_pane(
     directory: &std::path::Path,
     issue: &str,
     transport: Transport,
-) -> Result<Option<Subscription>> {
+) -> Result<Option<Watch>> {
     let repo = crate::ops::task::task_repository(directory, Some(issue))?;
     let identifier = tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
@@ -707,7 +707,7 @@ pub(crate) fn watch_plans(
     selected: Option<crate::durable::RepositoryId>,
     directory: std::path::PathBuf,
     transport: Transport,
-) -> Result<Option<Subscription>> {
+) -> Result<Option<Watch>> {
     super::watch::start(
         (),
         super::watch::Watched::every(super::watch::PLANNING_CLOCK),

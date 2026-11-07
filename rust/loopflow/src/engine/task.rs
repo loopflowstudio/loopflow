@@ -16,7 +16,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use super::{launch, Error, ErrorCode, Result};
 use crate::durable::TaskOwnership;
 use crate::id::LfProcessId;
-use crate::lf::commands::watch::{Subscription, Transport, Watched, ACTIVITY_CLOCK};
+use crate::lf::commands::watch::{Transport, Watch, Watched, ACTIVITY_CLOCK};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
 use crate::work::task::comment::TaskComments;
@@ -286,13 +286,13 @@ pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Res
     }
 }
 
-/// `task.wait` as a subscription: a reading whenever the Task changes, the
+/// `task.wait` as a watch: a reading whenever the Task changes, the
 /// last one `reached`.
 pub fn watch_wait(
     issue: String,
     until: TaskWaitUntil,
     transport: Transport,
-) -> anyhow::Result<Option<Subscription>> {
+) -> anyhow::Result<Option<Watch>> {
     crate::lf::commands::watch::start(
         (issue, until),
         Watched::every(ACTIVITY_CLOCK),

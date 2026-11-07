@@ -318,7 +318,7 @@ struct SessionWatchArgs {
 pub(crate) fn watch_list(
     filter: crate::session::SessionFilter,
     transport: super::watch::Transport,
-) -> anyhow::Result<Option<super::watch::Subscription>> {
+) -> anyhow::Result<Option<super::watch::Watch>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),

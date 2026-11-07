@@ -406,18 +406,18 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}}),
+        serde_json::json!({"type": "watch", "id": "processes", "operation": {"kind": "process.list"}}),
         true,
     );
-    let mut subscribed = false;
+    let mut watched = false;
     let mut answered = false;
-    while !(subscribed && answered) {
+    while !(watched && answered) {
         let message = receive().unwrap();
         assert_eq!(message["id"], "processes", "{message}");
         match message["type"].as_str().unwrap() {
             "response" => {
                 assert!(message["result"].is_null());
-                subscribed = true;
+                watched = true;
                 write(
                     serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
                     true,
@@ -816,7 +816,7 @@ fn server_operations_match_their_lf_commands() {
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow::server::client::Connection::open().unwrap();
-            let id = connection.subscribe(served.clone()).unwrap();
+            let id = connection.watch(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let served = frame;

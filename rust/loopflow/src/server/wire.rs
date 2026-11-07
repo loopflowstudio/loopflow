@@ -26,13 +26,13 @@ pub enum ClientMessage {
     Status,
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
-    /// A read with a watch; answers `subscribed`, then `reading` messages
+    /// A read with a watch; answers a null `response`, then `reading` messages
     /// until cancelled. The id follows the same rules as a request's.
-    Subscribe { id: String, operation: Read },
-    /// Ask the live subscription `id` for a reading now; the next reading's
+    Watch { id: String, operation: Read },
+    /// Ask the live watch `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     Checkpoint { id: String, checkpoint: u64 },
-    /// Forget a request's answer, or end a subscription.
+    /// Forget a request's answer, or end a watch.
     Cancel { id: String },
 }
 
@@ -97,7 +97,7 @@ pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
     /// What the request returned: the value its operation's `x-result` names,
-    /// null once a subscription or attachment is confirmed. `trace_id`
+    /// null once a watch or attachment is confirmed. `trace_id`
     /// correlates the server's diagnostics for it.
     Response {
         id: String,
@@ -110,12 +110,12 @@ pub enum ServerMessage {
         #[schemars(with = "WatchFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
-    /// The subscription's last reading was its answer (`task.wait` reached
+    /// The watch's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     Ended {
         id: String,
     },
-    /// `id` is null before a request exists. An error for a subscription ends it.
+    /// `id` is null before a request exists. An error for a watch ends it.
     Error {
         id: Option<String>,
         code: ErrorCode,
@@ -163,7 +163,7 @@ pub struct ConnectedClient {
     pub client: ClientIdentity,
     /// RFC 3339.
     pub connected_at: String,
-    /// Requests the connection has sent, subscriptions included.
+    /// Requests the connection has sent, watches included.
     pub requests: u64,
 }
 
@@ -195,7 +195,7 @@ mod tests {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/hello.json"),
             include_str!("../../../../tests/fixtures/dto/server/status_request.json"),
-            include_str!("../../../../tests/fixtures/dto/server/subscribe.json"),
+            include_str!("../../../../tests/fixtures/dto/server/watch.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkpoint.json"),
             include_str!("../../../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),

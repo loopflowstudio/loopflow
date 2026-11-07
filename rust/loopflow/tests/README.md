@@ -919,7 +919,7 @@ cargo test -p loopflow --lib server::
 cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
-cargo test -p loopflow --test transport_tests server_subscriptions_refresh_work_and_resolve_primary_session
+cargo test -p loopflow --test transport_tests server_watches_refresh_work_and_resolve_primary_session
 cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
 cargo test -p loopflow --test transport_tests server_reconnect_
 cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
@@ -935,7 +935,7 @@ executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
 
 `served_reads` covers CLI/server effect parity and concurrent request traces
-without request Process rows. The transport subscription proof covers live Task
+without request Process rows. The transport watch proof covers live Task
 changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.

@@ -43,7 +43,7 @@ owners. An API connection introduces no new retention authority.
 Desktop ── private Unix socket ── server
 phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
-server read/subscribe ─ shared Rust readers
+server read/watch ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
 server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
@@ -61,7 +61,7 @@ attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
-Every shared native Work read, write and subscription uses this server. Desktop
+Every shared native Work read, write and watch uses this server. Desktop
 links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
 the same shared Rust functions, which return typed values: `Write::run`
 (`lf/commands/write.rs`) returns the value as the response, and the CLI

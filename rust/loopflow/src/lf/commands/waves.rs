@@ -737,7 +737,7 @@ pub fn watch_show(
     task: Option<String>,
     all: bool,
     transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
+) -> Result<Option<super::watch::Watch>> {
     super::watch::start(
         (),
         super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
@@ -931,7 +931,7 @@ pub fn watch_task_status(
     repo: &Path,
     issue: String,
     transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
+) -> Result<Option<super::watch::Watch>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_detail(&store, status).await
     })
@@ -943,7 +943,7 @@ pub fn watch_task_pane(
     repo: &Path,
     issue: String,
     transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
+) -> Result<Option<super::watch::Watch>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_pane(&store, status).await
     })
@@ -954,7 +954,7 @@ fn watch_task<T, F, R>(
     issue: String,
     transport: super::watch::Transport,
     reading: F,
-) -> Result<Option<super::watch::Subscription>>
+) -> Result<Option<super::watch::Watch>>
 where
     T: Serialize,
     F: Fn(SharedStore, crate::ops::task::TaskStatus) -> R + Clone + Send + Sync + 'static,

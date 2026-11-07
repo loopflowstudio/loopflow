@@ -97,7 +97,7 @@ impl HistoryWindow {
 pub(crate) fn watch(
     window: HistoryWindow,
     transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
+) -> Result<Option<super::watch::Watch>> {
     super::watch::start(
         window,
         super::watch::Watched::every(super::watch::PLANNING_CLOCK),

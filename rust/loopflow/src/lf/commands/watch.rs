@@ -16,11 +16,11 @@
 //! Either way the next frame answers it, changed or not. The watch ends, after
 //! answering what it was asked, when stdin closes or its parent exits.
 //!
-//! [`Subscription`] serves the same watch inside this process, as Ghostty's
+//! [`Watch`] serves the same reading inside this process, as Ghostty's
 //! embedding API does: a data-free wakeup from any thread says a result may
 //! have changed, and the app pulls on its own thread, where the reading runs
 //! and coalesces a burst into one frame. The app reads exactly what the `lf`
-//! command would print. A subscription's arguments are fixed; it takes only
+//! command would print. A watch's arguments are fixed; it takes only
 //! checkpoints.
 
 mod checkouts;
@@ -194,7 +194,7 @@ where
 pub enum Transport {
     /// stdin and stdout, ending with the parent: `lf <read> --json --watch`.
     Stdio,
-    /// Requests and pulls through the returned [`Subscription`]; the callback
+    /// Requests and pulls through the returned [`Watch`]; the callback
     /// says, from any thread and carrying nothing, that a pull may find a frame.
     Pull(Box<dyn Fn() + Send + Sync>),
 }
@@ -209,13 +209,13 @@ impl std::fmt::Debug for Transport {
 }
 
 /// Serve `read` over `transport`. Stdio runs until the watch ends; a pulled
-/// watch returns its subscription at once.
+/// watch returns its handle at once.
 pub(crate) fn start<A, T, F, Fut>(
     args: A,
     watched: Watched,
     read: F,
     transport: Transport,
-) -> Result<Option<Subscription>>
+) -> Result<Option<Watch>>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
@@ -224,27 +224,27 @@ where
 {
     match transport {
         Transport::Stdio => run(args, watched, read).map(|()| None),
-        Transport::Pull(wake) => subscribe(args, watched, read, wake).map(Some),
+        Transport::Pull(wake) => start_pull(args, watched, read, wake).map(Some),
     }
 }
 
 /// A watch served inside this process. It takes checkpoints, never argument
-/// changes: a client with new arguments subscribes again. [`Subscription::pull`] reads on
+/// changes: a client with new arguments watches again. [`Watch::pull`] reads on
 /// the caller's thread and returns the frame that command would print next.
 /// Dropping it ends the watch.
-pub struct Subscription {
+pub struct Watch {
     inbox: Arc<dyn Inbox>,
     pull: Mutex<Box<dyn FnMut() -> Option<Vec<u8>> + Send>>,
     ended: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for Subscription {
+impl std::fmt::Debug for Watch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Subscription").finish_non_exhaustive()
+        f.debug_struct("Watch").finish_non_exhaustive()
     }
 }
 
-impl Subscription {
+impl Watch {
     /// `{"id": checkpoint}` on the stdin of the equivalent `lf` watch: the
     /// next frame answers it, changed or not.
     pub fn checkpoint(&self, checkpoint: u64) {
@@ -269,7 +269,7 @@ impl Subscription {
     }
 }
 
-impl Drop for Subscription {
+impl Drop for Watch {
     fn drop(&mut self) {
         self.inbox.close();
     }
@@ -305,12 +305,12 @@ impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
 
 /// Serve `read` as `run` does, read on the puller's thread. A thread of this
 /// process only waits for the next reason to read and calls `wake`.
-fn subscribe<A, T, F, Fut>(
+fn start_pull<A, T, F, Fut>(
     args: A,
     watched: Watched,
     read: F,
     wake: Box<dyn Fn() + Send + Sync>,
-) -> Result<Subscription>
+) -> Result<Watch>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
@@ -368,7 +368,7 @@ where
         })
         .ok()
     };
-    Ok(Subscription {
+    Ok(Watch {
         inbox,
         pull: Mutex::new(Box::new(pull)),
         ended,
@@ -757,7 +757,7 @@ fn accept<A: DeserializeOwned>(mailbox: &mut Mailbox<A>, line: &[u8]) {
 type Followers = Vec<(Weak<dyn Inbox>, Option<u32>)>;
 
 /// Every watch of a store in this process shares one observer of it, so an
-/// app serving many subscriptions watches its store once.
+/// app serving many watches follows its store once.
 static OBSERVERS: OnceLock<Mutex<HashMap<PathBuf, Followers>>> = OnceLock::new();
 
 fn observers() -> MutexGuard<'static, HashMap<PathBuf, Followers>> {
@@ -862,23 +862,23 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::time::{Duration, Instant};
 
-    use super::{changed, identity, retry_due, subscribe, Subscription, Watched, PLANNING_CLOCK};
+    use super::{changed, identity, retry_due, start_pull, Watch, Watched, PLANNING_CLOCK};
     use crate::store::sqlite::StoreRevisions;
 
-    fn next_frame(subscription: &Subscription, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
+    fn next_frame(watch: &Watch, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             wakes
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if let Some(frame) = subscription.pull() {
+            if let Some(frame) = watch.pull() {
                 return serde_json::from_slice(&frame).unwrap();
             }
         }
     }
 
     #[test]
-    fn configuration_changes_reach_an_existing_subscription_without_store_writes() {
+    fn configuration_changes_reach_an_existing_watch_without_store_writes() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -901,7 +901,7 @@ mod tests {
         let reads = Arc::new(AtomicUsize::new(0));
         let counted = reads.clone();
         let directory = checkout.clone();
-        let subscription = subscribe(
+        let watch = start_pull(
             (),
             Watched::every(PLANNING_CLOCK),
             move |_, ()| {
@@ -932,7 +932,7 @@ mod tests {
         )
         .unwrap();
         let agent = |expected: &str| {
-            let frame = next_frame(&subscription, &wakes);
+            let frame = next_frame(&watch, &wakes);
             assert!(frame["unavailable"].is_null(), "{frame}");
             assert_eq!(frame["body"], expected);
         };
@@ -973,7 +973,7 @@ mod tests {
         std::fs::write(&wave, "agent: pi\n").unwrap();
         agent("pi");
         std::fs::write(&wave, "agent: [\n").unwrap();
-        assert!(!next_frame(&subscription, &wakes)["unavailable"].is_null());
+        assert!(!next_frame(&watch, &wakes)["unavailable"].is_null());
         std::fs::write(&wave, "agent: codex\n").unwrap();
         agent("codex");
 
@@ -989,7 +989,7 @@ mod tests {
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
             wakes.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(subscription.pull().is_none());
+            assert!(watch.pull().is_none());
         }
         assert_eq!(reads.load(Ordering::Relaxed), before);
         assert!(!home.path().join("loopflow.db").exists());
@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn new_and_edited_skill_overrides_reach_an_existing_subscription() {
+    fn new_and_edited_skill_overrides_reach_an_existing_watch() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -1018,7 +1018,7 @@ mod tests {
         let (sender, wakes) = mpsc::channel();
         let directory = repo.path().to_owned();
         let personal = home.path().to_owned();
-        let subscription = subscribe(
+        let watch = start_pull(
             (),
             Watched::every(PLANNING_CLOCK),
             move |_, ()| {
@@ -1039,7 +1039,7 @@ mod tests {
         )
         .unwrap();
         let agent = |expected: serde_json::Value| {
-            let frame = next_frame(&subscription, &wakes);
+            let frame = next_frame(&watch, &wakes);
             assert!(frame["unavailable"].is_null(), "{frame}");
             assert_eq!(frame["body"], expected);
         };

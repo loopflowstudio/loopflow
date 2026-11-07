@@ -1,4 +1,4 @@
-// Native Work reads, writes and subscriptions use the local server.
+// Native Work reads, writes and watches use the local server.
 // Execution launches and remote file streams retain their CLI transports.
 
 #if os(macOS)

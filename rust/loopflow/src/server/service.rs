@@ -21,7 +21,7 @@ use super::wire::{
     REVISION,
 };
 use crate::engine::{Error, ErrorCode};
-use crate::lf::commands::{read::Read, watch::Subscription};
+use crate::lf::commands::{read::Read, watch::Watch};
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -29,7 +29,7 @@ const FIRST_MESSAGE: Duration = Duration::from_secs(5);
 const SEND: Duration = Duration::from_secs(5);
 /// Answers waiting for one connection's socket.
 const QUEUE: usize = 64;
-/// Checkpoints one subscription may have waiting.
+/// Checkpoints one watch may have waiting.
 const CHECKPOINTS: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -310,7 +310,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
     Ok(())
 }
 
-/// A request's task and, for a subscription, where its checkpoints go.
+/// A request's task and, for a watch, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
     checkpoints: Option<mpsc::Sender<u64>>,
@@ -345,18 +345,18 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                 };
                 let (id, admission) = match message {
                     ClientMessage::Request { id, operation } => (id, Admission::Request(operation)),
-                    ClientMessage::Subscribe { id, operation } => (id, Admission::Subscribe(operation)),
+                    ClientMessage::Watch { id, operation } => (id, Admission::Watch(operation)),
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
                                 if checkpoints.try_send(checkpoint).is_err() {
-                                    // Ending the subscription tells the client to reopen it
+                                    // Ending the watch tells the client to reopen it
                                     // for a complete reading rather than drop a checkpoint.
                                     if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
+                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "watch fell behind its checkpoints; watch again")).await?;
                                 }
                             }
-                            None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
+                            None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live watch has this ID").with(serde_json::json!({ "id": id })))).await?,
                         }
                         continue;
                     }
@@ -408,9 +408,9 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
                         tasks.abort_all();
                         return bridge(lines, destination).await;
                     }
-                    Admission::Subscribe(query) => {
+                    Admission::Watch(query) => {
                         let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
+                        let task = tasks.spawn(watching(id.clone(), query, outgoing.clone(), inbox));
                         Inflight { task, checkpoints: Some(checkpoints) }
                     }
                     Admission::Request(operation) => {
@@ -437,10 +437,10 @@ async fn session(mut lines: Lines, instance: Arc<str>, admitted: &Admitted) -> R
     }
 }
 
-/// What a request or subscription asks the session to start.
+/// What a request or watch asks the session to start.
 enum Admission {
     Request(Operation),
-    Subscribe(Read),
+    Watch(Read),
 }
 
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
@@ -491,13 +491,13 @@ async fn attached_owner(
     }
 }
 
-/// A `request` or `subscribe` whose envelope parses but whose operation this
+/// A `request` or `watch` whose envelope parses but whose operation this
 /// build does not accept: its id and why. An unknown kind is `invalid` with
 /// `data.kind`; a known kind names the argument it refused.
 fn refused_operation(line: &str) -> Option<(String, Error)> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let kind_of = value.get("type")?.as_str()?;
-    if !matches!(kind_of, "request" | "subscribe") {
+    if !matches!(kind_of, "request" | "watch") {
         return None;
     }
     let id = value.get("id")?.as_str()?.to_owned();
@@ -506,8 +506,8 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
     }
     let operation = value.get("operation")?;
     let kind = operation.get("kind")?.as_str()?.to_owned();
-    // A `subscribe` reaches here for any kind that is not a read.
-    if kind_of == "subscribe"
+    // A `watch` reaches here for any kind that is not a read.
+    if kind_of == "watch"
         && (serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).is_ok()
             || serde_json::from_value::<ServerOperation>(operation.clone()).is_ok())
     {
@@ -647,14 +647,14 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-async fn subscription(
+async fn watching(
     id: String,
     query: Read,
     outgoing: mpsc::Sender<ServerMessage>,
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
     if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
-        // The error ends the subscription for the client; a watch that
+        // The error ends the watch for the client; a watch that
         // started sent its failure as its last reading.
         let _ = outgoing
             .send(ServerMessage::error(Some(id.clone()), unavailable(failure)))
@@ -665,20 +665,20 @@ async fn subscription(
 
 /// The shared watch owns a blocking runtime, which cannot be dropped on an
 /// async worker. However its task ends, the watch leaves through a blocking one.
-struct Watch(Option<Arc<Subscription>>);
+struct Held(Option<Arc<Watch>>);
 
-impl std::ops::Deref for Watch {
-    type Target = Arc<Subscription>;
+impl std::ops::Deref for Held {
+    type Target = Arc<Watch>;
 
-    fn deref(&self) -> &Arc<Subscription> {
+    fn deref(&self) -> &Arc<Watch> {
         self.0.as_ref().expect("the watch is held until drop")
     }
 }
 
-impl Drop for Watch {
+impl Drop for Held {
     fn drop(&mut self) {
-        let subscription = self.0.take();
-        tokio::task::spawn_blocking(move || drop(subscription));
+        let watch = self.0.take();
+        tokio::task::spawn_blocking(move || drop(watch));
     }
 }
 
@@ -691,9 +691,9 @@ async fn watch(
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
-    let watch = Watch(Some(Arc::new(
+    let watch = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
+            crate::journal::request::isolate(|| query.watch(move || wake.notify_one()))
         })
         .await??,
     )));
@@ -994,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_ends_a_subscription_while_a_sibling_request_answers() {
+    fn cancel_ends_a_watch_while_a_sibling_request_answers() {
         with_empty_home(async {
             let mut client = Client::connect();
             assert!(matches!(
@@ -1003,7 +1003,7 @@ mod tests {
             ));
             // Live processes need no Machine registry: an empty activity reading.
             client
-                .send(&ClientMessage::Subscribe {
+                .send(&ClientMessage::Watch {
                     id: "ps".into(),
                     operation: Read::MonitorPs,
                 })
@@ -1041,7 +1041,7 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "after"
             ));
-            // A cancelled subscription takes no more checkpoints.
+            // A cancelled watch takes no more checkpoints.
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
@@ -1107,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn subscribing_to_a_write_says_it_has_no_watch() {
+    fn watching_to_a_write_says_it_has_no_watch() {
         with_empty_home(async {
             let mut client = Client::connect();
             assert!(matches!(
@@ -1116,7 +1116,7 @@ mod tests {
             ));
             client
                 .writer
-                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
+                .write_all(b"{\"type\":\"watch\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {

@@ -5527,7 +5527,7 @@ fn server_status_does_not_install_or_create_work() {
 }
 
 #[test]
-fn server_subscriptions_refresh_work_and_resolve_primary_session() {
+fn server_watches_refresh_work_and_resolve_primary_session() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
@@ -5535,9 +5535,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let service = ServerProof::start(&fixture, false);
     let query = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
-    let tasks = watch
-        .subscribe(serde_json::from_value(query).unwrap())
-        .unwrap();
+    let tasks = watch.watch(serde_json::from_value(query).unwrap()).unwrap();
     let initial = watch.reading(&tasks).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
     watch.checkpoint(&tasks, 17).unwrap();
@@ -5545,7 +5543,7 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     assert_eq!(confirmed["answers"], 17);
 
     // Write parity, concurrent traces and no request Process rows are covered
-    // by served_reads. This proof owns live subscription invalidation.
+    // by served_reads. This proof owns live watch invalidation.
     // A changed Task reading uses the shared invalidation path, with no polling
     // projection or shadow Task store in the service.
     let registered = support::register_task_with_pr(

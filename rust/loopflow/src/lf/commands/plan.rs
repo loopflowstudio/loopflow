@@ -109,7 +109,7 @@ const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
 pub(crate) fn watch_status(
     repo: &Path,
     transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
+) -> Result<Option<super::watch::Watch>> {
     let repo_key = repo.to_string_lossy().into_owned();
     super::watch::start(
         (),

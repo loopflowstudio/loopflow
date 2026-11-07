@@ -1,12 +1,12 @@
 //! Shared reads served by the client API server. Each [`Read`] is an `lf`
 //! command: [`Read::argv`] names it, [`Read::read`] returns what it prints,
-//! and for a command that takes `--watch`, [`Read::subscribe`] goes through the
+//! and for a command that takes `--watch`, [`Read::watch`] goes through the
 //! same function as `lf <argv> --watch`, so clients receive exactly the frames
 //! that command prints.
 //!
 //! A read the command scopes by its working directory names that directory
 //! instead: `--cwd <directory>` in its argv, and an explicit path in the server,
-//! where concurrent subscriptions cannot change the working directory.
+//! where concurrent watches cannot change the working directory.
 //!
 //! Reads only read: they record no Process and change no Work. The app's
 //! writes are [`super::write::Write`]s.
@@ -20,7 +20,7 @@ use super::activity::HistoryWindow;
 use super::graph_inventory;
 use super::machine::{local_machine, machines};
 use super::usage;
-use super::watch::{Subscription, Transport};
+use super::watch::{Transport, Watch};
 use super::waves::list as list_waves;
 use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
@@ -332,7 +332,7 @@ pub enum Read {
         pr: Option<String>,
     },
     /// `lf task wait <issue> --until <until> --timeout 0s --json`: the Task now
-    /// and whether it reached `until`. Subscribed, it reads on each change and
+    /// and whether it reached `until`. Watched, it reads on each change and
     /// ends after the reading that reached it.
     #[serde(rename = "task.wait")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::task::Waited>()))]
@@ -800,14 +800,11 @@ impl Read {
 
     /// Serve this read's watch inside this process, as `lf <argv> --watch`
     /// prints it. `wake` is called from any thread when a
-    /// [`Subscription::pull`] may find a frame; dropping the subscription ends
+    /// [`Watch::pull`] may find a frame; dropping the watch ends
     /// it. A read whose command takes no `--watch` is an error.
-    pub fn subscribe(
-        self,
-        wake: impl Fn() + Send + Sync + 'static,
-    ) -> anyhow::Result<Subscription> {
+    pub fn watch(self, wake: impl Fn() + Send + Sync + 'static) -> anyhow::Result<Watch> {
         let transport = Transport::Pull(Box::new(wake));
-        let subscription = match self {
+        let watch = match self {
             Self::MonitorPs => super::top::watch_ps(transport),
             Self::DesktopPlans { directory } => {
                 super::desktop::watch_plans(None, directory, transport)
@@ -842,10 +839,10 @@ impl Read {
                 .into())
             }
         }?;
-        Ok(subscription.expect("a pulled watch returns its subscription"))
+        Ok(watch.expect("a pulled watch returns its handle"))
     }
 
-    /// Whether a subscription to this read ends after `body`, a reading's
+    /// Whether a watch to this read ends after `body`, a reading's
     /// body: `task.wait` ends once the Task reached what it waits for.
     pub fn ends_after(&self, body: &serde_json::Value) -> bool {
         matches!(self, Self::TaskWait { .. }) && body["reached"] == serde_json::Value::Bool(true)
@@ -947,8 +944,8 @@ mod tests {
     }
 
     #[test]
-    fn a_read_without_a_watch_cannot_be_subscribed() {
-        let error = Read::Doctor.subscribe(|| {}).unwrap_err();
+    fn a_read_without_a_watch_cannot_be_watched() {
+        let error = Read::Doctor.watch(|| {}).unwrap_err();
         assert!(error.to_string().contains("--watch"), "{error}");
     }
 }

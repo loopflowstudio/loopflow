@@ -116,7 +116,7 @@ pub struct Response {
     pub result: serde_json::Value,
 }
 
-/// One connection: hello and welcome once, then requests, subscriptions and
+/// One connection: hello and welcome once, then requests, watches and
 /// cancels by id for its lifetime.
 #[derive(Debug)]
 pub struct Connection {
@@ -219,10 +219,10 @@ impl Connection {
         }
     }
 
-    /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, operation: Read) -> Result<String> {
+    /// Start a watch and return its id once the server confirms it.
+    pub fn watch(&mut self, operation: Read) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        self.socket.send(&ClientMessage::Subscribe {
+        self.socket.send(&ClientMessage::Watch {
             id: id.clone(),
             operation,
         })?;
@@ -243,8 +243,8 @@ impl Connection {
         }
     }
 
-    /// The next reading of subscription `id`, or `None` once it ended after
-    /// its last; an error for it ends the subscription.
+    /// The next reading of watch `id`, or `None` once it ended after
+    /// its last; an error for it ends the watch.
     pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
         match self.wait(|message| {
             matches!(message, ServerMessage::Reading { id: of, .. } | ServerMessage::Ended { id: of } if of == id)
@@ -267,7 +267,7 @@ impl Connection {
         }
     }
 
-    /// Ask subscription `id` for a reading whose `answers` is `checkpoint`.
+    /// Ask watch `id` for a reading whose `answers` is `checkpoint`.
     pub fn checkpoint(&mut self, id: &str, checkpoint: u64) -> Result<()> {
         self.socket.send(&ClientMessage::Checkpoint {
             id: id.into(),

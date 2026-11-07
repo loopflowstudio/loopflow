@@ -113,19 +113,19 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
-    @Test func serverEndingASubscriptionFailsItsWatchAlone() async throws {
+    @Test func serverEndingAWatchFailsItsWatchAlone() async throws {
         let peer = try ServerPeer()
-        let subscription = Mutex<String?>(nil)
+        let watchID = Mutex<String?>(nil)
         peer.serve { message, respond in
             switch (message["type"] as? String, (message["operation"] as? [String: Any])?["kind"] as? String) {
-            case ("subscribe", _):
+            case ("watch", _):
                 let id = message["id"] as! String
-                subscription.set(id)
+                watchID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
                 respond(["type": "reading", "id": id, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
-                let id = subscription.get()!
+                let id = watchID.get()!
                 respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
@@ -143,11 +143,11 @@ struct ServerClientTests {
         #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
             _ = try await frames.next()
-            Issue.record("An ended subscription kept its watch open")
+            Issue.record("An ended watch kept its stream open")
         } catch {
             #expect(error.localizedDescription == "unavailable: gone")
         }
-        // The connection outlives the subscription.
+        // The connection outlives the watch.
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")
         await watch.cancel()
     }

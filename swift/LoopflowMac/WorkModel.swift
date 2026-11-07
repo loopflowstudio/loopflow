@@ -1547,7 +1547,7 @@ final class WorkModel {
         }
     }
 
-    /// Confirmation follows the command's commit. Subscriptions choose what
+    /// Confirmation follows the command's commit. Watches choose what
     /// to read; an unrelated frame cannot confirm a saved draft.
     func confirmWorkUpdate(after home: String? = nil) async throws {
         if let home, home != workDataDirectory {
@@ -1555,7 +1555,7 @@ final class WorkModel {
         }
         guard workObservation != nil else {
             if query.streamsWork { throw RegistryQueryError("Update accepted; Work observation is unavailable") }
-            // One-shot transports have no subscription to deliver their writes.
+            // One-shot transports have no watch to deliver their writes.
             await refresh()
             if let reason = roadmap.errorMessage { throw RegistryQueryError(reason) }
             return
@@ -1754,7 +1754,7 @@ final class WorkModel {
         graphProcesses = [:]
     }
 
-    /// Explicit Retry/recovery, or a one-shot transport without subscriptions.
+    /// Explicit Retry/recovery, or a one-shot transport without watches.
     func refresh() async {
         if workObservation != nil {
             // Frames read before this request may predate the caller's write.
@@ -2298,7 +2298,7 @@ final class WorkModel {
         return URL(fileURLWithPath: path)
     }
 
-    /// Run the Task's Workflow through `lf task run`, then confirm its subscription
+    /// Run the Task's Workflow through `lf task run`, then confirm its watch
     /// update. `graph` takes up that graph; `from` starts at that step, and an
     /// interactive `from` only puts the Task there. Without either, Rust continues
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
@@ -2357,7 +2357,7 @@ final class WorkModel {
         navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)
     }
 
-    /// Ship the Task, then confirm its subscription update; it moves to Shipping
+    /// Ship the Task, then confirm its watch update; it moves to Shipping
     /// and the window's ship toast offers Undo.
     func shipTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {

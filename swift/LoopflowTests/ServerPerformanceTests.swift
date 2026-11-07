@@ -42,7 +42,7 @@ struct ServerPerformanceTests {
             let watch = ServerClient.watch(.allPlans, location: location)
             var frames = watch.lines.makeAsyncIterator()
             _ = try #require(try await frames.next())
-            results["subscribe_first_ms", default: []].append(start.elapsedMs)
+            results["watch_first_ms", default: []].append(start.elapsedMs)
             start = .now
             watch.send(Data(#"{"id":7}"#.utf8))
             let frame = try #require(try await frames.next())
@@ -50,7 +50,7 @@ struct ServerPerformanceTests {
             results["checkpoint_ms", default: []].append(start.elapsedMs)
             await watch.cancel()
         }
-        // Every read, write, subscription and checkpoint above shared one connection.
+        // Every read, write, watch and checkpoint above shared one connection.
         results["workload_connections"] = [Double(try server.admittedConnections() - admittedBeforeWorkload)]
         let watch = ServerClient.watch(.allPlans, location: location)
         var frames = watch.lines.makeAsyncIterator()

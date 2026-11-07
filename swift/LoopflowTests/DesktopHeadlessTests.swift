@@ -235,7 +235,7 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
-        // The subscription updates normally; command confirmation is separate.
+        // The watch updates normally; command confirmation is separate.
         let moving = Task { await model.startTask(nil, from: "demo", task: task) }
         try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["graph"] as? [String: Any])

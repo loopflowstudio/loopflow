@@ -111,7 +111,7 @@ fn kernel_state(status: u32, flags: u32) -> &'static str {
     }
 }
 
-pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
+pub(super) fn pids() -> io::Result<Vec<u32>> {
     // PROC_ALL_PIDS = 1. The first call sizes the byte buffer; leave room for
     // processes born between reads, as ps also samples a changing inventory.
     // SAFETY: a null, zero-sized buffer asks libproc for the required size.
@@ -132,13 +132,18 @@ pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
     if bytes < 0 {
         return Err(io::Error::last_os_error());
     }
-    let mut processes = Vec::new();
-    for pid in pids
+    Ok(pids
         .into_iter()
         .take(bytes as usize / size_of::<i32>())
         .filter(|pid| *pid > 0)
-    {
-        match read(pid as u32)? {
+        .map(|pid| pid as u32)
+        .collect())
+}
+
+pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
+    let mut processes = Vec::new();
+    for pid in pids()? {
+        match read(pid)? {
             Some(process) => processes.push(process),
             None => continue,
         }

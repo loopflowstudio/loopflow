@@ -393,7 +393,7 @@ fn scheduled_install_preserves_the_account_schedule_from_a_disposable_home() {
         args.extend(frequency);
         let output = success(command(home.path(), cwd.path(), &args).output().unwrap());
         assert!(
-            output.contains("Not scheduling installation: HOME"),
+            output.contains("Not scheduling installation or cleanup for disposable home"),
             "{output}"
         );
         assert!(!home.path().join("Library/LaunchAgents").exists());

@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
 use crate::durable::TaskId;
-use crate::journal::{process_evidence, ProcessIdentityEvidence};
+use crate::journal::ProcessIdentityEvidence;
 use crate::ops::graph_process::GraphProcess;
-use crate::process::LfProcess;
+use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::sqlite::{entry_of, GraphExecutionFacts, SqliteStore};
@@ -76,13 +76,11 @@ pub(crate) async fn execution_of_latest_graph(
     let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
     let evidence = |process: &crate::process::LfProcess| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::recorded_process_evidence(
+        None => crate::journal::lf_process_evidence(
             process,
             &match facts.receipts.get(&process.id) {
-                Some(path) if process.kind != crate::process::ProcessKind::Agent => {
-                    crate::journal::read_process_receipt(path)
-                }
-                _ => Ok(None),
+                Some(path) => crate::journal::read_process_receipt(path),
+                None => Ok(None),
             },
             crate::journal::process_identity_evidence,
         ),
@@ -187,15 +185,13 @@ fn error(error: impl std::fmt::Display) -> OpsError {
 /// so it never does; that exempts waiting and grants no authority.
 pub(crate) fn execution_blockers(
     store: &SqliteStore,
-    processes: &[LfProcess],
+    processes: &[ProcessEntry],
 ) -> OpsResult<Vec<String>> {
     Ok(unresolved_processes(store, processes)?
         .into_iter()
         .map(|(process, _)| {
-            format!(
-                "Process {} has live or unresolved execution; inspect `lf history show {}`",
-                process.id, process.id
-            )
+            let id = process.id();
+            format!("Process {id} has live or unresolved execution; inspect `lf history show {id}`")
         })
         .collect())
 }
@@ -204,20 +200,30 @@ pub(crate) fn execution_blockers(
 /// with their liveness evidence.
 pub(crate) fn unresolved_processes<'a>(
     store: &SqliteStore,
-    processes: &'a [LfProcess],
-) -> OpsResult<Vec<(&'a LfProcess, ProcessIdentityEvidence)>> {
+    processes: &'a [ProcessEntry],
+) -> OpsResult<Vec<(&'a ProcessEntry, ProcessIdentityEvidence)>> {
     let mut lineage = HashSet::new();
     let mut next = crate::journal::current_lf_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
-            .process(&id)
+            .lf_process(&id)
             .map_err(error)?
             .and_then(|process| process.parent_lf_process_id);
     }
     Ok(processes
         .iter()
-        .filter(|process| process.completed_at.is_none() && !lineage.contains(&process.id))
-        .map(|process| (process, process_evidence(store, &process.id)))
+        .filter(|process| {
+            process.completed_at().is_none()
+                && !process
+                    .as_lf()
+                    .is_some_and(|process| lineage.contains(&process.id))
+        })
+        .map(|process| {
+            (
+                process,
+                crate::journal::process_entry_evidence(store, process),
+            )
+        })
         .filter(|(_, evidence)| *evidence != ProcessIdentityEvidence::Dead)
         .collect())
 }

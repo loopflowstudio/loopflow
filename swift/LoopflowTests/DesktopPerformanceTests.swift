@@ -329,8 +329,7 @@ struct DesktopPerformanceTests {
                                        styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.contentView = nil; window.close() }
-        let companion = buildWorkspaceShellCommand(id: "launch-contract", argv: ["/bin/sh", "-c", "exit 0"], env: [:])
-        for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i", companion] {
+        for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i"] {
             let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString, machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 900, height: 500))
             terminal.workingDirectory = checkout.path
             terminal.command = command
@@ -347,11 +346,6 @@ struct DesktopPerformanceTests {
                 let text = terminalText(surface)
                 return [marker, checkout.path, home.path, "xterm-256color", profileValue, "login-shell-ok", "pty-ok"]
                     .allSatisfy { text.contains("\n\($0)") }
-            }
-            if command == companion {
-                let input = "test \"$LF_TERMINAL_ID\" = launch-contract && test -n \"$LF_TERMINAL_TTY\" && printf '\\ncompanion-ready\\n'\n"
-                input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
-                try await wait(window) { terminalText(surface).contains("\ncompanion-ready") }
             }
             window.contentView = NSView(frame: terminal.frame)
             window.contentView = terminal

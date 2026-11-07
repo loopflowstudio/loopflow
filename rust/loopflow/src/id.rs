@@ -290,6 +290,7 @@ macro_rules! uuid_id {
 uuid_id!(WaveId);
 uuid_id!(TraceId);
 uuid_id!(LfProcessId);
+uuid_id!(AgentProcessId);
 uuid_id!(SteerId);
 uuid_id!(SteerBatchId);
 
@@ -420,7 +421,7 @@ impl rusqlite::types::FromSql for AgentSessionId {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentSessionId, LfProcessId, TraceId, WaveId};
+    use super::{AgentProcessId, AgentSessionId, LfProcessId, TraceId, WaveId};
 
     #[test]
     fn agent_session_preserves_opaque_provider_bytes_in_json_and_sql() {
@@ -441,12 +442,24 @@ mod tests {
 
         let _trace = TraceId::new();
         let _process = LfProcessId::new();
+
+        let agent = AgentProcessId::new();
+        let encoded = serde_json::to_string(&agent).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AgentProcessId>(&encoded).unwrap(),
+            agent
+        );
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let stored: AgentProcessId = conn.query_row("SELECT ?1", [&agent], |r| r.get(0)).unwrap();
+        assert_eq!(stored, agent);
     }
 }
 
 #[cfg(test)]
 mod canonical_tests {
-    use super::{AgentSessionId, AttachmentToken, LfSessionId, TaskSelector, WaveId};
+    use super::{
+        AgentProcessId, AgentSessionId, AttachmentToken, LfSessionId, TaskSelector, WaveId,
+    };
     use crate::durable::{MachineId, ProjectId, TaskId};
     use crate::linear::LinearIssueId;
     use crate::pr_landing::PrLandingId;
@@ -477,6 +490,10 @@ mod canonical_tests {
             assert_eq!(stored, id);
             assert_eq!(
                 AttachmentToken::parse(&original).unwrap().as_str(),
+                canonical
+            );
+            assert_eq!(
+                AgentProcessId::parse(&original).unwrap().as_str(),
                 canonical
             );
             assert_eq!(LinearIssueId::new(&original).unwrap().as_str(), canonical);

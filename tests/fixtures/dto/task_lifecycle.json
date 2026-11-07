@@ -160,7 +160,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -418,7 +418,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
@@ -439,7 +438,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -460,7 +458,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -481,7 +478,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -502,7 +498,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -523,7 +518,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -856,7 +850,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -1163,7 +1157,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -1423,7 +1417,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -1444,7 +1437,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1465,7 +1457,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1486,7 +1477,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -1507,7 +1497,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -1812,7 +1801,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -2119,7 +2108,7 @@
         "updated_at": "2026-10-28T02:59:00Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "now",
+      "section": "autonomous",
       "ship_control": {
         "unavailable": "Task is already shipping"
       },
@@ -2351,7 +2340,6 @@
           ],
           "processes": [
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
@@ -2372,7 +2360,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2393,7 +2380,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2414,7 +2400,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
@@ -2435,7 +2420,6 @@
               "via_agent": false
             },
             {
-              "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
@@ -2740,7 +2724,7 @@
           "updated_at": "2026-10-28T02:59:00Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "now",
+        "section": "autonomous",
         "ship_control": {
           "unavailable": "Task is already shipping"
         },

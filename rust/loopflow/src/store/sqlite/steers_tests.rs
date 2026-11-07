@@ -121,7 +121,12 @@ fn pending_requests_hold_the_owner_until_the_current_attachment_settles_them() {
         .record_session_activity("session", &first, &activity)
         .unwrap();
     for viewed in [false, true] {
-        store.record_owner_viewers(owner, viewed).unwrap();
+        store
+            .record_owner_viewer_hold(
+                owner,
+                viewed.then_some(crate::store::sqlite::ViewerHold::Viewed(1)),
+            )
+            .unwrap();
         store
             .conn
             .lock()

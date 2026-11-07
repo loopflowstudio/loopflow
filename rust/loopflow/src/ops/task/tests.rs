@@ -90,8 +90,6 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         )
         .unwrap();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,
@@ -190,7 +188,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             )
             .unwrap();
         runtime
-            .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
+            .block_on(super::retirement::schedule(&fixture.store, &fixture.task))
             .unwrap();
     }
     assert!(repo.path().exists());
@@ -201,7 +199,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         WorkStatus::Done
     );
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
@@ -465,8 +463,6 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     // A reboot proves stale execution exited without settling the Graph.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,
@@ -522,7 +518,7 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     assert!(unresolved[0].contains(process.id.as_str()));
     assert!(after_boot.is_empty(), "{after_boot:?}");
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(

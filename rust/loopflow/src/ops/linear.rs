@@ -202,16 +202,33 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     })
 }
 
+/// Team claims this process has validated, by (Team, checkout). A claim changes
+/// only through `lf reteam`, so one `ListTeams` per process suffices; a
+/// long-lived process learns a rebinding on restart.
+static VALIDATED_TEAM_CLAIMS: std::sync::Mutex<BTreeSet<(String, std::path::PathBuf)>> =
+    std::sync::Mutex::new(BTreeSet::new());
+
 async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> {
     let team_id = repository_team_id(repo)?;
     let repo_id = repository_id(repo)?;
     let client = build_client(Some(team_id.clone()))
         .await?
         .for_repository(repo);
-    client
-        .validate_team_claim(&team_id, repo_id.as_str())
-        .await
-        .map_err(linear_error)?;
+    let claim = (team_id.clone(), repo.to_path_buf());
+    let validated = VALIDATED_TEAM_CLAIMS
+        .lock()
+        .expect("team claim cache poisoned")
+        .contains(&claim);
+    if !validated {
+        client
+            .validate_team_claim(&team_id, repo_id.as_str())
+            .await
+            .map_err(linear_error)?;
+        VALIDATED_TEAM_CLAIMS
+            .lock()
+            .expect("team claim cache poisoned")
+            .insert(claim);
+    }
     Ok(LinearRepository {
         client,
         repo_id,
@@ -2352,7 +2369,8 @@ mod tests {
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
-                    json_response(StatusCode::OK, team.clone()),
+                    // This process already validated the claim; the second
+                    // connect skips that ListTeams.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team),
                     projects_response(json!([])),

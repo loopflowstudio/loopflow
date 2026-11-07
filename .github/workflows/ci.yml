@@ -226,6 +226,12 @@ jobs:
         with:
           name: rust-${{ matrix.suite }}
           path: ${{ runner.temp }}
+      - name: Install isolated SSH fixture support
+        if: matrix.suite == 'integration'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
       - name: Extract the shared build
         run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-${{ matrix.suite }}.tar.zst"
       - name: Run Rust partition
@@ -303,9 +309,10 @@ jobs:
       - name: Verify migration namespaces
         env:
           LOOPFLOW_REQUIRE_ORIGIN_MAIN: "1"
-        # The runner's system Python links SQLite 3.46, which cannot replay
-        # released migrations using RAISE with an expression (3.48+).
-        run: uv run --managed-python python scripts/check_migrations.py
+          # The replay needs the SQLite the bundled runtime speaks (RAISE with an
+          # expression is 3.48+); the runner's system Python links an older one.
+          UV_PYTHON_PREFERENCE: only-managed
+        run: uv run python scripts/check_migrations.py
 
   python-test:
     needs: [merge-proof, scratch-clear]

@@ -252,7 +252,7 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
 async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
     let live = |process: &crate::process::LfProcess| {
         process.completed_at.is_none()
-            && crate::journal::process_evidence(&store.sqlite, &process.id)
+            && crate::journal::lf_evidence(&store.sqlite, &process.id)
                 == ProcessIdentityEvidence::Live
     };
     let processes: Vec<crate::process::LfProcess> = store
@@ -288,7 +288,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
         let running: Vec<String> = processes
             .iter()
             .filter(|process| {
-                crate::journal::process_evidence(&store.sqlite, &process.id)
+                crate::journal::lf_evidence(&store.sqlite, &process.id)
                     == ProcessIdentityEvidence::Live
             })
             .map(|process| process.id.to_string())

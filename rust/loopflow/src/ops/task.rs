@@ -2,7 +2,7 @@ pub(crate) mod adoption;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
-pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
+pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -18,7 +18,8 @@ mod handoff;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
-pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub mod retirement;
+pub(crate) use lifecycle::{notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod delivery;
 pub(crate) use delivery::{
@@ -1974,6 +1975,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let _retirement = retirement::lock(&task.id)?;
         let task = store
             .sqlite
             .reopen_task(&task.id, note)
@@ -1984,7 +1986,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsResult<String> {
+pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -2000,23 +2002,14 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             ));
         };
         if task.linear_id.is_none() {
-            if let Some(project) = &task.project_id {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Project(project.clone()),
-                )
-                .await?;
-            }
-            if retry_creation {
-                super::planning_export::retry_task_export(&store, repo, &task.id).await?;
-            } else {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Task(task.id.clone()),
-                )
-                .await?;
+            let project = task
+                .project_id
+                .clone()
+                .map(crate::durable::WorkRef::Project);
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            // The person's explicit look: ahead of the pass window if need be.
+            for work in project.iter().chain([&work]) {
+                super::planning_export::export(&store, repo, work, true).await?;
             }
         }
         let task = store
@@ -2124,7 +2117,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         let repo = repository_for_task(store, task)?;
         super::planning_sync::sync_after_save(store, &repo.to_string_lossy()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
-        cleanup_completed_task(store, task).await?;
+        retirement::schedule(store, task).await?;
         Ok(())
     }
     .await;
@@ -2531,8 +2524,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?
         .pop()
         .filter(|graph| {
-            crate::journal::process_evidence(&store.sqlite, graph.id())
-                != ProcessIdentityEvidence::Dead
+            crate::journal::lf_evidence(&store.sqlite, graph.id()) != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();
@@ -2566,8 +2558,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
     let open = crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?;
     Ok(open.first().map(|(process, evidence)| {
         let command = process
-            .command
-            .as_deref()
+            .command()
             .and_then(|command| serde_json::from_str::<Vec<String>>(command).ok())
             .map(|argv| format!(" running `{}`", argv.join(" ")))
             .unwrap_or_default();
@@ -2577,7 +2568,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         };
         format!(
             "interrupt recorded for Process {}{command}{unknown}; a Task run or a `--task` Session stops on it",
-            process.id
+            process.id()
         )
     }))
 }

@@ -145,7 +145,7 @@ pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> R
             return result;
         }
         let ended = registry.as_ref().is_some_and(|store| {
-            crate::journal::process_evidence(store, &owner)
+            crate::journal::lf_evidence(store, &owner)
                 == crate::journal::ProcessIdentityEvidence::Dead
         });
         if ended {

@@ -939,16 +939,8 @@ impl LinearClient {
     where
         T: DeserializeOwned,
     {
-        if query.trim_start().starts_with("mutation") {
-            if let Some(repo) = &self.repository {
-                // The delta reader uses an unbound client and performs no writes.
-                if let Err(error) =
-                    Box::pin(crate::ops::linear_observe::check_before_write(repo)).await
-                {
-                    tracing::debug!(%error, "pre-write Linear check pending");
-                }
-            }
-        }
+        // Freshness runs at work boundaries and before state delivery, never
+        // inside a write: a nested scope check consumed creation deadlines.
         let urgent = cooldown::is_urgent();
         let log = request_log::PendingRequest::start(
             &cooldown::home(&self.base_url),

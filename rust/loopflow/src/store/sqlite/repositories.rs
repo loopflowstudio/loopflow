@@ -423,8 +423,14 @@ mod tests {
             .unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
-        assert_eq!(store.task_work(&task).unwrap().processes[0].id, process);
-        assert_eq!(store.task_open_processes(&task).unwrap()[0].id, process);
+        assert_eq!(
+            store.task_work(&task).unwrap().processes[0].id(),
+            process.as_str()
+        );
+        assert_eq!(
+            store.task_open_processes(&task).unwrap()[0].id(),
+            process.as_str()
+        );
         let conn = store.conn.lock().unwrap();
         assert_eq!(
             super::super::task_work::task_of_process(&conn, &process)

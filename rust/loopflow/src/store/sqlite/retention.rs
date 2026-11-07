@@ -241,13 +241,13 @@ fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult
         let gone = evidence == ProcessIdentityEvidence::Dead
             || (evidence == ProcessIdentityEvidence::Unknown
                 && process
-                    .pid
+                    .pid()
                     .is_some_and(|pid| matches!(OsProcess::read(pid), Ok(None))));
         if !gone {
             continue;
         }
         let at = booted_at
-            .filter(|booted_at| process.started_at < *booted_at)
+            .filter(|booted_at| process.started_at() < *booted_at)
             .unwrap_or(now);
         closed += conn.execute(
             "UPDATE processes SET completed_at=?2,
@@ -255,7 +255,7 @@ fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult
                      WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
                  endpoint=NULL
              WHERE id=?1 AND completed_at IS NULL AND pid IS ?3 AND os_started_at IS ?4",
-            params![process.id, at, process.pid, process.os_started_at],
+            params![process.id(), at, process.pid(), process.os_started_at()],
         )? as u64;
     }
     Ok(closed)

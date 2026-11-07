@@ -9,6 +9,25 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
+    @Test("Departure and window Close end terminal viewers but keep Work and history")
+    func departureEndsTerminalViewers() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
+        let second = WorkWorkspaceKey(repository: "repo", kind: .task, id: "second")
+        let a = registry.open(first, title: "First", location: nil)
+        a.multiplexer.load(sessionId: "history")
+        #expect(a.presented)
+        let b = registry.open(second, title: "Second", location: nil)
+        #expect(!a.presented)
+        #expect(b.presented)
+        registry.closePresentation()
+        #expect(!b.presented)
+        #expect(a.multiplexer.sessionPane?.sessionId == "history")
+        #expect(registry.retained(first) === a)
+        _ = registry.open(first, title: "First", location: nil)
+        #expect(a.presented)
+    }
+
     @Test("Known repository entry presents its scene before admitting a new link",
           arguments: ["success", "failure", "cancellation"], [false, true])
     func repositoryEntryDuringResolution(outcome: String, restored: Bool) async throws {

@@ -132,10 +132,9 @@ editing. Set these on the Machine where the Task runs. GUI editors may open thei
 own windows.
 
 Changes runs `lf task diff`, using Git's pager and diff settings. Working-tree
-patches include untracked files; `--difftool` covers tracked files. To launch a tool directly:
+patches include untracked files; `--difftool` covers tracked files:
 
 ```bash
-lf task tool ENG-123 files --checkout /path/to/task
 lf diff ENG-123 --base parent --difftool
 ```
 

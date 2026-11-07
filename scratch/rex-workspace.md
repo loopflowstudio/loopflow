@@ -53,7 +53,8 @@ Stack validation against LOO-717 a1067c99: isolated Rex resume/cwd tests 2 passe
 
 Jack Heart requested sibling host adapters for Rex, cmux, Herdr and tmux, and one
 Task diff command. Changes panes invoke `lf task diff`; that command owns Git
-paging and `--difftool`. Remove `task tool … changes`; Files and Shell remain.
+paging and `--difftool`. Files and Shell use internal workspace command construction;
+there is no `task tool` or `desktop tool` command.
 
 Validation of the consolidation (November 6):
 - `cargo test -p loopflow --test integration task_diff_tests::`: 2 passed, including real Git difftool, pipe output and terminal paging.
@@ -71,3 +72,16 @@ Renderer extraction checks:
 - `cargo test -p loopflow --test integration work_open_tests:: -- --test-threads=1`: 23 passed, 2 native-host opt-in tests ignored; cmux caller-group lookup hit the unchanged two-second host deadline before rendering.
 - `cargo test -p loopflow --test integration work_open_tests::cmux_task_joins_the_group_its_caller_is_in_now -- --exact`: passed alone using the built CLI. No timeout or retry behavior changed.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. No live demo or fresh-conversation repair is claimed by this refactor.
+
+Jack Heart selected internal launch code: remove `TaskCommand::Tool` and the
+`lf task tool` command entirely, with no `desktop tool` replacement. Native
+workspace opening builds shell/editor argv directly on the selected Machine.
+Preserve configured editor/browser selection, literal file paths and checkout cwd.
+Jack then approved shipping after this removal (“otherwise lg2m ship it”).
+This supersedes the earlier shipping hold. Do not reopen the active conversation
+or manipulate its native panes; retained demo resources still have no cleanup release.
+
+Direct launch verification: opening unit tests 17 passed; opening integration tests
+24 passed, 2 opt-in native-host tests ignored; formatting and all-targets Clippy
+passed. The direct-shell regression executes the generated shell command and
+opens back into its Rex session with the private Machine context preserved.

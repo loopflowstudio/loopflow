@@ -1148,7 +1148,6 @@ impl TaskCommand {
             | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::View { .. }
-            | Self::Tool { .. }
             | Self::Diff { .. }
             | Self::Files { .. }
             | Self::File { .. }
@@ -2174,16 +2173,6 @@ until `lf ship`."
         #[arg(long)]
         watch: bool,
     },
-    /// Render a workspace tool in the Task's recorded checkout
-    Tool {
-        issue: String,
-        #[arg(value_enum)]
-        tool: crate::lf::commands::task_tool::Tool,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        path: Option<std::path::PathBuf>,
-    },
     /// Browse the Task brief, workflow and recorded runs without starting work
     View {
         issue: Option<String>,
@@ -2339,7 +2328,6 @@ impl TaskCommand {
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Retire { issue }
             | Self::Shell { issue, .. }
-            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2370,7 +2358,6 @@ impl TaskCommand {
             | Self::Checkout { issue, .. } => issue.as_mut(),
             Self::Retire { issue }
             | Self::Shell { issue, .. }
-            | Self::Tool { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }

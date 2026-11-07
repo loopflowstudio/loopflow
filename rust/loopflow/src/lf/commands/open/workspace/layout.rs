@@ -6,7 +6,9 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
-use super::{tool_cwd, viewer_argv, Native, Presentation, SqliteStore, ViewContent};
+use super::{
+    tool_cwd, tools, viewer_argv, with_machine_home, Native, Presentation, SqliteStore, ViewContent,
+};
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
@@ -77,7 +79,7 @@ pub(super) fn layout(
     };
     let Some(source) = source else {
         let conversation = tools.conversation(None)?;
-        let shell = tools.tool("shell", None)?;
+        let shell = tools.shell();
         // Background arrivals show workflow in place of an interactive resume.
         let secondary = if tools.resume {
             host.split(SplitAxis::Horizontal, 0.618, tools.task_view()?, shell)
@@ -122,24 +124,17 @@ impl Tools<'_> {
             .block("Conversation", self.cwd, viewer_argv(self.cwd, &words)?))
     }
 
-    fn tool(&self, name: &str, path: Option<&str>) -> Result<Value> {
-        let mut args = vec![
-            "task",
-            "tool",
-            &self.content.work.id,
-            name,
-            "--checkout",
-            self.cwd.to_str().context("Checkout is not UTF-8")?,
-        ];
-        if let Some(path) = path {
-            args.extend(["--path", path]);
-        }
-        let argv = viewer_argv(self.cwd, &args)?;
-        Ok(if name == "shell" {
-            self.host.terminal(name, self.cwd, argv)
-        } else {
-            self.host.block(name, self.cwd, argv)
-        })
+    fn shell(&self) -> Value {
+        self.host
+            .terminal("shell", self.cwd, with_machine_home(tools::shell()))
+    }
+
+    fn files(&self, path: Option<&str>) -> Result<Value> {
+        Ok(self.host.block(
+            "Files",
+            self.cwd,
+            with_machine_home(tools::files(self.cwd, path)?),
+        ))
     }
 
     fn changes(&self, comparison: &ChangeComparison) -> Result<Value> {
@@ -199,7 +194,7 @@ impl Tools<'_> {
                     );
                 }
                 *shells += 1;
-                self.tool("shell", None)?
+                self.shell()
             }
             PaneIntent::Browser {
                 location,
@@ -221,7 +216,7 @@ impl Tools<'_> {
                             .iter()
                             .find(|tab| Some(&tab.id) == selected.as_ref())
                             .map(|tab| tab.path.as_str());
-                        self.tool("files", path)?
+                        self.files(path)?
                     }
                     Some(BrowserTab::Changes { comparison, .. }) => self.changes(comparison)?,
                     Some(BrowserTab::Url { url, .. }) => {
@@ -239,14 +234,18 @@ mod tests {
     use super::{Native, Tools};
     use crate::lf::commands::open::rex::Rex;
     use crate::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
-    use std::path::Path;
 
     #[test]
     fn selected_tools_and_hidden_splits_shape_the_task_layout() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let saved: WorkPaneLayout = serde_json::from_str(include_str!(
-            "../../../../../../../tests/fixtures/dto/pane_layout.json"
-        ))
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().canonicalize().unwrap();
+        std::fs::create_dir(cwd.join("src")).unwrap();
+        std::fs::write(cwd.join("src/lib.rs"), "").unwrap();
+        let saved: WorkPaneLayout = serde_json::from_str(
+            &include_str!("../../../../../../../tests/fixtures/dto/pane_layout.json")
+                .replace("/repo/task", cwd.to_str().unwrap()),
+        )
         .unwrap();
         let content = ViewContent {
             work: saved.work.clone(),
@@ -255,7 +254,7 @@ mod tests {
             primary_session: None,
             location: Some(ViewLocation {
                 machine_id: "machine_recorded".into(),
-                cwd: "/repo/task".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
             }),
             pane_revision: None,
             face: None,
@@ -269,7 +268,7 @@ mod tests {
         let tools = Tools {
             host: &host,
             content: &content,
-            cwd: Path::new("/repo/task"),
+            cwd: &cwd,
             resume: true,
         };
         for (hidden, expected_shells) in [(saved.hidden.clone(), 0), (Default::default(), 1)] {
@@ -292,11 +291,12 @@ mod tests {
             let reports = |pane: &serde_json::Value| {
                 pane["command"].as_array().unwrap().iter().any(|word| {
                     let word = word.as_str().unwrap();
-                    word.starts_with("\x1b]7;file://") && word.ends_with("/repo/task/\x1b\\")
+                    word.starts_with("\x1b]7;file://")
+                        && word.ends_with(&format!("{}/\x1b\\", cwd.display()))
                 })
             };
             for pane in [conversation, files] {
-                assert_eq!(pane["cwd"], "/repo/task");
+                assert_eq!(pane["cwd"], cwd.to_str().unwrap());
                 let command = pane["command"].as_array().unwrap();
                 assert_eq!(command[0], "env");
                 assert_eq!(command[1], "REX_SERVER=unix:///task.sock");
@@ -304,7 +304,11 @@ mod tests {
             }
             if shells == 1 {
                 let shell = &secondary["split"]["before"]["block"]["options"];
-                assert!(shell.to_string().contains("\"shell\""));
+                assert!(shell["command"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "-l"));
                 assert!(!reports(shell), "a shell's own cwd must follow cd");
             }
             let viewing = conversation["command"].as_array().unwrap();
@@ -312,9 +316,11 @@ mod tests {
                 .windows(2)
                 .any(|args| args == ["resume", "session_primary"]));
             let editing = files["command"].as_array().unwrap();
-            assert!(editing
-                .windows(2)
-                .any(|args| args == ["--path", "src/lib.rs"]));
+            assert_eq!(
+                editing.last().unwrap(),
+                cwd.join("src/lib.rs").to_str().unwrap()
+            );
+            assert!(!editing.iter().any(|arg| arg == "--checkout"));
             assert!(!secondary.to_string().contains("README.md"));
         }
         // Without an existing Session, ordinary resume selects this Task.

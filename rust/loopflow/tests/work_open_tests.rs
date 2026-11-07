@@ -375,7 +375,7 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
             "a Task joins the caller's window: {call}"
         );
         assert!(
-            call.contains(r"'task' 'view'") && call.contains(r"'shell'"),
+            call.contains(r"'task' 'view'") && call.contains(r"'-l'"),
             "{call}"
         );
         assert!(call.contains("resume"), "{call}");
@@ -1254,7 +1254,7 @@ fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
     let split = &request["layout"]["split"];
     let words = |pane: &Value| pane["block"]["options"]["command"].to_string();
     assert!(words(&split["before"]).contains("\"diff\""), "{request}");
-    assert!(words(&split["after"]).contains("\"shell\""), "{request}");
+    assert!(words(&split["after"]).contains("\"-l\""), "{request}");
     assert!(
         !created.contains("Task & workflow"),
         "the template replaced the builtin"
@@ -1445,10 +1445,16 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     rex_peer(bin.path());
-    json(&lf(
+    let shell = bin.path().join("fixture-shell");
+    std::fs::write(&shell, format!(
+        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' open --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
+    )).unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    json(&lf_with(
         home.path(),
         repo.path(),
         Some(bin.path()),
+        &[("SHELL", shell.to_str().unwrap())],
         &[
             "open",
             "--task",
@@ -1473,12 +1479,7 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
         .map(|word| word.as_str().unwrap())
         .collect::<Vec<_>>();
     // Execute the generated native shell launcher. Rex supplies block/session
-    // identity; the launcher must carry the server across task-tool's exec.
-    let shell = bin.path().join("fixture-shell");
-    std::fs::write(&shell, format!(
-        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' open --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
-    )).unwrap();
-    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // identity; the direct shell command must carry the selected server.
     rex_reply(
         bin.path(),
         "session.list",
@@ -1495,7 +1496,6 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
         .env("HOME", home.path())
         .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("SHELL", shell)
         .env("REX_SESSION", "session:fixture")
         .env("REX_BLOCK", "block:shell")
         .current_dir(repo.path())

@@ -3,6 +3,7 @@
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
 mod layout;
+mod tools;
 
 use layout::layout;
 
@@ -858,6 +859,10 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
         cwd.to_string_lossy().into_owned(),
     ];
     argv.extend(words.iter().map(|word| (*word).into()));
+    Ok(with_machine_home(argv))
+}
+
+fn with_machine_home(mut argv: Vec<String>) -> Vec<String> {
     if crate::store::custom_home_selected() {
         argv.splice(
             0..0,
@@ -867,7 +872,7 @@ fn viewer_argv(cwd: &Path, words: &[&str]) -> Result<Vec<String>> {
             ],
         );
     }
-    Ok(argv)
+    argv
 }
 
 /// Add newly started Tasks while this tab runs: local ones to this Rex session,

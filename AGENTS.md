@@ -292,6 +292,16 @@ them.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
 
 **Rust tests:**
+- External terminal-host tests use an isolated socket, configuration, state directory
+  and process group. Check native identity and command replay separately: stable
+  pane IDs do not prove that the same processes survived a host restart.
+  Verify cwd with launcher-written evidence when host process telemetry still
+  reports a login wrapper; a displayed Task path does not prove the process cwd.
+  That wrapper is also what Rex itself sees: a `shell:"none"` program without job
+  control has no readable foreground cwd, so OSC 7 is the only directory a split
+  can inherit. Interactive shells stay unreported, or a launch report outlives `cd`.
+  Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
+  `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.

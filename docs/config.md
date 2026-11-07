@@ -1025,8 +1025,14 @@ name does not reuse its preferences.
 
 Files hold declared preferences, including account order, preferred machines,
 pool availability, rental templates and admission limits. The database holds live state and observations: account usage,
-cooldowns, machine identity, Sessions, execution history and actual saved Task
-arrangements. A saved arrangement remains live workspace state.
+cooldowns, machine identity, Sessions, execution history and Desktop’s current saved
+Task arrangements. A saved Desktop arrangement is current state, not a default.
+
+`task_layout` holds the default Task layout, including Wave-scoped preferences
+([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
+workspaces launched from it or from Desktop layouts; LF keeps no external-host
+workspace registry.
+
 Credentials stay with their secret/provider owner. The database is not an
 additional preference override layer.
 

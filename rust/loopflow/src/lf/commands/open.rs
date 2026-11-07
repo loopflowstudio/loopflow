@@ -1,12 +1,16 @@
 //! `lf open`: resolve Work through its shared owners, choose one presentation
-//! destination, and ask that destination to open the Work's conversation.
+//! destination, and open the Work there.
 //!
 //! Hosts translate only documented caller context and open/focus operations.
-//! They never select a conversation: every terminal destination runs
-//! `lf session resume` for the resolved Work, whose admission and attachment
-//! fences own reuse. Desktop resolves the same address through `--link --json`.
+//! Native workspace hosts launch ordinary tools and `lf resume` in the checkout.
+//! Resume owns conversation attachment and continuation. Desktop resolves the same address through `--link --json`.
 
+mod cmux;
 mod files;
+mod herdr;
+mod rex;
+mod tmux;
+mod workspace;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -129,6 +133,8 @@ pub struct OpenReceipt {
     pub host: Option<OpenHost>,
     /// The host's own identifier for the destination it created.
     pub destination: Option<String>,
+    /// The native container (Rex session, Herdr workspace, cmux group) holding it.
+    pub container: Option<String>,
     pub status: OpenStatus,
     pub reason: Option<String>,
     pub fallback_argv: Vec<String>,
@@ -232,6 +238,7 @@ impl Resolved {
             url: self.url.to_string(),
             host,
             destination,
+            container: None,
             status,
             reason,
             fallback_argv: self.fallback_argv(),
@@ -266,6 +273,16 @@ impl Resolved {
         }
     }
 
+    /// Why nothing opens when this Work's conversation is the one calling.
+    fn current_conversation(&self) -> Option<String> {
+        (self.relation().0 == ConversationRelation::CurrentConversation).then(|| {
+            format!(
+                "{} is this conversation; continue here. Nothing was opened.",
+                self.label
+            )
+        })
+    }
+
     /// Compare the calling conversation with this Work's selected destination.
     /// Same Work is not enough: a Graph step and the primary can share a Task.
     fn relation(&self) -> (ConversationRelation, Option<String>) {
@@ -298,7 +315,7 @@ pub(crate) fn selected_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
-    let resolution = work_context(
+    let mut resolution = work_context(
         &std::env::current_dir()?,
         cli.task.as_deref(),
         cli.wave.as_deref(),
@@ -313,6 +330,10 @@ pub(crate) fn selected_context(
                     ))?),
                 "Work does not belong to the selected repository. Nothing was opened."
             );
+        }
+        if cli.task.is_none() && cli.wave.is_none() && session.is_none() {
+            resolution.task = ContextFact::Unbound;
+            resolution.wave = ContextFact::Unbound;
         }
     }
     Ok(resolution)
@@ -778,24 +799,28 @@ fn route(requested: OpenHost) -> OpenRoute {
     }
     let mut hosts = Vec::new();
     let mut reasons = Vec::new();
-    if let Some((host, _)) = viewed_placement() {
-        hosts.push(host);
-        reasons.push("where this conversation is viewed");
+    // The host the caller is in is the only destination: failure there never
+    // falls through to another host. An agent's current viewer outranks its
+    // startup terminal, and a Herdr pane or tmux session inside a cmux or
+    // Desktop terminal is the innermost, current host.
+    let current = if let Some((host, _)) = viewed_placement() {
+        Some((host, "where this conversation is viewed"))
+    } else if in_rex() {
+        Some((OpenHost::Rex, "this Rex terminal"))
+    } else if in_herdr() {
+        Some((OpenHost::Herdr, "this Herdr pane"))
+    } else if in_tmux() {
+        Some((OpenHost::Tmux, "this tmux session"))
+    } else if in_cmux() {
+        Some((OpenHost::Cmux, "this cmux workspace"))
     } else {
-        // Open where the caller is. A Herdr pane or tmux session inside a cmux
-        // or Desktop terminal is the innermost, current host.
-        if in_herdr() {
-            hosts.push(OpenHost::Herdr);
-            reasons.push("this Herdr pane");
-        }
-        if in_tmux() {
-            hosts.push(OpenHost::Tmux);
-            reasons.push("this tmux session");
-        }
-        if in_cmux() {
-            hosts.push(OpenHost::Cmux);
-            reasons.push("this cmux workspace");
-        }
+        None
+    };
+    if let Some((host, reason)) = current {
+        return OpenRoute {
+            hosts: vec![host],
+            reason: format!("{reason}; failure there never falls through to another host"),
+        };
     }
     if cfg!(target_os = "macos") {
         hosts.push(OpenHost::Desktop);
@@ -832,6 +857,9 @@ const DESKTOP: &str = "LF_DESKTOP";
 /// Terminal-host context a direct caller carries. The link receiver removes
 /// it: an OS receiver's environment belongs to its first launch, not the click.
 pub(crate) const HOST_CONTEXT: &[&str] = &[
+    "REX_SERVER",
+    "REX_SESSION",
+    "REX_BLOCK",
     CMUX_WORKSPACE,
     CMUX_SOCKET,
     HERDR_ENV,
@@ -901,6 +929,10 @@ impl DesktopApp {
     }
 }
 
+fn in_rex() -> bool {
+    set("REX_SESSION") || set("REX_BLOCK")
+}
+
 fn in_herdr() -> bool {
     std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
 }
@@ -913,6 +945,10 @@ fn in_tmux() -> bool {
 /// terminal placement (`herdr:<workspace>`, `tmux:<pane>` or `cmux:<workspace>`)
 /// so a later opening can focus that conversation instead of starting another client.
 pub(crate) fn host_placement() -> Option<String> {
+    if in_rex() {
+        let location = rex::RexLocation::current().ok()?;
+        return Some(format!("rex:{}", serde_json::to_string(&location).ok()?));
+    }
     let (host, name) = if in_herdr() {
         (OpenHost::Herdr, HERDR_WORKSPACE)
     } else if in_tmux() {
@@ -949,6 +985,7 @@ fn placement(host: OpenHost, destination: &str) -> Option<String> {
         OpenHost::Cmux => Some(format!("cmux:{destination}")),
         OpenHost::Herdr => Some(format!("herdr:{destination}")),
         OpenHost::Tmux => Some(format!("tmux:{destination}")),
+        OpenHost::Rex => Some(format!("rex:{destination}")),
         _ => None,
     }
 }
@@ -959,6 +996,7 @@ fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
         "cmux" => OpenHost::Cmux,
         "herdr" => OpenHost::Herdr,
         "tmux" => OpenHost::Tmux,
+        "rex" => OpenHost::Rex,
         _ => return None,
     };
     Some((host, id))
@@ -1139,13 +1177,11 @@ fn open_one(
         }
         let attempt = match host {
             OpenHost::Desktop => open_desktop(target, focus, desktop),
-            OpenHost::Cmux => open_cmux(target, focus, lf),
-            OpenHost::Herdr => open_herdr(target, focus, lf),
-            OpenHost::Tmux => open_tmux(target, focus, lf),
+            OpenHost::Tmux => tmux::open(target, focus, lf),
             OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
-            OpenHost::Rex => Err(RouteError::Definite(
-                "Rex opening is not supported yet; use --host terminal".into(),
-            )),
+            OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux => {
+                unreachable!("native hosts launch fresh workspaces")
+            }
             OpenHost::Auto => unreachable!("routes contain concrete hosts"),
         };
         match attempt {
@@ -1247,8 +1283,9 @@ struct Live {
     placement: Option<String>,
 }
 
-/// A live provider attached to another client keeps its conversation; ordinary
-/// opening never takes it over. Desktop shows and moves its own retained panes.
+/// A live provider attached to another client keeps its conversation; tmux and
+/// plain terminals never take it over. Native hosts follow `Resume` instead, and
+/// Desktop shows and moves its own retained panes.
 /// One whose terminal closed has no viewer in control, so it opens here.
 fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;
@@ -1289,110 +1326,6 @@ fn open_desktop(
         batch.waiting.push((batch.next, url));
     }
     Ok(Opened::opening(None))
-}
-
-fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
-    let mut command = Command::new("cmux");
-    command
-        .env("CMUX_QUIET", "1")
-        .args([
-            "workspace",
-            "create",
-            "--name",
-            &target.destination_name(),
-            "--cwd",
-        ])
-        .arg(target.cwd())
-        .args([
-            "--command",
-            &shell,
-            "--focus",
-            if focus { "true" } else { "false" },
-        ]);
-    let output = run_host(command, "cmux")?;
-    let destination = output
-        .split_whitespace()
-        .find(|word| word.starts_with("workspace:"))
-        .map(str::to_owned);
-    Ok(Opened::opening(destination))
-}
-
-fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
-    let mut create = Command::new("herdr");
-    create
-        .args(["workspace", "create", "--cwd"])
-        .arg(target.cwd())
-        .args([
-            "--label",
-            &target.destination_name(),
-            if focus { "--focus" } else { "--no-focus" },
-        ]);
-    let output = run_host(create, "Herdr")?;
-    let created: serde_json::Value = serde_json::from_str(&output)
-        .map_err(|error| RouteError::Unknown(format!("unreadable Herdr reply: {error}")))?;
-    let workspace = created["result"]["workspace"]["workspace_id"]
-        .as_str()
-        .map(str::to_owned);
-    let pane = created["result"]["root_pane"]["pane_id"]
-        .as_str()
-        .ok_or_else(|| RouteError::Unknown("Herdr reply named no pane".into()))?;
-    // Herdr types the command into the newly allocated shell, never an existing one.
-    let mut run = Command::new("herdr");
-    run.args(["pane", "run", pane, &shell]);
-    run_host(run, "Herdr").map_err(|error| {
-        RouteError::Unknown(format!(
-            "created workspace {} but could not start its conversation: {}",
-            workspace.as_deref().unwrap_or(pane),
-            error.reason()
-        ))
-    })?;
-    Ok(Opened::opening(workspace))
-}
-
-/// A new window right after the caller's, named for the Work. Its pane is the
-/// destination: pane IDs are unique for the server's life, unlike indexes.
-fn open_tmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
-    let window = |after: Option<&str>| {
-        let mut command = Command::new("tmux");
-        command.arg("new-window");
-        if let Some(pane) = after {
-            command.args(["-a", "-t", pane]);
-        }
-        if !focus {
-            command.arg("-d");
-        }
-        command
-            .args([
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "-n",
-                &target.destination_name(),
-                "-c",
-            ])
-            .arg(target.cwd())
-            .arg(&shell);
-        run_host(command, "tmux")
-    };
-    // A pane recorded at launch may be gone; the server's current session remains.
-    let caller = match viewed_placement() {
-        Some((OpenHost::Tmux, pane)) => Some(pane),
-        _ => std::env::var(TMUX_PANE)
-            .ok()
-            .filter(|pane| !pane.is_empty()),
-    };
-    let output = match caller.as_deref().map(|pane| window(Some(pane))) {
-        Some(Err(RouteError::Definite(_))) | None => window(None)?,
-        Some(result) => result?,
-    };
-    let pane = output.trim();
-    if pane.is_empty() {
-        return Err(RouteError::Unknown("tmux reply named no pane".into()));
-    }
-    Ok(Opened::opening(Some(pane.to_owned())))
 }
 
 fn open_terminal(
@@ -1475,51 +1408,32 @@ fn open_terminal(
     ))
 }
 
+/// Raise an earlier destination. Only tmux panes are focused here; Desktop
+/// raises itself and native workspace hosts never reach this route.
 fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
-    let command = match host {
-        OpenHost::Cmux => {
-            let mut command = Command::new("cmux");
-            command
-                .env("CMUX_QUIET", "1")
-                .args(["workspace", "select", destination]);
-            command
-        }
-        OpenHost::Herdr => {
-            let mut command = Command::new("herdr");
-            command.args(["workspace", "focus", destination]);
-            command
-        }
-        OpenHost::Tmux => {
-            // Selecting proves the pane still exists; a client in another
-            // session follows it when one is attached.
-            let mut command = Command::new("tmux");
-            command.args(["select-window", "-t", destination, ";"]);
-            command.args(["select-pane", "-t", destination]);
-            let selected = run_host(command, OpenHost::Tmux.label()).map(drop);
-            if selected.is_ok() {
-                let mut switch = Command::new("tmux");
-                switch.args(["switch-client", "-t", destination]);
-                let _ = run_host(switch, OpenHost::Tmux.label());
-            }
-            return selected.inspect_err(|error| {
-                tracing::debug!(reason = error.reason(), "cannot focus the destination");
-            });
-        }
-        _ => return Ok(()),
-    };
-    run_host(command, host.label())
-        .map(drop)
-        .inspect_err(|error| {
-            tracing::debug!(reason = error.reason(), "cannot focus the destination");
-        })
+    if host != OpenHost::Tmux {
+        return Ok(());
+    }
+    tmux::focus(destination)
 }
 
 /// Run one host request with a finite timeout and return its stdout.
 fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
+    // Native inventories can exceed a pipe buffer. Spool while the child runs
+    // so waiting for exit cannot deadlock behind an unread stdout/stderr pipe.
+    let capture = || tempfile::tempfile().map_err(|error| RouteError::Definite(error.to_string()));
+    let mut stdout = capture()?;
+    let mut stderr = capture()?;
+    let output = stdout
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
+    let errors = stderr
+        .try_clone()
+        .map_err(|error| RouteError::Definite(error.to_string()))?;
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(output)
+        .stderr(errors)
         .spawn()
         .map_err(|error| RouteError::Definite(format!("cannot run {host}: {error}")))?;
     let (status, timed_out) =
@@ -1527,13 +1441,23 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
             .map_err(|error| RouteError::Unknown(error.to_string()))?;
     if timed_out {
         let _ = child.kill();
+        let _ = child.wait();
         return Err(RouteError::Unknown(format!(
             "{host} did not answer within {}s",
             HOST_TIMEOUT.as_secs()
         )));
     }
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    use std::io::Seek;
+    stdout
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    stderr
+        .rewind()
+        .map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stdout =
+        std::io::read_to_string(stdout).map_err(|error| RouteError::Unknown(error.to_string()))?;
+    let stderr =
+        std::io::read_to_string(stderr).map_err(|error| RouteError::Unknown(error.to_string()))?;
     if status.success() {
         Ok(stdout)
     } else {
@@ -1544,11 +1468,6 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
             format!("{host} refused: {detail}")
         }))
     }
-}
-
-fn drain(pipe: Option<impl std::io::Read>) -> String {
-    pipe.and_then(|pipe| std::io::read_to_string(pipe).ok())
-        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,7 +1481,7 @@ pub struct OpenArgs {
     /// Present original files in an attached Desktop Files view; never launch a host
     #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link"])]
     pub files: Vec<PathBuf>,
-    /// Presentation destination; auto opens in this Herdr/tmux/cmux host, then Desktop, then a terminal
+    /// Presentation destination; auto uses the current Rex/Herdr/tmux/cmux host, else Desktop, then a terminal
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
     /// Open every conversation available for you to work with
@@ -1582,6 +1501,30 @@ pub struct OpenArgs {
     pub format: Option<LinkFormat>,
     #[arg(long)]
     pub json: bool,
+    /// Rex server address; otherwise use the current viewer or configured local server
+    #[arg(long)]
+    pub server: Option<String>,
+    /// Create new Task tabs without changing the host's selection
+    #[arg(long)]
+    pub no_focus: bool,
+    /// Add newly started Tasks to this Rex session while the follower runs
+    #[arg(long, hide = true, requires = "server")]
+    pub follow: Option<String>,
+    /// Tasks the launching command already opened; the follower skips them
+    #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
+    pub seen: Vec<String>,
+    /// Open only this Machine's part of a routed workspace
+    #[arg(long, hide = true)]
+    pub local_workspace: bool,
+    /// Add these newly started Tasks from a routed selection, only those started here
+    #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
+    pub arrive_task: Vec<String>,
+    /// Append the arrival to this native container instead of creating one
+    #[arg(long, hide = true, requires = "arrive_task")]
+    pub into: Option<String>,
+    /// `<machine>=<container>` another Machine opened for this launch; empty when its creation is uncertain
+    #[arg(long = "remote", hide = true, requires = "follow")]
+    pub remote: Vec<String>,
 }
 
 /// The Work an invocation names: every available conversation, an address,
@@ -1626,7 +1569,12 @@ fn url_target(
         WorkTarget::Wave(name) => (None, Some(name.as_str())),
         WorkTarget::Repository => (None, None),
     };
-    let context = work_context(&repository, task, wave, session.as_deref())?;
+    let mut context = work_context(&repository, task, wave, session.as_deref())?;
+    // An explicit repository address does not inherit the checkout's Task.
+    if matches!(url.target, WorkTarget::Repository) && session.is_none() {
+        context.task = ContextFact::Unbound;
+        context.wave = ContextFact::Unbound;
+    }
     describe(store, &context, session, diff, None)
 }
 
@@ -1702,8 +1650,26 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         print_unknown(&unknown);
         return Ok(());
     }
-    let (targets, unknown) = targets(cli, args)?;
     let route = route(args.host);
+    if args.follow.is_some() {
+        return workspace::run(cli, args, OpenHost::Rex);
+    }
+    if let Some(&host) = route
+        .hosts
+        .first()
+        .filter(|host| matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux))
+    {
+        anyhow::ensure!(
+            args.server.is_none() || host == OpenHost::Rex,
+            "--server selects a Rex server"
+        );
+        return workspace::run(cli, args, host);
+    }
+    anyhow::ensure!(
+        args.server.is_none() && !args.no_focus && !args.local_workspace,
+        "--server and --no-focus are available for Rex, Herdr and cmux workspaces"
+    );
+    let (targets, unknown) = targets(cli, args)?;
     // A person typing in a terminal continues the conversation right here.
     let in_place = targets.len() == 1
         && route.hosts.last() == Some(&OpenHost::Terminal)
@@ -1711,11 +1677,8 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         && std::io::stdout().is_terminal()
         && crate::journal::agent_caller().is_none();
     if let [target] = targets.as_slice() {
-        if target.relation().0 == ConversationRelation::CurrentConversation {
-            bail!(
-                "{} is this conversation; continue here. Nothing was opened.",
-                target.label
-            );
+        if let Some(reason) = target.current_conversation() {
+            bail!(reason);
         }
     }
     let receipts = open_all(&targets, &route, in_place);
@@ -1779,6 +1742,21 @@ fn print_unknown(unknown: &[String]) {
 mod tests {
     use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
     use std::path::PathBuf;
+
+    #[test]
+    fn host_inventory_can_exceed_pipe_capacity() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2",
+        ]);
+        assert_eq!(
+            super::run_host(command, "fixture")
+                .unwrap_or_else(|error| panic!("{}", error.reason()))
+                .len(),
+            131072
+        );
+    }
 
     #[test]
     fn desktop_bundle_defaults_to_the_release_id() {

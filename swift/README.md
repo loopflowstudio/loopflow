@@ -73,7 +73,13 @@ changing the open workspace.
 
 The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
 
-Each Work keeps one pane layout and document store. Repository and Wave
+Each Work keeps one pane layout and document store. The browser offers Files,
+Changes, Task & workflow, Graph processes and web pages. A Task with no saved
+layout inherits its Wave's semantic default; later Wave edits leave saved Task
+layouts alone. Rex reads those defaults for new windows and owns its active
+native layout independently.
+
+Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, current Project and
 full Task inventory, followed by their metrics. **Project history**, **Realign Projects…** and **Workflow**

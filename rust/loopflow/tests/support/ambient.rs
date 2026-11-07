@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-/// Execution authority and capture context inherited by tests launched inside lf.
+/// Execution authority, capture context and host placement inherited by tests launched inside lf.
 pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_AGENT_OVERRIDE",
     "LF_YOLO_OVERRIDE",
@@ -18,6 +18,10 @@ pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_WAVE_ID",
     "LF_ACCOUNT_SELECTION",
     "LF_HUMAN_SESSION",
+    // A test run from a Rex terminal must not route in-process openings to that host.
+    "REX_SERVER",
+    "REX_SESSION",
+    "REX_BLOCK",
 ];
 
 /// Call while holding the suite's environment lock; restore on drop.

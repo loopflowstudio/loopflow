@@ -1,27 +1,35 @@
 # Surfaces
 
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
-you already work: Loopflow Desktop, cmux, Herdr, tmux or a plain terminal.
+you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
+
+For Task layouts, Wave defaults, automatic arrivals and native splits, read
+[Open Task workspaces](workspaces.md).
 
 ## Open Work where you are
 
 ```bash
 lf open loopflow://loopflow/task/LOO-12        # LOO-12's conversation, in the host you're in
-lf open loopflow://loopflow/wave/product       # the product Wave's conversation
+lf open loopflow://loopflow/wave/product       # the product Wave
 lf open --available                            # every conversation available for you, at once
 lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
 ```
 
-From a Herdr pane, `lf open` adds a Herdr workspace; from tmux, a new window
-right after this one; from cmux, a new workspace. Otherwise it opens in Desktop on
-macOS, then a plain terminal. It reads only the host's own environment
-(`HERDR_*`, `TMUX`, `CMUX_*`, Desktop's `LF_DESKTOP`) and never scans running
-apps. `--host desktop|cmux|herdr|tmux|terminal` picks one explicitly.
+From Rex, Herdr or cmux, `lf open` launches a fresh Task tab with its splits in
+the host you are in: inside a Rex session or Herdr workspace, a Task joins it; a
+repository or Wave gets its own session, workspace or cmux group. Each open is a
+new launch; return to earlier tabs through the host. From tmux it opens a new
+window right after this one. Otherwise it opens in Desktop on macOS, then a plain
+terminal. Host context comes from viewer placement, the host's environment or Rex
+process ancestry; opening never scans running apps, and failure in your host never
+falls through to another. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one
+explicitly.
 
-A conversation already live in this host is focused, draft intact. One live in
-another client is reported as `elsewhere`, with the `lf resume` command that
-moves it; opening never steals it. Open the same Task twice while its
-workspace starts and you get the one workspace.
+For a selected Task, Rex, Herdr and cmux run `lf resume` in its Conversation pane,
+which moves the conversation's input here. A repository or Wave opening starts no
+agents: it reconnects running conversations no terminal is showing and shows
+workflow information for the rest, as automatic Task arrivals do. tmux and terminal
+routes focus an existing conversation or report it as `elsewhere`.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.

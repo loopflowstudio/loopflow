@@ -592,6 +592,12 @@ struct SessionPaneView: View {
                     } catch { shellError = error.localizedDescription }
                 }
             }
+            Button("Task & workflow", systemImage: "list.bullet") {
+                workspace.showBrowser(.task, from: pane)
+            }
+            Button("Changes", systemImage: "plus.forwardslash.minus") {
+                workspace.showBrowser(.changes(comparison: .workingTree(base: "parent")), from: pane)
+            }
             Button("lf process", systemImage: "list.bullet.rectangle") {
                 workspace.showBrowser(.graphLog, from: pane)
             }
@@ -787,16 +793,42 @@ struct SessionPaneView: View {
                         .id(pane.incarnation)
                         .background(PaneFocusTarget(isFocused: isFocused))
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
-                case .files:
+                case .files, .changes:
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
                         TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
                             checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                            .task(id: pane.content.selectedBrowserTab?.id) {
+                                if case .changes(let comparison) = pane.content.selectedBrowserTab {
+                                    files.comparison = comparison
+                                    files.page = .files; files.mode = .diff; files.navigator = .pinned
+                                    await files.refresh()
+                                    await files.loadDiff()
+                                } else if files.comparison != .workingTree(base: "parent") {
+                                    files.comparison = .workingTree(base: "parent")
+                                    await files.refresh()
+                                    await files.loadDiff()
+                                }
+                            }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
                     case .failure(let error):
                         Text(error.localizedDescription).textSelection(.enabled)
                     }
+                case .task:
+                    if let task = model.task(id: taskId)?.task {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(task.task.name).font(.headline)
+                                TaskPlanningFactsView(task: task)
+                                TaskWorkflowHeader(model: model, task: task, work: model.taskWork[taskId])
+                                MarkdownBlocks(source: task.task.description).equatable()
+                                TaskWorkView(model: model, task: task)
+                                GraphProcessLog(model: model, taskId: taskId, location: location,
+                                    execution: execution, query: sessions.query)
+                            }.padding(14)
+                        }.textSelection(.enabled)
+                    } else { Text("Task is unavailable") }
                 case .url(let id, let url):
                     BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })

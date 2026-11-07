@@ -192,19 +192,6 @@ INSTALLER
 }
 
 fn executable(path: &Path, content: &str) {
-    // Mock the remote command/Machine identity, while exercising real framing.
-    let content = if path.file_name().is_some_and(|name| name == "lf") {
-        content.replacen(
-            "#!/bin/sh\n",
-            &format!(
-                "#!/bin/sh\nif [ \"$1 $2\" = 'session remote' ]; then exec env -u LF_EXPECTED_MACHINE_ID {} \"$@\"; fi\n",
-                shlex::try_quote(env!("CARGO_BIN_EXE_lf")).unwrap()
-            ),
-            1,
-        )
-    } else {
-        content.to_owned()
-    };
     fs::write(path, content).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -312,23 +299,11 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    let mut command = fixture.command(&argv[1..]);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().unwrap();
-    let mut input = child.stdin.take().unwrap();
-    input.write_all(b"unfinished draft\n").unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    let text = String::from_utf8(output.stdout)
-        .unwrap()
-        .replace("\r\n", "\n");
-    assert!(
-        text.contains("/remote/private home\nliteral ' quote\nunfinished draft\n"),
-        "{text}"
-    );
+    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
+    let script = argv.last().unwrap();
+    assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
+    assert!(script.contains("/remote/private home"), "{script}");
+    assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
 }
 
@@ -1766,7 +1741,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
 }
 
 #[test]
-fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
+fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     use loopflow::durable::RepositoryId;
     use loopflow::ops::task::TaskFilesFrame;
     use loopflow::store::sqlite::SqliteStore;
@@ -1788,52 +1763,19 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let owner = store.local_machine().unwrap().id;
     fs::write(path.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir(path.join("target")).unwrap();
-    let shell = fixture.root.path().join("remote/.local/bin/fixture-shell");
-    executable(&shell, "#!/bin/sh\nprintf 'shell at %s\\n' \"$PWD\"\ncat\n");
-    let launcher = fixture.root.path().join("remote/.local/bin/lf");
-    let script = fs::read_to_string(&launcher).unwrap();
-    fs::write(
-        &launcher,
-        script.replacen(
-            "export LF_HOME",
-            &format!("export SHELL='{}'\nexport LF_HOME", shell.display()),
-            1,
-        ),
-    )
-    .unwrap();
-    let args = [
+    let rejected = fixture.run(&[
         "--machine",
         "mini",
         "--repository",
         repository.as_str(),
         "task",
-        "shell",
+        "watch-files",
         registered.task.id.as_str(),
         "--checkout",
-        path.to_str().unwrap(),
-    ];
-    let mut child = fixture
-        .command(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all("literal ' text\n".as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        format!("shell at {}\nliteral ' text\n", path.display())
-    );
-    let mut stale = args;
-    stale[8] = "/different-checkout";
-    let rejected = fixture.run(&stale);
+        "/different-checkout",
+        "--request",
+        "stale-request",
+    ]);
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("checkout changed"));
     assert!(rejected.stdout.is_empty());

@@ -15,3 +15,9 @@ readiness protocol are superseded.
 - New hands-on proof must use separate work. Earlier rendering was visibly broken,
   not accepted. Retain all demo roots and owners; no input settlement or teardown
   authorization has been received.
+
+Jack Heart approved shipping LOO-498 after removal of `Task::Tool`. LOO-717
+remains the stack parent; its current Desktop ownership and shared stream
+transport are incorporated. Parent review history remains at
+`5f4ee78ee9:scratch/questions.md` and in [its design](loo-717-shell-lifetimes.md).
+Keep this Task’s walkthroughs; parent scratch filenames are independent reviews.

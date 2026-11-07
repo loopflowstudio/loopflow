@@ -1,8 +1,8 @@
 pub(crate) mod adoption;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
-pub mod workspace;
-pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
+mod workspace;
+pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -1962,7 +1962,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        let _retirement = retirement::lock(&task.id, false)?;
+        let _retirement = retirement::lock(&task.id)?;
         let task = store
             .sqlite
             .reopen_task(&task.id, note)

@@ -46,23 +46,15 @@ unknown checkouts stay unavailable. Seeded routing proves neither exchange nor a
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
 enables bounded reads; extraction/input remains unproved. Reads grant no input authority.
 
-Jack's October 8 API: `--context` previews input, `--explain` is broader,
-`--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
-removed; Task skill/Flow selection survives. History owns activity, Process pages,
-show/replay and usage; Desktop owns open/state. Bare `open` conflicts with PR opening;
-Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypasses
-execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
-retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
-retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
-Flow previews expose initial input; future/loop input stays unavailable. Discord is unchanged;
-`--steers-after` filters nodes, not restarts.
-`repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
-portable identity; remembered names remain open. Scoped IDs survive dispatch.
-Preview/routing use read-only SQLite; unreadable is not absent. Preview/launch share
-assembly and resolved operator scope; only launch materializes references.
-Main’s October 10 context design supersedes frozen input and budget gates:
-Wave/scratch refresh, Work direction is a retained reference, and preview reads
-current input without promising future hook bytes.
+October 8–10's superseded CLI surface and frozen-input history remain at
+`d14b32ada0:.lf/wave/product/MEMORY.md`, **Direction after October 7**;
+current commands and context assembly live in source. Preserve the shared lessons:
+preview and launch resolve the same scope, but only launch materializes references.
+Preview reads no providers or execution; unreadable SQLite is not absence.
+Remote paths resolve on their selected Machine, never as portable identity.
+A partial Session inventory must not retire other panes. Opening generations
+follow Session/Files/pane readiness and failures; refreshed context cannot promise
+future hook bytes.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -268,26 +260,41 @@ Capture models before records, delete replaced mechanisms, and use UPSERT when
 revision triggers matter: `INSERT OR REPLACE` skips update triggers. Focused SQL
 checks do not replace affected suites.
 
-## Native shell lifetimes (LOO-717, accepted November 3–5, 2026)
+## Native shell lifetimes (LOO-717, accepted November 3–6, 2026)
 
-Jack Heart approved building/publication through demo, not landing/installation.
-Rex owns its shells/layouts; LF closes only Desktop-owned shells, never Rex's.
-LOO-498 owns Rex's adapter. No ordinary-shell relay or deleted-checkout
-restoration. Close ends Desktop shells/jobs; Hide/switch/quit preserve execution.
-Undo restores history. Nested lf preserves shell purpose.
+Jack Heart's November 6 revision removes `lf task shell`. Desktop owns receipts,
+startup and Close through a private cross-platform runtime, independent of GUI
+control. Terminal bytes/Close status need no GUI schema or registry action;
+namespace misclassified the runtime.
+Shared transport owns PTYs/Machine routing; retirement delegates shell settlement.
+Rex owns shells/layouts; LOO-498 owns native layout creation. LF never closes Rex
+shells. Close ends Desktop jobs; hide/switch/quit retain execution until cleanup.
+Undo restores history, never execution or deleted checkouts.
 
 Eligible idle agents end at two minutes; completed-and-away workspaces at fifteen.
-Return cancels grace. Active work, drafts and pending requests delay cleanup
-without restarting elapsed grace. Uncommitted files are discarded; committed-ref
-safeguards and history survive.
+Return cancels cleanup. Work, drafts and pending requests delay cleanup
+without restarting grace. Uncommitted files are discarded; Git safeguards remain.
 
-Jack's November 5 rule: an open LF viewer of a Task Session retains the checkout
-(hidden, unfocused and passive count); a shell with that cwd does not; a native tab
-left after the viewer exits is no hold. LF persists no host/occurrence identity:
-the serving owner records `processes.viewer_hold` from its own connections. A local
-drop past reconnect grace is exit; an SSH drop is unknown until a fresh attach, so
-a quit Desktop releases remote viewers only once viewed again. Agent exit is never
-viewer exit. Superseded occurrence/lease design: `b81df60579:scratch/`.
+Jack's November 5 rule: only Task Session viewers retain checkouts, including
+hidden/unfocused/passive viewers. Shells and surviving native tabs add no hold.
+Desktop Quit explicitly releases viewers. Detected loss starts absence
+grace; expiry never proves client death or adds another fifteen minutes. Owners
+date connection evidence on Processes; LF stores no host/occurrence registry.
+November 6: carry the viewer protocol across SSH. The bridge owns no PTY or
+heartbeat; viewers pulse every ten seconds, owners drop silent viewers at thirty.
+External SSH uses host loss detection. Focused/loopback tests establish no native
+or physical remote-Machine acceptance. Prior designs:
+`d5cab9ba60:scratch/loo-717-shell-lifetimes.md`.
+
+Jack's November 6 follow-up replaces per-Task waiting workers with one minute-based
+OS sweep per Machine over SQLite retirement rows. Backoff stays separate from
+absence; held/interrupted work remains recoverable. Eligibility reaches a sweep
+in 15–16 minutes while awake. Cleanup and updating have separate installation jobs.
+Review found a queued close could outlive returning viewing between sweeps.
+Record return and close cancellation atomically; owners recheck current Task
+retention before consuming automatic closure. Explicit Close remains effective.
+Desktop supplies integration script/resources only on creation; reattachment
+never replays startup. Shared transport selects no integration; Rex owns its own.
 
 ## Session and operate pairs (2026-10-05)
 

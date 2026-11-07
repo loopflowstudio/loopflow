@@ -119,7 +119,10 @@ fn snapshot_preview_fixture() {
         while let Some((tag, payload)) = decoder.next().unwrap() {
             assert_eq!(tag, Tag::Request, "preview input reached the new provider");
             let request: Incoming = serde_json::from_slice(&payload).unwrap();
-            assert!(matches!(request.request, Request::Leave));
+            assert!(matches!(
+                request.request,
+                Request::Leave | Request::Controlled
+            ));
         }
     });
     attach_with_terminal(&owner, None, preview).unwrap();

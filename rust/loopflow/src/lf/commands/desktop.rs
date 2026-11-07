@@ -470,6 +470,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         .collect::<Vec<_>>()
         .as_slice()
     {
+        // The private runtime carries terminal bytes and Close status, not GUI replies.
+        ["desktop", "shell"] => None,
         ["desktop", "state"] => Some(schema::<DesktopInspection>()),
         ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
         ["desktop", "query" | "pin" | "unpin"] => {
@@ -1065,6 +1067,9 @@ pub(super) fn present_files(
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     match command {
+        DesktopCommand::Shell { .. } => {
+            unreachable!("shell runtime dispatch precedes Desktop control")
+        }
         DesktopCommand::Layout {
             work, save: false, ..
         } => {
@@ -1585,7 +1590,8 @@ impl Verb {
                     target.clone(),
                 )
             }
-            DesktopCommand::View { .. }
+            DesktopCommand::Shell { .. }
+            | DesktopCommand::View { .. }
             | DesktopCommand::Plans { .. }
             | DesktopCommand::Plan { .. }
             | DesktopCommand::Done { .. }
@@ -1763,12 +1769,13 @@ struct TileRequest {
     edit: TileEdit,
 }
 
-/// Commands that never contact Desktop, so they run on any platform: saved
-/// intent, view plans and tile verbs naming a saved record's tile.
+/// Commands that never contact the app: saved intent, view plans, saved tile
+/// verbs and the Desktop shell runtime on its execution Machine.
 pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     match command {
-        DesktopCommand::View { .. }
+        DesktopCommand::Shell { .. }
+        | DesktopCommand::View { .. }
         | DesktopCommand::Plans { .. }
         | DesktopCommand::Plan { .. }
         | DesktopCommand::Done { .. }
@@ -3667,7 +3674,7 @@ mod tests {
     }
 
     #[test]
-    fn every_verb_names_a_registry_action() {
+    fn every_gui_verb_names_a_registry_action() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIONS).unwrap();
         let names = fixture["actions"]
             .as_array()
@@ -3680,8 +3687,9 @@ mod tests {
         let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
         let work_reads = ["plans", "plan", "done", "wave", "sessions", "task"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
-            // `do` performs whichever registry action it names.
-            if verb == "do"
+            // The shell runtime never contacts the GUI; `do` names its own action.
+            if verb == "shell"
+                || verb == "do"
                 || saved.contains(&verb)
                 || work_reads.contains(&verb)
                 || super::READING_VERBS.contains(&verb)

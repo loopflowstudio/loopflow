@@ -40,10 +40,6 @@ struct GhosttyTerminalTitle {
     let title: String
 }
 
-#if GHOSTTY_ENABLED
-import GhosttyKit
-import CoreVideo
-
 enum GhosttyRuntimeResources {
     static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 
@@ -82,6 +78,33 @@ enum GhosttyRuntimeResources {
         return directory
     }
 }
+
+// Resource bytes travel with creation, so a remote Machine needs no app bundle.
+func desktopShellBootstrap() throws -> String {
+    guard let root = GhosttyRuntimeResources.directoryURL else {
+        throw RegistryQueryError("Desktop shell integration is unavailable")
+    }
+    let resources = [
+        ".zshenv": "task-zshenv",
+        "bash-env": "task-bash-env",
+        "ghostty/shell-integration/zsh/.zshenv": "shell-integration/zsh/.zshenv",
+        "ghostty/shell-integration/zsh/ghostty-integration": "shell-integration/zsh/ghostty-integration",
+        "ghostty/shell-integration/bash/ghostty.bash": "shell-integration/bash/ghostty.bash",
+        "ghostty/shell-integration/bash/bash-preexec.sh": "shell-integration/bash/bash-preexec.sh",
+        "ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish": "shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+    ]
+    var files: [String: String] = [:]
+    for (destination, source) in resources {
+        files[destination] = try String(contentsOf: root.appendingPathComponent(source), encoding: .utf8)
+    }
+    let script = try String(contentsOf: root.appendingPathComponent("task-shell.sh"), encoding: .utf8)
+    let data = try JSONSerialization.data(withJSONObject: ["script": script, "files": files], options: [.sortedKeys])
+    return String(decoding: data, as: UTF8.self)
+}
+
+#if GHOSTTY_ENABLED
+import GhosttyKit
+import CoreVideo
 
 @MainActor
 final class GhosttyManager: ObservableObject {

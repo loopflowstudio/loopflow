@@ -324,8 +324,8 @@ final class GhosttySurfacePool {
     }
 
     /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
-    /// so the Session owner records a deliberate leave. Through SSH a hangup
-    /// alone cannot show that the viewer exited and keeps the Task checkout.
+    /// so the Session owner records a deliberate leave without waiting for
+    /// connection-loss detection across SSH.
     func release(_ id: TerminalIdentity) {
         guard let view = views.removeValue(forKey: id) else { return }
         guard view.detachRelay() else {
@@ -1680,8 +1680,8 @@ struct GhosttyTerminalView: View {
 
 #endif
 
-// Block geometry and the header format stay outside the Ghostty build: the
-// shell bootstrap below names the header marker in every configuration.
+// Block geometry and the header format stay outside the Ghostty build.
+// GhosttyResources/task-zshenv prints the same marker in the shell prompt.
 
 /// The directory line above a command. The Loopflow prompt prints it as
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;

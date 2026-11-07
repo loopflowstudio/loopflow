@@ -186,6 +186,7 @@ pub(super) enum Request {
         hint: String,
     },
     /// Whether some viewer holds input control, asked before opening another.
+    /// On an attached connection this also refreshes the viewer's liveness.
     Controlled,
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {

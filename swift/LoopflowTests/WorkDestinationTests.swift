@@ -606,7 +606,7 @@ struct WorkDestinationTests {
             let tab = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell)
             let command = try remote.shellAttachment(tab)
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
-                "task", "shell", remoteID, "--checkout", remoteIdentity.worktree, "--id", tab.id, "--create"])
+                "desktop", "shell", remoteID, "--checkout", remoteIdentity.worktree, "--id", tab.id, "--create", "--bootstrap", try desktopShellBootstrap()])
             let splitID = try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
             #expect(remote.multiplexer.layout.pane(for: try #require(splitID.pane))?.content.selectedShell?.command == [])

@@ -95,9 +95,10 @@ resubmit its input.
 An owner that answers but then fails to attach leaves delivery unknown; that
 reconnection launches no other provider and replays no Graph. Finished Runs retain
 results in Session history.
-After connecting, attachment waits up to five seconds for acknowledgement. Timeout
+A local attachment waits up to five seconds for acknowledgement. Over command
+pipes it allows sixty seconds for SSH setup and destination Session resolution. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
-acknowledged, the attachment has no time limit.
+acknowledged, the attachment stays while its heartbeats reach the owner.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
@@ -148,11 +149,13 @@ A viewer's stream is the bytes of its snapshot, out and err frames in order. The
 viewer counts them; the owner spools the last 1 MiB per viewer.
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"ssh":false}
+{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","reconnect":"…","nonce":"…","token":"…","terminal":true,"grace_ms":60000,"owner":"…"}
 ```
 
-The stream then opens with the snapshot (pipes: the retained tail), a `resize`
+Before attachment, a destination may send a `snapshot` of retained history. It
+grants no input or retention claim; the live snapshot replaces it on attachment.
+The attached stream opens with the snapshot (pipes: the retained tail), a `resize`
 event, a `theme` event when one is known, an `owner` event, and live output.
 
 Events ride stream 1 as ``ESC _ lf1;<nonce>;<json> ESC \``, inserted only between
@@ -238,28 +241,25 @@ its surface; replacement providers begin with an empty observation.
 
 ## Task shells and completed workspaces
 
-```sh
-lf task shell TASK --checkout /recorded/checkout --id SHELL --create
-lf task shell TASK --checkout /recorded/checkout --list
-lf task shell TASK --checkout /recorded/checkout --id SHELL
-lf task shell TASK --checkout /recorded/checkout --id SHELL --close
-```
+Desktop creates a shell once, on the Task's recorded Machine. Its private
+runtime in `desktop::shells` owns execution receipts, startup, reconnect and
+Close. It runs on headless Linux too, without an app server. Machine routing
+carries the same viewer protocol across SSH; the transport owns the PTY.
+There is no Task shell command or external-host shell registry.
 
-Choose a fresh shell identity once. Creation accepts literal initial argv after
-`--`, followed by the destination login shell; repeating that identity never runs
-its initial command again. Attachment, Hide and Desktop exit leave the shell
-running. Close ends its ordinary foreground, background and stopped jobs, even
-when job control assigned them separate process groups. Deliberately daemonized
+Attachment, Hide and Desktop exit leave execution running. Creation consumes
+initial argv and Desktop's supplied integration once; reconnect never replays
+startup. Close ends ordinary foreground, background and stopped jobs, even when
+job control assigned them separate process groups. Deliberately daemonized
 processes that created a different OS session are outside the shell's ownership.
 Ended shells retain their identity and saved screen. Undo restores that history;
 New Shell deliberately starts different execution. An unavailable destination
-never opens a local successor prompt. Prefix these commands with `--machine` to
-use the same operations on the Task's recorded Machine.
+never opens a local successor prompt.
 
 Keep a Task Session viewer open to retain its worktree. Hidden or unfocused
 viewers count, passive ones too; input control is separate. Closing the last
-viewer lets a completed Task follow its normal cleanup grace once requested work
-finishes. An ordinary shell in that directory does not retain the worktree.
+viewer starts a completed Task's cleanup grace; requested work delays cleanup
+without restarting that clock. An ordinary shell does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
 Task and conversation history remain after cleanup.
 
@@ -270,30 +270,45 @@ starts the absence clock immediately, independently of the sixty-second stream
 replay grace. A resumed viewer cancels cleanup. Ending an unviewed owner preserves
 that absence time, so its two-minute idle ending adds no new workspace grace.
 
-LF's remote viewer path frames its PTY input/output over SSH. The viewing Machine
-sends heartbeats every ten seconds, independent of typing and provider output;
-the remote relay ends after thirty seconds without them, including silent network
-failure with no EOF. The detached Session or shell execution stays on its owner.
-Window dimensions travel on the same connection. There is no host registry or
-second provider conversation. An ordinary external SSH connection uses its host's
-connection-loss detection; LF's bounded heartbeat applies to its own remote path.
+Local and remote viewers use this same protocol. SSH carries the frames through
+`lf session attach -- <ssh argv>`; the destination attachment forwards stdin/stdout
+to the owner's socket. The bridge creates no PTY, Session or heartbeat. Only the
+execution owner holds a PTY. The viewing endpoint sends the existing
+`{"id":1,"kind":"controlled"}` query every ten seconds on its attached connection,
+independent of input and output; after thirty seconds without
+one the owner releases that connection's retention and input claim. Silent network
+loss needs no EOF. Other connected viewers still hold. Attach/Resume restarts the
+heartbeat deadline, and the same stream carries input, resize, ownership and Leave.
+An ordinary external SSH connection uses its host's connection-loss detection; LF's bounded heartbeat applies to its own remote path.
 
 Desktop departure, window close and orderly Quit send Ctrl+] to release their
 relays. Quit waits up to two seconds for relay exit; unavailable delivery falls
 back to connection-loss cleanup. Only actual Session viewing retains the checkout.
 An owner's dated observation expires too if it crashes, so a stale Process row
-cannot retain a completed workspace indefinitely. The retirement executor keeps
-observing while viewed and uses that same absence window after owner loss.
+cannot retain a completed workspace indefinitely. The Machine's scheduled cleanup
+pass also reconciles viewed Tasks and uses that same absence window after owner loss.
 
 A completed, released Task keeps its checkout and Desktop shells for fifteen
 minutes total; eligible unviewed agents still end at two minutes. A returning
-viewer cancels that deadline and its queued shell closes; leaving again starts
-a new one. Requested active work, drafts, pending requests and running Graphs
-still prevent ending execution; finishing that work does not restart an
-already-due deadline. Completion and PR landing schedule one retirement pinned
+viewer cancels that deadline and its queued automatic shell closes in the same
+write that records viewing, without waiting for a sweep; leaving again starts
+a new one. Owners recheck current Task viewing before consuming automatic closure.
+Explicit Close remains effective. Requested active work, drafts, pending requests
+and running Graphs still prevent ending execution; finishing that work does not
+restart an already-due deadline. Completion and PR landing schedule one retirement pinned
 to the completion, checkout and branch; reopen or changed placement revokes it.
-An owner whose viewers release wakes waiting cleanup for its Tasks. Destination
-owners confirm shell job settlement before deletion. Eligible cleanup discards
+Installation provisions a separate launchd/cron job running `lf task retire` once
+a minute. Each pass reads the local retirement queue, reconciles viewers, attempts
+eligible cleanup and exits. No Task owns a waiting cleanup process. Eligibility
+normally reaches a pass in 15–16 minutes while awake; wall-clock deadlines survive
+sleep and reboot. Destination owners confirm shell job settlement before deletion;
+a pending close finishes on a later pass. Eligible cleanup discards
 uncommitted files but preserves primary/persistent checkouts and changed
-committed refs. Failures record a pending reason and retry. Reopening a retired
-Task never silently recreates a checkout.
+committed refs. Failures record a reason and retry after one minute, doubling up
+to an hour independently of the absence deadline. One failed Task does not stop
+other queued Tasks. Overlapping passes serialize, and interrupted effects can be
+retried. `lf task retire <task>` runs one pass for a specific Task. Reopening a
+retired Task never silently recreates a checkout.
+
+Desktop's private [shell runtime](../desktop/README.md) carries startup resources
+on creation; the viewer transport does not select terminal integration.

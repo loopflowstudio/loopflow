@@ -965,7 +965,7 @@ Retired Ask/Ready/Complete and LOO-491 evidence: `a32c385044`, this heading.
 Jack Heart's November 4 LOO-672 approval: warm unfinished Tasks, bottom-on-return,
 explicit **Take back** over the last screen; no Fork button or shared input, CLI
 fork remains. Selected-first admission honors Close;
-saved display grants no retention. Eight warm/two preparations stay provisional; visible/protected work survives.
+saved display grants no retention. Sixteen warm/two preparations stay provisional; visible/protected work survives.
 
 Jack rejected the explicit Start gate at the November 4 re-demo (“the whole point
 of this task”), ruled out any normal “unopened” state on November 5, then extended
@@ -985,15 +985,18 @@ store and the pane adopts it.
 recovery restarts it; fixtures end in `interactive: default`.
 
 Local retention uses the local query; remote presence uses observed remote
-identity (peer lookup of the local Machine fails “is not added”). The November 5
-candidate proved four providers live on load with no Graph; primaries,
-drafts, cold return, Rex takeover, reboot and twenty-Task footprint remain with demo.
+identity (peer lookup of the local Machine fails “is not added”).
+
+November 7, real Claude: 23 conversations opened in 8s, no click or Graph; 14
+stopped on the trust dialog: booting Claudes hold `~/.claude.json.lock` past
+lf's 2s wait (now 30s), and `preparationLimit` ends before Claude boots. Claude
+~300 MB each; eviction stops no provider; no budget stated. Take back click unverified.
 
 ### Task observation and retired Watch
 
 Jack Heart selected Session posts plus an expandable run page for LOO-711
 (2026-11-02): minimal default, combined position/readiness, Files owning the diff.
-The wait-only proposal is superseded. `db5cdbbd14` implements four native provider
+`db5cdbbd14` implements four native provider
 paths and grouped history, repairing `dd2bb7bc21`'s latest-run-only reports.
 Compare reportable facts by durable run identity and settle gaps per run: a newer
 helper must not hide an older worker's failure. Existing receipts retain compact
@@ -1009,9 +1012,6 @@ substitute for delivery.
 
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.
-
-LOO-293's unproved native scope and retired Watch/FlowPosition history:
-`2c23acbb8:wave/product/MEMORY.md`, **Task observation and Watch**.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

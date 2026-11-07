@@ -99,8 +99,10 @@ selecting the Work shows the running terminal. A small **Connecting…** indicat
 remains until the live relay accepts input.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
-any additional visible panes; a Task shown as a Dashboard tile stays warm after the
-Dashboard leaves. Repository and Wave conversations stay warm beside that bound.
+any additional panes on screen; a Task admitted from a Dashboard tile stays warm after
+the Dashboard leaves. A board's other pages wait: past the bound, a tile opens when its
+page turns up or it is selected, and a tile that leaves returns to the bound.
+Repository and Wave conversations stay warm beside that bound.
 Return lands at the bottom. Older conversations reconnect or resume the same
 provider history automatically. After relaunch, the saved selected Work opens
 first, then the bounded warm set reconnects with at most two preparations at once.

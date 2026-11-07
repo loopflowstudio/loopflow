@@ -187,7 +187,7 @@ struct WorkNavigationTests {
         // The repository page is a Wave view, so its Tasks enter through it too.
         model.selectSidebarTask(slot: 1)
         #expect(model.navigation.destination == .entered(from: .repository, work: .task(id: "issue-now")))
-        #expect(model.navigation.wavePages[.repository] == 1)
+        #expect(model.navigation.boardPages[.repository] == 1)
         #expect(model.desktopDestination(repository: "repo")
             == .entered(from: .repository, work: .init(repository: "repo", kind: .task, id: "issue-now")))
     }
@@ -200,7 +200,7 @@ struct WorkNavigationTests {
         #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-now"])
         model.selectSidebarTask(slot: 0)
         #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-now")))
-        #expect(model.navigation.wavePages[.wave("wave-1")] == 0)
+        #expect(model.navigation.boardPages[.wave("wave-1")] == 0)
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
         model.selectSidebarTask(slot: 1)
         #expect(model.selection == .task(id: "issue-now"))

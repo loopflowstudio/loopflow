@@ -297,6 +297,9 @@ jobs:
       - name: Verify migration namespaces
         env:
           LOOPFLOW_REQUIRE_ORIGIN_MAIN: "1"
+          # The replay needs the SQLite the bundled runtime speaks (RAISE with an
+          # expression is 3.48+); the runner's system Python links an older one.
+          UV_PYTHON_PREFERENCE: only-managed
         run: uv run python scripts/check_migrations.py
 
   python-test:

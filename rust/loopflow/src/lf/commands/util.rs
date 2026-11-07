@@ -1490,7 +1490,7 @@ mod tests {
         assert_eq!(failed, 1);
         for agent in agents {
             let parent = store
-                .process(agent.parent_lf_process_id.as_ref().unwrap())
+                .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap();
             assert_eq!(parent.pid, Some(std::process::id()));

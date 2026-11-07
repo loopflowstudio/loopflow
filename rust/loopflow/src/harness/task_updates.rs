@@ -161,7 +161,7 @@ impl TaskUpdates {
                 }
                 let run = RunObservation {
                     name: graph.entry.summary.name,
-                    outcome: store.process(&id)?.and_then(|process| process.outcome),
+                    outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
                     completed: graph.entry.ended_at.is_some(),
                     step: graph.steps.last().cloned(),
                 };

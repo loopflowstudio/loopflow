@@ -9,8 +9,8 @@ use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior}
 
 use crate::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 use crate::process::{
-    AgentCaller, AgentProcess, LfProcess, LfProcessOutcomeFilter, LfProcessWorkFilter,
-    ProcessCursor, ProcessEntry, ProcessFilter, ProcessPage, SessionAttachment,
+    AgentCaller, AgentProcess, LfProcess, ProcessCursor, ProcessEntry, ProcessFilter,
+    ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -174,16 +174,16 @@ fn process_query(
     }
     if let Some(outcome) = filter.outcome {
         sql.push_str(match outcome {
-            LfProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
-            LfProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
-            LfProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
-            LfProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
+            ProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
+            ProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
+            ProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
+            ProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
         });
     }
     if let Some(work) = &filter.performed_work {
         let (column, value, tasks, close) = match work {
-            LfProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
-            LfProcessWorkFilter::Wave(id) => (
+            ProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
+            ProcessWorkFilter::Wave(id) => (
                 "wave_id",
                 id.as_str(),
                 "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
@@ -517,7 +517,7 @@ impl SqliteStore {
     }
 
     /// Read one command without decoding its event history or provider payloads.
-    pub fn process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
+    pub fn lf_process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -1229,7 +1229,7 @@ impl SqliteStore {
             return Err(attachment_changed());
         }
         if let Some(attached) = expected.and_then(|attachment| attachment.lf_process_id.as_ref()) {
-            if crate::journal::process_evidence(self, attached)
+            if crate::journal::lf_evidence(self, attached)
                 != crate::journal::ProcessIdentityEvidence::Dead
             {
                 return Err(StoreError::InvalidAuthority(
@@ -1530,9 +1530,7 @@ mod discovery_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{
-        LfProcessOutcomeFilter, LfProcessWorkFilter, ProcessEntry, ProcessFilter,
-    };
+    use crate::process::{ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
 
@@ -1692,7 +1690,7 @@ mod discovery_tests {
             store.session(&session.id).unwrap().unwrap().completed_at,
             Some(10)
         );
-        let mut owner = store.process(&first).unwrap().unwrap();
+        let mut owner = store.lf_process(&first).unwrap().unwrap();
         owner.completed_at = Some(11);
         store.record_process(&owner).unwrap();
         let (admitted, claimed) = store
@@ -1729,7 +1727,7 @@ mod discovery_tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let historical = insert_process(&store, 1, 1);
-        let retained = store.process(&historical).unwrap().unwrap();
+        let retained = store.lf_process(&historical).unwrap().unwrap();
         assert_eq!(retained.pid, None);
         let mut first = retained.clone();
         first.id = LfProcessId::new();
@@ -1743,9 +1741,9 @@ mod discovery_tests {
         first.outcome = Some("failed".into());
         first.exit_code = Some(42);
         store.record_process(&first).unwrap();
-        assert_eq!(store.process(&first.id).unwrap(), Some(first));
-        assert_eq!(store.process(&second.id).unwrap(), Some(second));
-        assert_eq!(store.process(&historical).unwrap(), Some(retained));
+        assert_eq!(store.lf_process(&first.id).unwrap(), Some(first));
+        assert_eq!(store.lf_process(&second.id).unwrap(), Some(second));
+        assert_eq!(store.lf_process(&historical).unwrap(), Some(retained));
     }
 
     #[test]
@@ -1793,7 +1791,7 @@ mod discovery_tests {
         );
         assert_eq!(page.next, None);
         for entry in &entries {
-            assert_eq!(store.process(&entry.id).unwrap().as_ref(), Some(*entry));
+            assert_eq!(store.lf_process(&entry.id).unwrap().as_ref(), Some(*entry));
         }
         let old = entries[3];
         assert_eq!(
@@ -1833,10 +1831,10 @@ mod discovery_tests {
             vec![agent.as_str()]
         );
         for (outcome, expected) in [
-            (LfProcessOutcomeFilter::Unknown, &parent),
-            (LfProcessOutcomeFilter::Failed, &direct),
-            (LfProcessOutcomeFilter::Succeeded, &agent),
-            (LfProcessOutcomeFilter::Interrupted, &interrupted),
+            (ProcessOutcomeFilter::Unknown, &parent),
+            (ProcessOutcomeFilter::Failed, &direct),
+            (ProcessOutcomeFilter::Succeeded, &agent),
+            (ProcessOutcomeFilter::Interrupted, &interrupted),
         ] {
             let filter = ProcessFilter {
                 outcome: Some(outcome),
@@ -1949,7 +1947,7 @@ mod discovery_tests {
             Err(StoreError::InvalidData(_))
         ));
         assert_eq!(store.resolve_process("%_").unwrap(), None);
-        assert_eq!(store.process(&LfProcessId::new()).unwrap(), None);
+        assert_eq!(store.lf_process(&LfProcessId::new()).unwrap(), None);
         let miss = ProcessFilter {
             command_contains: Some("%_".into()),
             id: Some(second.to_string()),
@@ -1983,7 +1981,12 @@ mod discovery_tests {
                 .unwrap();
             assert_eq!(page.entries.len(), usize::from(command.is_some()));
             assert_eq!(
-                store.process(&first).unwrap().unwrap().command.as_deref(),
+                store
+                    .lf_process(&first)
+                    .unwrap()
+                    .unwrap()
+                    .command
+                    .as_deref(),
                 command
             );
         }
@@ -2120,7 +2123,7 @@ mod discovery_tests {
             }
         }
         let filter = ProcessFilter {
-            performed_work: Some(LfProcessWorkFilter::Task(first.clone())),
+            performed_work: Some(ProcessWorkFilter::Task(first.clone())),
             ..Default::default()
         };
         let page = store
@@ -2139,7 +2142,7 @@ mod discovery_tests {
         assert_eq!(page.entries[0].id(), mechanical.as_str());
         assert_eq!(page.next, None);
         let second_filter = ProcessFilter {
-            performed_work: Some(LfProcessWorkFilter::Task(second)),
+            performed_work: Some(ProcessWorkFilter::Task(second)),
             ..Default::default()
         };
         let page = store
@@ -2153,7 +2156,7 @@ mod discovery_tests {
             vec![shared.as_str()]
         );
         let wave_filter = ProcessFilter {
-            performed_work: Some(LfProcessWorkFilter::Wave(wave)),
+            performed_work: Some(ProcessWorkFilter::Wave(wave)),
             ..Default::default()
         };
         let page = store
@@ -2166,8 +2169,8 @@ mod discovery_tests {
                 .collect::<Vec<_>>(),
             vec![shared.as_str(), mechanical.as_str()]
         );
-        assert_eq!(store.process(&unbound).unwrap().unwrap().outcome, None);
-        assert_eq!(store.process(&observer).unwrap().unwrap().outcome, None);
+        assert_eq!(store.lf_process(&unbound).unwrap().unwrap().outcome, None);
+        assert_eq!(store.lf_process(&observer).unwrap().unwrap().outcome, None);
         assert!(store
             .conn
             .lock()

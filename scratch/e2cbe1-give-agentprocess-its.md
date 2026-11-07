@@ -134,7 +134,7 @@ is a compile error.
 
 - **`lf server describe` exists only on #1813** (open, 457 files, branch
   `jack/loo-593-decide-the-desktop-servers-roles-and-long-term-architecture`,
-  head `77ab719b1` on 2026-11-06). There `uuid_id!` derives
+  head `93dae7dfc`, still open at realign on 2026-11-06). There `uuid_id!` derives
   `schemars::JsonSchema`, `$defs.LfProcessId` is `{"type":"string"}`, and
   `agent_process_id`/`caller_agent_process_id` both reference it. So the
   schema half of Done-when falls out of steps 1–3 once both are on main; no
@@ -230,13 +230,15 @@ Gate (once, after rebase onto main containing #1813):
 ## Implementation notes (2026-11-06)
 
 - Agent sites that passed an agent id to `store.process` / `journal::process_evidence`
-  worked only because `process()` didn't filter `kind`. They now use
+  worked only because the old bare `process()` didn't filter `kind`. They now use
   `SqliteStore::agent_process` and `journal::agent_evidence`
   (`harness/{agent_process,native_exit,task_updates}.rs`, `transport.rs`,
-  `ops/human_session.rs`). `store.process` reads `kind='lf'` only.
+  `ops/human_session.rs`). `store.lf_process` reads `kind='lf'` only.
 - `journal::recorded_process_evidence` takes `&ProcessEntry`; `lf_process_evidence`
   is the lf-only rule; `process_entry_evidence(store, entry)` reads a receipt for
-  lf rows. `task_open_processes`, `execution_blockers` and `unresolved_processes`
+  lf rows. By-id readers name their kind: `lf_evidence(&LfProcessId)` (was
+  `process_evidence`) beside `agent_evidence(&AgentProcessId)`, which goes
+  through the same entry rule. `task_open_processes`, `execution_blockers` and `unresolved_processes`
   carry `ProcessEntry`, so agent liveness no longer goes through an lf lookup.
 - `read_lf_process` / `read_agent_process` are strict: the other kind is a
   conversion error, not a silent skip. They serve Graph inventory, Task Graph
@@ -248,6 +250,28 @@ Gate (once, after rebase onto main containing #1813):
   labels agent rows "Agent". Fixtures `process_page.json`, `task_work.json`,
   `task_lifecycle.json` drop always-null cross-kind keys.
 
+## Concept review (2026-11-06, headless)
+
+The implemented split matches the accepted model: `ProcessEntry` is the one
+inventory row, `LfProcess` and `AgentProcess` each carry only their own
+fields, and `read_process` is the only place a `kind` picks an ID type. Two
+names still describe the pre-split world; both follow from step 4's rule that
+mixed-inventory types drop the `Lf` prefix and single-kind readers say which
+kind they read:
+
+- `SqliteStore::process(&LfProcessId)` reads `kind='lf'` only, beside
+  `agent_process(&AgentProcessId)`. Rename it `lf_process`. The bare name is
+  what let harness sites pass agent ids to it before this Task (see
+  Implementation notes); `lf_process` makes that reading visible at the call
+  site. Mechanical: ~57 call sites, no behavior change.
+- `LfProcessOutcomeFilter` / `LfProcessWorkFilter` are fields of
+  `ProcessFilter` and the outcome filter matches agent rows too. Rename them
+  `ProcessOutcomeFilter` / `ProcessWorkFilter` (~28 sites, Rust only).
+
+No open product choice: the wire shape, IDs and stored data are unchanged by
+either rename. Both done (2026-11-06): `Store`/`SqliteStore::lf_process`,
+`ProcessOutcomeFilter`, `ProcessWorkFilter`.
+
 ## Remaining
 
 - After #1813 lands: rebase, regenerate `tests/fixtures/dto/server_schema.json`,
@@ -255,6 +279,10 @@ Gate (once, after rebase onto main containing #1813):
   `ServerProtocolTests`.
 
 ## Check results
+
+- compress `lf_evidence` rename + `agent_evidence` dedupe (2026-11-06): `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- journal:: store::sqlite::processes:: harness::agent_process:: harness::task_updates::` 72/72.
+- implement renames (2026-11-06): `cargo check -p loopflow --all-targets` clean; `cargo test -p loopflow --lib store::sqlite::processes::` 18/18; `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
+- realign (2026-11-06, after merging main `12d897b6b`): `cargo check -p loopflow --all-targets` — clean; Done-when greps still empty.
 
 - compress: `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- store::sqlite::processes:: lf::commands::top:: ops::task_execution:: harness::agent_process:: lf::commands::doctor:: store::sqlite::retention::` — 50 pass; `swift build --target Loopflow` — builds. `TaskWorkView` (LoopflowMac): gate.
 

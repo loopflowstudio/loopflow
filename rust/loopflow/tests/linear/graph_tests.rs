@@ -78,7 +78,7 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 fn kill_recorded_graph(home: &Path, id: &str) {
     let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let pid = store
-        .process(&id.parse().unwrap())
+        .lf_process(&id.parse().unwrap())
         .unwrap()
         .unwrap()
         .pid

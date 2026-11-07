@@ -6,9 +6,9 @@ use crate::process::{LfProcess, ProcessCursor, ProcessEntry, ProcessFilter, Proc
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
+    pub async fn lf_process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
         let id = id.clone();
-        run_sqlite(&self.sqlite, move |store| store.process(&id)).await
+        run_sqlite(&self.sqlite, move |store| store.lf_process(&id)).await
     }
 
     pub async fn resolve_process(&self, selector: &str) -> StoreResult<Option<ProcessEntry>> {

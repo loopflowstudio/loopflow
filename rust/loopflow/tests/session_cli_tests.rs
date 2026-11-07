@@ -738,7 +738,7 @@ for line in sys.stdin:
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
     let process_cwd = store
-        .process(&agent_caller.origin_lf_process_id)
+        .lf_process(&agent_caller.origin_lf_process_id)
         .unwrap()
         .unwrap()
         .cwd
@@ -1922,7 +1922,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     reader.join().unwrap();
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
-        .process(&lf_process_id)
+        .lf_process(&lf_process_id)
         .unwrap()
         .unwrap()
         .completed_at

@@ -2,7 +2,7 @@
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::id::LfProcessId;
 use crate::journal::{
-    agent_evidence, process_evidence, process_identity_evidence, process_started_at, OsProcess,
+    agent_evidence, lf_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
 };
 use crate::os_process::terminate_process_group;
@@ -528,7 +528,7 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         }
     }
     let dead_lf =
-        |process: &LfProcessId| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
+        |process: &LfProcessId| lf_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let mut record = AgentProcessCleanup {
@@ -926,7 +926,7 @@ mod tests {
                 .execute("DELETE FROM processes WHERE id=?1", [&process])?;
             let session = store.test_session("lost", &crate::session_record::new_artifact_key());
             let attachment = store.claim_session_attachment(&session.id, None, &process, true)?;
-            let parent = store.process(&process)?.unwrap();
+            let parent = store.lf_process(&process)?.unwrap();
             let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(agent.trace_id, parent.trace_id);
             assert!(parent.command.is_some());

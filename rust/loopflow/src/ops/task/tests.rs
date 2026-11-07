@@ -199,7 +199,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         WorkStatus::Done
     );
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
@@ -518,7 +518,7 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     assert!(unresolved[0].contains(process.id.as_str()));
     assert!(after_boot.is_empty(), "{after_boot:?}");
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(

@@ -451,7 +451,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     // Earlier resumes take seconds each, so a person may have started a turn or
     // attached a terminal since classification; the owner may also have exited.
     for mut owner in std::mem::take(&mut report.moved) {
-        let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
+        let still_running = crate::journal::lf_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
             owner_disposition(&store.sqlite, &owner.process.id)?

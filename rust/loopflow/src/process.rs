@@ -200,14 +200,14 @@ pub struct ProcessFilter {
     pub caller_session_id: Option<LfSessionId>,
     pub command_contains: Option<String>,
     pub identity_contains: Option<String>,
-    pub outcome: Option<LfProcessOutcomeFilter>,
-    pub performed_work: Option<LfProcessWorkFilter>,
+    pub outcome: Option<ProcessOutcomeFilter>,
+    pub performed_work: Option<ProcessWorkFilter>,
 }
 
 /// Unknown means no terminal observation, not an OS liveness judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum LfProcessOutcomeFilter {
+pub enum ProcessOutcomeFilter {
     Succeeded,
     Failed,
     Interrupted,
@@ -217,7 +217,7 @@ pub enum LfProcessOutcomeFilter {
 /// IDs are already resolved by the caller, independently of launch eligibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum LfProcessWorkFilter {
+pub enum ProcessWorkFilter {
     Task(TaskId),
     Wave(WaveId),
 }

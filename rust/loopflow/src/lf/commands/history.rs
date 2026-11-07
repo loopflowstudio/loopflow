@@ -6,7 +6,7 @@ use clap::Subcommand;
 use crate::lf::commands::session_history::SessionView;
 use crate::lf::output::print_process;
 use crate::process::{
-    LfProcessOutcomeFilter, LfProcessWorkFilter, ProcessCursor, ProcessEntry, ProcessFilter,
+    ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
 };
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
@@ -307,13 +307,13 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 CanonicalRepo::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
-                (Some(task), _) => Some(LfProcessWorkFilter::Task(
+                (Some(task), _) => Some(ProcessWorkFilter::Task(
                     store
                         .sqlite
                         .resolve_task_id(task, repo.as_deref())?
                         .context("Task was not found")?,
                 )),
-                (_, Some(wave)) => Some(LfProcessWorkFilter::Wave(
+                (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
                     store
                         .sqlite
                         .resolve_wave_id(wave, repo.as_deref())?
@@ -340,10 +340,10 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 caller_session_id: caller.clone().map(Into::into),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
-                    "succeeded" => LfProcessOutcomeFilter::Succeeded,
-                    "failed" => LfProcessOutcomeFilter::Failed,
-                    "interrupted" => LfProcessOutcomeFilter::Interrupted,
-                    _ => LfProcessOutcomeFilter::Unknown,
+                    "succeeded" => ProcessOutcomeFilter::Succeeded,
+                    "failed" => ProcessOutcomeFilter::Failed,
+                    "interrupted" => ProcessOutcomeFilter::Interrupted,
+                    _ => ProcessOutcomeFilter::Unknown,
                 }),
                 performed_work,
                 ..Default::default()

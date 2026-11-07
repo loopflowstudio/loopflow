@@ -835,7 +835,7 @@ mod tests {
             let actual = activity_state(&record, &Ok(None), sample.as_deref());
             assert_eq!(actual, expected);
         }
-        let lf = ProcessEntry::Lf(store.process(&parent).unwrap().unwrap());
+        let lf = ProcessEntry::Lf(store.lf_process(&parent).unwrap().unwrap());
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             lf_process_id: parent.to_string(),

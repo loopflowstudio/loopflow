@@ -200,7 +200,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     .unwrap();
     let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
     let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
-    let record = store.process(&id).unwrap().unwrap();
+    let record = store.lf_process(&id).unwrap().unwrap();
     let retained_path = store.process_receipt_path(&id).unwrap().unwrap();
     assert_eq!(retained_path.file_name(), path.file_name());
     assert_eq!(
@@ -231,7 +231,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     )
     .unwrap();
     assert_eq!(
-        crate::journal::process_evidence(&store, &id),
+        crate::journal::lf_evidence(&store, &id),
         ProcessIdentityEvidence::Dead
     );
     assert!(conn

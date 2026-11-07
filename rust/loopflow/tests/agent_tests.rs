@@ -105,7 +105,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
         assert!(agent.os_started_at.is_some());
         assert!(agent.completed_at.is_some());
         let parent = store
-            .process(agent.parent_lf_process_id.as_ref().unwrap())
+            .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(parent.pid, Some(std::process::id()));

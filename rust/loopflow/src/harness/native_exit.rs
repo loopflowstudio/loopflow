@@ -117,7 +117,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     if let Some((store, _, attachment)) = &owner {
         let recorded = (|| -> Result<()> {
             let mut process = store
-                .process(&attachment.provider_lf_process_id)?
+                .lf_process(&attachment.provider_lf_process_id)?
                 .context("handed-off launcher is not recorded")?;
             process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
             process.outcome = Some(
@@ -371,7 +371,7 @@ mod tests {
                 .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
             assert_eq!(after.outcome, before.outcome);
-            let launcher = store.process(&launcher).unwrap().unwrap();
+            let launcher = store.lf_process(&launcher).unwrap().unwrap();
             assert_eq!(launcher.exit_code, Some(0));
             assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));
             let terminal: serde_json::Value = serde_json::from_slice(

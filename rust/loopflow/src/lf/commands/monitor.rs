@@ -184,7 +184,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                 }
                 crate::session::GraphProcessSummaryState::Current => {
                     match crate::id::LfProcessId::parse(&summary.id)
-                        .map(|id| crate::journal::process_evidence(&store.sqlite, &id))
+                        .map(|id| crate::journal::lf_evidence(&store.sqlite, &id))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {
                             ("running", format!("Graph process is at {at}"))

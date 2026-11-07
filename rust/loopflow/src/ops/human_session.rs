@@ -1151,9 +1151,9 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 /// as after a restart. Unknown evidence is not exit.
 pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
     Ok(store
-        .process(owner)?
+        .lf_process(owner)?
         .is_some_and(|process| process.completed_at.is_none())
-        && crate::journal::process_evidence(store, owner)
+        && crate::journal::lf_evidence(store, owner)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 

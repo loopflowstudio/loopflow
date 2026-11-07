@@ -154,7 +154,7 @@ fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
                     start,
                     end: Some(at(ended)?),
                 }),
-                None => (crate::journal::process_evidence(&store.sqlite, &process)
+                None => (crate::journal::lf_evidence(&store.sqlite, &process)
                     != crate::journal::ProcessIdentityEvidence::Dead)
                     .then_some(RepairWindow { start, end: None }),
             }
@@ -433,7 +433,7 @@ fn ci_fix_message(
 fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) -> bool {
     process.is_some_and(|process| {
         Some(process) != crate::journal::current_lf_process_id().as_ref()
-            && crate::journal::process_evidence(&store.sqlite, process)
+            && crate::journal::lf_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
 }
@@ -464,7 +464,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         .map_err(repair_error)?
     {
         if Some(&owner) == current.as_ref()
-            || crate::journal::process_evidence(&store.sqlite, &owner)
+            || crate::journal::lf_evidence(&store.sqlite, &owner)
                 != crate::journal::ProcessIdentityEvidence::Dead
         {
             continue;
@@ -1131,7 +1131,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .iter()
         .any(|graph| {
             graph.process.completed_at.is_none()
-                && crate::journal::process_evidence(&store.sqlite, graph.id())
+                && crate::journal::lf_evidence(&store.sqlite, graph.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
     {

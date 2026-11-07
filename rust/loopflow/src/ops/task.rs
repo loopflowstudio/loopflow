@@ -2515,8 +2515,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?
         .pop()
         .filter(|graph| {
-            crate::journal::process_evidence(&store.sqlite, graph.id())
-                != ProcessIdentityEvidence::Dead
+            crate::journal::lf_evidence(&store.sqlite, graph.id()) != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();

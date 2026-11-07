@@ -206,7 +206,7 @@ pub(crate) fn unresolved_processes<'a>(
     let mut next = crate::journal::current_lf_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
-            .process(&id)
+            .lf_process(&id)
             .map_err(error)?
             .and_then(|process| process.parent_lf_process_id);
     }

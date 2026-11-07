@@ -644,7 +644,7 @@ impl SqliteStore {
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::process_evidence(self, &process.id)
+        crate::journal::lf_evidence(self, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
@@ -938,7 +938,7 @@ mod tests {
 
     use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{LfProcessWorkFilter, ProcessFilter};
+    use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
 
@@ -1775,7 +1775,7 @@ mod tests {
         let performed = store
             .processes(
                 &ProcessFilter {
-                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
+                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,

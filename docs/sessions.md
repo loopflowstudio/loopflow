@@ -175,9 +175,11 @@ lf account use claude=work@                  # switch the Machine's login and st
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-Logins belong to the Machine, not to a Session: every open Session runs on the
-active one. `use` holds launches there until the login fills up or
-`lf account use auto`.
+Logins belong to the Machine, not to a Session: every open Claude runs on the
+active one. A running Codex keeps its login until you restart it on another:
+`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
+login each Session uses. `use` holds launches there until the login fills up
+or `lf account use auto`.
 
 Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 

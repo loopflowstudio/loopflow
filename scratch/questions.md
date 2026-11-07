@@ -40,7 +40,6 @@ Fix for #1828: touch that file after writing the Keychain in `activate`; decisio
 Scope (Jack): the bulk move goes in #1828 (Jack said 1820, which is merged and unrelated), not a stacked Task.
 
 Stub removed from `~/.claude` (Jack approved, November 5); `/login` spreading across real Sessions still to be seen in use.
-Drain (Jack, November 5): `lf account drain` is accepted as the gentle account-first action; `lf session move` is the more aggressive Session-first one. Same implementation.
 
 Worker fallback (Jack, November 5): an explicit agent is followed only within itself. `claude:<model>` stays on that model; bare `claude` may fall back across Claude models (e.g. Fable to Opus) and accounts. Preferences (default agent, no explicit agent) are where cross-provider fall-through lives. Before landing, nothing built-in or in this repo's config requires Claude or Codex explicitly; Jack only ever sets preferences.
 Interactive automatic moves: start shared-only (Jack); trade-offs explained at review.
@@ -74,7 +73,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.
 15. **Items 7–9 built (November 5).** Choices made headless, each reversible:
     - Replay keeps running in the recorded capture's profile (`AccountLogin::Replayed`): switching this Machine's shared login to another catalog's account would record a switch and move every open Session.
-    - `lf resume --account <email>` names the login a fresh launch switches to; a running Codex restarts on it (16), a running Claude attaches (28).
+    - `lf resume --account <email>` names the login a fresh launch switches to; a running Codex restarts on it (16); a running Claude's login switches, then it attaches (28).
     - Rentals use the laptop-held rental login by default, with no per-rental "owned" option yet; an owned Machine is any non-rental and gets its own fresh login.
     - The laptop renews a rental's token when it is within 2 hours of expiry (tokens last ~8h); after any refresh it resends to every live rental, since whether a refresh cancels earlier tokens is unverified.
     - `provider_session_accounts.isolated` stays as "transcript still in an account home"; column removal is Task e1f359 with the long-lived token columns and `isolate:`.
@@ -83,7 +82,7 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 18. **Pausing switches away.** `lf account pause <login>` on the active login switches (as `lf account use`) to the route's top other login, including Codex's daemon reconcile; with none, the login stays and the command says so.
 
 # `lf account` CLI pass (November 6, 2026; headless, each reversible)
-19. **The hold is a file**, `~/.lf/accounts/<provider>/held` (the account ID), beside the native lock, not a store column: Machine-local like the login, and no migration. It applies to default routing only; `--account`/`--only-account` still win. It ends when the held login is out on every model (cooldown, or an account-wide `limited_until`); a model-scoped limit sends only that model elsewhere and keeps the hold. A held login that is paused stops being eligible; pausing it releases the hold.
+19. **The hold is a file**, `~/.lf/accounts/<provider>/held` (the account ID), beside the native lock, not a store column: Machine-local like the login, and no migration. It applies to default routing only; `--account`/`--only-account` still win. It ends when the held login is out on every model (cooldown, or an account-wide `limited_until`); a model-scoped limit sends only that model elsewhere and keeps the hold. Pausing the held login releases the hold; `lf account use` on a paused login holds it anyway (30).
 20. **`--routing disabled` has no new spelling.** `pause` is explicit-only; nothing sets `disabled` by hand now (an expired `paid-through` still behaves as paused).
 21. **Local services leave the table.** Bare `lf account` shows managed logins only; `lf account linear` (or `claude`) and `--json` still show local credentials.
 22. **Naming a provider is its detail.** `lf account claude` shows every Claude login in the old long form with live verification; `lf account <login>` shows one. `--details` is gone.

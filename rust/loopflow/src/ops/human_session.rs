@@ -349,6 +349,10 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     }
 }
 
+fn is_running(state: SessionState) -> bool {
+    matches!(state, SessionState::Active | SessionState::Detached)
+}
+
 fn session_availability(session: &crate::session::SessionSummary) -> Option<SessionAvailability> {
     session.available.then_some(SessionAvailability::Available)
 }
@@ -438,6 +442,10 @@ pub(crate) async fn list(
         selection.limit = 0;
         selection.offset = 0;
     }
+    let on = match &filter.on {
+        Some(raw) => Some(SessionOn::resolve(store, raw).await?),
+        None => None,
+    };
     let mut sessions = Vec::new();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let capacity = LaunchCapacity::read(&store.sqlite)?;
@@ -458,10 +466,7 @@ pub(crate) async fn list(
                         .as_ref()
                         .is_some_and(|task| session.task_ids.contains(task)))
                 && (!filter.blocked || session.blocked)
-                && filter
-                    .on
-                    .as_deref()
-                    .is_none_or(|on| on_selects(on, session, &capacity))
+                && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
         let offset = if filter.after.is_some() {
             0
@@ -508,23 +513,68 @@ pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionReco
         .map(|session| summary_surface(&session, &capacity)))
 }
 
-/// `--on <account|harness[:model]>`: a login by email or account id, or an
-/// agent. A bare harness selects every model on it.
-fn on_selects(on: &str, session: &SessionRecord, capacity: &LaunchCapacity) -> bool {
-    let Some(provider) = session.provider.as_deref() else {
-        return false;
-    };
-    let (harness, model) = crate::config::parse_agent(on);
-    if !on.contains('@') && crate::harness::HarnessKind::parse(&harness).is_some() {
-        return provider == harness && (model.is_none() || model == session.model);
+/// What `--on <account|harness[:model]>` names, resolved once before filtering.
+enum SessionOn {
+    /// A bare harness selects every model on it.
+    Agent {
+        harness: crate::harness::HarnessKind,
+        model: Option<String>,
+    },
+    Login {
+        provider: String,
+        account_id: crate::store::ProviderAccountId,
+    },
+}
+
+impl SessionOn {
+    async fn resolve(store: &SharedStore, raw: &str) -> Result<Self> {
+        let (harness, model) = crate::config::parse_agent(raw);
+        match crate::harness::HarnessKind::parse(&harness) {
+            Some(harness) if !raw.contains('@') => Ok(Self::Agent { harness, model }),
+            _ => {
+                let login = crate::lf::commands::account::resolve_on(store, raw).await?;
+                Ok(Self::Login {
+                    provider: login.provider,
+                    account_id: login.account_id,
+                })
+            }
+        }
     }
-    capacity.login(provider).is_some_and(|account| {
-        account.account_id.as_str().eq_ignore_ascii_case(on)
-            || account
-                .login_email
-                .as_ref()
-                .is_some_and(|email| email.as_str().eq_ignore_ascii_case(on))
-    })
+
+    fn selects(&self, session: &SessionRecord, capacity: &LaunchCapacity) -> bool {
+        let Some(provider) = session.provider.as_deref() else {
+            return false;
+        };
+        match self {
+            Self::Agent { harness, model } => {
+                provider == harness.as_str() && (model.is_none() || *model == session.model)
+            }
+            Self::Login {
+                provider: selected,
+                account_id,
+            } => capacity
+                .login(
+                    provider,
+                    session.account.as_ref(),
+                    is_running(session.state),
+                )
+                .is_some_and(|login| {
+                    login.provider == *selected && login.account_id == *account_id
+                }),
+        }
+    }
+}
+
+fn is_blocked(
+    capacity: &LaunchCapacity,
+    provider: Option<&str>,
+    account: Option<&crate::store::ProviderAccountId>,
+    state: SessionState,
+    model: Option<&str>,
+) -> bool {
+    provider
+        .and_then(|provider| capacity.login(provider, account, is_running(state)))
+        .is_some_and(|login| capacity.blocks(login, model))
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
@@ -609,10 +659,13 @@ fn summary_surface(
         provider: session.provider.clone(),
         account: session.account.clone(),
         model: session.model.clone(),
-        blocked: session
-            .provider
-            .as_deref()
-            .is_some_and(|provider| capacity.blocks(provider, session.model.as_deref())),
+        blocked: is_blocked(
+            capacity,
+            session.provider.as_deref(),
+            session.account.as_ref(),
+            state,
+            session.model.as_deref(),
+        ),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -1373,9 +1426,14 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         provider: session.provider.clone(),
         account: metadata.account.clone(),
         model: session.model.clone(),
-        blocked: session.provider.as_deref().is_some_and(|provider| {
-            LaunchCapacity::read(&store.sqlite)
-                .is_ok_and(|capacity| capacity.blocks(provider, session.model.as_deref()))
+        blocked: LaunchCapacity::read(&store.sqlite).is_ok_and(|capacity| {
+            is_blocked(
+                &capacity,
+                session.provider.as_deref(),
+                metadata.account.as_ref(),
+                state,
+                session.model.as_deref(),
+            )
         }),
         cwd: session.cwd.display().to_string(),
         state,

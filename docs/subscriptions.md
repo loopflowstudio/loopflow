@@ -371,6 +371,7 @@ To see what would fail next, and move it in one go:
 ```bash
 lf session list --blocked                       # Sessions whose login cannot take their model now
 lf session list --on claude:fable               # every open Fable Session
+lf session list --on codex=work@                # every open Session using that login
 lf session move --blocked -a claude:opus        # continue them on Opus: idle ones at their next open, busy ones after their turn
 lf account pause jack@                          # stop routing to a login; when it is active, the Machine switches off it now
 lf account unpause jack@                        # route to it again

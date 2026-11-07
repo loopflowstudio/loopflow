@@ -231,7 +231,7 @@ pub struct SessionFilter {
     /// Only Sessions whose next message would fail: their login cannot take
     /// their model now.
     pub blocked: bool,
-    /// Only Sessions on this login (email or account id) or `harness[:model]`.
+    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
     pub on: Option<String>,
 }
 

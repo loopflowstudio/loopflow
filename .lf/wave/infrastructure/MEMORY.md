@@ -34,8 +34,9 @@ changes accounts only. `lf task run` restarts at a step that died waiting;
 login only on a `.credentials.json` mtime change (2.1.318), so `activate`
 touches it. One selector (`--blocked`, `--on`) serves `session list` and
 `session move -a`; `lf account pause` on the active login switches away, and
-`lf account use` holds until that login is full or `use auto`. `lf resume
---account` restarts a running Codex on another login; Claude attaches. Busy
+`lf account use` holds, over any order, until that login is full or `use auto`.
+`lf resume --account` restarts a running Codex on another login; a running
+Claude's login switches, then it attaches. Busy
 Sessions move at their Stop hook; moves never write preferences; the repo pins
 no provider.
 

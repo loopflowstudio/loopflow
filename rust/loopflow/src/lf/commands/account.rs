@@ -109,6 +109,16 @@ impl Target {
     }
 }
 
+/// The stored login `--on` names. Harnesses are already read as agents, so a
+/// provider's name here can only start a login.
+pub(crate) async fn resolve_on(store: &SharedStore, raw: &str) -> Result<ProviderAccount> {
+    let (provider, login) = match Target::parse(raw)? {
+        Target::Provider(_) => (None, raw.trim().to_string()),
+        Target::Login { provider, login } => (provider, login),
+    };
+    super::profile::resolve_login(store, provider, &login, "--on").await
+}
+
 pub fn run(
     cmd: Option<&AccountCommand>,
     target: Option<&str>,
@@ -140,7 +150,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             Target::Provider(provider) => disconnect(provider.as_str()).await,
             Target::Login { provider, login } => {
                 let store = open_account_store().await?;
-                let account = super::profile::resolve_login(&store, provider, &login, "disconnect").await?;
+                let account = super::profile::resolve_login(&store, provider, &login, "lf account disconnect").await?;
                 disconnect_account(&store, account).await
             }
         },
@@ -163,7 +173,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                     Some(provider) => provider,
                     None => {
                         let store = open_account_store().await?;
-                        let account = super::profile::resolve_login(&store, None, &login, "connect")
+                        let account = super::profile::resolve_login(&store, None, &login, "lf account connect")
                             .await
                             .map_err(|_| {
                                 anyhow!("name the provider for a new login: lf account connect claude={login}")
@@ -220,7 +230,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 ),
                 Target::Provider(provider) => (provider, None),
                 Target::Login { provider, login } => {
-                    let account = super::profile::resolve_login(&store, provider, &login, "set").await?;
+                    let account = super::profile::resolve_login(&store, provider, &login, "lf account set").await?;
                     (account.provider.parse()?, Some(account))
                 }
             };
@@ -271,7 +281,7 @@ async fn use_login(raw: &str) -> Result<()> {
         return Ok(());
     }
     let store = open_account_store().await?;
-    let account = super::profile::resolve_login(&store, provider, &login, "use").await?;
+    let account = super::profile::resolve_login(&store, provider, &login, "lf account use").await?;
     let provider: Provider = account.provider.parse()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     if account.credential_state != CredentialState::Connected {
@@ -319,7 +329,9 @@ async fn set_rotation(raw: &str, routing: RoutingState) -> Result<()> {
     };
     let (provider, login) = Target::parse_login(raw, verb)?;
     let store = open_account_store().await?;
-    let mut account = super::profile::resolve_login(&store, provider, &login, verb).await?;
+    let mut account =
+        super::profile::resolve_login(&store, provider, &login, &format!("lf account {verb}"))
+            .await?;
     let provider: Provider = account.provider.parse()?;
     account.routing_state = routing;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
@@ -1506,7 +1518,7 @@ async fn set_account_lifecycle(
 
 /// A login taken out of automatic routing stops taking work at once: when it
 /// is the active login, the Machine switches to the route's next one, and
-/// every open Session follows.
+/// every open Claude follows.
 async fn switch_away(
     store: &SharedStore,
     provider: Provider,

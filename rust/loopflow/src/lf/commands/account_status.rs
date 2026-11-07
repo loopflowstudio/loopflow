@@ -113,7 +113,8 @@ pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool)
             let store = store
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("no stored logins on this Machine"))?;
-            let account = super::super::profile::resolve_login(store, *provider, login, "").await?;
+            let account =
+                super::super::profile::resolve_login(store, *provider, login, "lf account").await?;
             (Some(account.provider.parse()?), Some(account.account_id))
         }
     };

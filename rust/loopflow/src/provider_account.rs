@@ -101,8 +101,8 @@ fn earliest_release<'a>(
 }
 
 /// What open conversations' next messages could launch on, read once: the
-/// stored logins and their limits. A Session is blocked when its provider's
-/// shared login cannot take its model now.
+/// stored logins and their limits. A Session is blocked when the login it
+/// uses cannot take its model now.
 #[derive(Debug, Default)]
 pub(crate) struct LaunchCapacity {
     accounts: Vec<ProviderAccount>,
@@ -138,25 +138,35 @@ impl LaunchCapacity {
         })
     }
 
-    /// The login a `provider` conversation uses next: the one signed in to
-    /// the provider's shared home. None for unmanaged providers.
-    pub(crate) fn login(&self, provider: &str) -> Option<&ProviderAccount> {
+    /// The login a `provider` conversation uses next. A running agent that
+    /// keeps the login it started with reads `recorded`; every other
+    /// conversation reads the provider's shared home. None for unmanaged
+    /// providers.
+    pub(crate) fn login(
+        &self,
+        provider: &str,
+        recorded: Option<&ProviderAccountId>,
+        running: bool,
+    ) -> Option<&ProviderAccount> {
         let managed: Provider = provider.parse().ok()?;
-        let account_id = self
-            .active
-            .iter()
-            .find(|(active, _)| *active == managed)?
-            .1
-            .as_ref()?;
+        let kept = recorded
+            .filter(|_| running && !activation::running_agents_follow_native_login(managed));
+        let account_id = match kept {
+            Some(account_id) => account_id,
+            None => self
+                .active
+                .iter()
+                .find(|(active, _)| *active == managed)?
+                .1
+                .as_ref()?,
+        };
         self.accounts
             .iter()
             .find(|account| account.provider == provider && account.account_id == *account_id)
     }
 
-    pub(crate) fn blocks(&self, provider: &str, model: Option<&str>) -> bool {
-        self.login(provider).is_some_and(|account| {
-            account_held_until(account, &self.limits, model, self.now).is_some()
-        })
+    pub(crate) fn blocks(&self, account: &ProviderAccount, model: Option<&str>) -> bool {
+        account_held_until(account, &self.limits, model, self.now).is_some()
     }
 }
 
@@ -1138,8 +1148,8 @@ async fn select_route(
         });
     }
     // The most urgent eligible account, whichever login is active: the shared
-    // login switches, and every open conversation follows, whenever another
-    // account ranks ahead.
+    // login switches, and every open Claude follows, whenever another account
+    // ranks ahead.
     let selection = store
         .select_provider_account(provider, &eligible, model)
         .await?;
@@ -2232,6 +2242,47 @@ mod account_first_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_running_codex_keeps_its_login_and_a_running_claude_follows_the_home() {
+        let home = tempdir().unwrap();
+        let on = |provider, name| {
+            new_account(
+                provider,
+                parse_account_id(name).unwrap(),
+                home.path().join(name),
+                None,
+            )
+        };
+        let (work, spare) = (
+            parse_account_id("work").unwrap(),
+            parse_account_id("spare").unwrap(),
+        );
+        let capacity = LaunchCapacity {
+            accounts: vec![
+                on(Provider::Claude, "work"),
+                on(Provider::Claude, "spare"),
+                on(Provider::Codex, "work"),
+                on(Provider::Codex, "spare"),
+            ],
+            limits: Vec::new(),
+            active: vec![
+                (Provider::Claude, Some(spare.clone())),
+                (Provider::Codex, Some(spare.clone())),
+            ],
+            now: 1,
+        };
+        let login = |provider, recorded, running| {
+            capacity
+                .login(provider, recorded, running)
+                .map(|account: &ProviderAccount| account.account_id.clone())
+        };
+        assert_eq!(login("codex", Some(&work), true), Some(work.clone()));
+        assert_eq!(login("codex", Some(&work), false), Some(spare.clone()));
+        assert_eq!(login("codex", None, true), Some(spare.clone()));
+        assert_eq!(login("claude", Some(&work), true), Some(spare));
+        assert_eq!(login("gemini", Some(&work), true), None);
     }
 
     fn account(provider: Provider, account_id: &str, home: &Path) -> ProviderAccount {

@@ -66,9 +66,6 @@ All eight decisions are in the diff. Corrections made while building:
 - `restart_held_runs` and `restart_ships` share `start_lf_in`; a shipping Task's held wait goes through ship's own restart.
 
 
-## Concept review (November 5, 2026, headless)
-The concepts hold: an account cools, a step goes on under another or waits, and status reads Running, Waiting or Blocked. Fixes built: the restart contract names its one exception (a step that ended waiting on a usage limit); `restarts_by_itself` decides both the sweep and whether status promises an automatic restart.
-
 ## Accepted at demo (Jack Heart, November 5, 2026)
 Supersedes decision 7 and answers `scratch/questions.md` 1–2; the reasoning and evidence are there. Build all of this in PR #1828, with no stacked Task.
 
@@ -101,7 +98,6 @@ Owners, one each. Routine choices are recorded in `scratch/questions.md` 6–10.
 ## Built: items 7–9 (November 5, 2026)
 - **Isolation deleted.** `RouteHome` is gone: a stored login (`AccountLogin::Stored`) always launches in the shared home; only replay (`AccountLogin::Replayed`) runs in a recorded capture's profile, so this Machine's login never switches to another catalog's account. `--isolate`/`--shared`, `LF_ACCOUNT_ISOLATION`, `launch_isolated`, `prepare_isolated_codex`, `provider_session_isolated`, and the restart-based move are deleted (`names_another_account` and `Departure::Account` came back for Codex on November 7). `isolate:` stays in the catalog as Inactive (read, ignored) until Task e1f359.
 - **Legacy isolated conversations.** `provider_session_accounts.isolated = 1` now means only "its transcript is still in that account's home". `adopt` copies it into the shared home on resume; `pin_provider_session_route` always writes `isolated = 0`, so readers (`transcript::conversation_home`) switch to the shared home once it ran there. `lf connect` of a conversation found in an account home copies it first.
-- **Sessions follow the shared login.** `LaunchCapacity::login/blocks` read only the active login.
 - **Remote logins.** Owned Machine: `lf machine connect <m> claude <email>` sends a fresh full login (`fresh_machine_login`, as Codex), installed through `install_managed`. Rental (`rental_for_machine`): the laptop keeps one Claude login per account under `~/.lf/accounts/rental-logins/claude/<id>/`, refreshes it through `subscription::claude_access_token` when within `ACCESS_RENEW_SECS` (2h) of expiry, and sends only `Credential::ClaudeAccess`; after a refresh it resends to every live rental. The rental replaces an older access token and, when its shared home was on it, that too (`activation::renew_claude_login`, mtime marker). `installed` reports an access token stale within 2h, so any connect or launch prefix renews it. `lf --machine <m> account` shows `access token until <time>` (`expires_at`).
 - **Long-lived tokens deleted.** `lf account token`, `mint_long_lived_token`, `claude setup-token` parsing and its PTY auth path, `LongLivedToken` and the store accessors. The migration clears the two columns; dropping them is Task e1f359.
 
@@ -149,10 +145,8 @@ Outstanding demo questions (bare login names, `pause` with no "disabled", Anthro
 ## Built: November 7 pass
 - **Failing integration tests.** Cause was this branch: merge 0f71d266c8 (#1831) kept the older `tests/support/native_codex.py` and undid main's `session_launch_contract.rs` expectations, so the stand-in had no stdio `app-server` ("disconnected before auth completed"). Both restored from the merge base; the other conflicted files of all six merges keep main's lines (audited). origin/main 81a79796f passed the same suites but for `native_background_watches_survive_until_settlement` (transport_tests, which passes here).
 - **Fixtures.** `support`'s ctor moves `HOME` into the temp directory for every test binary, keeping `CARGO_HOME`/`RUSTUP_HOME` (questions 27). `settings_launch_tests::command` sets its own `CODEX_HOME`; `auth_tests::cached_auth_leaves_no_process_or_account_state` sets `HOME`. Checked with a stand-in real home holding sentinels: `settings_launch_tests::`, `auth_tests::` left it untouched.
-- **Resume naming another login.** `Departure::Account`, `names_another_account` (Codex only) and `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went` are back; `provider_session_account` replaces `provider_session_routed`.
-- `session_moves` joins `NEVER_DISPLAYED`; `store_revisions_cover_every_table` was failing on it.
-Checks (empty cwd, isolated `HOME`, `LF_*` unset): integration `context_launch_tests:: session_cli_tests::` 34, `session_launch_contract` 27, `transport_tests` 66, `test_environment_tests` 4, lib `harness::agent_process:: provider_account:: store::sqlite::revisions` pass; fmt, clippy clean. Gate owns the full suites the ctor reaches.
-Realign (Nov 7): after syncing 81a79796f, only `install/published.rs` conflicted; `cargo test -p loopflow --lib lf::commands::install` 44 pass (isolated env). Test binaries all compile `tests/support` but for the ignored `codex_live_smoke`; every `env_clear` spawn of `lf` sets `HOME`, lib fixtures too.
+- **Resume naming another login.** `Departure::Account` (Codex only), `names_another_account` and `a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went` are back; `provider_session_account` replaces `provider_session_routed`.
+Test binaries all compile `tests/support` but for the ignored `codex_live_smoke`; every `env_clear` spawn of `lf` sets `HOME`, lib fixtures too. Gate owns the full suites the ctor reaches.
 
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none).
@@ -165,13 +159,9 @@ Still true from the first pass:
 - `limit_recovery::waiting_on_limit` names the step by label, so a skill repeated in a Graph restarts at its first occurrence.
 - Native Claude limits cool for the 15-minute default: `StopFailure` carries no reset time, and it was confirmed from Claude 2.1.318's schema, not a live limit. Codex terminal limits are seen only through the relay's stream.
 - No draft signal, so `lf session move` moves every available Session (questions 12). Desktop's Blocked filter waits for a Sessions list surface.
-- Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, `pause` switch-away) and `lf resume --account` restarting a running Codex have not been shown on the configured path; no paid quota may be spent.
-- Open at demo: the mock as build target (answer 5).
+- Demo: the demo-decision build (scoped limits, fall-through, `session move`, urgency routing, `pause` switch-away), a hold beating an order, and `lf resume --account` restarting a running Codex or switching a running Claude's login have not been shown on the configured path; no paid quota may be spent.
+- Open at demo: the mock as build target (answer 5); whether a hold beats an order or the order wins and `use` says so (questions 30).
 - Unverified, sharper now that launches switch often: a running Codex keeps its own login in memory; if it refreshes and writes `auth.json` after the home switched to another account, the home silently flips back and the other account's rotated refresh token, if it rotated in between, is lost (`save_back` runs only at the next switch). Demo checks: after a switch, does a running Codex's refresh rewrite `~/.codex/auth.json`?
-
-## Concept review (November 6, 2026, headless, after the CLI pass)
-The concepts hold. One correction:
-- **Every lf refresh of the shared Claude login takes Claude's refresh lock.** Built in b840306cf: `fresh_claude_token` holds `ClaudeRefreshLock`, re-reading the login once held; `activate`/`observe_active_account` pass their lock through `save_back`.
 
 ## Concept review (November 7, 2026, headless, after the November 7 pass)
 Found three places where lf said one thing and did another; all built:
@@ -179,4 +169,10 @@ Found three places where lf said one thing and did another; all built:
 2. **`lf --account claude=b@ resume <running Claude>` switches, then attaches** (questions 28). `switch_to_named_login` compares with the active login and shares `install_login` with `switch_login`; the line goes to stderr so `--json` stays clean. A Claude that is not running gets the login from its launch.
 3. **Old spelling.** No subcommand follows a value in `normalize_args`/`resolve_path`, so `lf help account claude use` and `lf account codex use --help` fail as unknown; `lf account codex --help`, `--cached` work. `lf ops account` is the only command with a positional beside subcommands.
 Checks (empty cwd, isolated `HOME`, `LF_*` unset): `session_launch_contract` 29, integration `cli_discovery:: auth_tests::` 82, lib `provider_account:: lf::commands::profile lf::commands::account lf::navigation ops::human_session` 120 plus 2 that fail only sharing libtest's process (cwd and `LF_HOME` races; pass alone, nextest isolates them). Branch binary, isolated home: the four help and `--cached` forms above. Gate owns the full suites.
-Compress: `lf resume` without `--account` no longer reads the login; same checks pass, clippy clean.
+
+## Concept review (November 7, 2026, headless, after realign)
+Launch routing, holds, limit hooks and the wait sweep agreed with the accepted design. Two Session selector faults and a docs error, all built:
+1. **`--blocked` and `--on` read the login the Session uses.** `LaunchCapacity::login` takes the recorded account and whether the Session runs: a running Codex (`running_agents_follow_native_login`) reads its recorded account, everything else the shared home.
+2. **`--on` takes a login as every command does.** `SessionOn::resolve` runs once before filtering, through `account::resolve_on`; unknown or ambiguous is an error, so `session move` no longer moves nothing silently. A harness name keeps its meaning, in any case (`--on CODEX`). `resolve_login`'s `verb` became `retry`, so the ambiguity line says `--on claude=work@`. An account ID now matches only for a login with no email, as in every other command.
+3. **Docs.** `docs/sessions.md`, `lf session move --help` and `moves_bulk`'s header say every open Claude; `docs/subscriptions.md` gains `--on codex=work@`.
+Checks (empty cwd, isolated `HOME`, `LF_*` unset, stdin /dev/null): lib `ops::human_session` 35, `provider_account::` 56, `lf::commands::account` 34, `lf::commands::profile` 1; fmt and clippy clean. Gate owns the full suites; demo owns the configured path under Remaining. Questions 30 and answer 5 stay for demo.

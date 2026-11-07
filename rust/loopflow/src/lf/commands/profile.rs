@@ -217,12 +217,12 @@ async fn next_launch(
 }
 
 /// The stored login an argument names: `claude=work@`, or `work@` when only
-/// one provider has it. `verb` spells the retry for an ambiguous name.
+/// one provider has it. `retry` spells the command to run again when both do.
 pub(crate) async fn resolve_login(
     store: &SharedStore,
     provider: Option<Provider>,
     login: &str,
-    verb: &str,
+    retry: &str,
 ) -> Result<ProviderAccount> {
     let login = login.trim();
     let providers = match provider {
@@ -250,18 +250,13 @@ pub(crate) async fn resolve_login(
             }
         }
     }
-    let verb = if verb.is_empty() {
-        String::new()
-    } else {
-        format!(" {verb}")
-    };
     match found.len() {
         1 => Ok(found.remove(0)),
         0 => Err(anyhow!(
             "no stored login matches '{login}'; lf account lists them"
         )),
         _ => Err(anyhow!(
-            "{login} is both claude and codex: lf account{verb} claude={login}"
+            "{login} is both claude and codex: {retry} claude={login}"
         )),
     }
 }

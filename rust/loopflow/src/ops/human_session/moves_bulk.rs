@@ -1,8 +1,9 @@
 //! Bulk moves over the Session selector: `lf session move`. Interactive
 //! Sessions only. Each selected Session continues on another agent through a
 //! fresh seeded thread, now when idle, after its turn when busy. A login is
-//! not a Session's to move: every open Session follows the Machine's login,
-//! which `lf account use` switches. Nothing here writes preferences.
+//! not a Session's to move: every open Claude follows the Machine's login,
+//! which `lf account use` switches, and a running Codex keeps its own until
+//! `lf --account codex=<login> resume`. Nothing here writes preferences.
 
 use std::os::unix::process::CommandExt;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{list, new_thread, SessionRecord, SessionState};
+use super::{is_running, list, new_thread, SessionRecord};
 use crate::id::LfSessionId;
 use crate::session::SessionFilter;
 use crate::store::sqlite::SqliteStore;
@@ -123,8 +124,7 @@ async fn move_agent(
     agent: &str,
     report: &mut MoveReport,
 ) {
-    let busy = session.availability.is_none()
-        && matches!(session.state, SessionState::Active | SessionState::Detached);
+    let busy = session.availability.is_none() && is_running(session.state);
     if busy {
         match store.sqlite.record_session_move(session.id.as_str(), agent) {
             Ok(()) => report.pending(session, format!("continues on {agent} after its turn")),

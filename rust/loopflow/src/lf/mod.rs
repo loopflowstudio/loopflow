@@ -1638,7 +1638,7 @@ pub struct SessionSelectorArgs {
     /// Sessions whose next message would fail: their login cannot take their model now
     #[arg(long)]
     pub blocked: bool,
-    /// Sessions on this login (email) or agent (harness[:model])
+    /// Sessions using this login (work@, claude=work@) or on this agent (harness[:model])
     #[arg(long, value_name = "ACCOUNT|AGENT")]
     pub on: Option<String>,
 }
@@ -1648,7 +1648,7 @@ pub enum SessionCommand {
     /// Move the selected open Sessions to another agent (-a harness[:model]);
     /// `lf session list` with the same flags previews them
     #[command(
-        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Session follows the active one, which `lf account use <login>` switches. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
+        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Claude follows the active one, which `lf account use <login>` switches; a running Codex keeps its login until `lf --account codex=<login> resume <session>`. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
     )]
     Move {
         #[command(flatten)]

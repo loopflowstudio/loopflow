@@ -334,12 +334,13 @@ struct WorkNavigationTests {
     func unstartedTaskOffersStart() async throws {
         let model = try model()
         await model.refresh()
-        let task = try #require(model.task(id: "issue-now")?.task)
+        let task = try #require(model.task(id: "issue-review")?.task)
         #expect(task.awaitsStart)
-        #expect(try #require(model.task(id: "issue-review")?.task).awaitsStart == false)
+        // Started Tasks open their conversation, whoever owns them; finished ones show history.
+        #expect(try #require(model.task(id: "issue-now")?.task).awaitsStart == false)
         #expect(try #require(model.task(id: "issue-later")?.task).awaitsStart == false)
         let offer = TaskStartOffer(model: model, task: task)
-        let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-now").button()
+        let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
         #expect(model.navigation.taskRunDrafts[task.id] == nil)
@@ -414,22 +415,20 @@ struct WorkNavigationTests {
             if args.first == "--repo" { await gate.wait() }
             return json
         })
-        let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
+        let first = Task { await registry.openConversation(in: entry, store: store) }
         await gate.started()
         let otherKey = WorkWorkspaceKey(repository: "repo", kind: .task, id: "other")
         let other = registry.open(otherKey, title: "Other", location: record.workspace?.identity)
         let otherLayout = other.multiplexer.layout
-        await entry.openPrimaryConversation(store: store, registry: registry)
+        await registry.openConversation(in: entry, store: store)
         await gate.release()
         await first.value
         let pane = try #require(entry.multiplexer.pane(forSessionId: record.id))
         #expect(registry.selectedWork == otherKey)
         #expect(other.multiplexer.layout == otherLayout)
         #expect(entry.presentation.selectedSessionId == record.id)
-        let second = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
-        await gate.started()
-        await gate.release()
-        await second.value
+        // Retry on an attached conversation selects it again in the same pane.
+        await registry.openConversation(in: entry, store: store)
         #expect(entry.multiplexer.pane(forSessionId: record.id)?.id == pane.id)
         #expect(entry.conversationError == nil)
         let model = WorkModel(query: store.query, repoPath: "/src/loopflow")

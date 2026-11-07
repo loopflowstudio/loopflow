@@ -34,7 +34,9 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     func read(_ args: [String]) async throws -> String {
         if args.prefix(2) == ["session", "resume"] {
-            guard args == ["session", "resume", sessionId, "--prepare", "--json"] else {
+            guard [SessionOpenIntent.resume, .start, .reveal].contains(where: {
+                args == ["session", "resume"] + $0.arguments + [sessionId, "--prepare", "--json"]
+            }) else {
                 throw RegistryQueryError("Only the owned Session may resume")
             }
             let output = try await Task.detached { try capture([cli] + args) }.value
@@ -233,7 +235,7 @@ struct DesktopNativeSessionTests {
             #expect(model.selection?.id == fixture.taskId)
             #expect(model.sessions.value?.contains { $0.id == model.navigation.selectedSessionId && $0.taskIds.contains(fixture.taskId) } == true)
             store.reconcile(try await fixture.records())
-            await store.resume(fixture.sessionId)
+            await store.start(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(try await fixture.resume(prepared).contains("resumed \(fixture.nativeId)"))
             store.recordPaneLive(fixture.sessionId)
@@ -259,7 +261,7 @@ struct DesktopNativeSessionTests {
         let store = SessionsStore(repoPath: fixture.home, query: fixture.query)
         for _ in 0..<3 {
             store.reconcile(try await fixture.records())
-            await store.resume(fixture.sessionId)
+            await store.start(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(prepared.id == fixture.sessionId)
             #expect(prepared.taskIds.contains(fixture.taskId))

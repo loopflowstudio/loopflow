@@ -5,6 +5,7 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
+use super::write::SessionOpenIntent;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
@@ -566,8 +567,8 @@ async fn resume(
         &store,
         &cwd,
         target,
+        connection,
         fork,
-        true,
         connection.json || cli.json,
     )
     .await?;
@@ -580,7 +581,13 @@ async fn select(
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     if selected.started {
         crate::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
@@ -590,17 +597,31 @@ async fn select(
 }
 
 /// `lf session resume` without a message: the selected conversation, opened
-/// here, and its provider started unless `launch` is false (`--prepare`).
+/// here, and its provider started unless `--prepare` was requested.
 async fn reopen(
     store: &Arc<Store>,
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
+    connection: &SessionConnectionArgs,
     fork: bool,
-    launch: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
+    let intent = connection.intent();
+    if intent != SessionOpenIntent::Resume {
+        anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
+        let selected =
+            crate::ops::human_session::select_connection(store, directory, target, intent).await?;
+        return crate::ops::human_session::open_without_replacing(
+            store,
+            &selected.id,
+            intent,
+            !connection.prepare,
+            json,
+        )
+        .await;
+    }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, launch, json).await
+    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -619,7 +640,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, *fork, false, false).await
+                reopen(&store, directory, target, connection, *fork, false).await
             }
             SessionCommand::New { id, connection } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
@@ -662,7 +683,13 @@ async fn restarted(
     launch: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
-    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     let session = crate::ops::human_session::session_by_id(store, &selected.id)
         .await?
         .context("Session not found")?;

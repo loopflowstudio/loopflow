@@ -224,6 +224,21 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         guard let runtime else { return false }
         return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
     }
+
+    // What a Task's Session slot does follows its state alone, never its owner:
+    // unstarted offers Start, working opens with Start, finished reveals history.
+
+    /// Not yet started and still open: it has no checkout, so no conversation to
+    /// open, and its Session slot offers Start instead.
+    public var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
+
+    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
+
+    /// Working Tasks start their conversation when opened, owned or not: opening
+    /// claims nothing. Unstarted and finished Tasks only show history.
+    public var conversationIntent: SessionOpenIntent {
+        runtime?.status.isWorking == true ? .start : .reveal
+    }
 }
 
 /// What a shipped Task is doing, derived in Rust; nothing here waits on a person.

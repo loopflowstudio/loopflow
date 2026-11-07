@@ -10,6 +10,64 @@ import ViewInspector
 @Suite("CLI to retained Work sidebar", .serialized)
 @MainActor
 struct WorkCLISubscriptionTests {
+    @Test("Load initializes working Task and repository conversations without a Start click", arguments: [false, true])
+    func workingTaskConversationOpensAutomatically(prepared: Bool) async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])
+        let id = try #require(created["id"] as? String)
+        _ = try await fixture.run(["checkout", id, "--json"])
+        let query = fixture.lf.query
+        let initial = prepared ? try await query.prepareTaskSession(issue: id, cwd: fixture.repo.path) : nil
+        let snapshot = try await query.taskDestination(issue: id, repo: fixture.repo.path)
+        let task = try #require(snapshot.tasks.items.first)
+        let location = try #require(task.reference.workspace?.identity)
+        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        defer { registry.prepareForQuit() }
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        model.bindWorkspaces(registry, repository: repository.id)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        await model.refreshSessions()
+        // A second window may discover the same missing conversation before
+        // the first window has finished preparing it.
+        let otherRegistry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        defer { otherRegistry.prepareForQuit() }
+        let otherModel = WorkModel(query: query, repoPath: fixture.repo.path)
+        otherModel.bindWorkspaces(otherRegistry, repository: repository.id)
+        otherModel.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        await otherModel.refreshSessions()
+        let otherStore = otherRegistry.sessionStore(repository: repository.id, repoPath: fixture.repo.path, query: query)
+        let workspace = try #require(registry.retained(model.workspaceKey(for: .task(id: id), repository: repository.id)))
+        let store = registry.sessionStore(repository: repository.id, repoPath: fixture.repo.path, query: query)
+        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil && store.sessions.first { $0.record.taskPrimary }?.state == .prepared }
+        #expect(model.selection == nil)
+        // The repository's own conversation opens on the same load, in its scope checkout.
+        let repositoryWorkspace = try #require(registry.retained(model.workspaceKey(for: nil, repository: repository.id)))
+        try await eventually { store.sessions.first { $0.record.primaryScope == "repository" }?.state == .prepared }
+        #expect(repositoryWorkspace.conversationError == nil)
+        #expect(repositoryWorkspace.multiplexer.sessionPane?.sessionId == store.sessions.first { $0.record.primaryScope == "repository" }?.id)
+        // Selecting and refreshing reuse the Session admitted by fresh-load prefetch.
+        model.select(.task(id: id))
+        await model.refreshSessions()
+        model.openWarmConversations()
+        let session = try #require(store.sessions.first { $0.record.taskPrimary })
+        #expect(session.state == .prepared)
+        #expect(session.record.workspace?.identity == location)
+        #expect(session.launchArguments.contains("--start-if-free"))
+        #expect(workspace.conversationStart == nil)
+        #expect(await query.startOffer(refused: .reveal, issue: id, cwd: fixture.repo.path) == nil)
+        let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
+        #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
+        #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)
+        #expect(recorded.count == 2)
+        if let initial { #expect(initial.id == session.id) }
+        #expect(recorded.allSatisfy { $0.agentProcessId == nil }) // Prepared, not launched: no Graph or operator ran.
+        try await eventually { otherStore.sessions.first { $0.record.taskPrimary }?.state == .prepared }
+        #expect(otherStore.sessions.first { $0.record.taskPrimary }?.id == session.id)
+    }
+
     @Test(arguments: ["complete", "abandon"])
     func taskLifecycleUpdatesOpenSidebar(action: String) async throws {
         let fixture = try WorkCLIFixture()
@@ -34,7 +92,7 @@ struct WorkCLISubscriptionTests {
         model.select(.wave(id: wave.wave.id))
         let original = try #require(registry.selectedWork.flatMap(registry.retained))
         original.multiplexer.newShell(command: ["/bin/cat"], location: original.location)
-        let originalLayout = original.multiplexer.layout
+        let originalPanes = original.multiplexer.layout.allPanes.map(\.id)
         let originalFiles = original.files(issue: seedID, cwd: fixture.repo.path, query: query)
         let originalDraft = originalFiles.document("notes.txt")
         originalDraft.editor.string = "retain original draft"
@@ -58,7 +116,8 @@ struct WorkCLISubscriptionTests {
         }
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(registry.retained(original.key) === original)
-        #expect(original.multiplexer.layout == originalLayout)
+        // The Wave's own conversation fills its session pane on load; the panes survive.
+        #expect(original.multiplexer.layout.allPanes.map(\.id) == originalPanes)
         #expect(originalFiles.document("notes.txt") === originalDraft)
         #expect(originalDraft.editor.string == "retain original draft")
 
@@ -66,15 +125,11 @@ struct WorkCLISubscriptionTests {
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         let task = try #require(model.task(id: id)?.task)
         let checkout = try #require(task.reference.workspace?.identity)
-        // Only the retained native-view identity is synthetic. No provider is launched.
-        var session = try renameFixtureRecord("retained-cli-task", title: "Retained conversation", work: .task(id: id))
-        session.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
-            "machine_id": machineID, "worktree": checkout.worktree, "task_id": id
-        ]))
-        registry.revealSession(session, in: workspace)
-        workspace.presentation.selectedSessionId = session.id
+        // Automatic opening prepares this Session; nothing mounts it, so no provider launches.
+        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
+        let sessionID = try #require(workspace.multiplexer.sessionPane?.sessionId)
         #if canImport(GhosttyKit)
-        let surfaceID = TerminalIdentity.session(session.id, machineId: machineID)
+        let surfaceID = TerminalIdentity.session(sessionID, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)
         #endif
         workspace.multiplexer.showBrowser(.files)
@@ -103,7 +158,7 @@ struct WorkCLISubscriptionTests {
         #expect(FileManager.default.fileExists(atPath: checkout.worktree))
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
-        #expect(workspace.presentation.selectedSessionId == session.id)
+        #expect(workspace.presentation.selectedSessionId == sessionID)
         #if canImport(GhosttyKit)
         #expect(registry.surfaces.view(for: surfaceID) === surface)
         #endif
@@ -133,6 +188,7 @@ struct WorkCLISubscriptionTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
         #if canImport(GhosttyKit)
+        // Completed departure releases the native viewer; returning keeps panes and drafts.
         #expect(registry.surfaces.view(for: surfaceID) !== surface)
         #endif
         #expect(files.document("notes.txt") === draft)
@@ -166,6 +222,8 @@ struct WorkCLISubscriptionTests {
         let location = try #require(workspace.location)
         let draft = workspace.files(issue: id, cwd: location.worktree).document("notes.txt")
         draft.editor.string = "Unsent direction"
+        // Moving must preserve the conversation the working Task already opened.
+        try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
         let layout = workspace.multiplexer.layout
         _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
@@ -241,6 +299,7 @@ private struct WorkCLIFixture: Sendable {
     }
 
     func prepare() async throws {
+        _ = try await run(["set", "--global", "default_agent", "claude"])
         let graphs = repo.appendingPathComponent(".lf/graphs")
         try FileManager.default.createDirectory(at: graphs, withIntermediateDirectories: true)
         try Data("- cmd: graph show proof\n- interactive: {name: demo, id: review}\n".utf8)

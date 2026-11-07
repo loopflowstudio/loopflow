@@ -55,22 +55,22 @@ impl Fixture {
             }
         }
         let home = self.home.path();
+        // Another installed harness would leave the stand-in one of several, and
+        // lf selects only when exactly one is installed.
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let inherited = std::env::split_paths(&inherited).filter(|dir| {
+            !["claude", "codex", "pi"]
+                .iter()
+                .any(|h| dir.join(h).exists())
+        });
+        let path = std::env::join_paths(std::iter::once(home.join("bin")).chain(inherited));
         command
             .args(args)
             .current_dir(self.repo.path())
             .env("HOME", home)
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    home.join("bin").display(),
-                    loopflow_test_support::path_without_installed_harnesses(
-                        &std::env::var("PATH").unwrap_or_default()
-                    )
-                ),
-            )
+            .env("PATH", path.unwrap())
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -449,7 +449,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("no setup checklist first"));
-    assert!(prompt.contains("When there is work, run it without waiting for a greeting"));
+    assert!(prompt.contains("Opening this conversation asks for nothing"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);
@@ -1325,6 +1325,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .map(|session| session["id"].as_str().unwrap().to_string())
             .collect()
     };
+
+    // No Session is different from an existing Session without native history.
+    // Reading the explicit Start offer must not admit either a Session or a turn.
+    let absent = fixture.json(&["resume", "--task", "INF-125", "--explain", "--json"]);
+    assert_eq!(absent["state"], Value::Null);
+    assert_eq!(absent["action"]["intent"], "start");
+    assert_eq!(absent["actions"].as_array().unwrap().len(), 1);
+    assert_eq!(absent["actions"][0]["label"], "Start conversation");
+    assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
     let sole = converse(&sole_path);

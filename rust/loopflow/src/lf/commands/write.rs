@@ -8,6 +8,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::task;
 
+/// Whether opening may take control, start a thread, or only reveal history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOpenIntent {
+    Resume,
+    Start,
+    Reveal,
+}
+
+impl SessionOpenIntent {
+    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
+    pub fn flag(self) -> Option<&'static str> {
+        match self {
+            Self::Resume => None,
+            Self::Start => Some("--start-if-free"),
+            Self::Reveal => Some("--reveal-existing"),
+        }
+    }
+}
+
 /// A typed mutation with the same defaults and effects as its CLI spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 /// On the wire each write is a resource-named `kind` (`task.complete`);
@@ -153,6 +173,7 @@ pub enum Write {
         task: Option<String>,
         wave: Option<String>,
         agent: Option<String>,
+        intent: SessionOpenIntent,
     },
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
@@ -1043,6 +1064,7 @@ impl Write {
                 task,
                 wave,
                 agent,
+                intent,
                 ..
             } => {
                 let mut words = Vec::new();
@@ -1053,6 +1075,7 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
+                words.extend(intent.flag());
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);
@@ -1207,7 +1230,7 @@ mod tests {
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
-            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
+            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
             r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","from":"implement","agent":"claude","approve":false}"#,
@@ -1260,7 +1283,7 @@ mod tests {
         };
         assert_eq!(
             spelled(
-                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
+                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#
             ),
             [
                 "lf",

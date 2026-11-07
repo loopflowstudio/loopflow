@@ -65,17 +65,36 @@ impl Drop for PausedOwner {
 
 impl Fixture {
     fn new() -> Self {
+        // An OSC opcode in an ordinary path is not terminal status.
+        let home = tempfile::Builder::new()
+            .prefix("lf-7501-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        // Stand-in providers never ask Claude's folder-trust question, so lf must
+        // not report one and pre-empt the activity these tests arrange.
+        std::fs::write(
+            home.path().join(".claude.json"),
+            json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+        )
+        .unwrap();
         Self {
-            // An OSC opcode in an ordinary path is not terminal status.
-            home: tempfile::Builder::new()
-                .prefix("lf-7501-")
-                .tempdir_in("/tmp")
-                .unwrap(),
+            home,
             repo: TestRepo::new(),
         }
     }
     fn command(&self, args: &[&str]) -> Command {
         self.command_from(Path::new(env!("CARGO_BIN_EXE_lf")), args)
+    }
+    /// Execute the returned program too: preparation may wrap lf in `env`.
+    fn prepared_command(&self, record: &Value) -> Command {
+        let argv: Vec<&str> = record["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        let (program, args) = argv.split_first().expect("preparation returns a command");
+        self.command_from(Path::new(program), args)
     }
     /// `command` run from another lf executable, such as a removable copy.
     fn command_from(&self, program: &Path, args: &[&str]) -> Command {
@@ -759,6 +778,153 @@ fn automatic_attachment_preserves_an_existing_viewers_control() {
     controller.input("original-controller\n");
     controller.finish();
     assert_eq!(fixture.wait_file("answer"), "original-controller");
+}
+
+#[test]
+fn automatic_command_attachment_preserves_an_existing_viewers_control() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    let mut controller = fixture.viewer(&owner, true);
+    let output = fixture
+        .command(&[
+            "session",
+            "attach",
+            "--",
+            "/usr/bin/env",
+            "LF_VIEWER_STREAM=1",
+            env!("CARGO_BIN_EXE_lf"),
+            "session",
+            "attach",
+            &owner,
+        ])
+        .env("LF_RELAY_IF_FREE", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Session is attached in another viewer"),
+        "{output:?}"
+    );
+    controller.input("original-controller\n");
+    controller.finish();
+    assert_eq!(fixture.wait_file("answer"), "original-controller");
+}
+
+#[test]
+fn prepared_reveal_preserves_a_later_controlling_viewer() {
+    prepared_open_preserves_controller("--reveal-existing", false);
+}
+
+#[test]
+fn prepared_start_preserves_a_later_controlling_viewer() {
+    prepared_open_preserves_controller("--start-if-free", false);
+}
+
+#[test]
+fn prepared_start_preserves_a_claim_time_winner() {
+    prepared_open_preserves_controller("--start-if-free", true);
+}
+
+fn prepared_open_preserves_controller(intent: &str, claim_race: bool) {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'permission request-17\n'
+read -r answer < /dev/tty
+printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
+"#,
+    );
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "original input",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    let launched = fixture.wait_file("launches");
+    let session = session_of(&fixture.sql(), launched.trim());
+    let prepared = fixture
+        .command(&["session", "resume", &session, intent, "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert!(prepared["open_argv"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(intent)));
+    let mut controller = Some(fixture.viewer(&owner, !claim_race));
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    let race = if claim_race {
+        // Interpose only at the socket boundary: all ownership reads see the
+        // free real owner, then the competing viewer claims before Attach arrives.
+        std::fs::rename(&endpoint, &retained).unwrap();
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let backend = retained.clone();
+        let mut winner = controller.take().unwrap();
+        Some(std::thread::spawn(move || loop {
+            let (mut socket, _) = listener.accept().unwrap();
+            let (tag, payload) = read_frame(&mut socket).unwrap();
+            assert_eq!(tag, REQUEST);
+            let request: Value = serde_json::from_slice(&payload).unwrap();
+            let attaching = request["kind"] == "attach";
+            if attaching {
+                winner.request(json!({"kind":"attach","control":true,"replace":true,
+                        "own":"take","rows":24,"cols":80}));
+                let attached = winner.until_reply();
+                winner.accept(&attached);
+            } else {
+                assert_eq!(request["kind"], "controlled");
+            }
+            let mut real = UnixStream::connect(&backend).unwrap();
+            real.write_all(&frame(tag, &payload)).unwrap();
+            let (reply_tag, reply) = read_frame(&mut real).unwrap();
+            socket.write_all(&frame(reply_tag, &reply)).unwrap();
+            if attaching {
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&reply).unwrap()["kind"],
+                    "busy"
+                );
+                return winner;
+            }
+        }))
+    } else {
+        None
+    };
+    let opened = fixture.prepared_command(&prepared).output().unwrap();
+    assert!(
+        !opened.status.success(),
+        "opening stole a competing claim: {opened:?}"
+    );
+    if let Some(race) = race {
+        controller = Some(race.join().unwrap());
+        std::fs::remove_file(&endpoint).unwrap();
+        std::fs::rename(retained, endpoint).unwrap();
+    }
+    assert_eq!(fixture.wait_file("launches"), launched);
+    assert!(!fixture.home.path().join("answer").exists());
+    let mut controller = controller.unwrap();
+    controller.input("original-controller\n");
+    controller.finish();
+    let pid = launched.trim().split(':').next().unwrap();
+    assert_eq!(
+        fixture.wait_file("answer").trim(),
+        format!("{pid}:original-controller")
+    );
 }
 
 #[test]
@@ -1842,6 +2008,128 @@ fn returned_session(output: &Output) -> Value {
         .find("{\n")
         .unwrap_or_else(|| panic!("Session JSON missing: {output:?}"));
     serde_json::from_str(text[start..].trim()).unwrap()
+}
+
+#[test]
+fn prepared_start_and_take_back_keep_one_thread_with_or_without_a_session() {
+    for existing in [false, true] {
+        let fixture = Fixture::new();
+        let path = fixture.provider(
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+        );
+        let prepare = |args: &[&str]| -> Value {
+            let result = fixture.command(args).env("PATH", &path).output().unwrap();
+            assert!(result.status.success(), "{result:?}");
+            serde_json::from_slice(&result.stdout).unwrap()
+        };
+        let before = existing.then(|| prepare(&["-a", "claude", "resume", "--prepare", "--json"]));
+        let mut args = vec![
+            "-a",
+            "claude",
+            "resume",
+            "--start-if-free",
+            "--prepare",
+            "--json",
+        ];
+        if let Some(before) = &before {
+            args.push(before["id"].as_str().unwrap());
+        }
+        let prepared = prepare(&args);
+        let session = prepared["id"].as_str().unwrap();
+        if let Some(before) = &before {
+            assert_eq!(before["id"], session);
+        }
+        assert!(!fixture.home.path().join("launches").exists());
+        assert!(prepared["open_argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--start-if-free")));
+
+        // Execute exactly what preparation returned, through delegation and relay.
+        let mut command = fixture.prepared_command(&prepared);
+        command.env("PATH", &path);
+        let mut first = Terminal::spawn(command);
+        let launched = fixture.wait_file("launches");
+        let owner = fixture.owner_of(session);
+        fixture.wait_controlled(&owner);
+        let capture: i64 = fixture
+            .sql()
+            .query_row(
+                "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        // This prepared Start predates the holder. It may not replay or replace it.
+        let refused = fixture
+            .prepared_command(&prepared)
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(!refused.status.success(), "{refused:?}");
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("Take back"));
+        assert_eq!(fixture.wait_file("launches"), launched);
+        assert!(!fixture.home.path().join("answer").exists());
+
+        // Explicit Take back alone carries ordinary CLI resume authority.
+        let takeover = prepare(&["session", "resume", session, "--prepare", "--json"]);
+        assert!(!takeover["open_argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--start-if-free")));
+        let mut next = fixture
+            .prepared_command(&takeover)
+            .env("PATH", &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let departed = loop {
+            if let Some(status) = first.child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "viewer did not depart");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(departed.success(), "{departed:?}");
+        next.stdin
+            .take()
+            .unwrap()
+            .write_all(b"taken-back\n")
+            .unwrap();
+        let result = wait_for_viewer(next, Duration::from_secs(30));
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(fixture.wait_file("answer"), "taken-back");
+        assert_eq!(fixture.wait_file("launches"), launched);
+        assert_eq!(
+            fixture
+                .sql()
+                .query_row(
+                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+            capture
+        );
+        assert_eq!(
+            fixture
+                .sql()
+                .query_row("SELECT count(*) FROM agent_sessions", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        fixture.ends(&owner);
+    }
 }
 
 #[test]
@@ -3577,7 +3865,10 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     assert_eq!(prepared["state"], "detached");
     assert_eq!(
         prepared["actions"],
-        json!([{"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null}])
+        json!([
+            {"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null},
+            {"kind":"reveal","label":"Show conversation","help":"Continue existing history without taking another terminal's input","unavailable_reason":null}
+        ])
     );
     assert_eq!(prepared["terminal_ids"], json!([]));
 

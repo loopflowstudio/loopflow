@@ -269,6 +269,8 @@ pub(crate) struct SessionSummary {
     pub captured: Option<i64>,
     pub id: LfSessionId,
     pub artifact_key: Option<String>,
+    /// The current input records a native resume reference; opening validates it.
+    pub has_provider_history: bool,
     pub title: String,
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,

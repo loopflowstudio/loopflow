@@ -9340,6 +9340,7 @@
     },
     "SessionActionKind": {
       "enum": [
+        "reveal",
         "open",
         "move_here"
       ],
@@ -9663,6 +9664,15 @@
         "surface"
       ],
       "type": "object"
+    },
+    "SessionOpenIntent": {
+      "description": "Whether opening may take control, start a thread, or only reveal history.",
+      "enum": [
+        "resume",
+        "start",
+        "reveal"
+      ],
+      "type": "string"
     },
     "SessionPage": {
       "properties": {
@@ -15131,6 +15141,9 @@
                 "null"
               ]
             },
+            "intent": {
+              "$ref": "#/$defs/SessionOpenIntent"
+            },
             "kind": {
               "const": "session.resume",
               "type": "string"
@@ -15154,7 +15167,8 @@
             "id",
             "task",
             "wave",
-            "agent"
+            "agent",
+            "intent"
           ],
           "type": "object",
           "x-result": {

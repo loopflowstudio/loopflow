@@ -193,9 +193,18 @@ final class GhosttyTerminalMount: NSView {
 /// Retains live terminal views for one repository across navigation and window
 /// closure. Its current window mounts the views; different repositories have
 /// separate pools because an NSView can only live in one view hierarchy.
+/// With a runtime, a Session's terminal can start before any pane mounts it;
+/// a pool without one (a headless store) only retains views mounts create.
 @MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]
+    @ObservationIgnored private let runtime: GhosttyManager?
+    /// The size mounts last gave a terminal; an unmounted start uses it so the
+    /// provider lays out for the pane it will appear in.
+    @ObservationIgnored var lastMountedSize: CGSize?
+    private static let unmountedSize = CGSize(width: 1100, height: 700)
+
+    init(runtime: GhosttyManager? = nil) { self.runtime = runtime }
 
     func view(for id: TerminalIdentity) -> GhosttyMetalView {
         if let existing = views[id] { return existing }
@@ -203,6 +212,33 @@ final class GhosttySurfacePool {
         view.pool = self
         views[id] = view
         return view
+    }
+
+    /// Start `argv` in a Session's terminal now, mounted or not. The view later
+    /// mounted for this identity adopts the running surface. Nothing starts without
+    /// a runtime, a command, or after this view's child exited.
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool {
+        guard let runtime, let command = buildGhosttyShellCommand(argv: argv, env: [:]) else { return false }
+        let view = view(for: id)
+        guard view.surface == nil, !view.childExited else { return false }
+        view.workingDirectory = workingDirectory
+        view.command = command
+        view.onSurfaceCreated = onSurfaceCreated
+        view.onSurfaceFailed = onSurfaceFailed
+        if case .uninitialized = runtime.state { runtime.initialize() }
+        switch runtime.state {
+        case .ready:
+            view.sizeDidChange(lastMountedSize ?? Self.unmountedSize)
+            view.createSurface(manager: runtime)
+            return view.surface != nil
+        case .failed(let reason):
+            onSurfaceFailed(reason)
+            return false
+        case .uninitialized, .initializing:
+            return false
+        }
     }
 
     /// Type `line` and Enter into a shell, as a person would: at once when its
@@ -328,6 +364,17 @@ final class GhosttySurfacePool {
     func discard(_ view: GhosttyMetalView) {
         guard views[view.terminal] === view else { return }
         views.removeValue(forKey: view.terminal)
+    }
+
+    func scrollToBottom(_ id: TerminalIdentity) {
+        guard let surface = views[id]?.surface else { return }
+        let action = "scroll_to_bottom"
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+    }
+
+    func screen(_ id: TerminalIdentity) -> String? {
+        guard let view = views[id], case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return nil }
+        return text
     }
 
     /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
@@ -1017,13 +1064,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func updateSurfaceSize() {
         guard let surface else { return }
-        let backingSize = convertToBacking(bounds).size
+        // Unmounted, the view has no window to convert through; use the scale the
+        // surface was given so its grid matches the pane it will mount in.
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        let backingSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         guard backingSize.width > 0, backingSize.height > 0 else { return }
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
     }
 
     func sizeDidChange(_ newSize: CGSize) {
         guard newSize.width > 0, newSize.height > 0 else { return }
+        if window != nil { pool?.lastMountedSize = newSize }
         if frame.size != newSize { setFrameSize(newSize) }
         updateContentScale()
     }
@@ -1663,6 +1714,11 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 // Stub view when GhosttyKit is not available
 @MainActor @Observable
 final class GhosttySurfacePool {
+    var lastMountedSize: CGSize?
+    init(runtime: GhosttyManager? = nil) {}
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool { false }
     func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         .unavailable(reason: .missingSurface)
@@ -1683,6 +1739,8 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
     func title(for id: TerminalIdentity) -> String? { nil }
+    func scrollToBottom(_ id: TerminalIdentity) {}
+    func screen(_ id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
     func detachForQuit() {}
     var hasRunningRelays: Bool { false }
@@ -1874,7 +1932,7 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
-private func shellEscape(_ value: String) -> String {
+func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }

@@ -74,6 +74,13 @@ clippy.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 `rust-test` failure; CI's eight partitions own the full Rust matrix.
 
+## macOS traps
+
+- `served_reads` compares paths, and macOS temp directories are symlinks: run it
+  with a resolved `TMPDIR` (`/private/var/...`).
+- File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
+  If they fail, first check whether `fseventsd` is pinned at 100% CPU.
+
 ## Builds
 
 - Cargo serializes builds per target directory, so a second concurrent `cargo`

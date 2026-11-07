@@ -9,8 +9,8 @@ import ViewInspector
 @Suite("Application workspace retention")
 @MainActor
 struct WorkspaceRetentionTests {
-    @Test("Departure and window Close end terminal viewers but keep Work and history")
-    func departureEndsTerminalViewers() {
+    @Test("Recent unfinished Tasks stay warm; window Close ends viewers but keeps history")
+    func warmTasksKeepViewersUntilClose() {
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let first = WorkWorkspaceKey(repository: "repo", kind: .task, id: "first")
         let second = WorkWorkspaceKey(repository: "repo", kind: .task, id: "second")
@@ -18,14 +18,157 @@ struct WorkspaceRetentionTests {
         a.multiplexer.load(sessionId: "history")
         #expect(a.presented)
         let b = registry.open(second, title: "Second", location: nil)
-        #expect(!a.presented)
+        #expect(a.presented)
         #expect(b.presented)
         registry.closePresentation()
+        #expect(!a.presented)
         #expect(!b.presented)
         #expect(a.multiplexer.sessionPane?.sessionId == "history")
         #expect(registry.retained(first) === a)
         _ = registry.open(first, title: "First", location: nil)
         #expect(a.presented)
+    }
+
+    @Test("Warm visits are bounded; completed departure and Close release without refresh reopening")
+    func boundedWarmVisits() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let keys = (0..<limit + 2).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        for key in keys { registry.open(key, title: key.id, location: nil) }
+        #expect(registry.recentTasks.count == limit)
+        #expect(registry.retained(keys[0])?.presented == false)
+        let latest = registry.retained(keys[limit + 1])!
+        registry.updateCompletion(keys[limit + 1], completed: true)
+        #expect(latest.presented)
+        registry.open(keys[0], title: "First", location: nil)
+        #expect(!latest.presented)
+        let first = registry.retained(keys[0])!
+        first.multiplexer.load(sessionId: "conversation")
+        first.closePane(first.multiplexer.sessionPane!.id)
+        #expect(first.conversationClosed)
+        #expect(!registry.recentTasks.contains(keys[0]))
+        #expect(!first.presented)
+        registry.open(keys[0], title: "First", location: nil)
+        #expect(!first.conversationClosed)
+        #expect(first.presented)
+    }
+
+    @Test("The warm-conversation bound spans repository windows without sharing surfaces")
+    func warmthIsApplicationWide() {
+        let application = RepositoryWorkspaces(localMachineId: "local")
+        let first = application.registry(for: "first")
+        let second = application.registry(for: "second")
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        for index in 0..<limit {
+            first.open(WorkWorkspaceKey(repository: "first", kind: .task, id: "a-\(index)"), title: "A", location: nil)
+        }
+        for index in 0..<limit {
+            second.open(WorkWorkspaceKey(repository: "second", kind: .task, id: "b-\(index)"), title: "B", location: nil)
+        }
+        #expect(first.recentTasks.count + second.recentTasks.count == limit)
+        #expect(first.recentTasks.count == 1) // Its visible pane stays retained.
+        #expect(first.surfaces !== second.surfaces)
+    }
+
+    @Test("Restart restores bounded warm intent and preserves explicit Close")
+    func restoresWarmIntent() {
+        let repository = "repo_" + UUID().uuidString
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        registry.loadWarmIntent(repository: repository)
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let keys = (0..<limit + 2).map { WorkWorkspaceKey(repository: repository, kind: .task, id: "saved-\($0)") }
+        for key in keys { registry.open(key, title: key.id, location: nil) }
+        let last = registry.retained(keys[limit + 1])!
+        last.multiplexer.load(sessionId: "closed")
+        last.closePane(last.multiplexer.sessionPane!.id)
+        registry.prepareForQuit()
+        registry.closePresentation() // AppKit window teardown must not erase warm intent.
+        let restored = SessionsWorkspaceRegistry(localMachineId: "local")
+        restored.loadWarmIntent(repository: repository)
+        #expect(restored.restoreCandidates.count == limit - 1)
+        #expect(!restored.restoreCandidates.contains(keys[limit + 1]))
+        #expect(restored.recentTasks.isEmpty) // Saved intent alone acquires no hold.
+        let closed = restored.open(keys[limit + 1], title: "Closed", location: nil, deliberate: false)
+        #expect(closed.conversationClosed)
+        #expect(!closed.presented)
+        let interruptedRestore = SessionsWorkspaceRegistry(localMachineId: "local")
+        interruptedRestore.loadWarmIntent(repository: repository)
+        #expect(interruptedRestore.restoreCandidates.count == limit - 1) // No fresh read has settled these yet.
+        restored.open(keys[limit + 1], title: "Closed", location: nil)
+        #expect(!closed.conversationClosed)
+        #expect(closed.presented)
+        UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())")
+    }
+
+    @Test("A working Task shown as a tile stays warm after the Dashboard leaves")
+    func tiledWorkingTaskStaysWarm() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let repository = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let tiled = WorkWorkspaceKey(repository: "repo", kind: .task, id: "tiled")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        _ = registry.workspace(for: repository, title: "repo", location: nil)
+        let tile = registry.workspace(for: tiled, title: "Tiled", location: location)
+        registry.present(open: [repository, tiled])
+        #expect(tile.presented)
+        registry.prefetch(tiled, title: "Tiled", location: location, completed: false)
+        #expect(registry.recentTasks == [tiled])
+        #expect(!tile.requiresLocationValidation)
+        registry.open(WorkWorkspaceKey(repository: "repo", kind: .task, id: "visited"), title: "Visited", location: location)
+        #expect(tile.presented)
+    }
+
+    @Test("Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit")
+    func primariesStayWarmBesideTheTaskBound() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/repo")
+        let repository = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let wave = WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave-1")
+        registry.prefetchPrimary(repository, title: "repo", location: location)
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        #expect(registry.warmPrimaries == [repository, wave])
+        #expect(registry.retained(wave)?.wave == "product")
+        let limit = SessionsWorkspaceRegistry.warmConversationLimit
+        let keys = (0..<limit + 1).map { WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-\($0)") }
+        for key in keys { registry.prefetch(key, title: key.id, location: location, completed: false) }
+        #expect(registry.recentTasks.count == limit)
+        #expect(registry.warmWork == [repository, wave] + keys.prefix(limit))
+        // Primaries hold no checkout: `presented` belongs to Task viewers.
+        let primary = registry.retained(wave)!
+        #expect(primary.conversationIntent == .start)
+        primary.multiplexer.load(sessionId: "wave-conversation")
+        primary.closePane(primary.multiplexer.sessionPane!.id)
+        #expect(primary.conversationClosed)
+        #expect(registry.warmPrimaries == [repository])
+        registry.prefetchPrimary(wave, title: "product", wave: "product", location: location)
+        #expect(registry.warmPrimaries == [repository], "refresh never undoes Close")
+        registry.open(wave, title: "product", location: location)
+        #expect(!primary.conversationClosed)
+        #expect(registry.warmPrimaries == [repository, wave])
+    }
+
+    @Test("Saved unfinished Tasks fill spare warmth without evicting working Tasks", arguments: [false, true])
+    func restoredTasksFillSpareWarmth(full: Bool) {
+        let workingCount = SessionsWorkspaceRegistry.warmConversationLimit - (full ? 0 : 1)
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-local-\(repository.lowercased())") }
+        let saved = WorkWorkspaceKey(repository: repository, kind: .task, id: "saved")
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/tmp/task")
+        let previous = SessionsWorkspaceRegistry(localMachineId: "local")
+        previous.loadWarmIntent(repository: repository)
+        previous.open(saved, title: "Saved", location: location)
+        previous.prepareForQuit()
+
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        registry.loadWarmIntent(repository: repository)
+        let working = (0..<workingCount).map { WorkWorkspaceKey(repository: repository, kind: .task, id: "working-\($0)") }
+        for key in working {
+            registry.prefetch(key, title: key.id, location: location, completed: false)
+        }
+        registry.prefetch(saved, title: "Saved", location: location, completed: false)
+        #expect(registry.recentTasks == working + (full ? [] : [saved]))
+        #expect(registry.restoreCandidates.isEmpty)
+        #expect(registry.retained(saved)?.requiresLocationValidation == (full ? nil : true))
     }
 
     @Test("Known repository entry presents its scene before admitting a new link",

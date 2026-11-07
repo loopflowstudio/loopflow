@@ -1030,7 +1030,9 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     assert_eq!(detached["terminal_ids"], serde_json::json!([]));
     assert_eq!(detached["actions"][0]["label"], "Reconnect");
     assert!(detached["actions"][0]["unavailable_reason"].is_null());
-    assert_eq!(detached["actions"].as_array().unwrap().len(), 1);
+    assert_eq!(detached["actions"][1]["kind"], "reveal");
+    assert!(detached["actions"][1]["unavailable_reason"].is_null());
+    assert_eq!(detached["actions"].as_array().unwrap().len(), 2);
 
     db.execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
         .unwrap();

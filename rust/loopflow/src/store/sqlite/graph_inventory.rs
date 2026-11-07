@@ -167,6 +167,8 @@ pub(crate) struct AgentLimitRecovery {
     pub provider: String,
     pub reason: String,
     pub retry_at: Option<i64>,
+    /// The step's explicit agent choice, if it had one.
+    pub agent: Option<String>,
 }
 
 /// How each of `steps`, or the command served for it, is recovering from a
@@ -179,7 +181,7 @@ fn limit_recoveries(
     let rows = conn
         .prepare(&format!(
             "{DELEGATED}
-             SELECT d.root,r.provider,r.reason,r.retry_at,MAX(r.updated_at) FROM delegated d
+             SELECT d.root,r.provider,r.reason,r.retry_at,r.agent,MAX(r.updated_at) FROM delegated d
              JOIN agent_limit_recoveries r ON r.lf_process_id=d.id GROUP BY d.root"
         ))?
         .query_map([&ids], |row| {
@@ -189,6 +191,7 @@ fn limit_recoveries(
                     provider: row.get(1)?,
                     reason: row.get(2)?,
                     retry_at: row.get(3)?,
+                    agent: row.get(4)?,
                 },
             ))
         })?
@@ -250,18 +253,21 @@ impl SqliteStore {
         provider: &str,
         reason: &str,
         retry_at: Option<i64>,
+        agent: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,updated_at)
-             VALUES(?1,?2,?3,?4,?5)
+            "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6)
              ON CONFLICT(lf_process_id) DO UPDATE SET provider=excluded.provider,
-                reason=excluded.reason,retry_at=excluded.retry_at,updated_at=excluded.updated_at",
+                reason=excluded.reason,retry_at=excluded.retry_at,agent=excluded.agent,
+                updated_at=excluded.updated_at",
             params![
                 id,
                 provider,
                 reason,
                 retry_at,
+                agent,
                 crate::store::rows::now_unix()
             ],
         )?;
@@ -613,6 +619,7 @@ mod tests {
                     "claude",
                     "limit",
                     Some(retry_at),
+                    None,
                 )
                 .unwrap();
         };

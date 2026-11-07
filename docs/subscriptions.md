@@ -345,7 +345,7 @@ lf task status LOO-1
 | Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
 | Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
 | No account will free up | Fails with the limit, like any other failure |
-| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset |
+| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given |
 
 Only accounts in the resolved route take a step on. An explicit `harness:model`
 stays on its model and changes only accounts; a bare harness may change model;
@@ -545,6 +545,14 @@ once. The rental registers the identity the laptop verified. Only `sk-ant-oat`
 subscription tokens are accepted; an API key bills per token. A background run
 skips an account whose rental login still needs an approval, and `-b --rent`
 refuses before renting when no account has one.
+
+```bash
+lf machine connect rental-3 claude personal@example.com --owned   # its own login; runs without the laptop
+```
+
+`--owned` gives one rental what an owned Machine has: a fresh full login, one
+browser approval, that it refreshes itself. It replaces the access token, and
+renewal leaves that rental's login alone.
 
 An account-selected launch connects the requested account if missing. Invocation selectors resolve
 against the laptop's managed logins;

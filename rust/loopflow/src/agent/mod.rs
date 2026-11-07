@@ -394,7 +394,13 @@ fn _note_limit_recovery(
 
 fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
     _note_limit_recovery(|store, process| {
-        store.record_agent_limit_recovery(process, provider, reason, retry_at)
+        store.record_agent_limit_recovery(
+            process,
+            provider,
+            reason,
+            retry_at,
+            crate::config::agent_override().as_deref(),
+        )
     });
 }
 

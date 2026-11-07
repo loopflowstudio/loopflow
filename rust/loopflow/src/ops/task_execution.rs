@@ -310,6 +310,7 @@ mod tests {
             provider: "claude".into(),
             reason: "rejected: five_hour".into(),
             retry_at,
+            agent: None,
         }
     }
 

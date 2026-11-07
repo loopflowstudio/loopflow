@@ -2,9 +2,10 @@
 //! identity is checked again by the receiving process before it consumes them.
 //!
 //! A Machine gets a login of its own, never a copy of the laptop's: a fresh
-//! browser-approved login it refreshes itself, or, on a rental, an access
-//! token the laptop refreshes from a login it holds for rentals and sends
-//! again before it expires. Nothing forwards credentials while a Session runs.
+//! browser-approved login it refreshes itself, or, on a rental not connected
+//! `--owned`, an access token the laptop refreshes from a login it holds for
+//! rentals and sends again before it expires. Nothing forwards credentials
+//! while a Session runs.
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -14,7 +15,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::Machine;
+use crate::durable::{Machine, MachineId};
 use crate::lf::{Cli, Commands, GraphCommand, MachineCredentialCommand, TaskCommand};
 use crate::profile::EmailAddress;
 use crate::provider_account::selection::AccountSelection;
@@ -88,6 +89,7 @@ pub(super) async fn connect(
     provider: Provider,
     email: Option<&str>,
     chrome_profile: Option<&str>,
+    owned: bool,
     batch: bool,
 ) -> Result<()> {
     let store = open_account_store().await?;
@@ -97,10 +99,16 @@ pub(super) async fn connect(
             let email = email.ok_or_else(|| anyhow!("{provider} requires a login email"))?;
             let account = managed_account(&store, provider, email).await?;
             let login = account_login(&account);
-            if remote_has(machine, provider, login)? {
+            // A current access token is not the login `--owned` asks for.
+            let connected = if owned {
+                remote_holds_full_login(machine, login)?
+            } else {
+                remote_has(machine, provider, login)?
+            };
+            if connected {
                 return Ok(());
             }
-            if store.sqlite.rental_for_machine(&machine.id)?.is_none() {
+            if owned || store.sqlite.rental_for_machine(&machine.id)?.is_none() {
                 require_foreground(batch)?;
                 connecting(machine, provider, login);
                 let (staging, identity) =
@@ -130,7 +138,7 @@ pub(super) async fn connect(
                 };
                 send(machine, &credential)?;
                 if refreshed {
-                    renew_other_rentals(&store, machine, &credential).await;
+                    renew_other_rentals(&store, machine, login, &credential).await;
                 }
                 eprintln!(
                     "Connected Claude on {}: an access token from the laptop's rental login; `lf machine connect` renews it",
@@ -276,7 +284,7 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
             eprintln!("Skipping Claude {login}: the laptop holds no rental login for it (`lf machine connect <rental> claude {login}` in a foreground terminal approves one)");
             continue;
         }
-        connect(machine, Provider::Claude, Some(login), None, batch).await?;
+        connect(machine, Provider::Claude, Some(login), None, false, batch).await?;
         connected += 1;
     }
     if connected == 0 {
@@ -360,9 +368,15 @@ async fn rental_access(
 }
 
 /// Whether a refresh cancels the access tokens before it is unverified, so
-/// every other live rental gets the new token at once. A failure is reported
-/// and leaves that rental to its next connect.
-async fn renew_other_rentals(store: &SharedStore, sent: &Machine, credential: &Credential) {
+/// every other live rental gets the new token at once, unless it holds its own
+/// full login for `login`. A failure is reported and leaves that rental to its
+/// next connect.
+async fn renew_other_rentals(
+    store: &SharedStore,
+    sent: &Machine,
+    login: &str,
+    credential: &Credential,
+) {
     let rentals = match store.sqlite.rentals(None) {
         Ok(rentals) => rentals,
         Err(error) => {
@@ -376,16 +390,30 @@ async fn renew_other_rentals(store: &SharedStore, sent: &Machine, credential: &C
         .filter_map(|rental| rental.machine_id)
         .filter(|machine_id| *machine_id != sent.id)
     {
-        let renewed = match store.sqlite.machine_by_id(&machine_id) {
-            Ok(Some(machine)) => send(&machine, credential).map(|()| machine.name()),
-            Ok(None) => continue,
-            Err(error) => Err(error.into()),
-        };
-        match renewed {
-            Ok(name) => eprintln!("Renewed Claude on {name}"),
+        match renew_rental(store, &machine_id, login, credential) {
+            Ok(Some(name)) => eprintln!("Renewed Claude on {name}"),
+            Ok(None) => {}
             Err(error) => eprintln!("Could not renew Claude on {machine_id}: {error:#}"),
         }
     }
+}
+
+/// The name of the rental `credential` reached; none when the Machine is gone
+/// or holds its own full login.
+fn renew_rental(
+    store: &SharedStore,
+    machine_id: &MachineId,
+    login: &str,
+    credential: &Credential,
+) -> Result<Option<String>> {
+    let Some(machine) = store.sqlite.machine_by_id(machine_id)? else {
+        return Ok(None);
+    };
+    if remote_holds_full_login(&machine, login)? {
+        return Ok(None);
+    }
+    send(&machine, credential)?;
+    Ok(Some(machine.name()))
 }
 
 /// gh resolves its own selected token. It is never exported to a child.
@@ -465,17 +493,18 @@ async fn managed_account(
 }
 
 fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
-    let output = remote_command(
-        machine,
-        &[
-            "machine",
-            "credentials",
-            "inspect",
-            provider.as_str(),
-            login,
-        ],
-        None,
-    )?;
+    remote_inspect(machine, &[provider.as_str(), login])
+}
+
+/// Whether `machine` holds a Claude login for `login` it refreshes itself, as
+/// opposed to an access token from the laptop.
+fn remote_holds_full_login(machine: &Machine, login: &str) -> Result<bool> {
+    remote_inspect(machine, &[Provider::Claude.as_str(), login, "--full"])
+}
+
+fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
+    let args = [&["machine", "credentials", "inspect"], args].concat();
+    let output = remote_command(machine, &args, None)?;
     serde_json::from_slice(&output).context("remote credential inspection returned invalid JSON")
 }
 
@@ -532,8 +561,17 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
 pub(super) async fn receive(cmd: &MachineCredentialCommand) -> Result<()> {
     let store = open_account_store().await?;
     match cmd {
-        MachineCredentialCommand::Inspect { provider, login } => {
-            println!("{}", installed(&store, *provider, login).await?);
+        MachineCredentialCommand::Inspect {
+            provider,
+            login,
+            full,
+        } => {
+            let held = if *full && *provider == Provider::Claude {
+                holds_full_login(&store, login).await?
+            } else {
+                installed(&store, *provider, login).await?
+            };
+            println!("{held}");
         }
         MachineCredentialCommand::Receive => {
             let mut bytes = Vec::new();
@@ -575,6 +613,17 @@ async fn renew_rentals(store: &SharedStore) -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn holds_full_login(store: &SharedStore, login: &str) -> Result<bool> {
+    let account = managed_account(store, Provider::Claude, login).await?;
+    let Some(home) = account.home.as_ref() else {
+        return Ok(false);
+    };
+    match crate::provider_auth::read_claude_login(home)? {
+        Some(credential) => Ok(access_only_expiry(credential.expose_secret())?.is_none()),
+        None => Ok(false),
+    }
 }
 
 async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Result<bool> {
@@ -936,7 +985,13 @@ async fn install_managed(
     fs::create_dir_all(parent)?;
     let _lock = acquire_managed_login_lock(&home, provider, &account.account_id)?;
     let file = credential_file(provider)?;
-    if home.join(file).is_file() {
+    // A full login takes over from the access token an `--owned` rental held.
+    let replaces_access = provider == Provider::Claude
+        && match crate::provider_auth::read_claude_login(&home)? {
+            Some(current) => access_only_expiry(current.expose_secret())?.is_some(),
+            None => false,
+        };
+    if home.join(file).is_file() && !replaces_access {
         // A prior transfer can have installed the file and lost its SQLite write.
         let (identity, plan) =
             super::account::verify_managed_identity(store, provider, &account, &home).await?;
@@ -964,9 +1019,13 @@ async fn install_managed(
     }
     let _identity_lock = crate::provider_account::identity::acquire_identity_install_lock(&home)?;
     let home = ensure_account_home(provider, &account.account_id)?;
-    // No replacement: a concurrently installed login remains its owner's.
-    let bytes = fs::read(staging.path().join(file))?;
-    write_private(&home.join(file), &bytes)?;
+    if replaces_access {
+        crate::provider_account::activation::renew_claude_login(&home, credential)?;
+    } else {
+        // No replacement: a concurrently installed login remains its owner's.
+        let bytes = fs::read(staging.path().join(file))?;
+        write_private(&home.join(file), &bytes)?;
+    }
     super::account::register_managed_account(
         store,
         provider,
@@ -1006,20 +1065,21 @@ async fn install_access(
     let parent = home.parent().expect("managed account home has a parent");
     fs::create_dir_all(parent)?;
     let _lock = acquire_managed_login_lock(&home, provider, &account.account_id)?;
-    let file = credential_file(provider)?;
-    match fs::read_to_string(home.join(file)) {
-        Ok(current) if access_only_expiry(&current)?.is_none() => {
+    match crate::provider_auth::read_claude_login(&home)? {
+        Some(current) if access_only_expiry(current.expose_secret())?.is_none() => {
             bail!("a full Claude login is installed for {login}; left unchanged")
         }
-        Ok(current) if current == credential => {}
-        Ok(_) => crate::provider_account::activation::renew_claude_login(&home, credential)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        Some(current) if current.expose_secret() == credential => {}
+        Some(_) => crate::provider_account::activation::renew_claude_login(&home, credential)?,
+        None => {
             let _identity_lock =
                 crate::provider_account::identity::acquire_identity_install_lock(&home)?;
             let home = ensure_account_home(provider, &account.account_id)?;
-            write_private(&home.join(file), credential.as_bytes())?;
+            write_private(
+                &home.join(credential_file(provider)?),
+                credential.as_bytes(),
+            )?;
         }
-        Err(error) => return Err(error.into()),
     }
     let identity = crate::provider_account::identity::AccountIdentity {
         email,
@@ -1171,7 +1231,7 @@ pub(super) async fn prepare_launch(
             .as_ref()
             .ok_or_else(|| anyhow!("selected account has no expected login email"))?
             .as_str();
-        connect(machine, provider, Some(login), None, cli.batch).await?;
+        connect(machine, provider, Some(login), None, false, cli.batch).await?;
         selectors.push(format!("{provider}={login}"));
     }
     // An explicitly requested login may not fall back to somebody else remotely.
@@ -1194,7 +1254,10 @@ mod tests {
     use clap::Parser;
     use serde_json::json;
 
-    use super::{install, install_managed, installed, write_private, Credential};
+    use super::{
+        connect, holds_full_login, install, install_managed, installed, renew_other_rentals,
+        write_private, Credential,
+    };
     use crate::provider_account::{account_home_path, account_id_for_login};
     use crate::provider_auth::Provider;
     use crate::store::{SharedStore, StorageConfig};
@@ -1746,6 +1809,144 @@ esac
         let full = json!({"claudeAiOauth": {"accessToken": "sk-ant-oat01-own", "refreshToken": "sk-ant-ort01-own"}}).to_string();
         fs::write(&path, &full).unwrap();
         assert!(install(&store, claude(&next)).await.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), full);
+    }
+
+    /// A Machine at `route` under a live rental.
+    fn live_rental(store: &SharedStore, route: &str) -> crate::durable::Machine {
+        use crate::rental::{Hardware, OnDemand, Provider, Usd};
+        let usd = |text| Usd::parse(text).unwrap();
+        store
+            .sqlite
+            .add_ondemand(&OnDemand {
+                name: route.into(),
+                provider: Provider::Daytona,
+                hardware: Hardware {
+                    vcpus: 4,
+                    memory_gb: 8,
+                    disk_gb: 10,
+                    gpu: None,
+                    spot: false,
+                },
+                max_machines: 1,
+                max_usd_per_hour: usd("0.40"),
+                hours: 4.0,
+                created_at: time::OffsetDateTime::UNIX_EPOCH,
+            })
+            .unwrap();
+        let rental = store.sqlite.admit_rental(route, None, None, false).unwrap();
+        store
+            .sqlite
+            .confirm_rental(&rental.id, route, usd("0.25"))
+            .unwrap();
+        let id = crate::durable::MachineId::new();
+        store.sqlite.add_machine(&id, route, route).unwrap();
+        store.sqlite.attach_rental(&rental.id, &id).unwrap();
+        store.sqlite.machine_by_id(&id).unwrap().unwrap()
+    }
+
+    /// An `ssh` that logs each remote command and reports `owned-rental` as the
+    /// only Machine holding a full login.
+    fn fake_ssh(root: &Path) -> std::path::PathBuf {
+        let calls = root.join("ssh-calls");
+        executable(
+            &root.join("bin/ssh"),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncat > /dev/null\ncase \"$*\" in\n*owned-rental*inspect*) echo true;;\n*inspect*) echo false;;\nesac\n",
+                calls.display()
+            ),
+        );
+        calls
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn renewal_sends_nothing_to_a_rental_holding_its_own_login() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let calls = fake_ssh(root.path());
+        let store = store(root.path()).await;
+        let sent = live_rental(&store, "sent-rental");
+        live_rental(&store, "owned-rental");
+        live_rental(&store, "other-rental");
+        let token = claude(&access("sk-ant-oat01-next", 2_000_000_000));
+
+        renew_other_rentals(&store, &sent, "person@example.com", &token).await;
+
+        let calls = fs::read_to_string(calls).unwrap();
+        let received = |route: &str| {
+            calls.lines().any(|call| {
+                call.contains(route) && call.contains("credentials") && call.contains("receive")
+            })
+        };
+        assert!(received("other-rental"), "{calls}");
+        assert!(!received("owned-rental"), "{calls}");
+        assert!(!received("sent-rental"), "{calls}");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn connecting_a_rental_owned_asks_for_a_full_login_whatever_token_it_holds() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let calls = fake_ssh(root.path());
+        let opened = crate::provider_account::open_account_store().await.unwrap();
+        let email = Some("person@example.com");
+
+        // Already its own: nothing to approve, nothing sent.
+        let owned = live_rental(&opened, "owned-rental");
+        connect(&owned, Provider::Claude, email, None, true, true)
+            .await
+            .unwrap();
+
+        // An access token does not count, and the laptop's rental login plays
+        // no part: this takes a browser approval, so a batch run stops there.
+        let rental = live_rental(&opened, "other-rental");
+        let error = connect(&rental, Provider::Claude, email, None, true, true)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("foreground terminal"), "{error}");
+        assert!(!fs::read_to_string(calls).unwrap().contains("receive"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn a_full_login_replaces_a_rentals_access_token_and_renewal_cannot_undo_it() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.path().join("native"));
+        executable(&root.path().join("bin/security"), "#!/bin/sh\nexit 99\n");
+        let (endpoint, server) = identity_server(
+            json!({"account": {"email": "person@example.com", "uuid": "claude-person"}}),
+        )
+        .await;
+        std::env::set_var("LF_TEST_CLAUDE_PROFILE_URL", endpoint);
+        let store = store(root.path()).await;
+        let login = "person@example.com";
+        let held = access("sk-ant-oat01-held", 2_000_000_000);
+        install(&store, claude(&held)).await.unwrap();
+        assert!(!holds_full_login(&store, login).await.unwrap());
+        let accounts = store.list_provider_accounts(Some("claude")).await.unwrap();
+        let path = accounts[0].home.as_ref().unwrap().join(".credentials.json");
+        let native = root.path().join("native/.credentials.json");
+        fs::create_dir_all(native.parent().unwrap()).unwrap();
+        fs::write(&native, &held).unwrap();
+
+        let full = json!({"claudeAiOauth": {"accessToken": "sk-ant-oat01-own", "refreshToken": "sk-ant-ort01-own", "expiresAt": 2_000_000_000_000_i64}}).to_string();
+        install_managed(&store, Provider::Claude, login, "claude-person", &full)
+            .await
+            .unwrap();
+        server.abort();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), full);
+        assert_eq!(fs::read_to_string(&native).unwrap(), full);
+        assert!(holds_full_login(&store, login).await.unwrap());
+        // `lf machine credentials renew` stops at this answer.
+        assert!(installed(&store, Provider::Claude, login).await.unwrap());
+        assert!(install(&store, claude(&held)).await.is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), full);
     }
 

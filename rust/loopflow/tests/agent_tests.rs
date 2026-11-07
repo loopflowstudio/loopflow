@@ -419,6 +419,30 @@ fn with_every_account_exhausted_the_step_waits_for_a_reset_and_finishes() {
     assert!(launches[2].starts_with("resume "));
 }
 
+/// A wait keeps the explicit choice its step ran under, for whatever restarts it.
+#[test]
+fn a_limit_wait_records_the_explicit_agent() {
+    let home = TempDir::new().expect("lf home");
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _lf = branch_lf();
+    let (_runtime, _store, _) = two_codex_accounts(home.path(), "primary", "backup");
+    let _selected = loopflow::config::settings::select_invocation(
+        serde_yaml_ng::from_str("agent: codex").unwrap(),
+    );
+
+    let (result, _) = run_limited_step(home.path(), "primary backup", 1);
+
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let agent: Option<String> = db
+        .query_row("SELECT agent FROM agent_limit_recoveries", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(agent.as_deref(), Some("codex"));
+}
+
 #[test]
 fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");

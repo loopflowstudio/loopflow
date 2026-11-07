@@ -2,7 +2,9 @@
 //! Process ends first (a restart, a reboot), the wait's record says which step
 //! the run was waiting at. `lf task run` starts the run again at that step, so
 //! the steps before it stay done; the recovery sweep does so by itself once the
-//! wait is over, for a Task that `restarts_by_itself`.
+//! wait is over, for a Task that `restarts_by_itself`. A restart runs under the
+//! agent the waiting step was explicitly given, not the one of whoever's read
+//! happened to trigger it.
 
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
@@ -13,12 +15,20 @@ use crate::store::StoreResult;
 use super::super::error::OpsResult;
 use super::{block_on_task, task_error, task_store};
 
-/// The step of the Task's latest Graph whose Process ended waiting on a limit,
-/// and when that wait ends. It is where `lf task run` picks up.
+/// A step of the Task's latest Graph whose Process ended waiting on a limit. It
+/// is where `lf task run` picks up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LimitWait {
+    pub step: String,
+    pub retry_at: i64,
+    /// The explicit agent choice the step ran under.
+    pub agent: Option<String>,
+}
+
 pub(crate) fn waiting_on_limit(
     store: &SqliteStore,
     task: &TaskId,
-) -> StoreResult<Option<(String, i64)>> {
+) -> StoreResult<Option<LimitWait>> {
     let Some(graph) = store.task_graphs(task)?.pop() else {
         return Ok(None);
     };
@@ -28,10 +38,14 @@ pub(crate) fn waiting_on_limit(
     if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
-    Ok(store
-        .agent_limit_recovery(&step.process.id)?
-        .and_then(|recovery| recovery.retry_at)
-        .map(|retry_at| (graph.label(step), retry_at)))
+    let Some(recovery) = store.agent_limit_recovery(&step.process.id)? else {
+        return Ok(None);
+    };
+    Ok(recovery.retry_at.map(|retry_at| LimitWait {
+        step: graph.label(step),
+        retry_at,
+        agent: recovery.agent,
+    }))
 }
 
 /// Whether the sweep starts a waiting run again without anyone asking: the
@@ -60,11 +74,10 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             {
                 continue;
             }
-            let Some((_, retry_at)) = waiting_on_limit(&store.sqlite, &id).map_err(task_error)?
-            else {
+            let Some(wait) = waiting_on_limit(&store.sqlite, &id).map_err(task_error)? else {
                 continue;
             };
-            if retry_at > now {
+            if wait.retry_at > now {
                 continue;
             }
             let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
@@ -73,7 +86,11 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            super::ship::start_lf_in(worktree, &["task", "run", &task.identifier])?;
+            super::ship::restart_lf_in(
+                worktree,
+                wait.agent.as_deref(),
+                &["task", "run", &task.identifier],
+            )?;
             tracing::info!(
                 "restarted the run waiting on a limit for {}",
                 task.identifier

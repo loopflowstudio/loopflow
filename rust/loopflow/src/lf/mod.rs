@@ -232,6 +232,7 @@ impl Cli {
                 ..
             }) => true,
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
+            Some(Commands::Ship { stop, .. }) => !stop,
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
                 SessionCommand::Resume {
@@ -2702,6 +2703,10 @@ pub enum MachineCommand {
         email: Option<String>,
         #[arg(long)]
         chrome_profile: Option<String>,
+        /// Give a rental its own fresh Claude login, which runs without the
+        /// laptop, in place of the laptop's access token
+        #[arg(long)]
+        owned: bool,
     },
     /// Inspect, receive or renew machine credentials (credential bytes use stdin only).
     Credentials {
@@ -2845,6 +2850,9 @@ pub enum MachineCredentialCommand {
     Inspect {
         provider: crate::provider_auth::Provider,
         login: String,
+        /// Count only a Claude login this Machine refreshes itself
+        #[arg(long)]
+        full: bool,
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
@@ -4055,6 +4063,12 @@ mod tests {
                 }
             }
         }
+        // A restarted ship carries its run's agent to the steps it starts.
+        let ship = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
+        assert!(
+            ship(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"]).may_launch_agent()
+        );
+        assert!(!ship(&["lf", "--task", "LOO-1", "ship", "--stop"]).may_launch_agent());
         for argv in [
             vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
             vec![

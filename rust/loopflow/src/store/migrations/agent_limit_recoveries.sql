@@ -1,10 +1,12 @@
 -- How a headless step Process is recovering from a usage limit. `retry_at` set:
 -- nothing can launch before then. NULL: it went on under another account.
+-- `agent`: the invocation's explicit agent choice, which a restart keeps.
 CREATE TABLE agent_limit_recoveries (
     lf_process_id TEXT PRIMARY KEY REFERENCES processes(id) ON DELETE CASCADE,
     provider TEXT NOT NULL,
     reason TEXT NOT NULL,
     retry_at INTEGER,
+    agent TEXT,
     updated_at INTEGER NOT NULL
 );
 

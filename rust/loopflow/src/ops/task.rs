@@ -725,7 +725,7 @@ pub(crate) fn select_task_run(
         // step it was waiting at on a usage limit: the steps before it are done.
         (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
             .map_err(task_error)?
-            .and_then(|(step, _)| graph.find(&step))
+            .and_then(|wait| graph.find(&wait.step))
             .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {

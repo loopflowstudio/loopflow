@@ -813,6 +813,11 @@ impl GraphTask {
                 ".lf/graphs/held.yaml",
                 "- cmd: task sync --plan\n- cmd: graph show late\n",
             ),
+            // The same, with a stop for a person: running it approves no Auto-Ship.
+            (
+                ".lf/graphs/held-review.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n- interactive: {name: demo, id: review}\n",
+            ),
             // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/graphs/feature.yaml",
@@ -1427,7 +1432,8 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
         )
         .unwrap();
     db.execute(
-        "INSERT INTO agent_limit_recoveries VALUES(?1,'claude','rejected: five_hour',1,1)",
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,1)",
         [&waiting],
     )
     .unwrap();
@@ -1440,6 +1446,93 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     let steps = steps_of_latest_graph();
     assert_eq!(steps.len(), 1, "{steps:?}");
     assert!(steps[0].contains("late"), "{steps:?}");
+}
+
+/// What a read of the Task starts for a run of `graph` that ended waiting on a
+/// limit with `recorded` as its explicit agent, when that reader exported its
+/// own choice: the restart's arguments and the agent settings it saw.
+fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", graph]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let waiting: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,?2,1)",
+        rusqlite::params![waiting, recorded],
+    )
+    .unwrap();
+    // A failed ship waits before restarting; that wait has passed too.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+
+    let bin = tempfile::tempdir().unwrap();
+    let restarts = bin.path().join("restarts");
+    let lf = bin.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            restarts.display(),
+            loopflow_test_support::lf_binary()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let read = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .env("LF_BIN", &lf)
+    .env("LF_AGENT_OVERRIDE", "codex:reader")
+    .env("LF_SETTINGS", "agent: codex:reader")
+    .output()
+    .unwrap();
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    wait_for("the restart", || restarts.exists());
+    fs::read_to_string(restarts).unwrap().trim().to_string()
+}
+
+#[test]
+fn a_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", Some("claude:opus")),
+        "--agent claude:opus task run INF-123||{}"
+    );
+}
+
+#[test]
+fn a_restarted_wait_with_no_explicit_agent_ignores_the_readers() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", None),
+        "task run INF-123||{}"
+    );
+}
+
+/// With no stop for a person the run ships, so ship's own restart resumes it.
+#[test]
+fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held", Some("claude:opus")),
+        "--agent claude:opus --task INF-123 ship||{}"
+    );
 }
 
 #[test]

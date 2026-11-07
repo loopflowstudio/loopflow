@@ -97,15 +97,17 @@ fn library_launch_records_each_provider_under_its_invocation() {
         )
         .unwrap();
         let rows = store.processes_since(0).unwrap();
-        let agent = rows.iter().find(|row| row.pid == Some(pid)).unwrap();
-        assert_eq!(agent.kind, loopflow::process::ProcessKind::Agent);
+        let agent = rows
+            .iter()
+            .filter_map(loopflow::process::ProcessEntry::as_agent)
+            .find(|row| row.pid == Some(pid))
+            .unwrap();
         assert!(agent.os_started_at.is_some());
         assert!(agent.completed_at.is_some());
         let parent = store
             .process(agent.parent_lf_process_id.as_ref().unwrap())
             .unwrap()
             .unwrap();
-        assert_eq!(parent.kind, loopflow::process::ProcessKind::Lf);
         assert_eq!(parent.pid, Some(std::process::id()));
         assert!(parent.completed_at.is_some());
         assert!(agent.agent_session_id.is_some());
@@ -118,7 +120,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
     assert_eq!(rows.len(), 4);
     assert_eq!(
         rows.iter()
-            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .filter_map(loopflow::process::ProcessEntry::as_agent)
             .count(),
         2
     );
@@ -142,13 +144,13 @@ fn library_launch_reuses_the_enclosing_invocation() {
         let rows = store.processes_since(0)?;
         let parents = rows
             .iter()
-            .filter(|row| row.kind == loopflow::process::ProcessKind::Lf)
+            .filter_map(loopflow::process::ProcessEntry::as_lf)
             .collect::<Vec<_>>();
         assert_eq!(parents.len(), 1);
         assert!(parents[0].completed_at.is_none());
         let agents = rows
             .iter()
-            .filter(|row| row.kind == loopflow::process::ProcessKind::Agent)
+            .filter_map(loopflow::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {

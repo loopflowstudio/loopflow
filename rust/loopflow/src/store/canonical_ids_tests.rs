@@ -211,7 +211,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        crate::journal::recorded_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
+        crate::journal::lf_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
             assert_eq!((pid, start), (std::process::id(), 1));
             ProcessIdentityEvidence::Dead
         }),
@@ -893,7 +893,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id.as_str(),
+        store.resolve_process(PROCESS).unwrap().unwrap().id(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn

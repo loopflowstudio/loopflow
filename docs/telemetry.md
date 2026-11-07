@@ -51,9 +51,10 @@ lf history retention                      # what providers still keep, and what 
 `lf history` orders what Sessions did — input captured, provider turns, recorded
 outcomes — each tagged with its Task or Wave. Changes no Session made (PRs,
 Steers, Workflow moves, sync) are on the Task: `lf task status`.
-`history list` is the command record underneath it, one row per lf process,
-with its parent and outcome. Narrow it with `--parent`, `--caller SESSION` or
-`--outcome`.
+`history list` is the command record underneath it, one row per lf or agent
+process (`kind`), with its parent and outcome. Narrow it with `--parent`,
+`--caller SESSION` or `--outcome`; an agent `--parent` lists the lf commands it
+issued.
 
 `history show` opens any process or Session by ID. `--events` prints a Session's
 raw input events, including which account it actually ran on.

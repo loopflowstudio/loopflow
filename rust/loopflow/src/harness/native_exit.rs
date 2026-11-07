@@ -154,7 +154,7 @@ pub(crate) fn record_exit(owner: &AttachmentOwner) -> Result<bool> {
         Err(error) => return Err(error.into()),
     }
     Ok(store
-        .process(&attachment.agent_process_id)?
+        .agent_process(&attachment.agent_process_id)?
         .is_some_and(|process| {
             process.completed_at.is_some() && process.outcome.as_deref() == Some("interrupted")
         }))
@@ -351,7 +351,10 @@ mod tests {
                     true,
                 )
                 .unwrap();
-            let before = store.process(&next.agent_process_id).unwrap().unwrap();
+            let before = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             let settled = settle(&exit, ExitStatus::from_raw(7 << 8));
             assert_eq!(settled.code, 0);
             assert!(settled
@@ -362,7 +365,10 @@ mod tests {
                 store.session_attachment(&session.id).unwrap(),
                 Some(next.clone())
             );
-            let after = store.process(&next.agent_process_id).unwrap().unwrap();
+            let after = store
+                .agent_process(&next.agent_process_id)
+                .unwrap()
+                .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
             assert_eq!(after.outcome, before.outcome);
             let launcher = store.process(&launcher).unwrap().unwrap();

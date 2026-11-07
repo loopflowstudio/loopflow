@@ -7,10 +7,10 @@ use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
-use crate::id::{AgentSessionId, AttachmentToken, LfProcessId};
+use crate::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 use crate::process::{
-    AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter,
-    LfProcessPage, LfProcessWorkFilter, SessionAttachment,
+    AgentCaller, AgentProcess, LfProcess, LfProcessOutcomeFilter, LfProcessWorkFilter,
+    ProcessCursor, ProcessEntry, ProcessFilter, ProcessPage, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -42,35 +42,73 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
 
-pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
-    Ok(LfProcess {
-        id: row.get(0)?,
-        pid: row.get(15)?,
-        kind: match row.get::<_, String>(16)?.as_str() {
-            "agent" => crate::process::ProcessKind::Agent,
-            _ => crate::process::ProcessKind::Lf,
-        },
-        agent_session_id: row.get(17)?,
-        os_started_at: row.get(18)?,
-        trace_id: row.get(1)?,
-        parent_lf_process_id: row.get(2)?,
-        via_agent: row.get(3)?,
-        caller_session_id: row.get(4)?,
-        caller_agent_process_id: row.get(5)?,
-        command: row.get(6)?,
-        repo: row.get(7)?,
-        cwd: row.get(8)?,
-        started_at: row.get(9)?,
-        completed_at: row.get(10)?,
-        outcome: row.get(11)?,
-        exit_code: row.get(12)?,
-        signal: row.get(13)?,
-        error: row.get(14)?,
+/// The row's `kind` column is the only place an id becomes either type.
+pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessEntry> {
+    Ok(match row.get::<_, String>(16)?.as_str() {
+        "agent" => ProcessEntry::Agent(AgentProcess {
+            id: row.get(0)?,
+            pid: row.get(15)?,
+            os_started_at: row.get(18)?,
+            agent_session_id: row.get(17)?,
+            trace_id: row.get(1)?,
+            parent_lf_process_id: row.get(2)?,
+            command: row.get(6)?,
+            repo: row.get(7)?,
+            cwd: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            outcome: row.get(11)?,
+            exit_code: row.get(12)?,
+            signal: row.get(13)?,
+            error: row.get(14)?,
+        }),
+        _ => ProcessEntry::Lf(LfProcess {
+            id: row.get(0)?,
+            pid: row.get(15)?,
+            os_started_at: row.get(18)?,
+            trace_id: row.get(1)?,
+            parent_lf_process_id: row.get(2)?,
+            via_agent: row.get(3)?,
+            caller_session_id: row.get(4)?,
+            caller_agent_process_id: row.get(5)?,
+            command: row.get(6)?,
+            repo: row.get(7)?,
+            cwd: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            outcome: row.get(11)?,
+            exit_code: row.get(12)?,
+            signal: row.get(13)?,
+            error: row.get(14)?,
+        }),
     })
 }
 
+/// A row from a query that selects only one kind; the other kind is invalid data.
+pub(super) fn read_lf_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
+    match read_process(row)? {
+        ProcessEntry::Lf(process) => Ok(process),
+        ProcessEntry::Agent(process) => Err(wrong_kind(process.id.as_str(), "LfProcess")),
+    }
+}
+
+fn read_agent_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentProcess> {
+    match read_process(row)? {
+        ProcessEntry::Agent(process) => Ok(process),
+        ProcessEntry::Lf(process) => Err(wrong_kind(process.id.as_str(), "AgentProcess")),
+    }
+}
+
+fn wrong_kind(id: &str, selected: &str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        16,
+        rusqlite::types::Type::Text,
+        format!("process {id} is not the {selected} the query selected").into(),
+    )
+}
+
 /// The unfinished inventory shared by Task membership and activity.
-pub(super) fn unfinished_processes(conn: &rusqlite::Connection) -> StoreResult<Vec<LfProcess>> {
+pub(super) fn unfinished_processes(conn: &rusqlite::Connection) -> StoreResult<Vec<ProcessEntry>> {
     Ok(conn
         .prepare(&format!(
             "{PROCESS_SELECT} INDEXED BY processes_unfinished WHERE e.completed_at IS NULL
@@ -81,8 +119,8 @@ pub(super) fn unfinished_processes(conn: &rusqlite::Connection) -> StoreResult<V
 }
 
 fn process_query(
-    filter: &LfProcessFilter,
-    after: Option<&LfProcessCursor>,
+    filter: &ProcessFilter,
+    after: Option<&ProcessCursor>,
     limit: NonZeroU32,
 ) -> (String, Vec<Value>) {
     let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.id FROM processes e WHERE 1");
@@ -92,7 +130,7 @@ fn process_query(
         format!("?{}", values.len())
     };
     for (column, value) in [
-        ("id", filter.id.as_ref().map(LfProcessId::as_str)),
+        ("id", filter.id.as_deref()),
         ("repo", filter.repo.as_deref()),
         (
             "parent_lf_process_id",
@@ -102,6 +140,13 @@ fn process_query(
                 .map(LfProcessId::as_str),
         ),
         ("caller_session_id", filter.caller_session_id.as_deref()),
+        (
+            "caller_agent_process_id",
+            filter
+                .caller_agent_process_id
+                .as_ref()
+                .map(AgentProcessId::as_str),
+        ),
     ] {
         if let Some(value) = value {
             sql.push_str(&format!(
@@ -163,7 +208,7 @@ fn process_query(
     }
     if let Some(after) = after {
         let time = bind(Value::Integer(after.started_at));
-        let id = bind(Value::Text(after.id.to_string()));
+        let id = bind(Value::Text(after.id.clone()));
         sql.push_str(&format!(
             " AND e.started_at<={time} AND (e.started_at<{time} OR e.id>{id})"
         ));
@@ -187,7 +232,7 @@ const UNRECORDED_ANCESTRY: &str = "a.kind='agent' AND a.completed_at IS NOT NULL
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnrecordedAncestry {
-    pub(crate) agent_process_id: LfProcessId,
+    pub(crate) agent_process_id: AgentProcessId,
     pub(crate) parent_lf_process_id: LfProcessId,
     pub(crate) attached_lf_process_id: Option<LfProcessId>,
     pub(crate) session_id: Option<String>,
@@ -209,7 +254,7 @@ fn attachment_in(
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<AttachmentToken>>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<LfProcessId>>(3)?,
+                    row.get::<_, Option<AgentProcessId>>(3)?,
                 ))
             },
         )
@@ -242,7 +287,7 @@ fn no_observed_exit() -> StoreError {
 /// requested a spawn. Anything else may still be running.
 fn agent_process_progress_in(
     conn: &rusqlite::Connection,
-    agent: &LfProcessId,
+    agent: &AgentProcessId,
 ) -> StoreResult<(bool, bool)> {
     Ok(conn.query_row(
         "SELECT completed_at IS NOT NULL,spawn_state IS 'reserved' AND pid IS NULL
@@ -282,7 +327,7 @@ pub(super) fn attach_in(
         agent_process_id: current
             .as_ref()
             .filter(|_| !replace_provider)
-            .map_or_else(LfProcessId::new, |value| value.agent_process_id.clone()),
+            .map_or_else(AgentProcessId::new, |value| value.agent_process_id.clone()),
         lf_process_id: Some(process.clone()),
         token: AttachmentToken::new(),
         provider_lf_process_id: current.as_ref().filter(|_| !replace_provider).map_or_else(
@@ -342,7 +387,7 @@ pub(super) fn attach_in(
 }
 
 impl SqliteStore {
-    pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<LfProcess>> {
+    pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<ProcessEntry>> {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
     }
 
@@ -350,15 +395,15 @@ impl SqliteStore {
     /// it. `skip` forgets rows that are no longer unfinished.
     pub(crate) fn unfinished_processes_except(
         &self,
-        skip: &mut std::collections::HashSet<LfProcessId>,
-    ) -> StoreResult<Vec<LfProcess>> {
+        skip: &mut std::collections::HashSet<String>,
+    ) -> StoreResult<Vec<ProcessEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let ids = conn
             .prepare(
                 "SELECT id FROM processes INDEXED BY processes_unfinished
                  WHERE completed_at IS NULL ORDER BY started_at DESC,id",
             )?
-            .query_map([], |row| row.get::<_, LfProcessId>(0))?
+            .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut read = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.id=?1"))?;
         let mut records = Vec::new();
@@ -374,7 +419,7 @@ impl SqliteStore {
         Ok(records)
     }
 
-    pub fn processes_since(&self, since: i64) -> StoreResult<Vec<LfProcess>> {
+    pub fn processes_since(&self, since: i64) -> StoreResult<Vec<ProcessEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "{PROCESS_SELECT} WHERE e.started_at>=?1 ORDER BY e.started_at,e.id"
@@ -449,9 +494,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &format!("{PROCESS_SELECT} WHERE e.receipt_locator=?1"),
+                &format!("{PROCESS_SELECT} WHERE e.receipt_locator=?1 AND e.kind='lf'"),
                 [locator],
-                read_process,
+                read_lf_process,
             )
             .optional()?)
     }
@@ -476,9 +521,21 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &format!("{PROCESS_SELECT} WHERE e.id=?1"),
+                &format!("{PROCESS_SELECT} WHERE e.id=?1 AND e.kind='lf'"),
                 [id],
-                read_process,
+                read_lf_process,
+            )
+            .optional()?)
+    }
+
+    /// Read one provider OS process by its own identity.
+    pub fn agent_process(&self, id: &AgentProcessId) -> StoreResult<Option<AgentProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!("{PROCESS_SELECT} WHERE e.id=?1 AND e.kind='agent'"),
+                [id],
+                read_agent_process,
             )
             .optional()?)
     }
@@ -571,7 +628,7 @@ impl SqliteStore {
     }
 
     /// Exact identity wins; otherwise require a unique literal UUID prefix.
-    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<LfProcess>> {
+    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<ProcessEntry>> {
         let canonical = selector.to_ascii_lowercase();
         let selector = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -591,7 +648,7 @@ impl SqliteStore {
         let mut query =
             conn.prepare("SELECT id FROM processes WHERE id>=?1 AND id<?2 ORDER BY id LIMIT 2")?;
         let ids = query
-            .query_map(params![selector, upper], |row| row.get::<_, LfProcessId>(0))?
+            .query_map(params![selector, upper], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         match ids.as_slice() {
             [] => Ok(None),
@@ -610,10 +667,10 @@ impl SqliteStore {
     /// Missing payloads do not remove rows. No history body is read for discovery.
     pub fn processes(
         &self,
-        filter: &LfProcessFilter,
-        after: Option<&LfProcessCursor>,
+        filter: &ProcessFilter,
+        after: Option<&ProcessCursor>,
         limit: NonZeroU32,
-    ) -> StoreResult<LfProcessPage> {
+    ) -> StoreResult<ProcessPage> {
         let (sql, values) = process_query(filter, after, limit);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&sql)?;
@@ -622,14 +679,14 @@ impl SqliteStore {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let next = if entries.len() > limit.get() as usize {
             entries.pop();
-            entries.last().map(|process| LfProcessCursor {
-                started_at: process.started_at,
-                id: process.id.clone(),
+            entries.last().map(|process| ProcessCursor {
+                started_at: process.started_at(),
+                id: process.id().to_owned(),
             })
         } else {
             None
         };
-        Ok(LfProcessPage { entries, next })
+        Ok(ProcessPage { entries, next })
     }
 
     pub(crate) fn make_session_interactive(
@@ -830,7 +887,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn agent_endpoint(&self, process: &LfProcessId) -> StoreResult<Option<String>> {
+    pub(crate) fn agent_endpoint(&self, process: &AgentProcessId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT endpoint FROM processes WHERE id=?1",
@@ -980,14 +1037,14 @@ impl SqliteStore {
     }
 
     /// All unfinished agent rows, including detached and replaced processes.
-    pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcess>> {
+    pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
             PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e")))?;
         let rows = query
             .query_map([], |row| {
-                Ok(crate::process::AgentProcess {
-                    process: read_process(row)?,
+                Ok(crate::process::AgentProcessState {
+                    process: read_agent_process(row)?,
                     attached_lf_process_id: row.get(19)?,
                     attachment_token: row.get(20)?,
                     provider: row.get(21)?,
@@ -1074,7 +1131,7 @@ impl SqliteStore {
     /// Only positive OS death evidence (including successful termination) settles it.
     pub(crate) fn settle_agent_process(
         &self,
-        expected: &crate::process::AgentProcess,
+        expected: &crate::process::AgentProcessState,
         terminate: impl FnOnce() -> StoreResult<()>,
     ) -> StoreResult<bool> {
         let session = expected
@@ -1473,7 +1530,9 @@ mod discovery_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter};
+    use crate::process::{
+        LfProcessOutcomeFilter, LfProcessWorkFilter, ProcessEntry, ProcessFilter,
+    };
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
 
@@ -1646,7 +1705,10 @@ mod discovery_tests {
         assert_ne!(admitted.captured, session.captured);
         assert_eq!(claimed.lf_process_id, Some(second.clone()));
         let history = store.session_history(&session.id, 0, 0).unwrap();
-        let reserved = store.process(&claimed.agent_process_id).unwrap().unwrap();
+        let reserved = store
+            .agent_process(&claimed.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             reserved.agent_session_id.as_deref(),
             Some(session.id.as_str())
@@ -1694,6 +1756,7 @@ mod discovery_tests {
         let direct = insert_process(&store, 2, 2);
         let agent = insert_process(&store, 3, 3);
         let interrupted = insert_process(&store, 4, 4);
+        let issuer = crate::id::AgentProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1704,7 +1767,7 @@ mod discovery_tests {
             .unwrap();
             conn.execute("UPDATE processes SET parent_lf_process_id=?2,via_agent=1,caller_session_id='retained-caller',
                 caller_agent_process_id=?3,outcome='succeeded',
-                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct,parent]).unwrap();
+                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct,issuer]).unwrap();
             conn.execute(
                 "UPDATE processes SET outcome='interrupted',completed_at=7,exit_code=130
                 WHERE id=?1",
@@ -1714,52 +1777,75 @@ mod discovery_tests {
         }
         let page = store
             .processes(
-                &LfProcessFilter::default(),
+                &ProcessFilter::default(),
                 None,
                 NonZeroU32::new(10).unwrap(),
             )
             .unwrap();
+        let entries = page
+            .entries
+            .iter()
+            .map(|entry| entry.as_lf().unwrap())
+            .collect::<Vec<_>>();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
             vec![&interrupted, &agent, &direct, &parent]
         );
         assert_eq!(page.next, None);
-        for entry in &page.entries {
-            assert_eq!(store.process(&entry.id).unwrap().as_ref(), Some(entry));
+        for entry in &entries {
+            assert_eq!(store.process(&entry.id).unwrap().as_ref(), Some(*entry));
         }
-        let old = &page.entries[3];
+        let old = entries[3];
         assert_eq!(
             (old.via_agent, old.completed_at, old.exit_code),
             (None, None, None)
         );
         assert_eq!(old.outcome, None);
         assert_eq!(old.signal, None);
-        let failed = &page.entries[2];
+        let failed = entries[2];
         assert_eq!(failed.parent_lf_process_id.as_ref(), Some(&parent));
         assert_eq!(failed.via_agent, Some(false));
         assert_eq!(failed.exit_code, Some(42));
-        let success = &page.entries[1];
+        let success = entries[1];
         assert_eq!(
             success.caller_session_id.as_deref(),
             Some("retained-caller")
         );
-        assert_eq!(success.caller_agent_process_id.as_ref(), Some(&parent));
+        assert_eq!(success.caller_agent_process_id.as_ref(), Some(&issuer));
         assert_eq!(success.via_agent, Some(true));
-        assert_eq!(page.entries[0].signal, None);
+        assert_eq!(entries[0].signal, None);
+        let issued = store
+            .processes(
+                &ProcessFilter {
+                    caller_agent_process_id: Some(issuer.clone()),
+                    ..Default::default()
+                },
+                None,
+                NonZeroU32::new(10).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            issued
+                .entries
+                .iter()
+                .map(ProcessEntry::id)
+                .collect::<Vec<_>>(),
+            vec![agent.as_str()]
+        );
         for (outcome, expected) in [
             (LfProcessOutcomeFilter::Unknown, &parent),
             (LfProcessOutcomeFilter::Failed, &direct),
             (LfProcessOutcomeFilter::Succeeded, &agent),
             (LfProcessOutcomeFilter::Interrupted, &interrupted),
         ] {
-            let filter = LfProcessFilter {
+            let filter = ProcessFilter {
                 outcome: Some(outcome),
                 ..Default::default()
             };
             let selected = store
                 .processes(&filter, None, NonZeroU32::new(1).unwrap())
                 .unwrap();
-            assert_eq!(&selected.entries[0].id, expected);
+            assert_eq!(selected.entries[0].id(), expected.as_str());
             assert_eq!(selected.next, None);
         }
         assert!(!dir.path().join("runs").exists());
@@ -1830,7 +1916,7 @@ mod discovery_tests {
                 ],
             )
             .unwrap();
-        let filter = LfProcessFilter {
+        let filter = ProcessFilter {
             repo: Some("/repo".into()),
             parent_lf_process_id: Some(second.clone()),
             caller_session_id: Some("caller".into()),
@@ -1843,20 +1929,20 @@ mod discovery_tests {
                 .processes(&filter, None, NonZeroU32::new(1).unwrap())
                 .unwrap()
                 .entries[0]
-                .id,
-            first
+                .id(),
+            first.as_str()
         );
         assert_eq!(
-            store.resolve_process(first.as_str()).unwrap().unwrap().id,
-            first
+            store.resolve_process(first.as_str()).unwrap().unwrap().id(),
+            first.as_str()
         );
         assert_eq!(
             store
                 .resolve_process(&second.as_str()[..35])
                 .unwrap()
                 .unwrap()
-                .id,
-            second
+                .id(),
+            second.as_str()
         );
         assert!(matches!(
             store.resolve_process("00000000"),
@@ -1864,9 +1950,9 @@ mod discovery_tests {
         ));
         assert_eq!(store.resolve_process("%_").unwrap(), None);
         assert_eq!(store.process(&LfProcessId::new()).unwrap(), None);
-        let miss = LfProcessFilter {
+        let miss = ProcessFilter {
             command_contains: Some("%_".into()),
-            id: Some(second),
+            id: Some(second.to_string()),
             ..Default::default()
         };
         assert!(store
@@ -1886,8 +1972,8 @@ mod discovery_tests {
                 .unwrap();
             let page = store
                 .processes(
-                    &LfProcessFilter {
-                        id: Some(first.clone()),
+                    &ProcessFilter {
+                        id: Some(first.to_string()),
                         command_contains: Some("pr land".into()),
                         ..Default::default()
                     },
@@ -1922,7 +2008,7 @@ mod discovery_tests {
             }
         }
         expected.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
-        let filter = LfProcessFilter {
+        let filter = ProcessFilter {
             repo: Some("/repo".into()),
             ..Default::default()
         };
@@ -1933,7 +2019,7 @@ mod discovery_tests {
                 .processes(&filter, after.as_ref(), NonZeroU32::new(2).unwrap())
                 .unwrap();
             assert!(page.entries.len() <= 2);
-            found.extend(page.entries.into_iter().map(|entry| entry.id));
+            found.extend(page.entries.iter().map(|entry| entry.id().to_owned()));
             after = page.next;
             if after.is_none() {
                 break;
@@ -1942,7 +2028,10 @@ mod discovery_tests {
         }
         assert_eq!(
             found,
-            expected.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
+            expected
+                .into_iter()
+                .map(|(_, id)| id.to_string())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -2030,7 +2119,7 @@ mod discovery_tests {
                 .unwrap();
             }
         }
-        let filter = LfProcessFilter {
+        let filter = ProcessFilter {
             performed_work: Some(LfProcessWorkFilter::Task(first.clone())),
             ..Default::default()
         };
@@ -2038,15 +2127,18 @@ mod discovery_tests {
             .processes(&filter, None, NonZeroU32::new(1).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
-            vec![&shared]
+            page.entries
+                .iter()
+                .map(ProcessEntry::id)
+                .collect::<Vec<_>>(),
+            vec![shared.as_str()]
         );
         let page = store
             .processes(&filter, page.next.as_ref(), NonZeroU32::new(1).unwrap())
             .unwrap();
-        assert_eq!(page.entries[0].id, mechanical);
+        assert_eq!(page.entries[0].id(), mechanical.as_str());
         assert_eq!(page.next, None);
-        let second_filter = LfProcessFilter {
+        let second_filter = ProcessFilter {
             performed_work: Some(LfProcessWorkFilter::Task(second)),
             ..Default::default()
         };
@@ -2054,10 +2146,13 @@ mod discovery_tests {
             .processes(&second_filter, None, NonZeroU32::new(10).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
-            vec![&shared]
+            page.entries
+                .iter()
+                .map(ProcessEntry::id)
+                .collect::<Vec<_>>(),
+            vec![shared.as_str()]
         );
-        let wave_filter = LfProcessFilter {
+        let wave_filter = ProcessFilter {
             performed_work: Some(LfProcessWorkFilter::Wave(wave)),
             ..Default::default()
         };
@@ -2065,8 +2160,11 @@ mod discovery_tests {
             .processes(&wave_filter, None, NonZeroU32::new(10).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
-            vec![&shared, &mechanical]
+            page.entries
+                .iter()
+                .map(ProcessEntry::id)
+                .collect::<Vec<_>>(),
+            vec![shared.as_str(), mechanical.as_str()]
         );
         assert_eq!(store.process(&unbound).unwrap().unwrap().outcome, None);
         assert_eq!(store.process(&observer).unwrap().unwrap().outcome, None);
@@ -2148,7 +2246,7 @@ mod attachment_tests {
             Some(attachment.clone())
         );
         assert!(store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap()
             .completed_at
@@ -2167,7 +2265,7 @@ mod attachment_tests {
             .lf_process_id
             .is_none());
         assert!(store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap()
             .completed_at
@@ -2204,7 +2302,10 @@ mod attachment_tests {
                 &"original-thread".into(),
             )
             .unwrap();
-        let original = store.process(&first.agent_process_id).unwrap().unwrap();
+        let original = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         for closed in [
             Ok(false),
             Err(StoreError::InvalidAuthority("close failed".into())),
@@ -2213,7 +2314,7 @@ mod attachment_tests {
                 .replace_session_agent_process("conversation", &first, None, || closed)
                 .is_err());
             assert_eq!(
-                store.process(&first.agent_process_id).unwrap(),
+                store.agent_process(&first.agent_process_id).unwrap(),
                 Some(original.clone())
             );
             assert_eq!(
@@ -2231,7 +2332,7 @@ mod attachment_tests {
         assert_ne!(first.agent_process_id, next.agent_process_id);
         assert_eq!(first.lf_process_id, next.lf_process_id);
         assert!(store
-            .process(&first.agent_process_id)
+            .agent_process(&first.agent_process_id)
             .unwrap()
             .unwrap()
             .completed_at
@@ -2287,14 +2388,17 @@ mod attachment_tests {
         store
             .record_agent_process_exit("conversation", &first, false)
             .unwrap();
-        let failed = store.process(&first.agent_process_id).unwrap().unwrap();
+        let failed = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         let next = store
             .prepare_session_agent_process("conversation", &first)
             .unwrap();
         assert_ne!(next.agent_process_id, first.agent_process_id);
         assert_eq!(next.lf_process_id, first.lf_process_id);
         assert_eq!(
-            store.process(&first.agent_process_id).unwrap(),
+            store.agent_process(&first.agent_process_id).unwrap(),
             Some(failed)
         );
         assert!(store
@@ -2603,7 +2707,10 @@ mod attachment_tests {
             .unwrap();
         assert_ne!(replacement.agent_process_id, first.agent_process_id);
         assert_eq!(store.agent_processes().unwrap().len(), 2);
-        let old = store.process(&first.agent_process_id).unwrap().unwrap();
+        let old = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(old.pid, Some(4242));
         assert_eq!(old.parent_lf_process_id, Some(a));
         assert!(old.completed_at.is_none());
@@ -2632,10 +2739,9 @@ mod attachment_tests {
             .record_agent_process_exit(&session.id, &attachment, false)
             .unwrap();
         let row = store
-            .process(&attachment.agent_process_id)
+            .agent_process(&attachment.agent_process_id)
             .unwrap()
             .unwrap();
-        assert_eq!(row.kind, crate::process::ProcessKind::Agent);
         assert_eq!(row.pid, Some(4242));
         assert_eq!(row.os_started_at, Some(123));
         assert!(store
@@ -2643,7 +2749,7 @@ mod attachment_tests {
             .is_err());
         assert_eq!(
             store
-                .process(&attachment.agent_process_id)
+                .agent_process(&attachment.agent_process_id)
                 .unwrap()
                 .unwrap()
                 .pid,
@@ -2688,13 +2794,16 @@ mod attachment_tests {
             .settle_agent_process(&current, || {
                 // Settlement holds the attachment fence, not the SQLite mutex.
                 assert_eq!(
-                    store.process(&current.process.id)?.as_ref(),
+                    store.agent_process(&current.process.id)?.as_ref(),
                     Some(&current.process)
                 );
                 Ok(())
             })
             .unwrap());
-        let retained = store.process(&first.agent_process_id).unwrap().unwrap();
+        let retained = store
+            .agent_process(&first.agent_process_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(retained.pid, Some(4242));
         assert_eq!(retained.parent_lf_process_id, Some(a));
         assert!(retained.completed_at.is_some());
@@ -2717,8 +2826,6 @@ mod forget_tests {
             let process = crate::process::LfProcess {
                 id: LfProcessId::new(),
                 pid: None,
-                kind: crate::process::ProcessKind::Lf,
-                agent_session_id: None,
                 os_started_at: None,
                 trace_id: TraceId::new(),
                 parent_lf_process_id: parent.cloned(),

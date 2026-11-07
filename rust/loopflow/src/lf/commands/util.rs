@@ -1339,7 +1339,7 @@ mod tests {
             let rows = store.processes_since(0).unwrap();
             let agents = rows
                 .iter()
-                .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+                .filter_map(crate::process::ProcessEntry::as_agent)
                 .collect::<Vec<_>>();
             let saved = store
                 .session_for_artifact(&capture.artifact_key())
@@ -1352,7 +1352,7 @@ mod tests {
                     && agent.completed_at.is_some()));
             assert_eq!(
                 rows.iter()
-                    .filter(|row| row.kind == crate::process::ProcessKind::Lf)
+                    .filter_map(crate::process::ProcessEntry::as_lf)
                     .count(),
                 index + 1
             );
@@ -1360,6 +1360,7 @@ mod tests {
             assert!(attachment.lf_process_id.is_none());
             assert!(rows
                 .iter()
+                .filter_map(crate::process::ProcessEntry::as_lf)
                 .any(|row| row.id == attachment.provider_lf_process_id
                     && row.pid == Some(std::process::id())
                     && row.completed_at.is_some()));
@@ -1471,7 +1472,7 @@ mod tests {
         let rows = store.processes_since(0).unwrap();
         let agents = rows
             .iter()
-            .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+            .filter_map(crate::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         assert!(agents
@@ -1535,7 +1536,7 @@ mod tests {
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
-            let before = store.process(&attached.agent_process_id)?.unwrap();
+            let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 isolate: None,
                 launch: None,
@@ -1550,7 +1551,7 @@ mod tests {
             let result =
                 session_command_status_with_env(&command, &environment, None, None, None, None);
             let alive = provider.try_wait()?.is_none();
-            let unchanged = store.process(&attached.agent_process_id)? == Some(before);
+            let unchanged = store.agent_process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
             let local =
                 session_command_status_with_env(&command, &environment, None, None, None, None);
@@ -1643,7 +1644,7 @@ mod tests {
                 "{error:#}"
             );
             // The conflict is found before any provider runs.
-            let agent = store.process(&attachment.agent_process_id)?;
+            let agent = store.agent_process(&attachment.agent_process_id)?;
             assert!(
                 agent.as_ref().and_then(|process| process.pid).is_none(),
                 "a provider was launched despite the conflict: {agent:?}"

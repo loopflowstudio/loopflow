@@ -417,7 +417,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (Option<loopflow::id::LfProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::AgentProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
                 "SELECT p.id,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",

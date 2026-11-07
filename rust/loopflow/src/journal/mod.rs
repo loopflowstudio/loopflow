@@ -697,8 +697,6 @@ fn record_process_interruption(context: &ProcessContext) {
 /// same row in its own transaction, so an agent never names an unrecorded parent.
 fn start_record(context: &ProcessContext) -> LfProcess {
     LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: context.process_started_at,
         id: context.lf_process_id.clone(),
         pid: Some(std::process::id()),
@@ -1229,11 +1227,40 @@ pub(crate) fn process_evidence(
     let Ok(Some(record)) = store.process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    recorded_process_evidence(
+    lf_process_evidence(
         &record,
         &recorded_process_receipt(store, &record),
         process_identity_evidence,
     )
+}
+
+/// A provider OS process's liveness, by its own recorded identity.
+pub(crate) fn agent_evidence(
+    store: &SqliteStore,
+    process: &crate::id::AgentProcessId,
+) -> ProcessIdentityEvidence {
+    let Ok(Some(record)) = store.agent_process(process) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    agent_process_evidence(
+        record.completed_at,
+        record.pid,
+        record.os_started_at,
+        Some(record.started_at),
+        process_identity_evidence,
+    )
+}
+
+/// Either kind's liveness: an lf row by its receipt, an agent by its own OS identity.
+pub(crate) fn process_entry_evidence(
+    store: &SqliteStore,
+    record: &crate::process::ProcessEntry,
+) -> ProcessIdentityEvidence {
+    let receipt = match record {
+        crate::process::ProcessEntry::Lf(process) => recorded_process_receipt(store, process),
+        crate::process::ProcessEntry::Agent(_) => Ok(None),
+    };
+    recorded_process_evidence(record, &receipt, process_identity_evidence)
 }
 
 /// The OS PID a recorded Process runs under now; `None` unless its recorded
@@ -1242,7 +1269,7 @@ pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Op
     let record = store.process(process).ok()??;
     let receipt = recorded_process_receipt(store, &record);
     let mut live = None;
-    recorded_process_evidence(&record, &receipt, |pid, started_at| {
+    lf_process_evidence(&record, &receipt, |pid, started_at| {
         let evidence = process_identity_evidence(pid, started_at);
         if evidence == ProcessIdentityEvidence::Live {
             live = Some(pid);
@@ -1257,9 +1284,6 @@ pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,
     record: &crate::process::LfProcess,
 ) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    if record.kind == crate::process::ProcessKind::Agent {
-        return Ok(None);
-    }
     match store
         .process_receipt_path(&record.id)
         .map_err(std::io::Error::other)?
@@ -1311,22 +1335,31 @@ pub(crate) fn agent_process_evidence(
     }
 }
 
-/// One identity rule for control readers and sampled activity. An unreadable
-/// receipt is not an absent one; neither permits invented OS identity.
+/// One identity rule for control readers and sampled activity. An agent has
+/// no receipt; it is judged by its own recorded OS identity.
 pub(crate) fn recorded_process_evidence(
-    record: &crate::process::LfProcess,
+    record: &crate::process::ProcessEntry,
     receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
-    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+    observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
-    if record.kind == crate::process::ProcessKind::Agent {
-        return agent_process_evidence(
+    match record {
+        crate::process::ProcessEntry::Lf(record) => lf_process_evidence(record, receipt, observe),
+        crate::process::ProcessEntry::Agent(record) => agent_process_evidence(
             record.completed_at,
             record.pid,
             record.os_started_at,
             Some(record.started_at),
             observe,
-        );
+        ),
     }
+}
+
+/// An unreadable receipt is not an absent one; neither permits invented OS identity.
+pub(crate) fn lf_process_evidence(
+    record: &crate::process::LfProcess,
+    receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
+    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+) -> ProcessIdentityEvidence {
     let Ok(receipt) = receipt else {
         return ProcessIdentityEvidence::Unknown;
     };

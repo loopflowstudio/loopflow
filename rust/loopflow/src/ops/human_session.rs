@@ -296,7 +296,7 @@ pub struct SessionRecord {
     pub availability: Option<SessionAvailability>,
     pub program_status: Option<crate::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    pub agent_process_id: Option<crate::id::LfProcessId>,
+    pub agent_process_id: Option<crate::id::AgentProcessId>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -822,7 +822,7 @@ pub(crate) async fn open(
             .sqlite
             .session_attachment(&session.id)?
             .is_some_and(|attachment| {
-                crate::journal::process_evidence(&store.sqlite, &attachment.agent_process_id)
+                crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
                     == crate::journal::ProcessIdentityEvidence::Live
             }))
     };
@@ -1560,7 +1560,7 @@ pub(crate) async fn observe_program_status(
     store: &SharedStore,
     id: &str,
     terminal: &str,
-    agent_process: Option<&crate::id::LfProcessId>,
+    agent_process: Option<&crate::id::AgentProcessId>,
 ) -> Result<()> {
     let session = find_session(store, id, false)
         .await?

@@ -27,11 +27,10 @@ use time::OffsetDateTime;
 
 use crate::id::LfProcessId;
 use crate::journal::{
-    recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
+    lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
 use crate::ops::human_session::end_owner;
 use crate::ops::human_session::restore::{self, ResumeOutcome, ResumedSession};
-use crate::process::ProcessKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 
@@ -163,12 +162,15 @@ fn live_lf_processes(
     let current = crate::journal::current_lf_process_id();
     let mut live = Vec::new();
     for record in store.unfinished_processes()? {
-        if record.kind != ProcessKind::Lf || Some(&record.id) == current.as_ref() {
+        let crate::process::ProcessEntry::Lf(record) = record else {
+            continue;
+        };
+        if Some(&record.id) == current.as_ref() {
             continue;
         }
         let mut live_pid = None;
         let receipt = recorded_process_receipt(store, &record);
-        let evidence = recorded_process_evidence(&record, &receipt, |pid, started_at| {
+        let evidence = lf_process_evidence(&record, &receipt, |pid, started_at| {
             let Some(process) = by_pid.get(&pid) else {
                 return ProcessIdentityEvidence::Dead;
             };
@@ -183,7 +185,7 @@ fn live_lf_processes(
         };
         live.push((
             RunningLfProcess {
-                label: super::top::command_label(record.command.as_deref(), record.kind),
+                label: super::top::lf_command_label(record.command.as_deref()),
                 id: record.id,
                 pid,
                 started_at: record.started_at,

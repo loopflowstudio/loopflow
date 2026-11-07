@@ -4,7 +4,7 @@ use clap::Subcommand;
 
 use crate::lf::output::print_process;
 
-use crate::process::LfProcessFilter;
+use crate::process::ProcessFilter;
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 
@@ -80,7 +80,7 @@ struct MonitorItem {
 struct MonitorOverview {
     observed_at: i64,
     items: Vec<MonitorItem>,
-    recent_commands: crate::process::LfProcessPage,
+    recent_commands: crate::process::ProcessPage,
     sessions_next: Option<String>,
     graphs_next: Option<String>,
     gaps: Vec<String>,
@@ -212,7 +212,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         }
         let recent_commands = store
             .processes(
-                &LfProcessFilter {
+                &ProcessFilter {
                     repo,
                     ..Default::default()
                 },

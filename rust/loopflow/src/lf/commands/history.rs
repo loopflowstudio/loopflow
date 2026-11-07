@@ -6,7 +6,7 @@ use clap::Subcommand;
 use crate::lf::commands::session_history::SessionView;
 use crate::lf::output::print_process;
 use crate::process::{
-    LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter,
+    LfProcessOutcomeFilter, LfProcessWorkFilter, ProcessCursor, ProcessEntry, ProcessFilter,
 };
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
@@ -49,8 +49,9 @@ pub enum HistoryCommand {
         limit: NonZeroU32,
         /// Continue with the previous page's next object, encoded as JSON
         #[arg(long, value_parser = parse_cursor)]
-        after: Option<LfProcessCursor>,
-        /// Direct children of an exact or unambiguous parent Process
+        after: Option<ProcessCursor>,
+        /// Direct children of an exact or unambiguous parent Process; for an
+        /// AgentProcess, the lf commands it issued
         #[arg(long)]
         parent: Option<String>,
         /// Commands issued by this Session
@@ -201,7 +202,7 @@ fn export(since: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
+fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
@@ -320,18 +321,22 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 )),
                 _ => None,
             };
-            let filter = LfProcessFilter {
-                repo,
-                parent_lf_process_id: match parent {
-                    Some(parent) => Some(
-                        store
-                            .resolve_process(parent)
-                            .await?
-                            .context("Parent Process was not found")?
-                            .id,
-                    ),
-                    None => None,
+            // An lf parent started its children; an agent parent issued them.
+            let (parent_lf_process_id, caller_agent_process_id) = match parent {
+                Some(parent) => match store
+                    .resolve_process(parent)
+                    .await?
+                    .context("Parent Process was not found")?
+                {
+                    ProcessEntry::Lf(parent) => (Some(parent.id), None),
+                    ProcessEntry::Agent(parent) => (None, Some(parent.id)),
                 },
+                None => (None, None),
+            };
+            let filter = ProcessFilter {
+                repo,
+                parent_lf_process_id,
+                caller_agent_process_id,
                 caller_session_id: caller.clone().map(Into::into),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
@@ -365,7 +370,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
 /// What `lf history show` found: this Machine's own record, or a copy.
 #[derive(Debug)]
 enum Shown {
-    Local(Option<crate::process::LfProcess>),
+    Local(Option<crate::process::ProcessEntry>),
     Copied(crate::machine_records::CopiedHistory),
 }
 

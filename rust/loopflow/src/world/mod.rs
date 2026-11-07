@@ -25,7 +25,7 @@ use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
-use crate::process::{LfProcess, ProcessKind};
+use crate::process::LfProcess;
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
@@ -1105,8 +1105,6 @@ impl World {
         LfProcess {
             id: LfProcessId::new(),
             pid: None,
-            kind: ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             trace_id: trace.clone(),
             parent_lf_process_id: parent.cloned(),

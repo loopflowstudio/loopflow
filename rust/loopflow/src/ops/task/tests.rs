@@ -90,8 +90,6 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         )
         .unwrap();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,
@@ -465,8 +463,6 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     // A reboot proves stale execution exited without settling the Graph.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,

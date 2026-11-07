@@ -449,7 +449,7 @@ fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResul
         .processes_since(0)
         .map_err(repair_error)?
         .into_iter()
-        .filter(|process| process.cwd.as_deref() == worktree.to_str())
+        .filter(|process| process.cwd() == worktree.to_str())
         .collect();
     super::task_execution::execution_blockers(&store.sqlite, &processes)
 }

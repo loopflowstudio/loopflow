@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e2cbe1 explore: AgentProcessId</title>
+<style>
+  :root { --fg:#1d1d1f; --muted:#6b6b70; --bg:#fdfdfc; --code:#f3f2ef; --rule:#e2e0db; --accent:#2f5d8a; --new:#2e7d32; --gone:#b23b3b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e6e3; --muted:#9a9894; --bg:#171717; --code:#232322; --rule:#333230; --accent:#8db4dc; --new:#7fc283; --gone:#e08080; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 .5rem; }
+  h2 { font-size:1.25rem; margin:3rem 0 .25rem; }
+  h3 { font-size:1rem; margin:1.5rem 0 .25rem; }
+  .meta { color:var(--muted); font-size:.875rem; }
+  .truth { font-style:italic; margin:.25rem 0 1rem; }
+  pre { background:var(--code); padding:.9rem 1rem; overflow-x:auto; font:13px/1.5 ui-monospace, Menlo, monospace; border-radius:4px; }
+  code { font:0.9em ui-monospace, Menlo, monospace; }
+  .add { color:var(--new); } .del { color:var(--gone); }
+  hr { border:0; border-top:1px solid var(--rule); margin:3rem 0; }
+  .ledger { width:100%; border-collapse:collapse; font-size:.9rem; }
+  .ledger td, .ledger th { border-bottom:1px solid var(--rule); padding:.4rem .5rem; text-align:left; vertical-align:top; }
+  .rec { border-left:3px solid var(--accent); padding-left:1rem; }
+  ol.q li { margin-bottom:.75rem; }
+</style>
+</head>
+<body>
+<main>
+<p class="meta">Task e2cbe1 · explore step · 2026-11-06 · built from
+<code>scratch/e2cbe1-give-agentprocess-its.md</code>, <code>rust/loopflow/src/process.rs</code>,
+<code>rust/loopflow/src/id.rs</code>, <code>swift/Loopflow/Models/LfProcess.swift</code></p>
+
+<h1>How far should AgentProcess separate from LfProcess?</h1>
+
+<p>The decision: which of three type shapes the implement step builds. All three
+add <code>AgentProcessId</code>. They differ in what an agent <em>row</em> is.
+Today, on main:</p>
+
+<pre>pub struct LfProcess {
+    pub id: LfProcessId,                 // agent rows too
+    pub kind: ProcessKind,               // runtime switch, 39 uses in 18 files
+    pub agent_session_id: Option&lt;LfSessionId&gt;,   // null on lf rows
+    pub via_agent: Option&lt;bool&gt;,                  // null on agent rows
+    pub caller_session_id: Option&lt;LfSessionId&gt;,  // null on agent rows
+    pub caller_agent_process_id: Option&lt;LfProcessId&gt;,  // names an agent, typed lf
+    ...
+}</pre>
+
+<p>14 fields named <code>agent*</code> are typed <code>LfProcessId</code>
+(<code>rg 'agent[a-z_]*: *(&amp;|Option&lt;&amp;?)?LfProcessId' rust</code>).</p>
+
+<hr>
+
+<h2>A. Rename the fields, keep the row</h2>
+<p class="truth">Every AgentProcess <em>reference</em> is typed; the inventory row still isn't.</p>
+
+<pre>uuid_id!(AgentProcessId);
+<span class="add">+ pub caller_agent_process_id: Option&lt;AgentProcessId&gt;,</span>
+<span class="add">+ // SessionRecord, AgentCaller, Steer, SessionAttachment: AgentProcessId</span>
+
+// at the one place a row becomes a reference:
+let agent = AgentProcessId::from(row.id.as_str());   // kind == Agent checked by hand</pre>
+
+<p>Cost: smallest diff, about a day. Risk: the row's <code>id</code> is still an
+<code>LfProcessId</code> for agent rows, so <code>store.process(&amp;row.id)</code>
+on an agent row compiles. <code>ProcessKind</code> and its runtime branches stay.
+The schema shows <code>AgentProcess</code> nowhere; agents remain "an LfProcess
+with kind=agent". This is the gap the Task names, moved one layer down.</p>
+
+<h2>B. The row is a tagged enum <span class="meta">(kickoff's plan)</span></h2>
+<p class="truth">An agent row <em>is</em> an <code>AgentProcess</code>; mixing them up doesn't compile.</p>
+
+<pre>#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessEntry { Lf(LfProcess), Agent(AgentProcess) }
+
+pub struct AgentProcess { pub id: AgentProcessId, pub agent_session_id: .., .. }
+pub struct LfProcess    { pub id: LfProcessId, pub via_agent: .., pub caller_agent_process_id: Option&lt;AgentProcessId&gt;, .. }
+<span class="del">- pub enum ProcessKind { Lf, Agent }</span></pre>
+
+<p>What a reader sees:</p>
+<pre>$ lf history list --json | jq '.entries[0:2]'
+[{"kind":"lf","id":"5e1c…","via_agent":true,"caller_agent_process_id":"a03f…", …},
+ {"kind":"agent","id":"a03f…","agent_session_id":"9b2d…", …}]
+<span class="meta"># same ids, same "kind" values; each row drops only its always-null keys</span></pre>
+
+<p>Cost: 2–3 days; touches ~18 files for <code>ProcessKind</code> plus the 14
+reference sites, and Swift's <code>TaskWork.processes</code> becomes
+<code>[ProcessEntry]</code>. No migration. Risk: conflicts with #1813 in
+<code>process.rs</code>, <code>id.rs</code> and Swift models, whichever lands
+second. Released Desktop keeps decoding (dropped keys were optional).</p>
+
+<h2>C. Two inventories <span class="meta">(radical)</span></h2>
+<p class="truth">History lists what <code>lf</code> did; agents live under their Session and nowhere else.</p>
+
+<pre>$ lf history list --json        # LfProcess only
+$ lf session show 9b2d --json | jq .agent_processes
+[{"id":"a03f…","pid":4182,"started_at":…,"outcome":"exited"}]
+
+// store: agent_processes table, processes(kind) column dropped
+<span class="add">+ migrations/split_agent_processes.sql   -- expand now, contract after STAGING_DAYS</span></pre>
+
+<p>What's true: no mixed-kind reader exists anywhere, so no enum, no cursor
+over two kinds, no <code>--parent</code> ambiguity. The activity tree in
+<code>lf top</code> joins Sessions to agents explicitly. Cost: a staged
+migration (expand, ~30 days, contract), a new Session read API, rewriting
+<code>top</code>, <code>rollover</code>, <code>task_execution</code> and
+<code>FORGETTABLE</code> pruning. A week plus the staging window. Risk: the plan
+lists "a migration" as forbidden for this Task; history loses agent rows that a
+person reads today when they list everything that ran.</p>
+
+<hr>
+
+<h2>Side by side</h2>
+<table class="ledger">
+<tr><th></th><th>A</th><th>B</th><th>C</th></tr>
+<tr><td>Agent row's id type</td><td>LfProcessId</td><td>AgentProcessId</td><td>AgentProcessId</td></tr>
+<tr><td><code>ProcessKind</code></td><td>stays</td><td>deleted</td><td>deleted</td></tr>
+<tr><td>Wire change</td><td>none</td><td>drop null keys</td><td>agents leave history</td></tr>
+<tr><td>Migration</td><td>no</td><td>no</td><td>yes, staged</td></tr>
+<tr><td>Done-when met</td><td>partly (schema still says agent = LfProcess row)</td><td>yes</td><td>yes, and more</td></tr>
+</table>
+
+<div class="rec">
+<h3>Recommendation: B</h3>
+<p>It is the smallest shape that meets every Done-when line without a
+migration, and it deletes <code>ProcessKind</code> instead of keeping a runtime
+switch beside a new type. C is the cleaner end state but spends a migration and
+a new read API on a type-safety Task; it reads better as its own Task if
+mixed history ever becomes a burden. A leaves the stated gap open.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Which shape? (a) field rename only, (b) tagged <code>ProcessEntry</code>, (c) two inventories.</li>
+<li>Sequencing with #1813: (a) implement on main, rebase onto #1813 before gate; (b) stack on #1813's branch now.</li>
+<li><code>--parent &lt;AgentProcess&gt;</code>: (a) list the lf processes that agent issued; (b) keep returning nothing.</li>
+<li>If B: should C be filed as a separate Task now? (a) yes; (b) no, wait for a reason.</li>
+</ol>
+<p class="meta">Path: <code>scratch/explore.html</code></p>
+</main>
+</body>
+</html>

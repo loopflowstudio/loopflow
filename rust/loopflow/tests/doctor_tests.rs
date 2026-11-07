@@ -42,8 +42,6 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&LfProcess {
-            kind: loopflow::process::ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             id: loopflow::id::LfProcessId::new(),
             pid: None,
@@ -158,7 +156,11 @@ fn doctor_accepts_machine_commands_without_a_repository() {
         "machine-command",
         OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let mut event = store.processes_since(0).unwrap().pop().unwrap();
+    let loopflow::process::ProcessEntry::Lf(mut event) =
+        store.processes_since(0).unwrap().pop().unwrap()
+    else {
+        panic!("the fixture records an lf Process")
+    };
     event.id = loopflow::id::LfProcessId::new();
     event.repo = None;
     event.command = Some("lf help".to_string());

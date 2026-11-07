@@ -1408,8 +1408,6 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .attempt_task_state(&completed, false)
             .unwrap());
         let process = crate::process::LfProcess {
-            kind: crate::process::ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             id: crate::id::LfProcessId::new(),
             pid: None,

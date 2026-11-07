@@ -90,7 +90,7 @@ pub struct ProcessPruneReport {
 /// Missing identity and failed sampling remain visible without granting control.
 /// Only affirmative death removes a recorded process from the activity view.
 fn activity_state(
-    record: &crate::process::LfProcess,
+    record: &crate::process::ProcessEntry,
     receipt: &std::io::Result<Option<ProcessReceipt>>,
     processes: Option<&[OsProcess]>,
 ) -> Option<ActivityState> {
@@ -242,9 +242,9 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
 #[derive(Debug, Default)]
 pub(crate) struct ActivityReader {
     store: Option<SqliteStore>,
-    dead: HashSet<LfProcessId>,
+    dead: HashSet<String>,
     /// The rows not yet proven dead, read at this `processes` revision.
-    rows: Option<(i64, Vec<crate::process::LfProcess>)>,
+    rows: Option<(i64, Vec<crate::process::ProcessEntry>)>,
 }
 
 impl ActivityReader {
@@ -271,9 +271,10 @@ impl ActivityReader {
         let shown: HashSet<&str> = snapshot.nodes.iter().map(|node| node.id.as_str()).collect();
         let current = crate::journal::current_lf_process_id();
         let (dead, alive) = records.into_iter().partition::<Vec<_>, _>(|row| {
-            !shown.contains(row.id.as_str()) && Some(&row.id) != current.as_ref()
+            !shown.contains(row.id()) && current.as_ref().map(LfProcessId::as_str) != Some(row.id())
         });
-        self.dead.extend(dead.into_iter().map(|row| row.id));
+        self.dead
+            .extend(dead.into_iter().map(|row| row.id().to_owned()));
         self.rows = Some((revision, alive));
         Ok(snapshot)
     }
@@ -281,16 +282,20 @@ impl ActivityReader {
 
 fn read_activity(
     store: &SqliteStore,
-    records: Vec<crate::process::LfProcess>,
+    records: Vec<crate::process::ProcessEntry>,
 ) -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     // Each unfinished row reads its own receipt and its own OS processes, so
     // cost follows live work, not history or the rest of the Machine.
     let mut receipts: HashMap<_, _> = records
         .iter()
+        .filter_map(crate::process::ProcessEntry::as_lf)
         .map(|record| (record.id.clone(), recorded_process_receipt(store, record)))
         .collect();
-    let mut pids: Vec<u32> = records.iter().filter_map(|record| record.pid).collect();
+    let mut pids: Vec<u32> = records
+        .iter()
+        .filter_map(crate::process::ProcessEntry::pid)
+        .collect();
     pids.extend(
         receipts
             .values()
@@ -308,36 +313,37 @@ fn read_activity(
 }
 
 fn collect_activity(
-    records: Vec<crate::process::LfProcess>,
+    records: Vec<crate::process::ProcessEntry>,
     processes: Option<&[OsProcess]>,
     mut receipt: impl FnMut(&crate::process::LfProcess) -> std::io::Result<Option<ProcessReceipt>>,
 ) -> Result<ActivitySnapshot> {
+    use crate::process::ProcessEntry;
+    let current = crate::journal::current_lf_process_id();
     let mut nodes = Vec::new();
     for record in records {
-        let agent = record.kind == crate::process::ProcessKind::Agent;
-        if Some(&record.id) == crate::journal::current_lf_process_id().as_ref() {
+        if current.as_ref().map(LfProcessId::as_str) == Some(record.id()) {
             continue;
         }
-        let Some(state) = activity_state(&record, &receipt(&record), processes) else {
+        let receipt = match &record {
+            ProcessEntry::Lf(process) => receipt(process),
+            ProcessEntry::Agent(_) => Ok(None),
+        };
+        let Some(state) = activity_state(&record, &receipt, processes) else {
             continue;
         };
         nodes.push(ActivityNode {
-            id: record.id.to_string(),
-            parent_id: record
-                .parent_lf_process_id
-                .as_ref()
-                .map(ToString::to_string),
-            kind: if agent {
-                ActivityNodeKind::AgentProcess
-            } else {
-                ActivityNodeKind::Process
+            id: record.id().to_owned(),
+            parent_id: record.parent_lf_process_id().map(ToString::to_string),
+            kind: match record {
+                ProcessEntry::Lf(_) => ActivityNodeKind::Process,
+                ProcessEntry::Agent(_) => ActivityNodeKind::AgentProcess,
             },
-            label: command_label(record.command.as_deref(), record.kind),
-            repo: record.repo,
-            worktree: record.cwd,
+            label: command_label(&record),
+            repo: record.repo().map(ToOwned::to_owned),
+            worktree: record.cwd().map(ToOwned::to_owned),
             wave: None,
-            pid: record.pid,
-            started_at: unix_to_datetime(record.started_at),
+            pid: record.pid(),
+            started_at: unix_to_datetime(record.started_at()),
             state,
         });
     }
@@ -346,26 +352,37 @@ fn collect_activity(
     Ok(ActivitySnapshot { nodes })
 }
 
-pub(crate) fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
-    if kind == crate::process::ProcessKind::Agent {
-        let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
-        let program = argv
-            .as_ref()
-            .and_then(|argv| argv.first().map(String::as_str))
-            .or(command)
-            .and_then(|value| Path::new(value).file_name())
-            .and_then(|value| value.to_str())
-            .filter(|value| safe_command_word(value))
-            .unwrap_or("AgentProcess");
-        let subcommand = argv
-            .as_ref()
-            .and_then(|argv| argv.get(1))
-            .filter(|value| safe_command_word(value));
-        return match subcommand {
-            Some(subcommand) => format!("{program} {subcommand}"),
-            None => program.to_owned(),
-        };
+pub(crate) fn command_label(record: &crate::process::ProcessEntry) -> String {
+    match record {
+        crate::process::ProcessEntry::Lf(process) => lf_command_label(process.command.as_deref()),
+        crate::process::ProcessEntry::Agent(process) => {
+            agent_command_label(process.command.as_deref())
+        }
     }
+}
+
+/// The provider program and its subcommand, never its prompt or other arguments.
+fn agent_command_label(command: Option<&str>) -> String {
+    let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
+    let program = argv
+        .as_ref()
+        .and_then(|argv| argv.first().map(String::as_str))
+        .or(command)
+        .and_then(|value| Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .filter(|value| safe_command_word(value))
+        .unwrap_or("AgentProcess");
+    let subcommand = argv
+        .as_ref()
+        .and_then(|argv| argv.get(1))
+        .filter(|value| safe_command_word(value));
+    match subcommand {
+        Some(subcommand) => format!("{program} {subcommand}"),
+        None => program.to_owned(),
+    }
+}
+
+pub(crate) fn lf_command_label(command: Option<&str>) -> String {
     let Some(command) = command else {
         return "lf".to_string();
     };
@@ -646,8 +663,8 @@ fn format_duration(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess};
-    use crate::id::{LfProcessId, TraceId};
-    use crate::process::{LfProcess, ProcessKind};
+    use crate::id::{AgentProcessId, LfProcessId, TraceId};
+    use crate::process::{AgentProcess, ProcessEntry};
 
     #[test]
     fn activity_fold_keeps_unknown_parents_and_rejects_cycles() {
@@ -717,7 +734,7 @@ mod tests {
         let sql = rusqlite::Connection::open(path).unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let parent = LfProcessId::new();
-        let agent = LfProcessId::new();
+        let agent = AgentProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
             rusqlite::params![parent, now, std::process::id()],
@@ -774,9 +791,10 @@ mod tests {
             assert!(super::render_snapshot(&snapshot).contains(id));
         }
 
-        let mut record = store.process(&agent).unwrap().unwrap();
+        let mut record = store.agent_process(&agent).unwrap().unwrap();
         record.pid = Some(4242);
         record.os_started_at = Some(now);
+        let record = ProcessEntry::Agent(record);
         for (sample, expected) in [
             (None, Some(ActivityState::Unknown)),
             (Some(vec![]), None),
@@ -817,11 +835,11 @@ mod tests {
             let actual = activity_state(&record, &Ok(None), sample.as_deref());
             assert_eq!(actual, expected);
         }
-        let lf = store.process(&parent).unwrap().unwrap();
+        let lf = ProcessEntry::Lf(store.process(&parent).unwrap().unwrap());
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             lf_process_id: parent.to_string(),
-            trace_id: lf.trace_id.to_string(),
+            trace_id: lf.trace_id().to_string(),
             pid: 4242,
             started_at: now,
         };
@@ -969,19 +987,15 @@ mod tests {
 
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {
-        let id = LfProcessId::new();
+        let id = AgentProcessId::new();
         let parent = LfProcessId::new();
-        let record = LfProcess {
+        let record = ProcessEntry::Agent(AgentProcess {
             id: id.clone(),
-            kind: ProcessKind::Agent,
             agent_session_id: Some("conversation".into()),
             pid: Some(4242),
             os_started_at: Some(100),
             trace_id: TraceId::new(),
             parent_lf_process_id: Some(parent.clone()),
-            via_agent: None,
-            caller_session_id: None,
-            caller_agent_process_id: None,
             command: Some(r#"["codex","app-server"]"#.into()),
             repo: Some("/repo".into()),
             cwd: Some("/repo/task".into()),
@@ -991,7 +1005,7 @@ mod tests {
             exit_code: None,
             signal: None,
             error: None,
-        };
+        });
         let os = |start| {
             vec![OsProcess {
                 pid: 4242,

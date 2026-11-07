@@ -4,7 +4,7 @@ import Foundation
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]
-    public let processes: [LfProcess]
+    public let processes: [ProcessEntry]
     /// The graph the Task took up; `nil` until its first `lf task run`.
     public let graph: TaskGraph?
 

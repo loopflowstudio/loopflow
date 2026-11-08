@@ -1,7 +1,7 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 mod panes;
 use super::SqliteStore;
-use crate::durable::{RepositoryId, TaskState};
+use crate::durable::{RepositoryId, TaskSection, TaskState};
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
@@ -118,7 +118,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
     }
     for task in tasks {
-        let started = super::chapters::task_started_or_published_in(conn, &task.id)?;
+        let started = super::project_adoption::task_started_or_published_in(conn, &task.id)?;
         let state = super::durable::task_state_in(conn, &task.id)?;
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
@@ -133,9 +133,17 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Shipping => SelectionState::Shipping,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
-        if !started && !state.is_terminal() {
-            states.insert(SelectionState::Backlog);
-        }
+        let section = TaskSection::of(
+            state,
+            super::task_ownership::owned_in(conn, &task.id)?,
+            task.state.as_deref(),
+        );
+        states.insert(match section {
+            TaskSection::Backlog => SelectionState::Backlog,
+            TaskSection::Working => SelectionState::Working,
+            TaskSection::Autonomous => SelectionState::Autonomous,
+            TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
+        });
         let mut activity_known = true;
         for session in sessions_by_task.get(&task.id).into_iter().flatten() {
             // A conversation Loopflow never attached cannot be running here.
@@ -329,7 +337,7 @@ fn plan_in(
                             [
                                 "--machine".into(),
                                 location.machine_id.clone(),
-                                "--repository".into(),
+                                "--repo-id".into(),
                                 repository.to_string(),
                             ],
                         );
@@ -468,7 +476,9 @@ impl SqliteStore {
             .into_iter()
             .find(|saved| &saved.id == id);
         if previous.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let mut selection =
             Selection::parse(source, previous.as_ref().map(|saved| &saved.selection))
@@ -558,7 +568,9 @@ impl SqliteStore {
         let catalog = catalog_in(&tx, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let work = work_in(&tx, repository)?;
         let mut definitions = definitions(&catalog);
@@ -620,7 +632,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET name=coalesce(?1,name),pinned=coalesce(?2,pinned),revision=revision+1 WHERE repository_id=?3 AND id=?4 AND revision=?5",
             params![name,pinned,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -647,7 +661,9 @@ impl SqliteStore {
         let changed = tx.execute("UPDATE dashboards SET slots_json=?1,revision=revision+1 WHERE repository_id=?2 AND id=?3 AND revision=?4",
             params![json,repository.as_str(),id.0,expected_revision])?;
         if changed == 0 {
-            return Err(invalid("Dashboard changed; read it again before editing"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before editing".into(),
+            ));
         }
         let saved = catalog_in(&tx, repository)?
             .into_iter()
@@ -728,7 +744,9 @@ impl SqliteStore {
             params![repository.as_str(), id.0, expected_revision],
         )?;
         if deleted == 0 {
-            return Err(invalid("Dashboard changed; read it again before deleting"));
+            return Err(StoreError::Stale(
+                "Dashboard changed; read it again before deleting".into(),
+            ));
         }
         Ok(())
     }
@@ -784,7 +802,8 @@ mod tests {
         let independent = store
             .edit_dashboard(&repo, &DashboardId("backlog".into()), "state:backlog", None)
             .unwrap();
-        assert_eq!(independent.arrangement.order.len(), 1);
+        // FIX-1 is claimed with no checkout and FIX-3 unclaimed: both wait in Backlog.
+        assert_eq!(independent.arrangement.order.len(), 2);
         let repaired = store
             .edit_dashboard(&repo, &id, "task:FIX-1", Some(saved.revision))
             .unwrap();
@@ -1152,7 +1171,7 @@ mod tests {
         assert_eq!(dashboard.dashboard_id, Some(id.clone()));
         assert_eq!(dashboard.name.as_deref(), Some("Later"));
         assert!(dashboard.pinned);
-        assert_eq!(dashboard.contents.len(), 1);
+        assert_eq!(dashboard.contents.len(), 2);
         assert!(dashboard.contents[0].primary_session.is_none());
         let plans = store.selection_plans(&repo).unwrap();
         assert_eq!(plans.len(), defaults.len() + 1);
@@ -1746,7 +1765,7 @@ mod tests {
     }
 
     #[test]
-    fn a_published_pr_starts_a_task_for_queries_as_for_its_runtime() {
+    fn a_published_pr_opens_a_task_that_waits_in_backlog_until_claimed() {
         let (_dir, store, repo) = fixture();
         store
             .conn
@@ -1764,7 +1783,8 @@ mod tests {
             .view_plan(&repo, Some("state:backlog"))
             .unwrap()
             .contents
-            .is_empty());
+            .iter()
+            .any(|content| content.title == "Backlog"));
         assert!(store
             .view_plan(&repo, Some("state:open"))
             .unwrap()
@@ -1778,8 +1798,12 @@ mod tests {
         let (_dir, store, repo) = fixture();
         let before = store.revisions().unwrap();
         let plan = store.view_plan(&repo, Some("state:backlog")).unwrap();
-        assert_eq!(plan.contents.len(), 1);
-        let backlog = &plan.contents[0];
+        assert_eq!(plan.contents.len(), 2);
+        let backlog = plan
+            .contents
+            .iter()
+            .find(|content| content.title == "Backlog")
+            .unwrap();
         assert_eq!(backlog.title, "Backlog");
         assert!(backlog.primary_session.is_none());
         assert!(backlog.location.is_none());

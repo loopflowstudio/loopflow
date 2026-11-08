@@ -55,20 +55,24 @@ impl Fixture {
             }
         }
         let home = self.home.path();
+        // Another installed harness would leave the stand-in one of several, and
+        // lf selects only when exactly one is installed.
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let inherited = std::env::split_paths(&inherited).filter(|dir| {
+            !["claude", "codex", "pi"]
+                .iter()
+                .any(|h| dir.join(h).exists())
+        });
+        let path = std::env::join_paths(std::iter::once(home.join("bin")).chain(inherited));
         command
             .args(args)
             .current_dir(self.repo.path())
             .env("HOME", home)
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    home.join("bin").display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            )
+            .env("PATH", path.unwrap())
+            // A routed launch signs the provider's shared home in; keep it in the fixture.
+            .env("CODEX_HOME", home.join(".codex"))
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -446,8 +450,8 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let preview = fixture.json(&["skill", "repo/session", "--context", "--json"]);
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
-    assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
-    assert!(prompt.contains("When Work exists, apply it"));
+    assert!(prompt.contains("no setup checklist first"));
+    assert!(prompt.contains("Opening this conversation asks for nothing"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);
@@ -588,10 +592,10 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
     let config: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(fixture.home.path().join("native-config.json")).unwrap(),
+        &std::fs::read(fixture.home.path().join("native-server-config.json")).unwrap(),
     )
     .unwrap();
-    let roots = config["config"]["sandbox_workspace_write.writable_roots"]
+    let roots = config["sandbox_workspace_write.writable_roots"]
         .as_array()
         .unwrap();
     assert!(
@@ -640,7 +644,6 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     // its Graph registers, so wait for it to stop there.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
-        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
@@ -696,7 +699,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(history["plan_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -935,6 +938,11 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .map(|s| s["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
         ["inventory-110", "inventory-111"]
+    );
+    // `--select` keeps only the named paths of each listed Session.
+    assert_eq!(
+        fixture.json(&["session", "list", "--json", "--limit", "2", "--select", "id"]),
+        serde_json::json!([{"id": "inventory-110"}, {"id": "inventory-111"}])
     );
     let output = fixture
         .command(&list)
@@ -1323,6 +1331,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .map(|session| session["id"].as_str().unwrap().to_string())
             .collect()
     };
+
+    // No Session is different from an existing Session without native history.
+    // Reading the explicit Start offer must not admit either a Session or a turn.
+    let absent = fixture.json(&["resume", "--task", "INF-125", "--explain", "--json"]);
+    assert_eq!(absent["state"], Value::Null);
+    assert_eq!(absent["action"]["intent"], "start");
+    assert_eq!(absent["actions"].as_array().unwrap().len(), 1);
+    assert_eq!(absent["actions"][0]["label"], "Start conversation");
+    assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
     let sole = converse(&sole_path);
@@ -2445,6 +2462,9 @@ fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() 
 fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
     for owned in [false, true] {
         let fixture = Fixture::new(true);
+        fixture
+            .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
         fixture
             .repo
             .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
@@ -3573,6 +3593,9 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
 fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
     for wave in [false, true] {
         let fixture = Fixture::new(false);
+        fixture
+            .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
         let scope = if wave {
             let task_path = fixture.repo.create_named_worktree("other-task");
             support::register_task_with_pr(

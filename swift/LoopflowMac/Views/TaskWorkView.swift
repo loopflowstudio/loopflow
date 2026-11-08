@@ -581,11 +581,6 @@ struct TaskHeading: View {
     }
 }
 
-extension RoadmapTask {
-    /// Not yet started and still open: its Session slot offers Start.
-    var awaitsStart: Bool { runtime?.owner == nil && !task.isTerminal }
-}
-
 /// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
 /// Task's Workflow through the same path as `lf task run`.
 struct TaskStartOffer: View {
@@ -797,9 +792,9 @@ struct GraphProcessLog: View {
                     subject = task?.runtime?.workId ?? taskId
                 }
                 historyQuery = ownerQuery
-                let watch = try await ownerQuery.watchTask(task: subject)
+                let subscription = try await ownerQuery.subscribeTask(task: subject)
                 do {
-                    for try await line in watch.lines {
+                    for try await line in subscription.lines {
                         try Task.checkCancellation()
                         let frame = try WorkFrame.decode(part: .task,
                             scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil), sequence: 0, line: line)
@@ -811,10 +806,10 @@ struct GraphProcessLog: View {
                         error = nil
                     }
                 } catch {
-                    await watch.cancel()
+                    await subscription.cancel()
                     throw error
                 }
-                await watch.cancel()
+                await subscription.cancel()
             } catch is CancellationError {
                 return
             } catch { self.error = error.localizedDescription }
@@ -822,7 +817,7 @@ struct GraphProcessLog: View {
     }
 }
 
-/// The shown Task's recorded work, from its status watch, behind a disclosure.
+/// The shown Task's recorded work, from its status subscription, behind a disclosure.
 struct TaskDiagnosticsView: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -854,8 +849,8 @@ struct TaskWorkView: View {
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.processes) { process in
-                    row("Process", id: process.id, name: process.command ?? "Unknown command",
-                        state: process.outcome ?? "unknown")
+                    row(process.isAgent ? "Agent" : "Process", id: process.id,
+                        name: process.command ?? "Unknown command", state: process.outcome ?? "unknown")
                 }
                 if work.sessions.isEmpty && work.processes.isEmpty {
                     Text("No recorded work.")

@@ -44,7 +44,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     let mut config = AgentConfig {
-        isolate: None,
         system_prompt: request.system_prompt.clone(),
         conversation_context: request.conversation_context.clone(),
         task_prompt: request.task_prompt.clone(),
@@ -248,7 +247,7 @@ for line in sys.stdin:
             write_scope: crate::agent::AgentWriteScope::Worktree,
             execution_boundary: None,
             skip_permissions: true,
-            chrome: false,
+            chrome: None,
         };
         let source = CaptureHandle::begin_with_request(
             SessionCaptureSpec {

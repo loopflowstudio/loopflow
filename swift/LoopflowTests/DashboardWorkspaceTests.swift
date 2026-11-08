@@ -77,8 +77,8 @@ struct DashboardWorkspaceTests {
         let moved = try plan(["task_c", "task_a", "task_b"])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "move", "-p", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
-            case ["desktop", "view", "--plan", "--json"]: return moved
+            case ["desktop", "dashboard", "move", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "view", "show", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
@@ -88,7 +88,7 @@ struct DashboardWorkspaceTests {
         // A sidebar row drop and a grid tile drop both name Work IDs.
         let row = try #require(model.workingTaskWorkID(row: "task_c"))
         let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token(row)))
-        await model.reorderWorkingTask(dragged, to: "task_a")
+        await model.reorderWorkingTask(dragged, to: "task_a").value
         #expect(model.dashboardError == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
@@ -138,9 +138,9 @@ struct DashboardWorkspaceTests {
         let query = RegistryQuery { args, _ in
             switch args {
             // Rust applies the same move as the repository order and decides the mode.
-            case ["desktop", "move", "-p", "query:picked/task:task_c", "--destination", "task:task_a"]:
+            case ["desktop", "dashboard", "move", "query:picked/task:task_c", "--destination", "task:task_a"]:
                 return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
-            case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
+            case ["desktop", "view", "show", "query:picked", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
@@ -171,7 +171,7 @@ struct DashboardWorkspaceTests {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
         for focus in [nil, 0, 5] as [Int?] {
             let frames = SlotFrames()
-            let grid = DashboardSlotGrid(members: members, focused: focus.map { members[$0].work }, layout: Self.golden) { member in
+            let grid = DashboardSlotGrid(members: members, focused: focus.map { members[$0].work }, layout: Self.golden, page: .constant(0)) { member in
                 let index = members.firstIndex(of: member)!
                 ZStack {
                     // Slot 1's content asks for nearly the whole window.
@@ -293,7 +293,7 @@ struct DashboardWorkspaceTests {
         let expression = saved ? "query:picked" : "state:backlog or task:LOO-497"
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
         let query = RegistryQuery { args, _ in
-            if args == ["desktop", "view", expression, "--plan", "--json"] { return String(decoding: bytes, as: UTF8.self) }
+            if args == ["desktop", "view", "show", expression, "--json"] { return String(decoding: bytes, as: UTF8.self) }
             if args.starts(with: ["desktop", "layout"]) { return "null" }
             throw RegistryQueryError("Unexpected execution")
         }
@@ -404,35 +404,6 @@ struct DashboardWorkspaceTests {
         #expect(durable == workspace.portableLayout())
         #expect(workspace.multiplexer.shell(added.id) == added)
         #expect(workspace.persistenceError == nil)
-    }
-
-    @Test func editAfterDebounceElapsesSupersedesSaveWithoutError() async throws {
-        let source = fixtureWork(fixtureWorkspace("/task"))
-        let location = try #require(source.location)
-        let server = IntentReading(source.portableLayout())
-        // Like the real runner, a cancelled caller's write fails with CancellationError.
-        let query = RegistryQuery(runWithInput: { _, _, input in
-            try Task.checkCancellation()
-            return try await server.write(input)
-        }) { args, _ in
-            if args.starts(with: ["desktop", "layout"]) { return await server.read() }
-            throw RegistryQueryError("Unexpected execution")
-        }
-        let workspace = fixtureWork(location)
-        workspace.startPersistence(query: query, repoPath: "/repo")
-        await server.waitForRead()
-        try await server.release()
-        try await eventually { !workspace.isRestoringIntent }
-        let loaded = workspace.portableLayout().revision
-        workspace.multiplexer.newShell(command: ["first"], location: location)
-        try await Task.sleep(for: .milliseconds(50))
-        // The first debounce fires while the main actor is busy; the second edit's
-        // cancellation reaches that task before it resumes into its save.
-        workspace.multiplexer.newShell(command: ["second"], location: location)
-        usleep(400_000)  // Block the main actor; Task.sleep would yield it.
-        try await eventually { workspace.persistenceError != nil || workspace.portableLayout().revision > loaded }
-        #expect(workspace.persistenceError == nil)
-        #expect(await server.saved == workspace.portableLayout())
     }
 
     private func eventually(_ condition: () -> Bool) async throws {

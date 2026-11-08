@@ -49,9 +49,10 @@ pub fn resolve_child(
     if prefix.is_empty() {
         let owner = match name {
             "resume" => Some("session"),
-            "comment" => Some("task"),
             // `lf release` stays the release command.
-            "sync" | "release" => Some("ops"),
+            "release" => Some("repository"),
+            // `lf set` and `lf unset` stay the everyday spelling of `config set|unset`.
+            "set" | "unset" => Some("config"),
             _ => None,
         };
         if let Some(owner) = owner.and_then(|name| command.find_subcommand(name)) {
@@ -192,9 +193,14 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut current = &tree;
     let mut path = Vec::new();
     let mut output = vec![args[0].clone()];
+    // Where each word of `path` sits in `output`.
+    let mut positions = Vec::new();
     let mut location = Vec::new();
     let mut index = 1;
     let mut boundary = false;
+    // Whether `path` ends in a word the tree does not know.
+    let mut unknown = false;
+    let mut values_before_subcommand = Vec::new();
     let mut help = false;
     while index < args.len() {
         let value = &args[index];
@@ -232,12 +238,18 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if !boundary {
-            if let Some(expansion) = resolve_child(current, value, &path)? {
+            let child = if values_before_subcommand.is_empty() {
+                resolve_child(current, value, &path)?
+            } else {
+                None
+            };
+            if let Some(expansion) = child {
                 for owner in &expansion {
                     current = current
                         .find_subcommand(owner)
                         .expect("resolved child exists");
                 }
+                positions.extend(output.len()..output.len() + expansion.len());
                 output.extend(expansion.clone());
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
@@ -245,17 +257,62 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 {
                     boundary = true;
                 }
+            } else if leading_value(current, &values_before_subcommand, value) {
+                // `lf account codex --cached`: the provider is a value, not an owner.
+                values_before_subcommand.push(value.clone());
+                positions.push(output.len());
+                path.push(value.clone());
+                output.push(value.clone());
             } else {
                 // Keep unknown owner children in help requests too: they must
                 // fail identically instead of becoming the owner's help page.
+                positions.push(output.len());
                 path.push(value.clone());
                 output.push(value.clone());
                 boundary = true;
+                unknown = true;
             }
         } else {
             output.push(value.clone());
         }
         index += 1;
+    }
+    if let Some(start) = positions.first().copied() {
+        // An old spelling is the resolved path, or that path less the unknown
+        // word after it: `desktop view <expression> --plan` names `--plan`
+        // after the expression the tree could not resolve.
+        let splits = if unknown {
+            vec![path.len(), path.len() - 1]
+        } else {
+            vec![path.len()]
+        };
+        for split in splits {
+            let kept = &positions[..split];
+            let rest: Vec<String> = (start..output.len())
+                .filter(|index| !kept.contains(index))
+                .map(|index| output[index].clone())
+                .collect();
+            let Some(entry) = super::aliases::find(&path[..split], &rest) else {
+                continue;
+            };
+            let mut moved = output[..start].to_vec();
+            moved.extend(entry.canonical.iter().map(|word| word.to_string()));
+            let mut dropped = entry.words.to_vec();
+            for (index, word) in output.iter().enumerate().skip(start) {
+                if kept.contains(&index) {
+                    continue;
+                }
+                if let Some(at) = dropped.iter().position(|old| old == word) {
+                    dropped.remove(at);
+                    continue;
+                }
+                moved.push(word.clone());
+            }
+            if help {
+                moved.push("--help".into());
+            }
+            return normalize_args(moved);
+        }
     }
     if help {
         let mut request = vec![args[0].clone()];
@@ -272,14 +329,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
         Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.processes
-    ) || matches!(
-        command,
-        Commands::Graph {
-            cmd: GraphCommand::Show {
-                processes: true,
-                ..
-            }
-        }
     ) {
         return None;
     }
@@ -300,7 +349,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     }
     Some((|| {
         let cwd = std::env::current_dir()?;
-        let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+        let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or_else(|| cwd.clone());
         match command {
             Commands::Help { path, all, json } => {
                 if *json || cli.json {
@@ -323,7 +372,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 crate::lf::commands::graph::list(&repo, *json)?;
             }
             Commands::Graph {
-                cmd: GraphCommand::Show { name, json, .. },
+                cmd: GraphCommand::Show { name, json },
             } => {
                 if *json {
                     let entry = crate::graph::compiled::graph_catalog_entry(name, &repo)?;
@@ -333,8 +382,19 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 }
             }
             Commands::Graph {
-                cmd: GraphCommand::Customize { name },
-            } => println!("{}", crate::graph::customize(name, &repo)?.display()),
+                cmd: GraphCommand::Customize { .. },
+            } => {
+                crate::lf::commands::mutation::run(
+                    cli,
+                    &std::env::args().collect::<Vec<_>>(),
+                    &cwd,
+                    &mut crate::lf::commands::mutation::CommandIo {
+                        input: &mut std::io::stdin(),
+                        output: &mut std::io::stdout(),
+                        error: &mut std::io::stderr(),
+                    },
+                )?;
+            }
             Commands::Skill {
                 cmd: SkillCommand::Customize { name },
             } => println!("{}", crate::skills::customize(name, &repo)?.display()),
@@ -344,18 +404,73 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     })())
 }
 
+/// Whether `word` is the next positional value of a command that also has
+/// subcommands, as the provider in `lf account codex --cached`. No subcommand
+/// follows a value. The root's skill name is not one, and a value the
+/// positional rejects is an unknown child.
+fn leading_value(command: &Command, taken: &[String], word: &str) -> bool {
+    if command.get_name() == "lf"
+        || command.is_args_conflicts_with_subcommands_set()
+        || command.get_subcommands().next().is_none()
+        || command.get_positionals().nth(taken.len()).is_none()
+    {
+        return false;
+    }
+    let args = std::iter::once(command.get_name())
+        .chain(taken.iter().map(String::as_str))
+        .chain([word]);
+    command.clone().try_get_matches_from(args).is_ok()
+}
+
 pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Command, Vec<String>)> {
     let mut current = tree;
-    let mut canonical = Vec::new();
-    for name in path {
-        let Some(expansion) = resolve_child(current, name, &canonical)? else {
+    let mut canonical: Vec<String> = Vec::new();
+    let mut values_before_subcommand = Vec::new();
+    for (index, name) in path.iter().enumerate() {
+        let expansion = if values_before_subcommand.is_empty() {
+            resolve_child(current, name, &canonical)?
+        } else {
+            None
+        };
+        if expansion.is_none() && leading_value(current, &values_before_subcommand, name) {
+            values_before_subcommand.push(name.clone());
+            continue;
+        }
+        let Some(expansion) = expansion else {
+            // `lf help <old path>` explains the command it moved to: the old
+            // spelling is the canonical path so far plus the words after it.
+            for split in index..=path.len() {
+                let old = [canonical.as_slice(), &path[index..split]].concat();
+                let Some(entry) = super::aliases::find(&old, &path[split..]) else {
+                    continue;
+                };
+                let mut words: Vec<String> = entry
+                    .canonical
+                    .iter()
+                    .map(|word| word.to_string())
+                    .collect();
+                let mut dropped = entry.words.to_vec();
+                for word in &path[split..] {
+                    match dropped.iter().position(|old| old == word) {
+                        Some(at) => {
+                            dropped.remove(at);
+                        }
+                        None => words.push(word.clone()),
+                    }
+                }
+                return resolve_path(tree, &words);
+            }
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidSubcommand,
                 format!(
                     "unknown command: lf {}",
-                    [canonical.as_slice(), std::slice::from_ref(name)]
-                        .concat()
-                        .join(" ")
+                    [
+                        canonical.as_slice(),
+                        values_before_subcommand.as_slice(),
+                        std::slice::from_ref(name)
+                    ]
+                    .concat()
+                    .join(" ")
                 ),
             )
             .into());
@@ -441,7 +556,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             ));
         }
         output.push_str("\nSelect: --repo <name-or-path>, --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>, --cwd <path>\n--repo resolves names under repo_root (default ~/src) on the selected Machine.\n--machine otherwise uses its saved remote repository.\nWith --machine: --forward-agent\nAgent selection: -a, --agent <harness[:model]> selects this invocation and its Graph steps; unrelated child work keeps its own preferences\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf ops pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf graph NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {

@@ -30,15 +30,33 @@ pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
 }
 
 /// A user edit selects an owner, never a file plus an independently asserted scope.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Destination {
     PersonalGlobal {},
-    PersonalRepository { repository: PathBuf },
-    SharedRepository { repository: PathBuf },
-    PersonalWave { repository: PathBuf, wave: String },
-    SharedWave { repository: PathBuf, wave: String },
+    #[serde(rename = "personal_repo")]
+    PersonalRepository {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+    },
+    #[serde(rename = "shared_repo")]
+    SharedRepository {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+    },
+    PersonalWave {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+        wave: String,
+    },
+    SharedWave {
+        #[serde(rename = "repo")]
+        repository: PathBuf,
+        wave: String,
+    },
 }
 
 #[derive(Debug)]
@@ -275,9 +293,12 @@ pub(crate) fn read_text(path: &Path) -> Result<String> {
     }
 }
 
-/// Read an authored configuration mapping; absent or empty files are empty mappings.
+/// Read an authored configuration mapping in the typed layout, whichever
+/// spellings it uses; absent or empty files are empty mappings.
 pub(crate) fn read(path: &Path) -> Result<Value> {
-    parse_document(&read_text(path)?, path)
+    let mut document = parse_document(&read_text(path)?, path)?;
+    super::keys::fold(&mut document);
+    Ok(document)
 }
 
 fn parse_document(text: &str, path: &Path) -> Result<Value> {
@@ -465,11 +486,19 @@ pub fn remove(root: &mut Value, path: &[&str]) -> bool {
     removed
 }
 
-/// Set or remove an authored key; report whether it was set or found for removal.
-pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<bool> {
+/// Set or remove the typed key `parts`, written at its canonical spelling;
+/// report whether it was set or found for removal.
+pub(crate) fn edit(
+    path: &Path,
+    parts: &[&str],
+    value: Option<Value>,
+    root: super::keys::Root,
+) -> Result<bool> {
     update(path, |document| {
-        if parts.len() >= 2 && parts[parts.len() - 2] == "machine" {
-            if let Some(placement) = parts[..parts.len() - 1]
+        let written = super::keys::gather(document, parts, root);
+        let written: Vec<&str> = written.iter().map(String::as_str).collect();
+        if written.len() >= 2 && written[written.len() - 2] == "machine" {
+            if let Some(placement) = written[..written.len() - 1]
                 .iter()
                 .try_fold(&mut *document, |value, key| value.get_mut(*key))
             {
@@ -478,22 +507,22 @@ pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<
         }
         let changed = match value {
             Some(value) => {
-                if parts.len() >= 2 && parts[parts.len() - 2] == "machine" {
-                    let sibling = match parts.last() {
+                if written.len() >= 2 && written[written.len() - 2] == "machine" {
+                    let sibling = match written.last() {
                         Some(&"tasks") => Some("capacity"),
                         Some(&"capacity") => Some("tasks"),
                         _ => None,
                     };
                     if let Some(sibling) = sibling {
-                        let mut path = parts[..parts.len() - 1].to_vec();
+                        let mut path = written[..written.len() - 1].to_vec();
                         path.push(sibling);
                         remove(document, &path);
                     }
                 }
-                super::settings::insert(document, parts, value);
+                super::settings::insert(document, &written, value);
                 true
             }
-            None => remove(document, parts),
+            None => remove(document, &written),
         };
         let offset = if parts.first() == Some(&"waves") {
             2
@@ -503,9 +532,11 @@ pub(crate) fn edit(path: &Path, parts: &[&str], value: Option<Value>) -> Result<
         let settings = &parts[offset..];
         let preference = super::settings::preference_parts(settings)?.len();
         let root_index = parts.len() - preference;
+        let mut typed = document.clone();
+        super::keys::fold(&mut typed);
         if let Some(value) = parts[..=root_index]
             .iter()
-            .try_fold(&*document, |value, key| value.get(*key))
+            .try_fold(&typed, |value, key| value.get(*key))
         {
             super::settings::validate_value(&[parts[root_index]], value)?;
         }
@@ -547,11 +578,13 @@ pub fn import(
         for (key, value) in incoming {
             let key = key.as_str().context("setting key must be text")?;
             let parts: Vec<_> = prefix.iter().map(String::as_str).chain([key]).collect();
-            let existing = parts
+            let written = super::keys::gather(document, &parts, super::keys::Root::General);
+            let written: Vec<&str> = written.iter().map(String::as_str).collect();
+            let existing = written
                 .iter()
                 .try_fold(&*document, |value, key| value.get(*key));
             ensure!(replace || existing.is_none_or(|old| old == value), "{key} conflicts with saved settings; use --replace to adopt the imported declaration");
-            super::settings::insert(document, &parts, value.clone());
+            super::settings::insert(document, &written, value.clone());
         }
         Ok(())
     })?;
@@ -576,16 +609,22 @@ pub(crate) fn copy_wave(
         .cloned();
     if let Some(value) = &value {
         update(&target, |document| {
-            let existing = document
-                .get("waves")
-                .and_then(|waves| waves.get(id.as_str()));
+            let written = super::keys::gather(
+                document,
+                &["waves", id.as_str()],
+                super::keys::Root::General,
+            );
+            let written: Vec<&str> = written.iter().map(String::as_str).collect();
+            let existing = written
+                .iter()
+                .try_fold(&*document, |value, key| value.get(*key));
             ensure!(
                 existing.is_none_or(|existing| existing == value),
                 "Wave {} has independent preferences in {}; resolve them before relocation",
                 id,
                 target.display()
             );
-            super::settings::insert(document, &["waves", id.as_str()], value.clone());
+            super::settings::insert(document, &written, value.clone());
             Ok(())
         })?;
     }
@@ -599,12 +638,18 @@ pub(crate) fn finish_wave_move(
 ) -> Result<()> {
     let path = private_path(source)?;
     update(&path, |document| {
-        if document
-            .get("waves")
-            .and_then(|waves| waves.get(id.as_str()))
-            == Some(copied)
-        {
-            remove(document, &["waves", id.as_str()]);
+        let mut typed = document.clone();
+        super::keys::fold(&mut typed);
+        if typed.get("waves").and_then(|waves| waves.get(id.as_str())) == Some(copied) {
+            let written = super::keys::gather(
+                document,
+                &["waves", id.as_str()],
+                super::keys::Root::General,
+            );
+            remove(
+                document,
+                &written.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         Ok(())
     })
@@ -623,7 +668,57 @@ mod tests {
         value: Option<&str>,
     ) -> anyhow::Result<std::path::PathBuf> {
         let destination = super::Destination::from_cli(repo, wave, global, shared)?;
-        Ok(crate::config::api::declaration(&destination, key, value, value.is_none())?.path)
+        Ok(match value {
+            Some(value) => crate::engine::config::set(&destination, key, value)?,
+            None => crate::engine::config::unset(&destination, key)?,
+        }
+        .path)
+    }
+
+    #[test]
+    fn shared_edits_relocate_the_edited_group_to_its_canonical_key() {
+        let repo = tempfile::tempdir().unwrap();
+        let path = repo.path().join(".lf/config.yaml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "# shared\nplanning:\n  provider: linear\nlinear:\n  team: released\nskills:\n  design:\n    agent: codex\n",
+        )
+        .unwrap();
+        let shared = super::Destination::SharedRepository {
+            repository: repo.path().to_owned(),
+        };
+        let declared = crate::engine::config::get(&shared, "linear.team").unwrap();
+        assert_eq!(declared.key, "repo.plan.team");
+        assert_eq!(declared.value, "released");
+        crate::engine::config::set(&shared, "planning", "{provider: linear, team: typed}").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# shared\n"), "{text}");
+        // Released `lf` reads this layout and silently ignores `repo:`.
+        assert!(text.contains("planning:\n"), "{text}");
+        assert!(!text.contains("repo:"), "{text}");
+        assert!(!text.contains("linear:"), "{text}");
+        assert!(text.contains("skills:\n  design:\n"), "{text}");
+        assert_eq!(
+            crate::config::load_repo_config(repo.path())
+                .unwrap()
+                .unwrap()
+                .planning_transport(),
+            crate::config::PlanningConfig::Linear {
+                team: Some("typed".into())
+            }
+        );
+        let saved = crate::engine::config::set(&shared, "skills.design.agent", "claude").unwrap();
+        assert_eq!(saved.key, "skill.design.agent");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("skills:\n  design:\n    agent: claude\n"),
+            "{text}"
+        );
+        assert!(crate::engine::config::unset(&shared, "wave.graph")
+            .unwrap()
+            .value
+            .is_null());
     }
 
     #[test]
@@ -863,10 +958,28 @@ mod tests {
         let source_path = private_path(source.path()).unwrap();
         let target_path = private_path(target.path()).unwrap();
         let parts: Vec<_> = key.split('.').collect();
-        super::edit(&source_path, &parts, Some("codex".into())).unwrap();
-        super::edit(&target_path, &parts, Some("claude".into())).unwrap();
+        super::edit(
+            &source_path,
+            &parts,
+            Some("codex".into()),
+            super::super::keys::Root::General,
+        )
+        .unwrap();
+        super::edit(
+            &target_path,
+            &parts,
+            Some("claude".into()),
+            super::super::keys::Root::General,
+        )
+        .unwrap();
         assert!(super::copy_wave(source.path(), target.path(), &id).is_err());
-        super::edit(&target_path, &parts, None).unwrap();
+        super::edit(
+            &target_path,
+            &parts,
+            None,
+            super::super::keys::Root::General,
+        )
+        .unwrap();
         let copied = super::copy_wave(source.path(), target.path(), &id)
             .unwrap()
             .unwrap();
@@ -874,13 +987,25 @@ mod tests {
             crate::config::files::read(&target_path).unwrap()["waves"][id.as_str()]["agent"],
             "codex"
         );
-        super::edit(&source_path, &parts, Some("claude".into())).unwrap();
+        super::edit(
+            &source_path,
+            &parts,
+            Some("claude".into()),
+            super::super::keys::Root::General,
+        )
+        .unwrap();
         super::finish_wave_move(source.path(), &id, &copied).unwrap();
         assert_eq!(
             crate::config::files::read(&source_path).unwrap()["waves"][id.as_str()]["agent"],
             "claude"
         );
-        super::edit(&source_path, &parts, Some("codex".into())).unwrap();
+        super::edit(
+            &source_path,
+            &parts,
+            Some("codex".into()),
+            super::super::keys::Root::General,
+        )
+        .unwrap();
         super::finish_wave_move(source.path(), &id, &copied).unwrap();
         assert!(crate::config::files::read(&source_path).unwrap()["waves"]
             .get(id.as_str())
@@ -934,30 +1059,18 @@ mod tests {
         )
         .unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
-        let request = crate::config::api::Request::Declaration {
-            destination: super::Destination::PersonalRepository {
-                repository: repo.path().to_owned(),
-            },
-            key: "planning.provider".into(),
-            value: Some("linear".into()),
-            unset: false,
+        let destination = super::Destination::PersonalRepository {
+            repository: repo.path().to_owned(),
         };
-        assert!(crate::config::api::run(request).is_err());
+        assert!(crate::engine::config::set(&destination, "planning.provider", "linear").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-        crate::config::api::run(crate::config::api::Request::Declaration {
-            destination: super::Destination::PersonalRepository {
-                repository: repo.path().to_owned(),
-            },
-            key: "chrome".into(),
-            value: Some("false".into()),
-            unset: false,
-        })
-        .unwrap();
-        assert!(
-            !crate::config::load_config(Some(repo.path()))
+        crate::engine::config::set(&destination, "chrome", "false").unwrap();
+        assert_eq!(
+            crate::config::load_config(Some(repo.path()))
                 .unwrap()
                 .unwrap()
-                .chrome
+                .chrome,
+            Some(false)
         );
     }
 }

@@ -60,8 +60,6 @@ jobs:
         run: uv run python scripts/swift_cache.py restore
       - name: Build CLI for Swift transport tests
         run: /usr/bin/time -l cargo build -p loopflow --bin lf
-      - name: Build the Rust library Desktop links
-        run: /usr/bin/time -l cargo build -p loopflow-ffi --lib
       - name: Test checkout observation's read-only sandbox
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
       - name: Build Desktop and its tests
@@ -197,7 +195,10 @@ jobs:
         env:
           XCODE_CACHE_HIT: ${{ steps.xcode-cache.outputs.cache-hit }}
         run: uv run python scripts/build_xcode_ci.py
-        timeout-minutes: 12
+        # A warm Rust cache finishes in ~7 minutes. An evicted one recompiles the
+        # control CLI and app library from scratch, and a timed-out run never
+        # saves the cache, so a tight limit would starve every later run.
+        timeout-minutes: ${{ steps.rust-cache.outputs.cache-hit == 'true' && 12 || 30 }}
       - name: Record Xcode source timestamps
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/swift_cache.py save --build-system xcode

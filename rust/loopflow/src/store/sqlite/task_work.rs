@@ -239,7 +239,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
             conn.query_row(
                 &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
-                super::processes::read_process,
+                super::processes::read_lf_process,
             )?,
         )),
         None => None,
@@ -317,6 +317,7 @@ pub(crate) enum Approval {
 pub(crate) struct ShipStop {
     pub at: i64,
     pub by: Option<LfProcessId>,
+    pub person: Option<String>,
 }
 
 pub(super) fn ship_stop_in(
@@ -326,13 +327,14 @@ pub(super) fn ship_stop_in(
     use rusqlite::OptionalExtension;
     Ok(conn
         .query_row(
-            "SELECT ship_stopped_at,ship_stopped_lf_process_id FROM tasks
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks
              WHERE id=?1 AND ship_stopped_at IS NOT NULL",
             [task.as_str()],
             |row| {
                 Ok(ShipStop {
                     at: row.get(0)?,
                     by: row.get(1)?,
+                    person: row.get(2)?,
                 })
             },
         )
@@ -412,7 +414,7 @@ fn ship_in(
         Approval::Route => {}
         Approval::Explicit => {
             tx.execute(
-                "UPDATE tasks SET ship_stopped_at=NULL,ship_stopped_lf_process_id=NULL WHERE id=?1",
+                "UPDATE tasks SET ship_stopped_at=NULL,ship_stopped_lf_process_id=NULL,ship_stopped_person=NULL WHERE id=?1",
                 [task.as_str()],
             )?;
         }
@@ -624,7 +626,10 @@ impl SqliteStore {
     }
 
     /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
-    pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
+    pub(crate) fn task_open_processes(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::process::ProcessEntry>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let mut query = conn.prepare(&format!(
@@ -641,7 +646,7 @@ impl SqliteStore {
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
-        crate::journal::process_evidence(self, &process.id)
+        crate::journal::lf_evidence(self, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
@@ -832,14 +837,14 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         note: &str,
-        stopped_by: Option<&LfProcessId>,
+        stopped_by: Option<ShipStop>,
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         if let Some(by) = stopped_by {
             tx.execute(
-                "UPDATE tasks SET ship_stopped_at=?2,ship_stopped_lf_process_id=?3 WHERE id=?1",
-                rusqlite::params![task.as_str(), crate::store::rows::now_unix(), by.as_str()],
+                "UPDATE tasks SET ship_stopped_at=?2,ship_stopped_lf_process_id=?3,ship_stopped_person=?4 WHERE id=?1",
+                rusqlite::params![task.as_str(), by.at, by.by, by.person],
             )?;
         }
         let Some(shipping) = unship_in(&tx, task)? else {
@@ -935,9 +940,45 @@ mod tests {
 
     use crate::durable::{GraphProcessFilter, ProjectId, TaskId};
     use crate::id::{LfProcessId, TraceId, WaveId};
-    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
+    use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn request_stop_retains_its_person_without_an_os_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: TaskId::new(),
+                repository_id: store.ensure_repository("/request-stop").unwrap(),
+                project_id: None,
+                title: "Stop".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let stop = super::ShipStop {
+            at: 25,
+            by: None,
+            person: Some("Casey".into()),
+        };
+        assert!(store
+            .stop_shipping(&task.id, "Casey", Some(stop.clone()))
+            .unwrap()
+            .is_none());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(store.task_ship_stop(&task.id).unwrap(), Some(stop));
+        let count: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[test]
     fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
@@ -1057,7 +1098,17 @@ mod tests {
         assert_eq!(shipping.approved_by, Some(by.clone()));
         let stopper = LfProcessId::new();
         assert_eq!(
-            store.stop_shipping(&task, "stop", Some(&stopper)).unwrap(),
+            store
+                .stop_shipping(
+                    &task,
+                    "stop",
+                    Some(super::ShipStop {
+                        at: crate::store::rows::now_unix(),
+                        by: Some(stopper.clone()),
+                        person: None
+                    })
+                )
+                .unwrap(),
             Some(shipping)
         );
         assert_eq!(state(), crate::durable::TaskState::Moving);
@@ -1681,7 +1732,7 @@ mod tests {
         assert_eq!(initial_open.len(), 2);
         assert!(initial_open
             .iter()
-            .all(|process| process.completed_at.is_none()));
+            .all(|process| process.completed_at().is_none()));
         let unfinished = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -1694,7 +1745,9 @@ mod tests {
         }
         let open = store.task_open_processes(&task).unwrap();
         assert_eq!(open.len(), 3);
-        assert!(open.iter().any(|process| process.id == unfinished));
+        assert!(open
+            .iter()
+            .any(|process| process.id() == unfinished.as_str()));
         // With every Process unfinished, each membership path agrees: checkout,
         // Session event and attachment.
         store
@@ -1706,10 +1759,10 @@ mod tests {
              UPDATE processes SET completed_at=NULL;",
             )
             .unwrap();
-        let ids = |processes: Vec<crate::process::LfProcess>| {
+        let ids = |processes: Vec<crate::process::ProcessEntry>| {
             processes
-                .into_iter()
-                .map(|process| process.id)
+                .iter()
+                .map(|process| process.id().to_owned())
                 .collect::<Vec<_>>()
         };
         let all = ids(store.task_work(&task).unwrap().processes);
@@ -1730,11 +1783,11 @@ mod tests {
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == mechanical));
+            .any(|process| process.id() == mechanical.as_str()));
         assert!(work
             .processes
             .iter()
-            .any(|process| process.id == bound_process));
+            .any(|process| process.id() == bound_process.as_str()));
         assert_eq!(
             store.session_task_ids("manual").unwrap(),
             std::slice::from_ref(&task)
@@ -1769,8 +1822,8 @@ mod tests {
         // The Graph's step is the only work performed in the checkout.
         let performed = store
             .processes(
-                &LfProcessFilter {
-                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
+                &ProcessFilter {
+                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
@@ -1782,9 +1835,9 @@ mod tests {
             performed
                 .entries
                 .iter()
-                .map(|process| &process.id)
+                .map(crate::process::ProcessEntry::id)
                 .collect::<Vec<_>>(),
-            [&graph.steps[0].process.id]
+            [graph.steps[0].process.id.as_str()]
         );
 
         let child = TaskId::new();

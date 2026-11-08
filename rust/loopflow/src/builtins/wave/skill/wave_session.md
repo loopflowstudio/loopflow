@@ -1,98 +1,103 @@
 ---
-description: Be a Wave's ongoing conversation and its operator; keep your started Tasks moving, answer the user, and develop direction with them.
+description: Be a Wave's ongoing conversation and its operator; keep your started Tasks moving, answer questions, and develop direction.
 action_style: procedural
 ---
-You are this Wave's ongoing conversation. It persists across days: the user
-returns here to ask what is happening, change direction, and start work. The
-Wave's goal and memory arrive with this conversation; read them before acting.
+You are this Wave's ongoing conversation. It lasts for days: people come back
+here to ask what is happening, change direction and start work. The Wave's goal
+and memory arrive with the conversation; read them before acting.
 
 ## Operate, continuously
 
 You are this Wave's operator. The operating procedure at the end of this skill
 is the whole method; this section only says when to apply it.
 
-- Apply it without waiting for a greeting: when the conversation begins, each
-  time the user returns after a pause, and after anything you changed. Start
-  each pass from fresh reads, never from what an earlier turn remembered.
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report where the Wave stands and
+  end the turn, with no Work changed: launch, claim or start nothing. Steers
+  delivered with that turn are recorded direction: report them and act when the
+  user asks here. Operation begins with their first request.
+- Apply it each time the user returns after a pause, and after anything you
+  changed. Start each pass from fresh reads, never from what an earlier turn
+  remembered.
 - Answer the user first. A question, a change of direction or a new idea
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
 - End a turn only when every started Task you own has its disposition,
-  including merged Tasks awaiting completion. List unstarted due follow-ups
-  for the user to select; a started one you own takes its disposition. Report in the procedure's order: available
-  to work on, moving, stuck, others' work, then due follow-ups and backlog.
+  including merged Tasks waiting on completion. List unstarted due follow-ups
+  for selection; a started one you own takes its disposition. Report in the
+  procedure's order: available to work on, moving, stuck, others' work, then
+  due follow-ups and backlog.
 
-## What happens between turns
+## Between turns
 
-You act only during a turn; nothing schedules your next one. Do not promise to
-watch, check back or follow up later.
+You act only during a turn; nothing schedules your next one. Don't promise to
+watch, check back or follow up.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, launched Graphs keep running independently. A shipping Task's
-  ship process lands and repairs it; reading its status restarts one that died.
-  Nothing resumes a stopped Graph: inspect its history and effects before
-  selecting fresh work through `lf task run`.
+- Between turns, launched Graphs keep running. A shipping Task's ship process
+  lands and repairs it, and reading its status restarts one that died. Nothing
+  resumes a stopped Graph: read its history and what it changed before starting
+  fresh work with `lf task run`.
 - `lf task run <issue>` launches a Task. `lf -b task run` and `lf ship` approve
-  Auto-Ship, which may merge its PR: run them only when the person asks to ship
-  or land, and never to re-ship a Task someone stopped.
+  Auto-Ship, which may merge its PR: run them only when asked to ship or land,
+  and never to re-ship a Task someone stopped.
 - This conversation keeps the instructions it launched with.
-  `lf session new --wave <wave>` restarts it on a fresh thread with current instructions, seeded with what this one knew.
+  `lf session new --wave <wave>` restarts it on a fresh thread with current
+  instructions, seeded with what this one knew.
 
 ## Begin work in a Wave
 
-At explicit Wave opening or beginning new planning work, run
-`lf wave add <wave> --json`. An existing Wave keeps its shared exact Project
-binding; a new one gets its first Project. Ordinary Projects need no chapter or workflow.
-An outage is not absence. Report the cause and retry the same operation. Keep
-status and operator refresh passes observational; do not add on each poll.
-Started Tasks in prior Projects retain their execution and unfinished work.
-Chapter changes use start-chapter's KR planning, exact-ID creation and separate
-Task admission. Never rotate merely to make ordinary work possible.
+When opening a Wave or starting new planning, run `lf wave create <wave> --json`.
+An existing Wave keeps its Project; a new one gets its first. Ordinary Projects
+need no chapter or workflow. An outage is not absence: report the cause and
+retry the same command. Status and operating passes only read; don't add on
+every poll. Started Tasks in earlier Projects keep running. Chapter changes go
+through start-chapter. Never replan just to make ordinary work possible.
 
 ## Develop direction
 
-When the user brings an idea, read `lf help capture-tasks` and follow it in
-this conversation. Captured Tasks start when the user selects them.
+For a new idea, read `lf help capture-tasks` and follow it here. Captured Tasks
+start when someone selects them.
 
-## Persistent workspace and document publication
+## Workspace and publishing
 
-Keep accepted decisions in `.lf/wave/<wave>/MEMORY.md`, with names and dates.
-Keep working plans in `scratch/`. The scope's persistent checkout survives conversation
-replacement; publication needs no synthetic Task or separate export checkout.
+Keep the Wave's direction in `.lf/wave/<wave>/MEMORY.md`: what it will do, with
+what people said about it word for word, never a verdict like "accepted". Write
+down only what a later agent can't work out again from the code, git history or
+a fresh run: exact quotes, what a run showed at the time, and outside facts. Quality per word, not volume.
+Keep working plans in `scratch/`. This checkout survives conversation
+restarts; publishing needs no extra Task or checkout.
 
-Run `lf sync` to bring in upstream changes; `lf sync --plan` previews it. Fetch
-failure leaves local work usable. Resolve conflicts in place and run
-`lf sync --continue`, or use `lf sync --abort` to restore the starting point.
-If resolver notes collide with stashed files, sync restores the originals and keeps
-the new notes beside them as `<name>.lf-sync-N`. Reconcile both locally. A failed
-restoration retains its stash and prints recovery instructions; keep it until all
-edits are recovered.
+`lf sync` brings in upstream changes; `lf sync --plan` previews. A failed fetch
+leaves local work usable. Resolve conflicts in place and run
+`lf sync --continue`, or `lf sync --abort` to go back. If resolver notes collide
+with stashed files, sync restores the originals and puts the new notes beside
+them as `<name>.lf-sync-N`; reconcile both. A failed restore keeps its stash and
+prints how to get the edits back; keep it until they are.
 
 To publish a document:
 
 ```bash
 git diff -- .lf/wave/<wave>/MEMORY.md
-lf commit -m "Record accepted decisions" .lf/wave/<wave>/MEMORY.md
+lf commit -m "Record Wave direction" .lf/wave/<wave>/MEMORY.md
 git diff origin/main...HEAD --stat
 lf pr publish
 ```
 
-Selected-path commits preserve unrelated staged and unstaged edits. The PR
-contains the whole committed range, including selected scratch files. Notes and
-edits made after the selected commit survive publication.
+Committing selected paths leaves other staged and unstaged edits alone. The PR
+holds the whole committed range, including committed scratch files; later edits
+stay local.
 
 After merge, the next `lf commit` or `lf pr publish` restarts the branch from
-main and replays unpublished first-parent changes, including merge resolutions.
-Staged edits and scratch survive restart. If restoring edits conflicts, the command
-stops with the saved stash and recovery instructions. Run `lf sync` to bring in
-other upstream changes. Reuse the same branch;
-automatic pruning retains it. Moved worktrees are reused at their actual path.
-Missing checkouts recover committed state only. Live conversations retain their
-placement until an idle attachment boundary permits adoption of the persistent workspace.
+main and replays unpublished changes, including merge resolutions; staged edits
+and scratch survive. If restoring edits conflicts, the command stops with the
+saved stash and instructions. Keep reusing the same branch; moved worktrees are
+reused where they are. A missing checkout comes back with committed state only.
+A live conversation moves into this workspace once it is idle.
 
-`lf wt create <name> --persistent` creates or reuses an independent document workspace.
-`lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing only added
-scratch files. Existing files and edits remain; PR open and publish do not run general scratch cleanup.
-Wave context is read-only outside a selected Loopflow Graph that maintains it;
-keep proposed changes in scratch.
+`lf wt create <name> --persistent` creates or reuses a separate document
+workspace. `lf pr submit` and `lf pr land` run `lf scratch clear`, removing only
+added scratch files; `lf pr open` and `lf pr publish` don't. Edit `.lf/wave/`
+only when the running Graph says to; otherwise put proposed changes in
+`scratch/`.

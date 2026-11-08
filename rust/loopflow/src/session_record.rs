@@ -94,7 +94,7 @@ pub struct AgentProcessRequest {
     pub write_scope: crate::agent::AgentWriteScope,
     pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
-    pub chrome: bool,
+    pub chrome: Option<bool>,
 }
 
 impl AgentProcessRequest {
@@ -319,7 +319,7 @@ fn read_fact(evidence: &serde_json::Value) -> Option<FactEnvelope> {
 ///
 /// Optional counters stay unknown when no stream reported them. Finality is a
 /// count of direct provider receipts; Recorder settlement never upgrades it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionUsage {
     pub streams: usize,
     pub final_streams: usize,
@@ -338,7 +338,7 @@ pub struct SessionUsage {
 /// History beneath one conversation's immutable captured input. This is not a
 /// resumable object. Provider records retain separate outcomes and driving Processes;
 /// recorder completion is historical evidence, never native success or process exit.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
     pub session_id: crate::id::LfSessionId,
     pub captured: Option<i64>,
@@ -367,7 +367,7 @@ pub struct SessionHistory {
 
 /// An exact native turn, or an older provider observation with unknown native
 /// identity. References identify evidence; they confer no process/settlement API.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
     pub lf_process_id: Option<crate::id::LfProcessId>,
@@ -379,7 +379,7 @@ pub struct ProviderHistory {
     pub usage: SessionUsage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderHistoryReference {
     NativeTurn {
@@ -1167,7 +1167,7 @@ pub(crate) fn stdin_tty() -> Option<String> {
 /// Who chose a Session's current title. A human name is never replaced by a
 /// generated suggestion. `Unavailable` is never stored: the canonical name
 /// lives on another Machine and the reader only has a local display label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionTitleSource {
     Generated,
@@ -1424,6 +1424,17 @@ pub(crate) fn register_session_attachment_interrupt(
             Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
         }
     });
+}
+
+/// Whether a retry resuming `resume` keeps the conversation whose saved
+/// thread is `saved`. The thread goes on under any model; only a move to
+/// another account or provider may leave it behind, and only to start fresh.
+fn retry_keeps_its_thread(
+    saved: Option<&AgentSessionId>,
+    resume: Option<&AgentSessionId>,
+    moved: bool,
+) -> bool {
+    saved == resume || (resume.is_none() && moved)
 }
 
 impl CaptureHandle {
@@ -1921,13 +1932,10 @@ impl CaptureHandle {
         let saved_thread = store
             .session_thread(session)?
             .or_else(|| capture.agent_session.clone());
-        let account_changed = capture.account_observed && capture.account_id != account_id;
-        if (account_changed && resume_thread.is_some())
-            || (!account_changed && saved_thread.as_ref() != resume_thread)
-        {
-            anyhow::bail!(
-                "AgentProcess retry must retain its thread unless the selected account changes"
-            );
+        let moved = (capture.account_observed && capture.account_id != account_id)
+            || capture.provider != provider;
+        if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
+            anyhow::bail!("AgentProcess retry must retain its thread");
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
             crate::harness::agent_process::close_session_agent_process(&store, session)
@@ -2002,8 +2010,16 @@ impl CaptureHandle {
     /// its launcher left. Settling it writes the same terminal receipt and
     /// attempt facts the launcher would have.
     pub(crate) fn adopt(handoff: CaptureHandoff) -> StoreResult<Self> {
-        let (dir, manifest) =
-            resolve_manifest(&crate::store::lf_home_dir(), &handoff.key).map_err(record_error)?;
+        // The handoff names the exact capture, so its directory needs no store:
+        // the terminal receipt is written even when the store is unavailable.
+        let dir = record_dir(&crate::store::lf_home_dir(), &handoff.key).ok_or_else(|| {
+            record_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid capture key",
+            ))
+        })?;
+        let manifest = read_manifest(&dir).map_err(record_error)?;
+        validate_manifest_path(&dir, &manifest).map_err(record_error)?;
         let mut capture = SessionCapture::from_manifest(manifest, dir);
         capture.attempt = handoff.attempt;
         capture.attempt_started = handoff.attempt_started;
@@ -2277,30 +2293,32 @@ impl SessionCapture {
             result_ref: None,
         };
         let terminal = write_terminal(&self.dir, terminal)?;
+        // The receipt file is the settlement; its store observation and the
+        // attachment's end are records that must never fail the exit.
         if self.manifest.harness != "loopflow" {
-            let store = row_store(&self.dir).map_err(std::io::Error::other)?;
             let input = &self.manifest.artifact_key;
-            if let Some(session) = store
-                .session_for_artifact(input)
-                .map_err(std::io::Error::other)?
-            {
-                store
-                    .retain_session_observation(
-                        &session,
-                        &crate::session::SessionObservation {
-                            artifact_key: input.clone(),
-                            source: "terminal.json".into(),
-                            observed_at: terminal.ended_at.unix_timestamp(),
-                            task_id: session.task_id.clone(),
-                            wave_id: session.wave_id.clone(),
-                            payload: serde_json::json!({
-                                "input_id": input,
-                                "source": "terminal.json",
-                                "evidence": terminal,
-                            }),
-                        },
-                    )
-                    .map_err(std::io::Error::other)?;
+            let observed = row_store(&self.dir).and_then(|store| {
+                let Some(session) = store.session_for_artifact(input)? else {
+                    return Ok(());
+                };
+                store.retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: input.clone(),
+                        source: "terminal.json".into(),
+                        observed_at: terminal.ended_at.unix_timestamp(),
+                        task_id: session.task_id.clone(),
+                        wave_id: session.wave_id.clone(),
+                        payload: serde_json::json!({
+                            "input_id": input,
+                            "source": "terminal.json",
+                            "evidence": terminal,
+                        }),
+                    },
+                )
+            });
+            if let Err(error) = observed {
+                tracing::warn!(%error, artifact_key = %input, "terminal receipt written; its Session observation was not recorded");
             }
         }
         self.settled_outcome = Some(outcome.to_string());
@@ -2321,7 +2339,9 @@ impl SessionCapture {
                 .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
-                Err(error) => return Err(std::io::Error::other(error)),
+                Err(error) => {
+                    tracing::warn!(%error, %session, "cannot record the Session attachment's end")
+                }
             }
         }
         Ok(())
@@ -2898,7 +2918,7 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             // Observed wait, not successful spawn or a finished capture, ends it.
             capture.record_native_agent_exit(&first)?;
-            let ended = store.process(&first.agent_process_id)?.unwrap();
+            let ended = store.agent_process(&first.agent_process_id)?.unwrap();
             assert_eq!(ended.pid, Some(child.id()));
             assert!(ended.completed_at.is_some());
 
@@ -2912,14 +2932,14 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             assert!(capture.record_native_agent_exit(&first).is_err());
             assert!(store
-                .process(&second.agent_process_id)?
+                .agent_process(&second.agent_process_id)?
                 .unwrap()
                 .completed_at
                 .is_none());
             // The child exited but without its wait receipt another launch is refused.
             assert!(capture.spawn_native_agent(command()).is_err());
             capture.record_native_agent_exit(&second)?;
-            assert_eq!(store.process(&first.agent_process_id)?, Some(ended));
+            assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
             capture.finish("completed")?;
             assert!(capture.spawn_native_agent(command()).is_err());
             assert!(store
@@ -3306,8 +3326,7 @@ mod tests {
     fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            isolate: None,
-            chrome: true,
+            chrome: Some(true),
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
             agent: Some("codex:gpt-5.6".to_string()),
@@ -3860,6 +3879,26 @@ mod tests {
             .expect("provider session reference");
         assert_eq!(session.agent_session, "provider-session".into());
         assert_eq!(session.account_id, Some(account_id));
+    }
+
+    /// November 7: Fable ran out of usage credits, and the step went on with
+    /// Opus on the same account. That retry resumes the thread it saved.
+    #[test]
+    fn a_retry_on_another_model_keeps_its_thread() {
+        let thread: crate::id::AgentSessionId = "thread".into();
+        let other: crate::id::AgentSessionId = "other".into();
+        assert!(super::retry_keeps_its_thread(
+            Some(&thread),
+            Some(&thread),
+            false
+        ));
+        assert!(!super::retry_keeps_its_thread(Some(&thread), None, false));
+        assert!(super::retry_keeps_its_thread(Some(&thread), None, true));
+        assert!(!super::retry_keeps_its_thread(
+            Some(&thread),
+            Some(&other),
+            true
+        ));
     }
 
     #[test]

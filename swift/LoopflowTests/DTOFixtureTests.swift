@@ -7,6 +7,13 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
+        let data = try loadFixtureData("session_open_intents.json")
+        let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)
+        #expect(intents == [.resume, .start, .reveal])
+        #expect(try JSONDecoder().decode([SessionOpenIntent].self, from: JSONEncoder().encode(intents)) == intents)
+    }
+
     @Test func waveRemovalPreviewDecodesEveryField() throws {
         let removal = try RegistryQuery.decode(
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
@@ -444,7 +451,7 @@ struct DTOFixtureTests {
         let data = try Data(contentsOf: url)
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
-        #expect(page.entries[0].agentProcessId == "44444444-4444-4444-8444-444444444444")
+        #expect(page.entries[0].agentProcessId == AgentProcessId(rawValue: "44444444-4444-4444-8444-444444444444"))
         #expect(page.entries[0].account == "work")
         #expect(page.entries[0].programStatus?.summary?.state == .blocked)
         #expect(page.entries[0].programStatus?.summary?.kind == .question)
@@ -458,20 +465,23 @@ struct DTOFixtureTests {
     @Test("Process pages retain command outcomes, caller evidence and continuation")
     func processPageFixture() throws {
         let data = try loadFixtureData("process_page.json")
-        let page = try JSONDecoder().decode(LfProcessPage.self, from: data)
-        #expect(page.entries[0].exitCode == 42)
-        #expect(page.entries[0].viaAgent == nil)
-        #expect(page.entries[0].pid == nil)
-        #expect(page.entries[1].pid == 4242)
-        #expect(page.entries[1].kind == .agent)
-        #expect(page.entries[1].agentSessionID == "conversation")
-        #expect(page.entries[1].osStartedAt == 1790640000)
-        #expect(page.entries[1].parentLfProcessId == page.entries[0].id)
-        #expect(page.entries[1].outcome == nil)
-        #expect(page.next?.id == page.entries[1].id)
-        #expect(try JSONDecoder().decode(LfProcessPage.self, from: JSONEncoder().encode(page)) == page)
+        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
+        guard case .lf(let lf) = page.entries[0], case .agent(let agent) = page.entries[1] else {
+            Issue.record("expected an lf entry then an agent entry")
+            return
+        }
+        #expect(lf.exitCode == 42)
+        #expect(lf.viaAgent == nil)
+        #expect(lf.pid == nil)
+        #expect(agent.pid == 4242)
+        #expect(agent.agentSessionID == "conversation")
+        #expect(agent.osStartedAt == 1790640000)
+        #expect(agent.parentLfProcessId == lf.id)
+        #expect(agent.outcome == nil)
+        #expect(page.next?.id == agent.id.rawValue)
+        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(LfProcessPage.self, from: Data("{}".utf8))
+            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
         }
     }
 
@@ -635,7 +645,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
         #expect(detail.tasks.items[0].pr?.publication?.merge?.mode == .user)
-        #expect(detail.tasks.items.map(\.section) == [.waiting, .notStarted])
+        #expect(detail.tasks.items.map(\.section) == [.backlog, .backlog])
         #expect(detail.tasks.items[0].reference.workspace?.slug == "infrastructure-task")
         #expect(detail.tasks.items[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.tasks.items[0].reference.issueUrl?.host == "linear.app")
@@ -679,7 +689,7 @@ struct DTOFixtureTests {
         #expect(product.unavailableTasks[0].status == .unstarted)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
-        #expect(tasks.map(\.section) == [.now, .waiting, .notStarted, .later])
+        #expect(tasks.map(\.section) == [.backlog, .backlog, .backlog, .done])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(tasks[0].reference.workspace?.machineLabel == "build-server")
@@ -763,6 +773,15 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
     }
 
+    @Test("A Session move report round-trips and summarizes every outcome")
+    func sessionMoveReportFixture() throws {
+        let report = try JSONDecoder().decode(SessionMoveReport.self, from: loadFixtureData("session_move_report.json"))
+        #expect(report.moved.count == 1)
+        #expect(report.pending.first?.how == "continues on claude:opus after its turn")
+        #expect(report.summary.contains("Release notes: skipped, its transcript is missing"))
+        #expect(try JSONDecoder().decode(SessionMoveReport.self, from: JSONEncoder().encode(report)) == report)
+    }
+
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(
@@ -780,7 +799,7 @@ struct DTOFixtureTests {
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
-        #expect(session.actions.map(\.kind) == [.open, .moveHere])
+        #expect(session.actions.map(\.kind) == [.open, .moveHere, .reveal])
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -840,7 +859,7 @@ struct DTOFixtureTests {
         #expect(session.id == "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         #expect(session.taskIds == ["task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
         #expect(session.waveId == "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
-        #expect(session.agentProcessId == "ffffffff-ffff-4fff-8fff-ffffffffffff")
+        #expect(session.agentProcessId == AgentProcessId(rawValue: "ffffffff-ffff-4fff-8fff-ffffffffffff"))
         #expect(session.work?.id == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         #expect(session.workspace?.machineId == "home_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
         #expect(session.workspace?.taskId == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -884,7 +903,7 @@ struct DTOFixtureTests {
         #expect(session.availability == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
-        #expect(session.actions.map(\.kind) == [.open])
+        #expect(session.actions.map(\.kind) == [.open, .reveal])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
@@ -918,8 +937,8 @@ struct DTOFixtureTests {
     }
 
     @Test("Watch frames decode through their part and keep the wire text a saved workspace needs")
-    func watchFramesDecode() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    func subscribeFramesDecode() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
                               activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
@@ -1047,7 +1066,7 @@ func sessionInputHistoryFixture() throws {
 // Written by the Rust composed lifecycle test from one disposable Home.
 struct TaskLifecycleCapture {
     let row: RoadmapTask
-    /// `lf task status FIX-1 --json` as its watch would carry it.
+    /// `lf task status FIX-1 --json` as its subscription would carry it.
     let status: [String: Any]
 
     static func load(_ data: Data) throws -> [String: TaskLifecycleCapture] {

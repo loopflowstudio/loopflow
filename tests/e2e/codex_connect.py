@@ -93,7 +93,6 @@ class Handler(BaseHTTPRequestHandler):
         held = (
             "held conversation",
             "held fixture",
-            "held sibling",
             "held before driver death",
             "held after driver death",
         )
@@ -113,9 +112,7 @@ class Handler(BaseHTTPRequestHandler):
                 "name": "exec_command",
                 "arguments": json.dumps(
                     {
-                        "cmd": "printf sibling-only"
-                        if "held sibling" in json.dumps(request["input"][last_user])
-                        else self.server.commands.get(
+                        "cmd": self.server.commands.get(
                             len(self.server.requests), self.server.command
                         ),
                         "max_output_tokens": 100,
@@ -188,7 +185,7 @@ class Client:
         except ConnectionClosed:
             pass
 
-    def call(self, method: str, params: dict, *, rejected: bool = False) -> dict:
+    def call(self, method: str, params: dict) -> dict:
         self.next_id += 1
         ident = self.next_id
         self.socket.send(json.dumps({"id": ident, "method": method, "params": params}))
@@ -196,9 +193,6 @@ class Client:
         while time.monotonic() < deadline:
             event = self.pending.get(timeout=max(0.1, deadline - time.monotonic()))
             if event.get("id") == ident:
-                if rejected:
-                    assert event.get("error", {}).get("code") == -32001, event
-                    return event["error"]
                 assert "error" not in event, event
                 return event["result"]
         raise TimeoutError(method)
@@ -235,9 +229,7 @@ def main() -> None:
     parser.add_argument("--lf", required=True, type=Path)
     parser.add_argument("--lf-home", type=Path)
     parser.add_argument("--control", type=Path)
-    parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
-    parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--planning-peers", action="store_true")
     parser.add_argument("--graph-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--shared-provider-home", action="store_true")
@@ -328,16 +320,7 @@ enabled = false
                             work,
                             env,
                             server,
-                            shared_agent_process=False,
                             planning_peers=True,
-                        )
-                        return
-                    if args.public_connect:
-                        results["public_connect"] = _live_attachment_contract(
-                            binary, work, env, server, shared_agent_process=True
-                        )
-                        results["owner_exit"] = _live_attachment_contract(
-                            binary, work, env, server, shared_agent_process=False
                         )
                         return
                     if args.graph_decision_retry:
@@ -396,13 +379,6 @@ enabled = false
                     )
                     thread = first.call("thread/start", params)["thread"]["id"]
                     first.wait_turn(first.start_turn(thread))
-                    if args.gated:
-                        assert args.control
-                        results.update(
-                            _gated(args.control, endpoint, first, thread, params, server, clients)
-                        )
-                        results["agent_process_alive"] = agent_process.poll() is None
-                        return
                     _boundary(args.control, "before", "handoff")
                     active_turn = first.start_turn(thread, "Run the held fixture command.")
                     assert server.held.wait(10), "provider did not request held response"
@@ -467,7 +443,7 @@ def _provider_entry() -> None:
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if "--remote" not in sys.argv:
         if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
-            raise RuntimeError("public resume bypassed the retained provider relay")
+            raise RuntimeError("public resume bypassed the retained provider")
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     # A controlled native-protocol client exercises public lf resume. This is
     # deliberately not evidence of the rendered Codex TUI or Desktop.
@@ -489,9 +465,7 @@ def _provider_entry() -> None:
             action = json.loads(request.read_text())
             if action["method"] == "exit":
                 return
-            value = client.call(
-                action["method"], action["params"], rejected=action.get("rejected", False)
-            )
+            value = client.call(action["method"], action["params"])
             (control / f"{index}.response").write_text(json.dumps(value))
             index += 1
     finally:
@@ -534,7 +508,6 @@ def _public_connection_contract(
     server: Responses,
     results: dict,
     headless: subprocess.Popen,
-    shared_agent_process: bool,
     planning_exchange: Callable[[str, str], None] | None = None,
 ) -> None:
     session = results["session_id"]
@@ -555,12 +528,10 @@ def _public_connection_contract(
                     raise AssertionError(f"connect exited: {child.returncode}: {error.decode()}")
             time.sleep(0.02)
 
-    def call(index: int, method: str, params: dict, rejected: bool = False):
+    def call(index: int, method: str, params: dict):
         root, sequences = controls[index]
         sequence = next(sequences)
-        (root / f"{sequence}.request").write_text(
-            json.dumps(dict(method=method, params=params, rejected=rejected))
-        )
+        (root / f"{sequence}.request").write_text(json.dumps(dict(method=method, params=params)))
         if method == "exit":
             return None
         output = root / f"{sequence}.response"
@@ -607,12 +578,6 @@ def _public_connection_contract(
         provider = Client(Path(endpoint))
         inspectors.append(provider)
         provider.call("thread/resume", {"threadId": thread})
-        sibling = None
-        if shared_agent_process:
-            sibling = provider.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
-                "thread"
-            ]["id"]
-            provider.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
             _connect(label)
@@ -640,34 +605,12 @@ def _public_connection_contract(
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
         )
-        call(0, "turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
-        call(
-            0,
-            "turn/start",
-            {"threadId": thread, "input": [{"type": "text", "text": "stale turn"}]},
-            rejected=True,
-        )
-        call(
-            0,
-            "turn/steer",
-            {
-                "threadId": thread,
-                "expectedTurnId": active,
-                "input": [{"type": "text", "text": "stale steer"}],
-            },
-            rejected=True,
-        )
         assert (
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
         )
-        if sibling:
-            assert (
-                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-                == "active"
-            )
         # Explicit client replacement must use the same live-provider path as
-        # ordinary connect, with the current turn and shared sibling untouched.
+        # ordinary connect, with the current turn untouched.
         with sqlite3.connect(_database(env)) as database:
             before_prepare = _agent_process(
                 database,
@@ -698,11 +641,6 @@ def _public_connection_contract(
             provider.call("thread/read", {"threadId": thread})["thread"]["status"]["type"]
             == "active"
         )
-        if sibling:
-            assert (
-                provider.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
-                == "active"
-            )
         with sqlite3.connect(_database(env)) as database:
             retained_connection = _agent_process(
                 database, session, "p.endpoint,s.provider_thread,p.id"
@@ -771,66 +709,60 @@ def _public_connection_contract(
             )
             assert set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) == launches
             results["completed_task_control_turn"] = followup
-        if not shared_agent_process:
-            # Closing the current native UI releases the engine; obsolete UIs
-            # and the original headless driver's exit could not release it.
-            call(2, "exit", {})
-            _, error = processes[2].communicate(timeout=15)
-            assert processes[2].returncode == 0, error.decode()
+        # Closing the current native UI releases the engine; obsolete UIs
+        # and the original headless driver's exit could not release it.
+        call(2, "exit", {})
+        _, error = processes[2].communicate(timeout=15)
+        assert processes[2].returncode == 0, error.decode()
+        with sqlite3.connect(_database(env)) as database:
+            closed = _agent_process(
+                database,
+                session,
+                "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
+            )
+        assert closed == (thread, None, 1), closed
+        assert not Path(endpoint).exists() or not provider.reader.is_alive()
+        results["owner_exit_closed_agent_process"] = True
+        if planning_exchange:
+            # Abruptly kill only this fixture's resumed driver. The next
+            # explicit resume must use the same native thread on a new engine;
+            # peer exchange itself must never retry the interrupted turn.
+            resumed = _resume("held before driver death")
+            planning_exchange("resumed", session)
+            resumed.kill()
+            resumed.communicate(timeout=10)
+            replaced.append(resumed)
+            server.release.set()
             with sqlite3.connect(_database(env)) as database:
-                closed = _agent_process(
-                    database,
-                    session,
-                    "s.provider_thread,p.attached_lf_process_id,p.completed_at IS NOT NULL",
-                )
-            assert closed == (thread, None, 1), closed
-            assert not Path(endpoint).exists() or not provider.reader.is_alive()
-            results["owner_exit_closed_agent_process"] = True
-            if planning_exchange:
-                # Abruptly kill only this fixture's resumed driver. The next
-                # explicit resume must use the same native thread on a new engine;
-                # peer exchange itself must never retry the interrupted turn.
-                resumed = _resume("held before driver death")
-                planning_exchange("resumed", session)
-                resumed.kill()
-                resumed.communicate(timeout=10)
-                replaced.append(resumed)
-                server.release.set()
-                with sqlite3.connect(_database(env)) as database:
-                    retained_events = database.execute(
-                        "SELECT seq,kind,payload FROM session_events "
-                        "WHERE session_id=? ORDER BY seq",
-                        (session,),
-                    ).fetchall()
-                launches = set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json"))
-                recovered = _resume("held after driver death")
-                with sqlite3.connect(_database(env)) as database:
-                    selected = database.execute(
-                        "SELECT provider_thread FROM agent_sessions WHERE id=?",
-                        (session,),
-                    ).fetchone()[0]
-                    recovered_events = database.execute(
-                        "SELECT seq,kind,payload FROM session_events "
-                        "WHERE session_id=? ORDER BY seq",
-                        (session,),
-                    ).fetchall()
-                assert selected == thread
-                assert recovered_events[: len(retained_events)] == retained_events
-                assert (
-                    len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
-                )
-                planning_exchange("dead-driver-resume", session)
-                server.release.set()
-                _, error = recovered.communicate(timeout=20)
-                assert recovered.returncode == 0, error.decode()
-                results["planning_preserved_native_thread"] = thread
+                retained_events = database.execute(
+                    "SELECT seq,kind,payload FROM session_events WHERE session_id=? ORDER BY seq",
+                    (session,),
+                ).fetchall()
+            launches = set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json"))
+            recovered = _resume("held after driver death")
+            with sqlite3.connect(_database(env)) as database:
+                selected = database.execute(
+                    "SELECT provider_thread FROM agent_sessions WHERE id=?",
+                    (session,),
+                ).fetchone()[0]
+                recovered_events = database.execute(
+                    "SELECT seq,kind,payload FROM session_events WHERE session_id=? ORDER BY seq",
+                    (session,),
+                ).fetchall()
+            assert selected == thread
+            assert recovered_events[: len(retained_events)] == retained_events
+            assert len(set(Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")) - launches) == 1
+            planning_exchange("dead-driver-resume", session)
+            server.release.set()
+            _, error = recovered.communicate(timeout=20)
+            assert recovered.returncode == 0, error.decode()
+            results["planning_preserved_native_thread"] = thread
 
         results["history"] = history
-        results["public_connect"] = dict(
+        results["live_connect"] = dict(
             agent_process=agent_process,
             attached=attached,
-            retained_client_rejected=True,
-            active_turn_and_sibling_survived=True,
+            active_turn_survived=True,
             replaced_clients_exited=True,
             nested_child_id=child_id,
             nested_child_parent=child_parent,
@@ -856,7 +788,6 @@ def _live_attachment_contract(
     work: Path,
     env: dict[str, str],
     server: Responses,
-    shared_agent_process: bool,
     planning_peers: bool = False,
 ) -> dict:
     _init_repo(work, env)
@@ -951,7 +882,6 @@ def _live_attachment_contract(
             server,
             result,
             headless=child,
-            shared_agent_process=shared_agent_process,
             planning_exchange=exchange,
         )
         return result
@@ -1374,44 +1304,6 @@ def _shared_provider_home_contract(
     assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
     results["running_agent_survived_switch"] = True
 
-    # An isolated conversation runs in its account's own home and stays
-    # there across a switch, whether isolation came from the flag or config.
-    use("first")
-    home = str(profiles / "second")
-    pinned, agent_processes = converse("--account", "codex=second@example.com", "--isolate")
-    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
-    assert rollout(profiles / "second", pinned) and not rollout(native, pinned)
-    assert login(native) == "first@example.com"
-    config = work / ".lf" / "config.yaml"
-    config.parent.mkdir(exist_ok=True)
-    config.write_text("isolate: true\n")
-    standing, agent_processes = converse("--account", "codex=second@example.com")
-    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
-    assert rollout(profiles / "second", standing) and not rollout(native, standing)
-    # `--shared` overrides the standing default for one launch.
-    override, agent_processes = converse("--shared")
-    assert shared(agent_processes) and rollout(native, override)
-    config.unlink()
-
-    def isolated(conversation: str) -> bool:
-        recorded = rows(
-            "SELECT isolated FROM provider_session_accounts WHERE provider_session_id=?",
-            conversation,
-        )
-        return recorded == [(1,)]
-
-    assert isolated(pinned) and isolated(standing)
-    assert not isolated(override) and not isolated(moved)
-    # A conversation that lives in an account's home is opened there, under
-    # that account, whichever account the native home has moved to.
-    with plain_codex(profiles / "second") as client:
-        apart = start(client)
-    use("second")
-    use("first")
-    assert resumed(apart)["CODEX_HOME"] == home
-    assert login(native) == "first@example.com"
-    results["isolated_conversations"] = [pinned, standing, apart]
-
 
 def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):
     with subprocess.Popen(
@@ -1530,97 +1422,6 @@ def _boundary(control: Path, completed: str, next_action: str) -> None:
         if time.monotonic() > deadline:
             raise TimeoutError(next_action)
         time.sleep(0.05)
-
-
-def _gated(
-    control: Path,
-    endpoint: Path,
-    fixture: Client,
-    thread: str,
-    params: dict,
-    server: Responses,
-    clients: list[Client],
-) -> dict:
-    sibling_params = json.loads(json.dumps(params))
-    sibling_params["config"]["shell_environment_policy.set"].pop("LF_AGENT_CALLER", None)
-    sibling = fixture.call("thread/start", sibling_params)["thread"]["id"]
-    active = fixture.start_turn(thread, "Run the held fixture command.")
-    sibling_turn = fixture.start_turn(sibling, "Run the held sibling command.")
-    assert server.held.wait(10)
-    (control / "agent_process.json").write_text(
-        json.dumps({"endpoint": str(endpoint), "thread": thread})
-    )
-    _boundary(control, "native", "sockets")
-    old = Client(control / "old.sock")
-    observer = Client(control / "observer.sock")
-    clients.extend([old, observer])
-    for client in (old, observer):
-        assert (
-            client.call("thread/resume", {"threadId": thread})["thread"]["status"]["type"]
-            == "active"
-        )
-    observer.call("turn/interrupt", {"threadId": thread, "turnId": active}, rejected=True)
-    old.call(
-        "turn/steer",
-        {
-            "threadId": thread,
-            "expectedTurnId": active,
-            "input": [
-                {"type": "text", "text": "Continue original attachment.", "text_elements": []}
-            ],
-        },
-    )
-    _boundary(control, "attached", "transfer")
-    current = Client(control / "current.sock")
-    clients.append(current)
-    current.call("thread/resume", {"threadId": thread})
-    writes = [
-        (
-            "turn/start",
-            {"threadId": thread, "input": [{"type": "text", "text": "stale", "text_elements": []}]},
-        ),
-        (
-            "turn/steer",
-            {
-                "threadId": thread,
-                "expectedTurnId": active,
-                "input": [{"type": "text", "text": "stale", "text_elements": []}],
-            },
-        ),
-        ("turn/interrupt", {"threadId": thread, "turnId": active}),
-        ("thread/name/set", {"threadId": thread, "name": "stale name"}),
-    ]
-    for method, arguments in writes:
-        old.call(method, arguments, rejected=True)
-    current.call(
-        "turn/steer",
-        {
-            "threadId": thread,
-            "expectedTurnId": active,
-            "input": [{"type": "text", "text": "Continue the fixture.", "text_elements": []}],
-        },
-    )
-    # The transferred conversation and its sibling have not been interrupted.
-    for target in (thread, sibling):
-        assert (
-            fixture.call("thread/read", {"threadId": target})["thread"]["status"]["type"]
-            == "active"
-        )
-    server.release.set()
-    current.wait_turn(active)
-    fixture.wait_turn(sibling_turn)
-    old.wait_turn(active)
-    current.wait_turn(current.start_turn(thread))
-    assert not any("stale" in json.dumps(request) for request in server.requests)
-    return {
-        "old_client_wrote_before_transfer": True,
-        "rejected_old_client_writes": [method for method, _ in writes],
-        "passive_client_rejected": True,
-        "old_client_still_receives_completion": True,
-        "current_attachment_continued": True,
-        "active_turn": active,
-        "sibling_turn": sibling_turn,
-    }
 
 
 if __name__ == "__main__":

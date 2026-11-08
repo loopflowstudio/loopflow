@@ -277,7 +277,17 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
         COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),
-        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread)
+        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
+        EXISTS(
+            SELECT 1 FROM session_events history
+            WHERE history.session_id=s.id AND history.captured_event=s.current_capture
+            AND history.kind='observed'
+            AND CASE WHEN json_valid(history.payload) THEN
+                (instr(history.receipt_key,':provider-session:')>0
+                 OR (instr(history.receipt_key,':events.jsonl:')>0
+                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))
+            AND json_extract(history.payload,'$.evidence.schema_version')=1
+            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -328,7 +338,7 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<crate::id::LfProcessId> = row.get(31)?;
+        let agent_process_id: Option<crate::id::AgentProcessId> = row.get(31)?;
         let agent_process_evidence = crate::journal::agent_process_evidence(
             row.get(32)?,
             row.get(33)?,
@@ -344,6 +354,7 @@ fn read_summary(
             .transpose()?
             .flatten();
         Ok(crate::session::SessionSummary {
+            has_provider_history: row.get(40)?,
             preview: row
                 .get::<_, Option<String>>(36)?
                 .map(|json| serde_json::from_str(&json))
@@ -655,20 +666,6 @@ impl SqliteStore {
             [session],
             |row| row.get(0),
         )?)
-    }
-
-    /// Record whether a viewer is attached to execution owner `owner`.
-    pub(crate) fn record_owner_viewers(
-        &self,
-        owner: &crate::id::LfProcessId,
-        viewed: bool,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE processes SET viewed=?2 WHERE id=?1",
-            params![owner.as_str(), viewed],
-        )?;
-        Ok(())
     }
 
     /// What keeps execution owner `owner` running. None means its standalone

@@ -97,9 +97,8 @@ impl PendingRequest {
         }
         let (mutation, operation) = operation(query);
         let process = crate::journal::current_lf_process_id();
-        let command = crate::journal::current_command().map(|command| {
-            crate::lf::commands::top::command_label(Some(&command), crate::process::ProcessKind::Lf)
-        });
+        let command = crate::journal::current_command()
+            .map(|command| crate::lf::commands::top::lf_command_label(Some(&command)));
         let target = ["issueId", "id"]
             .into_iter()
             .find_map(|key| variables.get(key)?.as_str())
@@ -359,7 +358,7 @@ mod tests {
             ),
             record(
                 7_300_000,
-                "lf task comment",
+                "lf task report",
                 "SyncComment",
                 RequestOutcome::Sent,
             ),

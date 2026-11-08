@@ -55,6 +55,9 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
         .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
+    // Signing the shared Claude home in goes through the Keychain on macOS.
+    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+    fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
     let skill = repo.path().join(".claude/skills/startup-proof");
     fs::create_dir_all(&skill).unwrap();
     fs::write(
@@ -115,12 +118,13 @@ sys.stdin.read()
         .env("LF_HOME", home.path())
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        // The Keychain item lf signs the shared home in with names its user.
+        .env("USER", "fixture")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("GIT_ALLOW_PROTOCOL", "file")
         .current_dir(repo.path())
         .args([
             "-b",
-            "--isolate",
             "-a",
             "claude",
             "-c",
@@ -345,9 +349,12 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert!(rejected.stdout.is_empty());
     let mut foreign = payload.clone();
     foreign["session_id"] = serde_json::json!("child-native");
+    // A foreign conversation's refused authority is a recording gap: its tool
+    // completes with the launch's plain context and no steer reaches it.
     let rejected = hook(foreign);
-    assert!(!rejected.status.success());
-    assert!(rejected.stdout.is_empty());
+    assert!(rejected.status.success());
+    let rejected = String::from_utf8_lossy(&rejected.stdout);
+    assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
     // Exercise the shipped OpenCode transform against the real receipt command.
     // Internal stream retries reuse one transformed value; a later callback has
@@ -439,8 +446,10 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
     let cleared = String::from_utf8_lossy(&cleared.stdout).into_owned();
     assert!(cleared.contains("CLEARED_DIRECTION"));
     assert!(cleared.contains("additionalContext"));
+    // The replaced conversation keeps working without steers.
     let old_conversation = hook(payload.clone());
-    assert!(!old_conversation.status.success());
+    assert!(old_conversation.status.success());
+    assert!(!String::from_utf8_lossy(&old_conversation.stdout).contains("_DIRECTION"));
     store
         .save_session_steer(session, "Fixture author", "AFTER_CLEAR_DIRECTION")
         .unwrap();
@@ -519,12 +528,7 @@ fn public_commands_save_steers_without_launching_providers() {
         "steer",
         "WAVE_DIRECTION",
     ]);
-    run(&[
-        "comment",
-        task.task.id.as_str(),
-        "TASK_DIRECTION",
-        "--steer",
-    ]);
+    run(&["task", "steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)

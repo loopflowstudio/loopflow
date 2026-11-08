@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::{GraphStepProcess, TaskId};
 use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{StoreError, StoreResult};
+use crate::store::{RecordingGap, StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
 
 #[derive(Debug, Clone)]
@@ -161,7 +161,7 @@ impl TaskUpdates {
                 }
                 let run = RunObservation {
                     name: graph.entry.summary.name,
-                    outcome: store.process(&id)?.and_then(|process| process.outcome),
+                    outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
                     completed: graph.entry.ended_at.is_some(),
                     step: graph.steps.last().cloned(),
                 };
@@ -267,8 +267,9 @@ pub(crate) fn watch(
         Err(error) => return Err(error.into()),
     }
     let mut updates = TaskUpdates::default();
+    let mut gap = RecordingGap::default();
     loop {
-        if crate::journal::process_evidence(&store, &adapter.agent_process_id)
+        if crate::journal::agent_evidence(&store, &adapter.agent_process_id)
             == crate::journal::ProcessIdentityEvidence::Dead
         {
             return Ok(());
@@ -277,9 +278,15 @@ pub(crate) fn watch(
             updates.pending(&store, &adapter.session)
         });
         let pending = match pending {
-            Ok(pending) => pending,
+            Ok(pending) => {
+                gap.recovered();
+                pending
+            }
             Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                gap.note("native Task updates", &error);
+                None
+            }
         };
         if let Some(update) = pending {
             // Claude's next-priority inbox and Pi's follow-up queue own when
@@ -288,7 +295,7 @@ pub(crate) fn watch(
             match deliver(&store, &adapter, thread, &update) {
                 Ok(()) => {}
                 Err(StoreError::InvalidAuthority(_)) => return Ok(()),
-                Err(error) => tracing::warn!(%error, "native Task update delivery unavailable"),
+                Err(error) => gap.note("native Task update delivery", &error),
             }
         }
         std::thread::sleep(Duration::from_secs(1));

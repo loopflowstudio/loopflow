@@ -180,7 +180,8 @@ fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
 type Question = (PathBuf, Vec<String>);
 type RetainedReads = HashMap<Question, (Instant, Output)>;
 
-/// Set only by a process that never writes through Git.
+/// Set by a process with a long-lived reader. A served write in that process
+/// bypasses it: see [`crate::journal::request::writing`].
 static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
 
 /// How long a retained answer stands: repository layout rarely moves, while a
@@ -194,13 +195,13 @@ fn retained() -> MutexGuard<'static, Option<RetainedReads>> {
 
 /// Let this process reuse a Git answer for a short time instead of spawning
 /// `git` again. For a long-lived reader that asks the same questions on every
-/// reading and changes nothing itself; one-shot commands never call this.
+/// reading; one-shot commands never call this.
 pub(crate) fn retain_reads() {
     *retained() = Some(HashMap::new());
 }
 
 pub(crate) fn retains_reads() -> bool {
-    retained().is_some()
+    !crate::journal::request::writing() && retained().is_some()
 }
 
 fn is_layout(args: &[String]) -> bool {
@@ -1184,9 +1185,7 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
-    if let Err(error) = _mark_lf_created(path, inherit) {
-        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
-    }
+    mark_lf_created(path, inherit);
     Ok(())
 }
 
@@ -1194,7 +1193,15 @@ pub(crate) fn worktree_add_inheriting(
 /// the worktree; the working tree never sees it.
 const LF_CREATED_MARKER: &str = "loopflow-created";
 
-fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+/// Record that lf just created the worktree at `path`. Every creation calls
+/// this; a checkout lf adopted stays unmarked and keeps Claude's own dialog.
+pub(crate) fn mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) {
+    if let Err(error) = _write_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
+}
+
+fn _write_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     let marker = git_stdout_inheriting(
         path,
         &["rev-parse", "--git-path", LF_CREATED_MARKER],
@@ -2022,6 +2029,26 @@ mod tests {
             origin_branch(repo.path()).unwrap().as_deref(),
             Some("feature")
         );
+    }
+
+    #[test]
+    fn a_served_write_never_gets_a_watchs_retained_answer() {
+        let _guard = loopflow_test_support::env_lock().lock().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let previous = retained().take();
+        retain_reads();
+        let head = || git_stdout(repo.path(), &["status", "--porcelain"]).unwrap();
+        assert_eq!(head(), "");
+        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
+        assert_eq!(head(), "", "a reader keeps its retained answer");
+        let seen = crate::journal::request::run(
+            &crate::id::TraceId::default(),
+            &serde_json::json!({}),
+            || Ok(head()),
+        )
+        .unwrap();
+        assert!(seen.contains("new.txt"), "{seen:?}");
+        *retained() = previous;
     }
 
     #[test]

@@ -162,16 +162,36 @@ impl Command {
         } else if self.command == "activity" {
             self.command = "history".into();
         }
+        if self.command == "monitor" && self.args.first().is_some_and(|name| name == "ps") {
+            self.args[0] = "list".into();
+        }
+        if self.command == "monitor"
+            && self
+                .args
+                .first()
+                .is_some_and(|name| matches!(name.as_str(), "list" | "top"))
+        {
+            self.command = "process".into();
+        } else if self.command == "ps" {
+            self.command = "list".into();
+        }
         let owner = match self.command.as_str() {
-            "doctor" | "install" => Some("self"),
-            "ps" | "top" => Some("monitor"),
-            "usage" | "replay" => Some("history"),
-            "release" | "ci" | "tokens" => Some("ops"),
+            "doctor" => Some("machine"),
+            "install" => Some("self"),
+            "list" | "top" => Some("process"),
+            "usage" => Some("session"),
+            "replay" => Some("history"),
+            "release" | "ci" | "tokens" => Some("repo"),
             _ => None,
         };
         if let Some(owner) = owner {
             self.args.insert(0, self.command);
             self.command = owner.into();
+        }
+        // History reads Sessions, so `lf history` is `lf session history`.
+        if self.command == "history" {
+            self.args.insert(0, self.command);
+            self.command = "session".into();
         }
         self
     }
@@ -1561,7 +1581,8 @@ mod tests {
             edges(&pursue),
             [
                 ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 6)
+                ("loop-or-next".to_string(), 6),
+                ("loop-or-next".to_string(), 8)
             ]
         );
 
@@ -1886,7 +1907,7 @@ Design the feature.
                 _ => panic!("incident should contain only repair, analysis and planning"),
             })
             .collect();
-        assert_eq!(names, ["unbreak", "5whys", "launch-plan"]);
+        assert_eq!(names, ["unbreak", "debug", "5whys", "launch-plan"]);
     }
 
     #[test]

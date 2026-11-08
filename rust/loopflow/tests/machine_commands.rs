@@ -257,7 +257,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "LF_HOME=/remote/private home",
         "/bin/sh",
         "-c",
-        "printf '%s\\n' \"$LF_HOME\" \"$1\"; cat",
+        "stty -echo; printf '%s\\n' \"$LF_HOME\" \"$1\"; read -r line; printf '%s\\n' \"$line\"",
         "fixture",
         "literal ' quote"
     ]);
@@ -281,8 +281,8 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(argv[0], "ssh");
-    assert!(argv.contains(&"-tt"));
+    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
+    assert!(argv.contains(&"-T"));
     for target in [
         vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
@@ -299,26 +299,33 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    let mut command = Command::new(fixture.root.path().join("bin/ssh"));
-    command
-        .args(&argv[1..])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all("unfinished draft\n".as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "/remote/private home\nliteral ' quote\nunfinished draft\n"
-    );
+    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
+    let script = argv.last().unwrap();
+    assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
+    assert!(script.contains("/remote/private home"), "{script}");
+    assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
+    for intent in ["--start-if-free", "--reveal-existing"] {
+        let automatic = fixture.json(&[
+            "--machine",
+            "mini",
+            "session",
+            "resume",
+            &id,
+            intent,
+            "--prepare",
+            "--json",
+        ]);
+        let automatic = automatic["open_argv"].as_array().unwrap();
+        assert_eq!(
+            &automatic[..2],
+            &[
+                serde_json::json!("/usr/bin/env"),
+                serde_json::json!("LF_RELAY_IF_FREE=1")
+            ]
+        );
+        assert_eq!(&automatic[2..], opened["open_argv"].as_array().unwrap());
+    }
 }
 
 #[test]
@@ -375,7 +382,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
     let arguments = arguments.lines().collect::<Vec<_>>();
     let at = arguments
         .iter()
-        .position(|arg| *arg == "--repository")
+        .position(|arg| *arg == "--repo-id")
         .unwrap();
     assert_eq!(arguments[at + 1], repository);
     assert!(arguments.contains(&"resume"), "{arguments:?}");
@@ -729,7 +736,7 @@ case "$1 $2 $3" in
 "--version  ") echo 'lf {}';;
 "machine id ") echo 'home_11111111111111111111111111111111';;
 "machine credentials inspect") cat "$HOME/connected";;
-*) printf 'selection: %s\nisolation: %s\n' "$LF_ACCOUNT_SELECTION" "$LF_ACCOUNT_ISOLATION"; printf 'argument: %s\n' "$@";;
+*) printf 'selection: %s\n' "$LF_ACCOUNT_SELECTION"; printf 'argument: %s\n' "$@";;
 esac
 "#,
             loopflow::build_info::BUILD_VERSION
@@ -740,7 +747,6 @@ esac
         "mini",
         "--account",
         "codex=person@",
-        "--shared",
         "skill",
         "implement",
         "--",
@@ -753,7 +759,6 @@ esac
         "implement",
         "--account",
         "codex=person@",
-        "--shared",
         "--",
         "--account=other@",
         "--shared",
@@ -773,8 +778,6 @@ esac
             selection,
             serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
         );
-        assert!(stdout.contains("isolation: isolated\n"), "{stdout}");
-        assert!(stdout.contains("argument: --isolate\n"), "{stdout}");
         assert!(
             stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
             "{stdout}"
@@ -998,7 +1001,6 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
                 selector,
                 "--account",
                 "unconnected@example.invalid",
-                "--shared",
                 "skill",
                 "probe",
                 "literal 'draft'; $(false)",
@@ -1502,7 +1504,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
 
     // Moving it to the laptop sends it from mini, the writer, over SSH.
     let handed = fixture.json(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "task",
         "move",
@@ -1533,7 +1535,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
 
     // The laptop now writes; unassign keeps the history and leaves it unowned.
     let unassigned = fixture.json(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "task",
         "unassign",
@@ -1723,7 +1725,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
         .unwrap()
         .wave_id;
     let output = fixture.run(&[
-        "--repository",
+        "--repo-id",
         plan.repository.as_str(),
         "--wave",
         "owners",
@@ -1755,7 +1757,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
 }
 
 #[test]
-fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
+fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     use loopflow::durable::RepositoryId;
     use loopflow::ops::task::TaskFilesFrame;
     use loopflow::store::sqlite::SqliteStore;
@@ -1777,52 +1779,19 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let owner = store.local_machine().unwrap().id;
     fs::write(path.join(".gitignore"), "target/\n").unwrap();
     fs::create_dir(path.join("target")).unwrap();
-    let shell = fixture.root.path().join("remote/.local/bin/fixture-shell");
-    executable(&shell, "#!/bin/sh\nprintf 'shell at %s\\n' \"$PWD\"\ncat\n");
-    let launcher = fixture.root.path().join("remote/.local/bin/lf");
-    let script = fs::read_to_string(&launcher).unwrap();
-    fs::write(
-        &launcher,
-        script.replacen(
-            "export LF_HOME",
-            &format!("export SHELL='{}'\nexport LF_HOME", shell.display()),
-            1,
-        ),
-    )
-    .unwrap();
-    let args = [
+    let rejected = fixture.run(&[
         "--machine",
         "mini",
-        "--repository",
+        "--repo-id",
         repository.as_str(),
         "task",
-        "shell",
+        "watch-files",
         registered.task.id.as_str(),
         "--checkout",
-        path.to_str().unwrap(),
-    ];
-    let mut child = fixture
-        .command(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all("literal ' text\n".as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert_success(&output);
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        format!("shell at {}\nliteral ' text\n", path.display())
-    );
-    let mut stale = args;
-    stale[8] = "/different-checkout";
-    let rejected = fixture.run(&stale);
+        "/different-checkout",
+        "--request",
+        "stale-request",
+    ]);
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("checkout changed"));
     assert!(rejected.stdout.is_empty());
@@ -1831,7 +1800,7 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
         .command(&[
             "--machine",
             "mini",
-            "--repository",
+            "--repo-id",
             repository.as_str(),
             "task",
             "watch-files",
@@ -2573,4 +2542,111 @@ fn a_moved_session_clones_its_repository_where_none_is_checked_out() {
         git(&arrived.cwd, &["branch", "--show-current"]),
         "clone-demo"
     );
+}
+
+#[test]
+fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::client::Connection;
+    use loopflow::server::wire::Operation;
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    plan.to_local();
+    let server = Server(fixture.command(&["server", "run"]).spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let socket = loop {
+        let output = fixture.run(&["server", "status"]);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if status["ready"] == true {
+            break status["socket"].as_str().unwrap().to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "server did not become ready: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let send = |claimed| {
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        connection.request(Operation::Write(if claimed {
+            Mutation::TaskClaim {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        } else {
+            Mutation::TaskUnassign {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+            }
+        }))
+    };
+    let local = plan.local.task_ownership(&task).unwrap();
+    let ownership = send(true).unwrap().result;
+    assert_eq!(
+        ownership["owner"]["machine"]["id"],
+        plan.remote.local_machine().unwrap().id.as_str()
+    );
+    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
+    // A CLI mutation that takes no body must finish with stdin still open,
+    // as it is at a terminal. Sharing request I/O must not wait for EOF.
+    let mut cli = Server(
+        fixture
+            .command(&["task", "claim", task.as_str(), "--json"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let _input = cli.0.stdin.take().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = cli.0.try_wait().unwrap() {
+            let mut error = String::new();
+            cli.0
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut error)
+                .unwrap();
+            assert!(status.success(), "{error}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "remote claim waited for stdin EOF"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(cli);
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
+    );
+    let refused = send(false)
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
+    assert!(
+        refused.message.contains("peer unavailable") || refused.message.contains("unavailable"),
+        "{refused:?}"
+    );
+    assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
+    assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());
+    drop(server);
 }

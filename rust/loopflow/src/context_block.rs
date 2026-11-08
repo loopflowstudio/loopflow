@@ -29,11 +29,19 @@ pub enum ContextMoment {
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
+    /// A native turn ended on a usage limit: start `RecordLimit` and return.
+    Limit,
+    /// Started by a limit hook: record the limit and move the shared login to
+    /// an account with capacity.
+    RecordLimit,
     /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
     PiEvent,
     /// A Pi bash command is about to run: join its tool group to the watchdog
     /// that ends the group with its provider.
     ToolGroup,
+    /// Started by a Stop hook: once that hook exits, apply the Session's
+    /// pending move.
+    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -129,7 +137,8 @@ impl ContextDelivery {
         let Some((id, source)) = &self.repository else {
             return Ok(());
         };
-        let store = crate::store::sqlite::SqliteStore::new(&self.home.join("loopflow.db"))?;
+        let store =
+            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
             return Ok(());
         };
@@ -229,10 +238,10 @@ impl ContextDelivery {
         Ok(())
     }
 
-    /// App-server hooks inherit the server environment, not thread shell policy.
-    /// Bind before the first turn so sibling threads never borrow launch context.
+    /// App-server hooks inherit the server environment, not thread shell policy,
+    /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = codex_delivery_path(&self.home, session);
+        let path = native_delivery_path(&self.home, session);
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -260,6 +269,7 @@ impl ContextDelivery {
         Ok(serde_json::json!({
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
                 {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
+            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [
@@ -269,7 +279,19 @@ impl ContextDelivery {
     }
 }
 
-pub(crate) fn codex_delivery_path(home: &Path, session: &str) -> PathBuf {
+/// A conversation the person starts on a Session's app-server is that Session's,
+/// so it takes the binding of the one it replaces. A Session launched without
+/// context has no binding to carry.
+pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow::Result<()> {
+    let bytes = match fs::read(native_delivery_path(home, from)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
+}
+
+pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
     // Native IDs are opaque; never interpret one as a filesystem path.
     home.join("context-deliveries")
         .join(format!("{}.json", hex::encode(Sha256::digest(session))))
@@ -761,6 +783,7 @@ mod tests {
     #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempdir().unwrap();
         let delivery = delivery(repo.path());

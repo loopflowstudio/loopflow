@@ -965,6 +965,19 @@ mod tests {
         SendCurrentOutcome, SseParser,
     };
 
+    #[test]
+    fn bare_opencode_sends_no_model_and_a_pinned_variant_names_provider_and_model() {
+        let launch = |agent: &str| AgentConfig {
+            agent: Some(agent.into()),
+            ..AgentConfig::default()
+        };
+        assert_eq!(super::opencode_model(&launch("opencode")), None);
+        assert_eq!(
+            super::opencode_model(&launch("opencode:anthropic/claude-sonnet")),
+            Some(("anthropic".into(), "claude-sonnet".into()))
+        );
+    }
+
     #[tokio::test]
     async fn task_update_receipt_survives_reconnect() {
         use std::io::{Read, Write};
@@ -1241,8 +1254,7 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
-            isolate: None,
-            chrome: false,
+            chrome: None,
             session_attachment: None,
             system_prompt: String::new(),
             conversation_context: None,
@@ -1250,6 +1262,7 @@ mod tests {
             skill_invocation: None,
             output_schema: None,
             agent: Some("opencode".to_string()),
+            fallback_agents: Vec::new(),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,
             resume_token: None,

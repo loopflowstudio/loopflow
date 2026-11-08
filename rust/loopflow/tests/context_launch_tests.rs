@@ -6,6 +6,7 @@ use crate::support;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use loopflow_test_support::TestRepo;
@@ -26,6 +27,26 @@ fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[
         .args(args)
         .stdin(std::process::Stdio::null());
     command
+}
+
+/// Live agent Processes once a quit owner has finished its exit records. The
+/// terminal gets the provider's exit after a short wait; the owner lingers to
+/// settle its provider, so a reader waits for it.
+fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let live: i64 = database
+            .query_row(
+                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if live == 0 || std::time::Instant::now() >= deadline {
+            return live;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 #[test]
@@ -63,11 +84,25 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             start.elapsed() < std::time::Duration::from_secs(30),
             "{failure} must fail before the opener's deadline"
         );
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // A terminal's exit reads as the terminal's own output, on stdout.
+        let stderr = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // A quit owner still writing its records returns the terminal's own
+        // exit (the fixture's 24 or 25) instead of its own message.
+        let terminal_exit = match failure {
+            "fail-terminal" => Some(24),
+            "fail-after-submit" => Some(25),
+            _ => None,
+        };
         assert!(
-            (failure == "fail-after-submit" && stderr.contains("native terminal connection"))
+            (terminal_exit.is_some() && output.status.code() == terminal_exit)
+                || (failure == "fail-after-submit"
+                    && stderr.contains("native terminal connection"))
                 || stderr.contains(if failure == "fail-terminal" {
-                    "before submitting"
+                    "exited with"
                 } else if failure == "fail-after-submit" {
                     "status"
                 } else {
@@ -76,14 +111,11 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             "{failure}: {stderr}"
         );
         let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let live: i64 = database
-            .query_row(
-                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(live, 0, "{failure} must settle the owned provider");
+        assert_eq!(
+            settled_live_agents(&database),
+            0,
+            "{failure} must settle the owned provider"
+        );
         assert_eq!(
             fs::read_to_string(native.join("config.toml")).unwrap(),
             config
@@ -118,12 +150,15 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         let turns: serde_json::Value =
             serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
                 .unwrap();
+        // The first turn goes in before the terminal opens, so a terminal that
+        // fails leaves it in history, sent once, and the next one follows it.
+        let submitted = failure.starts_with("fail-") && failure != "fail-server";
         assert_eq!(
             turns.as_array().unwrap().len(),
-            if failure == "fail-after-submit" { 2 } else { 1 },
+            if submitted { 2 } else { 1 },
             "{failure}"
         );
-        if failure == "fail-after-submit" {
+        if submitted {
             assert_eq!(
                 turns[1]["items"][0]["content"][0]["text"],
                 "Native follow-up"
@@ -181,19 +216,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         "the terminal must answer, not a headless auto-approver"
     );
     let config = read("native-config.json");
+    let server = read("native-server-config.json");
     let capture = fs::read_to_string(home.path().join("launched")).unwrap();
     let key = capture.lines().next().unwrap();
     let shard = &key.strip_prefix("run_").unwrap_or(key)[..2];
     let manifest = read(&format!("runs/{shard}/{key}/manifest.json"));
+    // lf's configuration is the private app-server's, so a conversation the
+    // person starts in the client has it too; lf's own thread adds none.
     assert_eq!(
-        config["developerInstructions"],
+        server["developer_instructions"],
         manifest["exec"]["system_prompt"]
     );
+    assert!(config.get("developerInstructions").is_none());
+    assert!(config.get("config").is_none());
     assert!(config.get("baseInstructions").is_none());
-    assert_eq!(config["approvalPolicy"], "on-request");
+    assert!(config.get("approvalPolicy").is_none());
     assert_eq!(config["threadSource"], "user");
-    assert_eq!(config["config"]["native-setting"], true);
-    let hooks = &config["config"]["hooks"];
+    let hooks = &server["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
     let state = hooks["state"].as_object().unwrap();
     assert_eq!(
@@ -238,14 +277,11 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         turns[1]["items"][0]["content"][0]["text"],
         "Native follow-up"
     );
-    let live: i64 = database
-        .query_row(
-            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(live, 0, "both launches must settle their owned providers");
+    assert_eq!(
+        settled_live_agents(&database),
+        0,
+        "both launches must settle their owned providers"
+    );
 }
 
 #[test]
@@ -617,6 +653,89 @@ fn claude_opens_lf_created_worktree_already_trusted() {
     assert_eq!(
         seen,
         serde_json::json!({"projects": {key: {"hasTrustDialogAccepted": true}}})
+    );
+}
+
+/// A stand-in Claude that keeps what it saw under `$HOME`, for one launch environment.
+fn claude_launch(home: &Path, script: &str) -> Command {
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(&provider, format!("#!/bin/sh\n{script}\n")).unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("HOME", home)
+        .env("LF_HOME", home.join("machine"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
+        .stdin(std::process::Stdio::null());
+    command
+}
+
+fn succeed(command: &mut Command) -> String {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn claude_opens_a_task_checkout_already_trusted() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let script = "cp \"$CLAUDE_CONFIG_DIR/.claude.json\" \"$HOME/seen.json\"";
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), script)
+            .current_dir(repo.path())
+            .args(["task", "create", "--title", "Trust", "--json"]),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let placed: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), script)
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    ))
+    .unwrap();
+    let worktree = PathBuf::from(placed["worktree"].as_str().unwrap());
+
+    succeed(
+        claude_launch(home.path(), script)
+            .current_dir(&worktree)
+            .args(["-i", "-a", "claude", ":", "hello"]),
+    );
+
+    let seen: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("seen.json")).unwrap()).unwrap();
+    let key = worktree.canonicalize().unwrap().display().to_string();
+    assert_eq!(seen["projects"][&key]["hasTrustDialogAccepted"], true);
+}
+
+#[test]
+fn claude_dialog_in_a_checkout_lf_did_not_create_makes_the_session_available() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let list = "\"$LF_BIN\" session list --available --json > \"$HOME/available.json\"";
+
+    succeed(
+        claude_launch(home.path(), list)
+            .current_dir(repo.path())
+            .args(["-i", "-a", "claude", ":", "hello"]),
+    );
+
+    let available: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("available.json")).unwrap())
+            .unwrap();
+    assert_eq!(available.as_array().unwrap().len(), 1, "{available}");
+    assert!(
+        !home.path().join(".claude/.claude.json").exists(),
+        "the dialog stays Claude's to answer"
     );
 }
 

@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "route"],
-            vec!["account", "route", "--help"],
+            vec!["help", "account", "next"],
+            vec!["account", "next", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -301,8 +301,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["--no-chrome"][..],
         &["--diff", "invalid"][..],
         &["--chrome", "invalid"][..],
-        &["task", "changes", "INF-123", "--json"][..],
-        &["task", "diff", "INF-123", "src.rs", "--files"],
         &["task", "diff", "INF-123", "--files", "--draft"],
         &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
@@ -498,7 +496,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
         panic!("expected saved command");
     };
     let canonical = normalize_args(captured.item.argv()).unwrap();
-    assert_eq!(canonical, ["lf", "ops", "pr", "land", "--local"]);
+    assert_eq!(canonical, ["lf", "pr", "land", "--local"]);
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     let legacy = serde_json::json!({"Command": {
@@ -524,16 +522,16 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "rou"]),
-        ["lf", "ops", "account", "route"]
+        normalized(&["lf", "account", "nex"]),
+        ["lf", "account", "next"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
-        ["lf", "ops", "pr", "land", "--wait-and-fix"]
+        ["lf", "pr", "land", "--wait-and-fix"]
     );
     assert_eq!(
-        normalized(&["lf", "task", "comment", "status"]),
-        ["lf", "task", "comment", "status"]
+        normalized(&["lf", "task", "frobnicate", "status"]),
+        ["lf", "task", "frobnicate", "status"]
     );
     assert_eq!(
         normalized(&["lf", "graph", "land", "--", "--help"]),
@@ -543,6 +541,38 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     assert!(
         matches!(parsed.command, Some(Commands::Graph { cmd: GraphCommand::External(args) }) if args == ["list"])
     );
+}
+
+#[test]
+fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
+    let normalized =
+        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "--cached"]),
+        ["lf", "account", "codex", "--cached"]
+    );
+    assert_eq!(
+        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
+        ["lf", "account", "codex", "use", "a@example.com"]
+    );
+    let tree = loopflow::lf::navigation::command_tree();
+    let help = normalized(&["lf", "account", "codex", "--help"]);
+    assert_eq!(help, ["lf", "help", "account", "codex"]);
+    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &help[2..]).unwrap();
+    assert_eq!(canonical, ["account"]);
+
+    let verb = normalized(&["lf", "account", "codex", "use", "--help"]);
+    let error = loopflow::lf::navigation::resolve_path(&tree, &verb[2..]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown command: lf account codex use"),
+        "{error}"
+    );
+    for path in [["account", "codex", "use"], ["account", "codex", "nosuch"]] {
+        let path = path.map(String::from);
+        assert!(loopflow::lf::navigation::resolve_path(&tree, &path).is_err());
+    }
 }
 
 #[test]
@@ -590,7 +620,7 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
     let saved: loopflow::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
-    assert!(Cli::try_parse_from(["lf", "ops", "pr", "open", "--help"])
+    assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
         .is_err_and(|error| { error.kind() == clap::error::ErrorKind::DisplayHelp }));
 }
 
@@ -641,42 +671,66 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
         cli.task.is_none(),
         "history filters must not launch Task work"
     );
-    let Some(Commands::History { feed, cmd: None }) = cli.command else {
+    let Some(Commands::Session {
+        cmd:
+            loopflow::lf::SessionCommand::History {
+                id: None,
+                feed,
+                cmd: None,
+                ..
+            },
+    }) = cli.command
+    else {
         panic!("expected the default history feed");
     };
     assert_eq!(feed.task.as_deref(), Some("LOO-123"));
     assert_eq!(feed.since, "24h");
     assert!(feed.json);
 
-    for verb in ["list", "show", "usage", "replay"] {
+    for verb in ["list", "show", "replay"] {
         let mut args = vec!["lf", "history", verb];
         if matches!(verb, "show" | "replay") {
             args.push("exact-capture");
         }
         assert!(matches!(
             parse(&args).command,
-            Some(Commands::History { cmd: Some(_), .. })
-        ));
-        assert!(Cli::try_parse_from(["lf", "monitor", verb]).is_err());
-    }
-    for verb in ["usage", "replay"] {
-        let mut args = vec!["lf", verb];
-        if verb == "replay" {
-            args.push("exact-capture");
-        }
-        assert!(matches!(
-            parse(&args).command,
-            Some(Commands::History { cmd: Some(_), .. })
+            Some(Commands::Session {
+                cmd: loopflow::lf::SessionCommand::History { cmd: Some(_), .. }
+            })
         ));
     }
+    assert!(Cli::try_parse_from(["lf", "process", "replay", "exact-capture"]).is_err());
+    assert!(matches!(
+        parse(&["lf", "replay", "exact-capture"]).command,
+        Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::History { cmd: Some(_), .. }
+        })
+    ));
+    assert!(matches!(
+        parse(&["lf", "usage"]).command,
+        Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::Usage(_)
+        })
+    ));
     for verb in ["ps", "top"] {
         assert!(matches!(
             parse(&["lf", verb]).command,
-            Some(Commands::Monitor { .. })
+            Some(Commands::Process { .. })
         ));
     }
-    assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
-    assert!(Cli::try_parse_from(["lf", "monitor", "active"]).is_err());
+    assert!(matches!(
+        parse(&["lf", "monitor", "ps"]).command,
+        Some(Commands::Process {
+            cmd: loopflow::lf::commands::process::ProcessCommand::List { .. }
+        })
+    ));
+    // `lf monitor <retired verb>` moves to `lf process list` and fails there
+    // instead of running a skill named `monitor`.
+    for verb in ["activity", "active"] {
+        let args = normalize_args(["lf", "monitor", verb].map(str::to_owned).to_vec()).unwrap();
+        assert_eq!(args, ["lf", "process", "list", verb]);
+        assert!(Cli::try_parse_from(args).is_err());
+    }
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -712,13 +766,21 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
             vec!["--task", "LOO-123"],
         ),
         ("replay", vec!["capture-id"], vec!["replay", "capture-id"]),
-        ("usage", vec!["--days", "0"], vec!["usage", "--days", "0"]),
     ] {
         let saved = serde_json::json!({"command": command, "args": args});
         let restored: loopflow::graph::Command = serde_json::from_value(saved).unwrap();
-        assert_eq!(restored.command, "history");
-        assert_eq!(restored.args, expected);
+        assert_eq!(restored.command, "session");
+        assert_eq!(
+            restored.args,
+            [vec!["history"], expected.clone()].concat(),
+            "{command} {args:?}"
+        );
     }
+    let usage: loopflow::graph::Command =
+        serde_json::from_value(serde_json::json!({"command": "usage", "args": ["--days", "0"]}))
+            .unwrap();
+    assert_eq!(usage.command, "session");
+    assert_eq!(usage.args, ["usage", "--days", "0"]);
 }
 
 #[test]
@@ -746,14 +808,10 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
 }
 
 #[test]
-fn git_commands_belong_to_ops_not_task() {
+fn git_commands_sit_at_the_root_not_under_task() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["pr", "wt", "sync", "commit"] {
-        assert!(tree
-            .find_subcommand("ops")
-            .unwrap()
-            .find_subcommand(name)
-            .is_some());
+        assert!(tree.find_subcommand(name).is_some());
         if name == "sync" {
             continue;
         } // Task planning sync is separate from Git sync.
@@ -790,22 +848,13 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
-    assert!(tree.find_subcommand("repo").is_none());
     for (short, path) in [
-        (vec!["land"], vec!["ops", "pr", "land"]),
-        (vec!["pr", "land"], vec!["ops", "pr", "land"]),
-        (vec!["commit"], vec!["ops", "commit"]),
-        (vec!["sync"], vec!["ops", "sync"]),
-        (vec!["wt", "create"], vec!["ops", "wt", "create"]),
-        (vec!["account"], vec!["ops", "account"]),
-        (vec!["machine", "list"], vec!["ops", "machine", "list"]),
-        (vec!["pool"], vec!["ops", "machine", "pool"]),
-        (vec!["release", "run"], vec!["ops", "release", "run"]),
-        (vec!["ci"], vec!["ops", "ci"]),
-        (vec!["tokens"], vec!["ops", "tokens"]),
-        (vec!["repository"], vec!["config", "repository"]),
-        (vec!["planning", "key"], vec!["config", "planning", "key"]),
-        (vec!["reteam"], vec!["wave", "reteam"]),
+        (vec!["land"], vec!["pr", "land"]),
+        (vec!["pool"], vec!["machine", "pool"]),
+        (vec!["release", "run"], vec!["repo", "release", "run"]),
+        (vec!["ci"], vec!["repo", "ci"]),
+        (vec!["tokens"], vec!["repo", "tokens"]),
+        (vec!["reteam"], vec!["wave", "plan", "reteam"]),
     ] {
         assert!(tree.find_subcommand(short[0]).is_none(), "{short:?}");
         let help = success(run(
@@ -824,6 +873,34 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
         );
         assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
     }
+    // `lf planning` is the plans namespace; its old repository spellings move.
+    for (old, path) in [
+        (vec!["planning", "key"], vec!["repo", "plan", "key"]),
+        (vec!["planning"], vec!["repo", "plan"]),
+        (vec!["monitor", "ps"], vec!["process", "list"]),
+        (vec!["ship", "--stop"], vec!["task", "hold"]),
+        (vec!["desktop", "task"], vec!["task", "show"]),
+        (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),
+        (
+            vec!["desktop", "view", "--plan"],
+            vec!["desktop", "view", "show"],
+        ),
+    ] {
+        let help = success(run(
+            repo.path(),
+            home.path(),
+            &[path.clone(), vec!["--help"]].concat(),
+        ));
+        assert_eq!(
+            success(run(
+                repo.path(),
+                home.path(),
+                &[old.clone(), vec!["--help"]].concat()
+            )),
+            help,
+            "{old:?}"
+        );
+    }
     assert!(!home.path().join(".lf").exists());
 }
 
@@ -831,7 +908,11 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
 fn installation_configuration_and_app_commands_have_distinct_owners() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for (short, owner) in [("install", "self"), ("doctor", "self"), ("user", "config")] {
+    for (short, owner) in [
+        ("install", "self"),
+        ("doctor", "machine"),
+        ("user", "config"),
+    ] {
         let help = success(run(repo.path(), home.path(), &[owner, short, "--help"]));
         assert_eq!(
             success(run(repo.path(), home.path(), &[short, "--help"])),
@@ -841,8 +922,6 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     }
     let tree = Cli::command();
     let mut machine_commands: Vec<_> = tree
-        .find_subcommand("ops")
-        .unwrap()
         .find_subcommand("machine")
         .unwrap()
         .get_subcommands()
@@ -855,20 +934,21 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "add",
             "connect",
             "credentials",
+            "doctor",
             "end",
-            "id",
             "list",
             "ondemand",
             "pool",
             "public",
             "remove",
             "rename",
+            "self",
             "status"
         ]
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
-    for path in ["self install", "self doctor", "config user", "open"] {
+    for path in ["self install", "machine doctor", "config user", "open"] {
         assert!(help.contains(path), "{help}");
     }
     assert!(!help.contains("screenshot"));
@@ -891,7 +971,6 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
     for path in [
         vec!["installation", "install"],
         vec!["machine", "install"],
-        vec!["machine", "doctor"],
         vec!["machine", "user"],
         vec!["machine", "desktop"],
         vec!["machine", "screenshot"],
@@ -1235,6 +1314,33 @@ fn portable_help_describes_exact_kind_selection() {
 }
 
 #[test]
+fn structured_help_describes_desktop_shell_as_private_runtime() {
+    use loopflow::lf::navigation::describe_command;
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "desktop", "shell", "--json"],
+    ));
+    let runtime: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(runtime["definition"]["command"], "lf desktop shell");
+    assert_eq!(
+        runtime["definition"].get("result_schema"),
+        Some(&serde_json::Value::Null)
+    );
+    assert!(!home.path().join(".lf").exists());
+    for recursive in [false, true] {
+        let desktop = describe_command(&["desktop".into()], recursive).unwrap();
+        assert!(!desktop["definition"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["command"] == "lf desktop shell"));
+    }
+}
+
+#[test]
 fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     use loopflow::lf::navigation::describe_command;
     let repo = fixture();
@@ -1295,13 +1401,9 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .filter(|command| {
             // Desktop's Work reads print its presentation types, which carry no schema.
             ![
-                "lf desktop rename",
+                "lf desktop dashboard rename",
                 "lf desktop wait",
-                "lf desktop plan",
-                "lf desktop done",
-                "lf desktop wave",
-                "lf desktop sessions",
-                "lf desktop task",
+                "lf desktop portfolio",
             ]
             .contains(&command["command"].as_str().unwrap())
         })
@@ -1355,7 +1457,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         command
     };
     let invoke = |args: &[&str]| command(args).output().unwrap();
-    let output = invoke(&["desktop", "view", "state:backlog", "--plan", "--json"]);
+    let output = invoke(&["desktop", "view", "show", "state:backlog", "--json"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1367,14 +1469,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert!(plan.contents[0].primary_session.is_none());
     assert!(plan.contents[0].argv.is_none());
     assert_eq!(counts(), before);
-    let missing = invoke(&["desktop", "view", "query:missing", "--plan"]);
+    let missing = invoke(&["desktop", "view", "show", "query:missing"]);
     assert_eq!(
         missing.status.code(),
         Some(3),
         "{}",
         String::from_utf8_lossy(&missing.stderr)
     );
-    let invalid = invoke(&["desktop", "view", "repo:other", "--plan"]);
+    let invalid = invoke(&["desktop", "view", "show", "repo:other"]);
     assert_eq!(
         invalid.status.code(),
         Some(2),
@@ -1382,7 +1484,13 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         String::from_utf8_lossy(&invalid.stderr)
     );
     assert_eq!(counts(), before);
-    let saved = invoke(&["desktop", "query", "query:backlog", "state:backlog"]);
+    let saved = invoke(&[
+        "desktop",
+        "dashboard",
+        "query",
+        "query:backlog",
+        "state:backlog",
+    ]);
     assert!(
         saved.status.success(),
         "{}",
@@ -1392,6 +1500,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         serde_json::from_slice(&saved.stdout).unwrap();
     let after_save = counts();
     assert_eq!((after_save.0, after_save.1), (before.0, before.1));
+    // The old spelling still reads the plan.
     let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
     assert!(
         reopened.status.success(),
@@ -1413,6 +1522,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         .to_string();
     let renamed = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "task:task_33333333333333333333333333333333",
         "Later task",
@@ -1434,6 +1544,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let stale_name = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "task:task_33333333333333333333333333333333",
         "stale",
@@ -1449,7 +1560,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .title,
         "Later task"
     );
-    let pinned = invoke(&["desktop", "pin", "backlog", "--revision", "1"]);
+    let pinned = invoke(&["desktop", "dashboard", "pin", "backlog", "--revision", "1"]);
     assert!(
         pinned.status.success(),
         "{}",
@@ -1457,6 +1568,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let named = invoke(&[
         "desktop",
+        "dashboard",
         "rename",
         "query:backlog",
         "Later",
@@ -1471,13 +1583,13 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let removed = invoke(&["desktop", "bind", "repository", "backlog"]);
     assert_eq!(removed.status.code(), Some(2));
     let before_reads = counts();
-    let defaults = invoke(&["desktop", "view", "--plan"]);
+    let defaults = invoke(&["desktop", "view", "show"]);
     let defaults: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&defaults.stdout).unwrap();
     assert!(defaults.dashboard_id.is_none());
     // Both Waves and the two idle Tasks; the unstarted one isn't Working.
     assert_eq!(defaults.contents.len(), 4);
-    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
     let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
@@ -1486,9 +1598,16 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert!(layout.status.success());
     assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
     assert_eq!(counts(), before_reads);
-    let stale = invoke(&["desktop", "unpin", "backlog", "--revision", "1"]);
+    let stale = invoke(&[
+        "desktop",
+        "dashboard",
+        "unpin",
+        "backlog",
+        "--revision",
+        "1",
+    ]);
     assert!(!stale.status.success());
-    let plan = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
     let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
     assert!(plan.pinned);
     assert_eq!(plan.saved_revision, Some(3));
@@ -1508,9 +1627,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap();
         child.wait_with_output().unwrap()
     };
-    // Tile verbs aimed at a saved record's tile edit it without Desktop.
+    // Dashboard tile verbs edit a saved record's tile without Desktop.
     let tile = format!("query:backlog/task:{}", plan.arrangement.order[0].work.id);
-    let hidden = invoke(&["desktop", "hide", "-p", &tile]);
+    let hidden = invoke(&["desktop", "dashboard", "hide", &tile]);
     assert!(
         hidden.status.success(),
         "{}",
@@ -1523,14 +1642,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     // Hiding never changes whether the order is automatic.
     assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
     // A hidden tile is no longer shown, so hiding it again names nothing.
-    let again = invoke(&["desktop", "hide", "-p", &tile]);
+    let again = invoke(&["desktop", "dashboard", "hide", &tile]);
     assert_eq!(again.status.code(), Some(3));
     let order = defaults.resolution.task_ids();
     // Working Tasks keeps only the shared order: nothing to size.
     let sized = invoke(&[
         "desktop",
+        "dashboard",
         "resize",
-        "-p",
         &format!("working-tasks/task:{}", order[0]),
         "--toward",
         &format!("task:{}", order[1]),
@@ -1540,8 +1659,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(sized.status.code(), Some(1));
     let moved = invoke(&[
         "desktop",
+        "dashboard",
         "move",
-        "-p",
         &format!("working-tasks/task:{}", order[order.len() - 1]),
         "--destination",
         &format!("task:{}", order[0]),
@@ -1553,7 +1672,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let moved: Vec<String> = serde_json::from_slice(&moved.stdout).unwrap();
     assert_eq!(moved[0], order[order.len() - 1]);
-    let reopened = invoke(&["desktop", "view", "query:backlog", "--plan"]);
+    let reopened = invoke(&["desktop", "view", "show", "query:backlog"]);
     let reopened: loopflow::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.arrangement, arranged.arrangement);
@@ -1562,9 +1681,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let slots = invoke_input(
         &[
             "desktop",
-            "layout",
+            "dashboard",
+            "slots",
             "query:backlog",
-            "--save",
             "--revision",
             &revision,
         ],

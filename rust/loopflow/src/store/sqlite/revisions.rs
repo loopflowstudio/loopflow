@@ -91,7 +91,7 @@ mod tests {
         "planning_peer_observed",
         "project_binding_imports",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf ops people`.
+        // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
@@ -109,6 +109,8 @@ mod tests {
         "rentals",
         "schema_migrations",
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
+        // A busy Session's pending move; its Stop hook reads it, no view does.
+        "session_moves",
         "session_steers",
         "steer_adapters",
         "steer_batches",

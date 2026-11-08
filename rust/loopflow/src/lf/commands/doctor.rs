@@ -6,10 +6,10 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::output::Colors;
-use crate::process::LfProcess;
+use crate::process::ProcessEntry;
 use crate::store::contention::read_contention;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Status {
@@ -18,7 +18,7 @@ pub enum Status {
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct Check {
     pub name: &'static str,
     pub status: Status,
@@ -51,14 +51,14 @@ impl Check {
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
 /// What `lf doctor --json` prints.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct DoctorReport {
     store: StoreReport,
     rows: usize,
     checks: Vec<Check>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
     build_label: Option<String>,
@@ -444,10 +444,10 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
 }
 
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[LfProcess]) -> Check {
+fn check_attribution(events: &[ProcessEntry]) -> Check {
     let unnamed = events
         .iter()
-        .filter(|process| process.completed_at.is_some() && process.command.is_none())
+        .filter(|process| process.completed_at().is_some() && process.command().is_none())
         .count();
     if unnamed == 0 {
         Check::ok("attribution", "every completed Process names its command")
@@ -460,12 +460,9 @@ fn check_attribution(events: &[LfProcess]) -> Check {
 }
 
 /// Processes may be machine-scoped; recorded repositories must be absolute.
-fn check_identity(events: &[LfProcess]) -> Check {
-    let repos: HashSet<&str> = events
-        .iter()
-        .filter_map(|event| event.repo.as_deref())
-        .collect();
-    let unscoped = events.iter().filter(|event| event.repo.is_none()).count();
+fn check_identity(events: &[ProcessEntry]) -> Check {
+    let repos: HashSet<&str> = events.iter().filter_map(ProcessEntry::repo).collect();
+    let unscoped = events.iter().filter(|event| event.repo().is_none()).count();
     let invalid = repos
         .iter()
         .filter(|repo| !Path::new(repo).is_absolute())
@@ -485,16 +482,16 @@ fn check_identity(events: &[LfProcess]) -> Check {
     )
 }
 
-pub(crate) fn check_lineage(events: &[LfProcess], repairable: usize) -> Check {
+pub(crate) fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
+        .map(|event| (event.id(), event.trace_id().as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_lf_process_id.as_ref()?.as_str();
-            (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
+            let parent = event.parent_lf_process_id()?.as_str();
+            (processes.get(parent).copied() != Some(event.trace_id().as_str())).then_some(parent)
         })
         .collect();
     if dangling.is_empty() {
@@ -567,7 +564,7 @@ mod tests {
     const DAY: i64 = 86_400;
 
     #[test]
-    fn store_report_exposes_unknown_applied_migration() {
+    fn store_report_admits_a_newer_migration_tail() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let connection = rusqlite::Connection::open(&path).unwrap();
@@ -575,7 +572,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO schema_migrations (version, applied_at)
-                 VALUES ('9.0.001_divergent', unixepoch() + 1)",
+                 VALUES ('9.0.001_newer', unixepoch() + 1)",
                 [],
             )
             .unwrap();
@@ -585,17 +582,13 @@ mod tests {
 
         assert_eq!(
             report.latest_applied_migration.as_deref(),
-            Some("9.0.001_divergent")
+            Some("9.0.001_newer")
         );
-        let error = report.migration_error.unwrap();
-        assert!(error.contains("9.0.001_divergent"), "{error}");
-        assert!(error.contains("latest known"), "{error}");
+        assert_eq!(report.migration_error, None);
     }
 
     fn row(ts: i64, event: &str) -> LfProcess {
         LfProcess {
-            kind: crate::process::ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             id: crate::id::LfProcessId::new(),
             pid: None,
@@ -622,6 +615,11 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
+        let rows = &rows
+            .iter()
+            .cloned()
+            .map(crate::process::ProcessEntry::Lf)
+            .collect::<Vec<_>>();
         [
             check_attribution(rows),
             check_identity(rows),

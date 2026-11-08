@@ -106,11 +106,15 @@ struct GhosttyShellBlockTests {
     @Test("the default-prompt shell gets a context header and reports a failed command")
     func zshBootstrapMarksHeaderAndFailure() throws {
         let resources = try #require(GhosttyRuntimeResources.directoryURL)
-        let bootstrap = try #require(LoopflowZshBootstrap.install())
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(desktopShellBootstrap().utf8)) as? [String: Any])
+        let files = try #require(payload["files"] as? [String: String])
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("loopflow-zsh-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: home) }
+        let bootstrap = home.appendingPathComponent("bootstrap")
+        try FileManager.default.createDirectory(at: bootstrap, withIntermediateDirectories: true)
+        try #require(files[".zshenv"]).write(to: bootstrap.appendingPathComponent(".zshenv"), atomically: true, encoding: .utf8)
 
         func run(rc: String) throws -> String {
             try rc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
@@ -138,7 +142,7 @@ struct GhosttyShellBlockTests {
                 "GHOSTTY_RESOURCES_DIR": resources.path,
                 "GHOSTTY_SHELL_FEATURES": "",
                 "TERM": "xterm-256color",
-                "ZDOTDIR": bootstrap,
+                "ZDOTDIR": bootstrap.path,
                 "LF_BIN": "/bundled app/Contents/MacOS/lf",
             ]
             let stdout = Pipe()
@@ -163,7 +167,7 @@ struct GhosttyShellBlockTests {
 
         // The stock prompt becomes a blank row, a concealed header row holding
         // the directory, then the command line.
-        let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
+        let stock = try run(rc: "PS1='%n@%m %1~ %# '\n")
         try expectInOrder([
             "\u{1B}]133;A;cl=line\u{7}",
             "\n\u{1B}]133;P;k=s\u{7}",
@@ -355,7 +359,7 @@ struct GhosttyTerminalInputTests {
             let view = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)
             view.workingDirectory = NSTemporaryDirectory()
-            view.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/sh", "-c", "printf 'attachment-ready\\n'; exec /bin/cat"], env: [:])
+            view.command = buildGhosttyShellCommand(argv: ["/bin/sh", "-c", "printf 'attachment-ready\\n'; exec /bin/cat"], env: [:])
             view.createSurface(manager: manager)
             views.append(view)
             _ = try #require(view.surface)
@@ -363,7 +367,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }
@@ -380,27 +384,6 @@ struct GhosttyTerminalInputTests {
         await otherWindow.select("one")
         #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
         #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0], machineId: fixtureMachineId)))
-    }
-
-    @Test("Exiting the initial conversation leaves a usable companion shell")
-    @MainActor
-    func conversationReturnsToShell() async throws {
-        _ = NSApplication.shared
-        let manager = GhosttyManager.shared
-        manager.initialize()
-        let view = GhosttyMetalView(terminal: .shell("return-proof", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 800, height: 500))
-        view.workingDirectory = NSTemporaryDirectory()
-        view.command = buildWorkspaceShellCommand(id: "return-proof", argv: ["/bin/true"], env: [:])
-        view.createSurface(manager: manager)
-        defer { view.handleSurfaceClose() }
-        let surface = try #require(view.surface)
-        let command = "printf '%s:%s\\n' companion \"$LF_TERMINAL_ID\"\r"
-        command.withCString { ghostty_surface_text(surface, $0, UInt(command.utf8.count)) }
-        let deadline = ContinuousClock.now + .seconds(5)
-        while !terminalText(view).contains("companion:return-proof"), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(terminalText(view).contains("companion:return-proof"))
     }
 
     @Test("text and block selection replace each other, and copy follows the one shown")

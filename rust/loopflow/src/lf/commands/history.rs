@@ -6,7 +6,7 @@ use clap::Subcommand;
 use crate::lf::commands::session_history::SessionView;
 use crate::lf::output::print_process;
 use crate::process::{
-    LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter,
+    ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
 };
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
@@ -32,8 +32,42 @@ pub struct HistoryFeed {
     #[arg(long)]
     pub json: bool,
     /// Print a JSON line now and each time the history changes, until stdin closes
-    #[arg(long, requires = "json")]
-    pub watch: bool,
+    #[arg(short = 's', long, requires = "json")]
+    pub subscribe: bool,
+    #[command(flatten)]
+    pub selection: crate::lf::Selection,
+}
+
+/// `session.usage`: provider-authored usage from recorded Session inputs.
+#[derive(Debug, clap::Args)]
+pub struct UsageArgs {
+    /// Emit Session usage evidence as JSON
+    #[arg(long)]
+    pub json: bool,
+    /// Observation window, in days (zero means all time)
+    #[arg(long, default_value_t = 30)]
+    pub days: u32,
+    /// Report context cost and turn time by week since 2026-09-30
+    #[arg(long, conflicts_with_all = ["days", "parent"])]
+    pub weekly: bool,
+    /// Compare Task and Wave usage under prospective and post-hoc bind attribution
+    #[arg(long, conflicts_with_all = ["days", "parent", "weekly", "context", "wave", "project", "task"])]
+    pub binds: bool,
+    /// Inputs issued by this Session or retained capture
+    #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
+    pub parent: Option<String>,
+    /// Limit to Session inputs attributed to one Wave
+    #[arg(long)]
+    pub wave: Option<String>,
+    /// Limit to Session inputs attributed to one Project
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Limit to Session inputs attributed to one Task
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Break each step's submitted input down by source, flagged against budgets
+    #[arg(long)]
+    pub context: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -49,8 +83,9 @@ pub enum HistoryCommand {
         limit: NonZeroU32,
         /// Continue with the previous page's next object, encoded as JSON
         #[arg(long, value_parser = parse_cursor)]
-        after: Option<LfProcessCursor>,
-        /// Direct children of an exact or unambiguous parent Process
+        after: Option<ProcessCursor>,
+        /// Direct children of an exact or unambiguous parent Process; for an
+        /// AgentProcess, the lf commands it issued
         #[arg(long)]
         parent: Option<String>,
         /// Commands issued by this Session
@@ -89,11 +124,6 @@ pub enum HistoryCommand {
         #[arg(long, conflicts_with_all = ["final_answer", "context", "instructions", "input"])]
         transcript: bool,
     },
-    /// Show how much Session history providers still keep, and what they remove next
-    Retention {
-        #[arg(long)]
-        json: bool,
-    },
     /// Find text in the conversations of recent Sessions
     Search {
         text: String,
@@ -113,36 +143,6 @@ pub enum HistoryCommand {
         limit: usize,
         #[arg(long)]
         json: bool,
-    },
-    /// Show direct provider-authored usage from recorded Session inputs
-    Usage {
-        /// Emit Session usage evidence as JSON
-        #[arg(long)]
-        json: bool,
-        /// Observation window, in days (zero means all time)
-        #[arg(long, default_value_t = 30)]
-        days: u32,
-        /// Report context cost and turn time by week since 2026-09-30
-        #[arg(long, conflicts_with_all = ["days", "parent"])]
-        weekly: bool,
-        /// Compare Task and Wave usage under prospective and post-hoc bind attribution
-        #[arg(long, conflicts_with_all = ["days", "parent", "weekly", "context", "wave", "project", "task"])]
-        binds: bool,
-        /// Inputs issued by this Session or retained capture
-        #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
-        parent: Option<String>,
-        /// Limit to Session inputs attributed to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Limit to Session inputs attributed to one Project
-        #[arg(long)]
-        project: Option<String>,
-        /// Limit to Session inputs attributed to one Task
-        #[arg(long)]
-        task: Option<String>,
-        /// Break each step's submitted input down by source, flagged against budgets
-        #[arg(long)]
-        context: bool,
     },
     /// Show where this Machine's Linear requests went, by hour, command and operation
     #[command(
@@ -175,9 +175,7 @@ impl HistoryCommand {
         match self {
             Self::List { .. }
             | Self::Show { .. }
-            | Self::Retention { .. }
             | Self::Search { .. }
-            | Self::Usage { .. }
             | Self::Linear { .. }
             | Self::Export { .. } => false,
             Self::Replay { .. } => true,
@@ -201,8 +199,51 @@ fn export(since: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
+fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
+}
+
+/// `lf session usage`.
+pub fn usage(args: &UsageArgs) -> anyhow::Result<()> {
+    match args {
+        UsageArgs {
+            json, binds: true, ..
+        } => super::bind_attribution::run(*json),
+        UsageArgs {
+            json,
+            weekly: true,
+            wave,
+            project,
+            task,
+            ..
+        } => super::context_cost::run(
+            *json,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+        ),
+        UsageArgs {
+            json,
+            days,
+            parent,
+            wave,
+            project,
+            task,
+            weekly: false,
+            binds: false,
+            context,
+        } => super::usage::run(
+            *context,
+            *json,
+            *days,
+            wave.as_deref(),
+            project.as_deref(),
+            task.as_deref(),
+            parent.as_deref(),
+        ),
+    }
 }
 
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
@@ -210,7 +251,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Linear { since, json } => super::linear_requests::run(since, *json),
         HistoryCommand::Export { since } => export(since),
-        HistoryCommand::Retention { json } => super::history_transcript::retention(*json),
         HistoryCommand::Search {
             text,
             since,
@@ -229,43 +269,6 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             },
             *limit,
             *json,
-        ),
-        HistoryCommand::Usage {
-            json, binds: true, ..
-        } => super::bind_attribution::run(*json),
-        HistoryCommand::Usage {
-            json,
-            weekly: true,
-            wave,
-            project,
-            task,
-            ..
-        } => super::context_cost::run(
-            *json,
-            super::WorkFilter {
-                wave: wave.as_deref(),
-                project: project.as_deref(),
-                task: task.as_deref(),
-            },
-        ),
-        HistoryCommand::Usage {
-            json,
-            days,
-            parent,
-            wave,
-            project,
-            task,
-            weekly: false,
-            binds: false,
-            context,
-        } => super::usage::run(
-            *context,
-            *json,
-            *days,
-            wave.as_deref(),
-            project.as_deref(),
-            task.as_deref(),
-            parent.as_deref(),
         ),
         HistoryCommand::Show {
             id,
@@ -306,13 +309,13 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 CanonicalRepo::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
-                (Some(task), _) => Some(LfProcessWorkFilter::Task(
+                (Some(task), _) => Some(ProcessWorkFilter::Task(
                     store
                         .sqlite
                         .resolve_task_id(task, repo.as_deref())?
                         .context("Task was not found")?,
                 )),
-                (_, Some(wave)) => Some(LfProcessWorkFilter::Wave(
+                (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
                     store
                         .sqlite
                         .resolve_wave_id(wave, repo.as_deref())?
@@ -320,25 +323,29 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                 )),
                 _ => None,
             };
-            let filter = LfProcessFilter {
-                repo,
-                parent_lf_process_id: match parent {
-                    Some(parent) => Some(
-                        store
-                            .resolve_process(parent)
-                            .await?
-                            .context("Parent Process was not found")?
-                            .id,
-                    ),
-                    None => None,
+            // An lf parent started its children; an agent parent issued them.
+            let (parent_lf_process_id, caller_agent_process_id) = match parent {
+                Some(parent) => match store
+                    .resolve_process(parent)
+                    .await?
+                    .context("Parent Process was not found")?
+                {
+                    ProcessEntry::Lf(parent) => (Some(parent.id), None),
+                    ProcessEntry::Agent(parent) => (None, Some(parent.id)),
                 },
+                None => (None, None),
+            };
+            let filter = ProcessFilter {
+                repo,
+                parent_lf_process_id,
+                caller_agent_process_id,
                 caller_session_id: caller.clone().map(Into::into),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
-                    "succeeded" => LfProcessOutcomeFilter::Succeeded,
-                    "failed" => LfProcessOutcomeFilter::Failed,
-                    "interrupted" => LfProcessOutcomeFilter::Interrupted,
-                    _ => LfProcessOutcomeFilter::Unknown,
+                    "succeeded" => ProcessOutcomeFilter::Succeeded,
+                    "failed" => ProcessOutcomeFilter::Failed,
+                    "interrupted" => ProcessOutcomeFilter::Interrupted,
+                    _ => ProcessOutcomeFilter::Unknown,
                 }),
                 performed_work,
                 ..Default::default()
@@ -365,7 +372,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
 /// What `lf history show` found: this Machine's own record, or a copy.
 #[derive(Debug)]
 enum Shown {
-    Local(Option<crate::process::LfProcess>),
+    Local(Option<crate::process::ProcessEntry>),
     Copied(crate::machine_records::CopiedHistory),
 }
 

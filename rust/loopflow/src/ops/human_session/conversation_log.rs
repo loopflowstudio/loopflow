@@ -31,13 +31,7 @@ pub(super) fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
         .input_provider_session(session.input_key()?)?
         .ok_or_else(|| anyhow!("Session {id} has no native conversation to continue"))?;
     let thread = &reference.agent_session;
-    let located = transcript::locate(
-        store,
-        harness,
-        thread,
-        reference.account_id.as_ref(),
-        &session.cwd,
-    )?;
+    let located = transcript::locate(store, harness, thread, &session.cwd)?;
     let transcript::Located::Found { source, .. } = located else {
         bail!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.");
     };

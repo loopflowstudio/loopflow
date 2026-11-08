@@ -10,9 +10,11 @@ pub mod config;
 pub mod context_block;
 pub mod context_usage;
 pub mod definition;
+pub mod desktop;
 pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
+pub mod engine;
 pub mod error;
 pub(crate) mod ghostty_vt;
 pub mod git;
@@ -30,6 +32,7 @@ pub mod platform;
 pub mod portfolio;
 pub mod process;
 pub mod prompt;
+pub mod server;
 pub mod skills;
 pub(crate) mod startup;
 pub mod task_graph;
@@ -95,14 +98,14 @@ mod repository_team_matrix;
 #[path = "../tests/linear/status_tests.rs"]
 mod status_tests;
 #[cfg(test)]
+#[path = "../tests/linear/subscribe.rs"]
+mod subscribe;
+#[cfg(test)]
 #[path = "../tests/linear/task_adoption_tests.rs"]
 mod task_adoption_tests;
 #[cfg(test)]
 #[path = "../tests/linear/task_graph_launch_tests.rs"]
 mod task_graph_launch_tests;
-#[cfg(test)]
-#[path = "../tests/linear/watch.rs"]
-mod watch;
 #[cfg(test)]
 #[path = "../tests/linear/wave_repository_ownership.rs"]
 mod wave_repository_ownership;

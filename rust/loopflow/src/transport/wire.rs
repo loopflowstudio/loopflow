@@ -186,6 +186,7 @@ pub(super) enum Request {
         hint: String,
     },
     /// Whether some viewer holds input control, asked before opening another.
+    /// On an attached connection this also refreshes the viewer's liveness.
     Controlled,
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {
@@ -263,12 +264,11 @@ pub(super) enum Event {
         held: bool,
     },
     /// Input control changed hands. A recipient with `held: false` restores
-    /// its terminal, prints `notice`, then runs the full successor command
-    /// when the owner is retiring, or leaves when another viewer took control.
+    /// its terminal, prints `notice` and leaves: another viewer took control,
+    /// or the owner is ending.
     Control {
         held: bool,
         notice: Option<String>,
-        successor: Option<Vec<String>>,
     },
     ChildExited {
         code: u8,
@@ -280,6 +280,12 @@ pub(super) enum Event {
     /// How a viewer that detaches can return.
     Return {
         detach: String,
+    },
+    /// The execution's directory. Hosts read a terminal's foreground process as
+    /// well as its reports, so the viewer enters it: owner and viewer share a
+    /// Machine, and the two sources must not disagree.
+    Directory {
+        cwd: std::path::PathBuf,
     },
 }
 

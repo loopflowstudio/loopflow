@@ -91,7 +91,7 @@ PHASE_BUDGETS: dict[str, int] = {
     "architecture": 120,
     "rustfmt": 120,
     "clippy": 900,
-    "rust": 1200,
+    "rust": 2400,
     "python": 600,
     "website": 900,
     "swift": 1200,

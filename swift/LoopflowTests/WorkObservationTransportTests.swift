@@ -1,86 +1,92 @@
 #if os(macOS)
-import Darwin
 import Foundation
 import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// A window's watches, served by stand-ins or by Loopflow's library in the app.
-/// Every window starts with the plan and the live-process watch.
-@Suite("Workspace watch transport", .serialized)
+/// A window's subscriptions, served by stand-ins or by a private Loopflow server.
+/// Every window starts with the plan and the live-process subscription.
+@Suite("Workspace subscription transport", .serialized)
 struct WorkObservationTransportTests {
-    @Test("A native library write completes from an async caller")
+    @Test("A server command completes from an async caller")
     func writeFromAsyncCaller() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
         let repo = Self.home.appendingPathComponent("write-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: repo) }
         let lf = try BuiltLf(home: Self.home, cwd: repo)
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
 
-        let printed = try #require(try await LoopflowLibrary.write(.graphCustomize(directory: repo.path, name: "code")))
-        let path = printed.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await lf.run(["config", "repo", "--json"])
+        let server = LocalServerFixture(lf)
+        let printed = try await ServerClient.write(.graphCustomize(directory: repo.path, name: "code"), location: server.location())
+        await server.stop()
+        let path = try #require(try JSONSerialization.jsonObject(with: Data(printed.utf8)) as? [String: String])["path"]!
         let graph = try String(contentsOfFile: path, encoding: .utf8)
         #expect(graph.contains("implement"))
     }
 
-    @Test("Loopflow's library serves a read in the app and ends it on cancel")
-    func servedInProcess() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
-        let watch = try LoopflowLibrary.watch(.allPlans)
-        var lines = watch.lines.makeAsyncIterator()
+    @Test("The server serves a read and ends it on cancel")
+    func servedOverSocket() async throws {
+        let lf = try BuiltLf(home: Self.home)
+        _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
+        _ = try await lf.run(["config", "repo", "--json"])
+        let server = LocalServerFixture(lf)
+        let subscription = ServerClient.subscribe(.allPlans, location: server.location())
+        var lines = subscription.lines.makeAsyncIterator()
         let first = try #require(try await lines.next())
         let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
         #expect(frame.keys.contains("body"))
-        watch.send(Data(#"{"id":7}"#.utf8 + [10]))
+        subscription.send(Data(#"{"id":7}"#.utf8 + [10]))
         let answered = try #require(try await lines.next())
         #expect((try JSONSerialization.jsonObject(with: answered) as? [String: Any])?["answers"] as? Int == 7)
-        await watch.cancel()
+        await subscription.cancel()
+        await server.stop()
         #expect(try await lines.next() == nil)
     }
 
-    @Test("A read Loopflow does not serve fails its watch")
+    @Test("A read Loopflow does not serve fails its subscription")
     func unservedRead() async throws {
-        setenv("LF_HOME", Self.home.path, 1)
-        defer { unsetenv("LF_HOME") }
-        let watch = try LoopflowLibrary.watch(.desktopTask(directory: "/", issue: "NONE-404"))
+        let lf = try BuiltLf(home: Self.home)
+        _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
+        _ = try await lf.run(["config", "repo", "--json"])
+        let server = LocalServerFixture(lf)
+        let subscription = ServerClient.subscribe(.machineId, location: server.location())
         do {
-            for try await _ in watch.lines {}
+            for try await _ in subscription.lines {}
             Issue.record("An unserved read finished successfully")
         } catch {
-            #expect(error is RegistryQueryError)
+            #expect((error as? ServerError)?.code == .invalid)
         }
-        await watch.cancel()
+        await subscription.cancel()
+        await server.stop()
     }
 
-    @Test("A scope change keeps a watch whose read is unchanged and starts the new ones")
+    @Test("A scope change keeps a subscription whose read is unchanged and starts the new ones")
     func scopeChange() async throws {
-        let watches = FakeWatches()
-        let observation = try WorkWatches.observe(launch: watches.launch)
+        let subscriptions = FakeSubscriptions()
+        let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
-        try await watches.answer(.allPlans, 0)
+        try await subscriptions.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
         observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
         // The plan answers from its last reading.
         #expect(try await frames.next()?.answers == 2)
-        #expect(watches.launched.contains(.desktopTask(directory: "/src/loopflow", issue: "LOO-1")))
-        #expect(watches.launched.filter { $0 == .allPlans }.count == 1)
+        #expect(subscriptions.launched.contains(.desktopTask(directory: "/src/loopflow", issue: "LOO-1")))
+        #expect(subscriptions.launched.filter { $0 == .allPlans }.count == 1)
         await observation.cancel()
     }
 
-    @Test("A checkpoint follows once every running watch has answered it")
-    func checkpointPerWatch() async throws {
-        let watches = FakeWatches()
-        let observation = try WorkWatches.observe(launch: watches.launch)
+    @Test("A checkpoint follows once every running subscription has answered it")
+    func checkpointPerSubscription() async throws {
+        let subscriptions = FakeSubscriptions()
+        let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
         observation.request(.checkpoint(id: 5, replay: []))
-        try await watches.answer(.allPlans, 5)
+        try await subscriptions.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(watches.requests(.monitorPs) == [#"{"id":5}"#])
-        // The live-process watch has not answered, so nothing is confirmed yet.
-        try await watches.answer(.monitorPs, 5)
+        #expect(subscriptions.requests(.monitorPs) == [#"{"id":5}"#])
+        // The live-process subscription has not answered, so nothing is confirmed yet.
+        try await subscriptions.answer(.monitorPs, 5)
         let answered = try await frames.next()
         #expect(answered?.content.part == "activity")
         let checkpoint = try await frames.next()
@@ -89,15 +95,15 @@ struct WorkObservationTransportTests {
         await observation.cancel()
     }
 
-    @Test("Malformed frames and ended watches fail rather than becoming empty",
+    @Test("Malformed frames and ended subscriptions fail rather than becoming empty",
           arguments: ["malformed", "wrong-type", "ended"])
     func invalidFrames(kind: String) async throws {
-        let watches = FakeWatches()
-        let observation = try WorkWatches.observe(launch: watches.launch)
+        let subscriptions = FakeSubscriptions()
+        let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         switch kind {
-        case "malformed": watches.send(.allPlans, "{bad}")
-        case "wrong-type": watches.send(.allPlans, #"{"answers":"not a number"}"#)
-        default: watches.end(.allPlans)
+        case "malformed": subscriptions.send(.allPlans, "{bad}")
+        case "wrong-type": subscriptions.send(.allPlans, #"{"answers":"not a number"}"#)
+        default: subscriptions.end(.allPlans)
         }
         do {
             for try await _ in observation.frames {
@@ -106,7 +112,7 @@ struct WorkObservationTransportTests {
             Issue.record("Invalid transport finished successfully")
         } catch {
             #expect(error is RegistryQueryError)
-            if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid planning watch frame")) }
+            if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid planning subscription frame")) }
             if kind == "wrong-type" { #expect(error.localizedDescription.contains("answers")) }
         }
         await observation.cancel()
@@ -133,7 +139,7 @@ struct WorkObservationTransportTests {
         #expect(!process.isRunning)
     }
 
-    @Test("Silence after the first frame expires a reader that must speak, not a watch")
+    @Test("Silence after the first frame expires a reader that must speak, not a subscription")
     func stalled() async throws {
         let process = shell("echo ready; exec /bin/sleep 30")
         let reader = try LocalLineObservation<Data>.start(
@@ -151,8 +157,7 @@ struct WorkObservationTransportTests {
         #expect(!process.isRunning)
     }
 
-    /// One Machine for the library's reads: Loopflow may keep its store open
-    /// for the rest of this process.
+    /// One private Machine for this serialized suite.
     private static let home: URL = {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -160,34 +165,34 @@ struct WorkObservationTransportTests {
     }()
 }
 
-/// Watches with no reader: a test sends each line a watch would.
-private final class FakeWatches: @unchecked Sendable {
+/// Subscriptions with no reader: a test sends each line a subscription would.
+private final class FakeSubscriptions: @unchecked Sendable {
     private let lock = NSLock()
-    private var watches: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
+    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
 
-    var launch: WorkWatches.Launch {
+    var launch: WorkSubscriptions.Launch {
         { [self] read in
             let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
-            let index = lock.withLock { watches.append((read, continuation, [])); return watches.count - 1 }
-            return LineWatch(lines: lines, send: { [self] line in
-                lock.withLock { watches[index].sent.append(String(decoding: line, as: UTF8.self)
+            let index = lock.withLock { subscriptions.append((read, continuation, [])); return subscriptions.count - 1 }
+            return LineSubscription(lines: lines, send: { [self] line in
+                lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
                     .trimmingCharacters(in: .newlines)) }
             }, cancel: { continuation.finish() })
         }
     }
 
-    var launched: [ServedRead] { lock.withLock { watches.map(\.read) } }
+    var launched: [ServedRead] { lock.withLock { subscriptions.map(\.read) } }
 
     func requests(_ read: ServedRead) -> [String] {
-        lock.withLock { watches.first { $0.read == read }?.sent ?? [] }
+        lock.withLock { subscriptions.first { $0.read == read }?.sent ?? [] }
     }
 
     func send(_ read: ServedRead, _ line: String) {
-        _ = lock.withLock { watches.first { $0.read == read }?.lines.yield(Data(line.utf8)) }
+        _ = lock.withLock { subscriptions.first { $0.read == read }?.lines.yield(Data(line.utf8)) }
     }
 
     func end(_ read: ServedRead) {
-        lock.withLock { watches.first { $0.read == read }?.lines.finish() }
+        lock.withLock { subscriptions.first { $0.read == read }?.lines.finish() }
     }
 
     /// Answer request `id` (0 answers none) with a failed reading.

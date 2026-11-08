@@ -203,6 +203,12 @@ pub(crate) async fn explain_resume(
             fork: false,
             prepare_only,
         });
+        report.actions = vec![SessionAction {
+            kind: super::SessionActionKind::Open,
+            label: "Start conversation".into(),
+            help: "No existing conversation; start one explicitly".into(),
+            unavailable_reason: None,
+        }];
     }
     report
 }
@@ -284,6 +290,6 @@ async fn read_resume(
         .ok_or_else(|| super::session_not_found(&session.id))?;
     let state = super::session_state(&metadata);
     report.state = Some(state);
-    report.actions = super::session_actions(state, session.interactive);
+    report.actions = super::projected_actions(&metadata);
     Ok(())
 }

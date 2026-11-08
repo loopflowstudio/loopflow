@@ -95,7 +95,9 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
             }
         }
         Err(error) => {
-            eprintln!("warning: Linear viewer unavailable ({error}); the assignee is unchanged");
+            crate::journal::request::diagnostic(format_args!(
+                "warning: Linear viewer unavailable ({error}); the assignee is unchanged"
+            ));
         }
     }
 }

@@ -19,7 +19,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -33,7 +33,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -91,7 +91,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -128,7 +128,7 @@
       "owner": "wave",
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -376,7 +376,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -413,7 +413,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -635,7 +635,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -672,7 +672,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -730,7 +730,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -767,7 +767,7 @@
       "owner": "user",
       "reason": "choose the recovery boundary"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -990,7 +990,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1027,7 +1027,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1085,7 +1085,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1122,7 +1122,7 @@
       "owner": "user",
       "reason": "merge pull request head head-commits on GitHub"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

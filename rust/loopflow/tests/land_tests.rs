@@ -605,6 +605,8 @@ fi
             &[("gh", script.as_str()), ("codex", provider.as_str())],
             Some(home.path()),
         );
+        fs::create_dir_all(home.path().join(".lf")).unwrap();
+        support::managed_codex_account(&home.path().join(".lf"));
         let options = LandOptions {
             strict: true,
             local: false,
@@ -615,11 +617,13 @@ fi
             pr_body: body_override.map(str::to_string),
             agent: Some("codex".to_string()),
         };
-        if manual_merge {
-            submit(repo.path(), &options, &NullProgress).unwrap();
+        let _directory = support::InDirectory::enter(repo.path());
+        let result = if manual_merge {
+            submit(repo.path(), &options, &NullProgress)
         } else {
-            land(repo.path(), &options, &NullProgress).unwrap();
-        }
+            land(repo.path(), &options, &NullProgress)
+        };
+        result.unwrap();
         assert_eq!(
             fs::read_to_string(title_path).unwrap(),
             if changed_head {
@@ -1577,6 +1581,8 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         ],
         Some(home.path()),
     );
+    fs::create_dir_all(home.path().join(".lf")).unwrap();
+    support::managed_codex_account(&home.path().join(".lf"));
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -1606,7 +1612,8 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    land(
+    let _directory = support::InDirectory::enter(repo.path());
+    let result = land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -1616,11 +1623,11 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
             commit_message: None,
             pr_title: None,
             pr_body: None,
-            agent: None,
+            agent: Some("codex".to_string()),
         },
         &NullProgress,
-    )
-    .expect("land with stale cached copy should regenerate");
+    );
+    result.expect("land with stale cached copy should regenerate");
 }
 
 #[test]
@@ -2529,13 +2536,35 @@ esac
         String::from_utf8_lossy(&selected.stderr)
     );
     assert!(String::from_utf8_lossy(&selected.stdout).contains("already merged"));
-    // Completion is durable even when dirty notes prevent checkout cleanup.
+    // Completion starts one grace period; dirty notes survive that grace.
     let completed = command()
         .args(["task", "complete", "INF-123"])
         .output()
         .unwrap();
-    assert!(String::from_utf8_lossy(&completed.stderr)
-        .contains("is complete, but cleanup is incomplete"));
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    let read_retirement = || {
+        database
+            .query_row(
+                "SELECT phase,due_at,reason FROM task_retirements",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap()
+    };
+    let (phase, due_at, _) = read_retirement();
+    assert_eq!(phase, "waiting");
+    assert!(due_at.unwrap() > time::OffsetDateTime::now_utc().unix_timestamp());
+    assert!(worktree.join("scratch/retained.md").exists());
     assert_eq!(
         runtime
             .block_on(fixture.store.task_state(&fixture.task.id))
@@ -2560,6 +2589,30 @@ esac
         .unwrap()
         .unwrap();
     assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
+    assert_eq!(
+        read_retirement().1,
+        due_at,
+        "repeated landing must preserve the completion's deadline"
+    );
+    // No viewer holds the checkout: once its grace elapses a scheduled pass retires it.
+    database
+        .execute("UPDATE task_retirements SET due_at=unixepoch()-1", [])
+        .unwrap();
+    let retired = command()
+        .current_dir(repo.path())
+        .args(["task", "retire", "INF-123"])
+        .output()
+        .unwrap();
+    assert!(
+        retired.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retired.stderr)
+    );
+    assert!(
+        !worktree.exists(),
+        "pending retirement: {:?}",
+        read_retirement()
+    );
     let log = fs::read_to_string(&log_path).unwrap();
     assert_eq!(
         log.lines()

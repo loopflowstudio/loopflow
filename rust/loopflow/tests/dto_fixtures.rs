@@ -43,7 +43,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
             requester: Some("Maya".into())
         }
     );
-    // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
+    // What `lf task steer ISSUE MESSAGE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
         serde_json::to_value(&thread).unwrap(),
@@ -313,28 +313,27 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 #[test]
 fn process_page_retains_outcomes_unknowns_and_continuation() {
     let json = include_str!("../../../tests/fixtures/dto/process_page.json");
-    let page: loopflow::process::LfProcessPage = serde_json::from_str(json).unwrap();
-    assert_eq!(page.entries[0].exit_code, Some(42));
-    assert_eq!(page.entries[0].via_agent, None);
-    assert_eq!(page.entries[0].pid, None);
-    assert_eq!(page.entries[1].pid, Some(4242));
-    assert_eq!(page.entries[1].kind, loopflow::process::ProcessKind::Agent);
-    assert_eq!(
-        page.entries[1].agent_session_id.as_deref(),
-        Some("conversation")
-    );
-    assert_eq!(page.entries[1].os_started_at, Some(1790640000));
-    assert_eq!(
-        page.entries[1].parent_lf_process_id.as_ref(),
-        Some(&page.entries[0].id)
-    );
-    assert_eq!(page.entries[1].outcome, None);
-    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
+    let loopflow::process::ProcessEntry::Lf(lf) = &page.entries[0] else {
+        panic!("first entry is an lf Process")
+    };
+    let loopflow::process::ProcessEntry::Agent(agent) = &page.entries[1] else {
+        panic!("second entry is an AgentProcess")
+    };
+    assert_eq!(lf.exit_code, Some(42));
+    assert_eq!(lf.via_agent, None);
+    assert_eq!(lf.pid, None);
+    assert_eq!(agent.pid, Some(4242));
+    assert_eq!(agent.agent_session_id.as_deref(), Some("conversation"));
+    assert_eq!(agent.os_started_at, Some(1790640000));
+    assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&lf.id));
+    assert_eq!(agent.outcome, None);
+    assert_eq!(page.next.as_ref().unwrap().id, agent.id.as_str());
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::process::LfProcessPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
 }
 
 #[test]
@@ -414,7 +413,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(status).unwrap(), value);
-    for field in ["planning_stale", "graph_processes"] {
+    for field in ["plan_stale", "graph_processes"] {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
@@ -532,11 +531,45 @@ fn graph_detail_keeps_its_launched_graph_and_every_step() {
     );
 }
 
+/// Every state Rust can send, so Swift's decoder is tested against all of them.
 #[test]
-fn watch_frames_carry_each_reads_json_result() {
-    use loopflow::lf::commands::watch::WatchFrame;
+fn selection_states_fixture_lists_every_state() {
+    use loopflow::work::selection::SelectionState;
+    fn collect(schema: &serde_json::Value, names: &mut Vec<String>) {
+        match schema {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    match (key.as_str(), value) {
+                        ("const", serde_json::Value::String(name)) => names.push(name.clone()),
+                        ("enum", serde_json::Value::Array(values)) => names
+                            .extend(values.iter().filter_map(|v| v.as_str().map(str::to_owned))),
+                        _ => collect(value, names),
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => values.iter().for_each(|v| collect(v, names)),
+            _ => {}
+        }
+    }
+    let mut sent = Vec::new();
+    collect(
+        &serde_json::to_value(schemars::schema_for!(SelectionState)).unwrap(),
+        &mut sent,
+    );
+    sent.sort();
+    let mut fixture: Vec<String> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/selection_states.json"
+    ))
+    .unwrap();
+    fixture.sort();
+    assert_eq!(fixture, sent);
+}
+
+#[test]
+fn subscribe_frames_carry_each_reads_json_result() {
+    use loopflow::lf::commands::subscribe::SubscriptionFrame;
     let entries: Vec<serde_json::Value> = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/watch_frames.json"
+        "../../../tests/fixtures/dto/subscribe_frames.json"
     ))
     .unwrap();
     let envelope = |frame: &serde_json::Value| {
@@ -544,7 +577,7 @@ fn watch_frames_carry_each_reads_json_result() {
         keys.sort();
         keys
     };
-    let written = serde_json::to_value(WatchFrame::<()> {
+    let written = serde_json::to_value(SubscriptionFrame::<()> {
         answers: None,
         unavailable: Some("gone".into()),
         body: None,
@@ -565,7 +598,7 @@ fn watch_frames_carry_each_reads_json_result() {
         match entry["part"].as_str().unwrap() {
             "planning" => read::<RoadmapSnapshot>(&body),
             "selections" => read::<Vec<loopflow::work::selection::ViewPlan>>(&body),
-            // Desktop's Session rows are pinned by `sessions.json`; the watch carries them as listed.
+            // Desktop's Session rows are pinned by `sessions.json`; the subscription carries them as listed.
             "sessions" => assert!(body
                 .as_array()
                 .unwrap()
@@ -580,7 +613,7 @@ fn watch_frames_carry_each_reads_json_result() {
                 read::<Vec<loopflow::store::PeerPlanningStatus>>(&body["destinations"]);
                 assert_eq!(body["transport"], "git");
             }
-            other => panic!("unknown watch {other}"),
+            other => panic!("unknown subscription {other}"),
         }
     }
 }
@@ -1182,23 +1215,6 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
 }
 
 #[test]
-fn session_rows_say_each_fact_once_and_require_every_field() {
-    use loopflow::lf::commands::session::SessionRow;
-    let fixture = include_str!("../../../tests/fixtures/dto/session_rows.json");
-    let value: serde_json::Value = serde_json::from_str(fixture).unwrap();
-    let rows: Vec<SessionRow> = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(serde_json::to_value(&rows).unwrap(), value);
-    for field in ["id", "title", "interactive", "state", "available", "cwd"] {
-        let mut missing = value[0].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<SessionRow>(missing).is_err(),
-            "{field}"
-        );
-    }
-}
-
-#[test]
 fn retention_summary_keeps_states_expiries_and_policies_exactly() {
     use loopflow::transcript::summary::{AgeBucket, RetentionSummary};
     use loopflow::transcript::{ExpiryPolicy, RetentionState};
@@ -1300,4 +1316,23 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
         serde_json::to_value(&graphs).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
+}
+
+#[test]
+fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
+    use loopflow::lf::commands::write::SessionOpenIntent;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_open_intents.json"
+    ))
+    .unwrap();
+    let intents: Vec<SessionOpenIntent> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        intents,
+        vec![
+            SessionOpenIntent::Resume,
+            SessionOpenIntent::Start,
+            SessionOpenIntent::Reveal
+        ]
+    );
+    assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }

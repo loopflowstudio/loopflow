@@ -110,7 +110,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
     let caller_graph = crate::journal::current_lf_process_id()
-        .map(|process| store.process(&process))
+        .map(|process| store.lf_process(&process))
         .transpose()?
         .flatten()
         .and_then(|process| process.parent_lf_process_id);
@@ -584,6 +584,7 @@ fn build_prompt_at(
             .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
+        wait_for_capacity: !is_interactive && crate::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;
@@ -1325,7 +1326,7 @@ mod tests {
                     );
                     assert_eq!(
                         built.agent_config.chrome,
-                        browser.map_or(configured, |value| value == "on")
+                        Some(browser.map_or(configured, |value| value == "on"))
                     );
                 }
             }

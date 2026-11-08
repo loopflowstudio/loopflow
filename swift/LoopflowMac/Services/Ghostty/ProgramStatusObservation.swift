@@ -6,9 +6,9 @@ import Observation
 /// The provider named by one Session reading. A conversation Loopflow never
 /// launched has no AgentProcess; that absence is itself the reading.
 struct SessionProviderReading: Equatable, Sendable {
-    let agentProcessId: String?
+    let agentProcessId: AgentProcessId?
 
-    init(agentProcessId: String?) { self.agentProcessId = agentProcessId }
+    init(agentProcessId: AgentProcessId?) { self.agentProcessId = agentProcessId }
 
     init?(record: SessionRecord, terminal: String) {
         guard record.state == .active, record.terminalIds.contains(terminal) else { return nil }
@@ -44,7 +44,7 @@ final class ProgramStatusSurface {
         self.terminalId = terminalId
         self.provider = provider
         if firstAssociation {
-            // A restored screen can report before Desktop's Session watch names
+            // A restored screen can report before Desktop's Session subscription names
             // its owner. Preserve that first reading; later providers start empty.
             sessionReducer = reducer
             hasAssociatedSession = true
@@ -143,7 +143,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         let process = LocalWaveAgentLauncher.queryProcess(
             [helper, "session", "observe-status", sessionId, "--terminal", terminalId]
-                + (provider.agentProcessId.map { ["--agent-process", $0] } ?? [])
+                + (provider.agentProcessId.map { ["--agent-process", $0.rawValue] } ?? [])
         )
         let pipe = Pipe()
         process.standardInput = pipe

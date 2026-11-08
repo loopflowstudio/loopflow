@@ -25,6 +25,19 @@ fn write(home: &Path, file: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+fn inspected(
+    repo: &Path,
+    skill: Option<&str>,
+    graph: Option<&str>,
+    step: Option<&str>,
+) -> Vec<serde_json::Value> {
+    crate::engine::config::inspect(repo, None, skill, graph, step)
+        .unwrap()
+        .iter()
+        .map(|inspection| serde_json::to_value(inspection).unwrap())
+        .collect()
+}
+
 fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
     let config = crate::config::load_config(Some(repo))
         .unwrap()
@@ -53,15 +66,12 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
 
 fn probe(repo: &Path) -> settings::ResolvedSettings {
     let resolved = resolve(repo, crate::graph::load_skill("probe", repo).unwrap());
-    let inspected = crate::config::api::inspect(repo, None, Some("probe"), None, None).unwrap();
+    let report = inspected(repo, Some("probe"), None, None);
     assert_eq!(
-        inspected[0]["settings"]["agent"]["value"],
+        report[0]["settings"]["agent"]["value"],
         resolved.config.agent().unwrap()
     );
-    assert_eq!(
-        inspected[0]["settings"]["yolo"]["value"],
-        resolved.config.yolo
-    );
+    assert_eq!(report[0]["settings"]["yolo"]["value"], resolved.config.yolo);
     resolved
 }
 
@@ -95,7 +105,7 @@ fn forwarded_general_choice_excludes_executor_definition_preferences() {
         let resolved = probe(repo.path());
         assert_eq!(resolved.config.agent().unwrap(), "codex:origin");
         assert!(!resolved.config.yolo);
-        assert!(resolved.config.chrome);
+        assert_eq!(resolved.config.chrome, Some(true));
         assert!(!executor.path().join(".lf/profile-retention.json").exists());
         remote::receive(Some(repo.path())).unwrap();
         assert_eq!(probe(repo.path()).config.agent().unwrap(), "codex:origin");
@@ -241,11 +251,10 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             remote::PROFILE_ENV,
             &serde_json::to_string(&profile).unwrap(),
         );
-        let inspected =
-            crate::config::api::inspect(repo.path(), None, None, Some("outer"), None).unwrap();
-        assert_eq!(inspected.len(), 4);
+        let report = inspected(repo.path(), None, Some("outer"), None);
+        assert_eq!(report.len(), 4);
         for index in [0, 2] {
-            let pair = &inspected[index..index + 2];
+            let pair = &report[index..index + 2];
             assert_eq!(pair[0]["settings"]["agent"]["value"], "codex:named");
             assert_eq!(pair[1]["settings"]["agent"]["value"], "codex:anonymous");
         }
@@ -259,7 +268,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
                 let pair = &resolved[index..index + 2];
                 assert_eq!(pair[0].config.agent().unwrap(), "codex:named");
                 assert!(pair[0].config.yolo);
-                assert!(pair[0].config.chrome);
+                assert_eq!(pair[0].config.chrome, Some(true));
                 assert_eq!(pair[1].config.agent().unwrap(), "codex:anonymous");
                 assert_eq!(
                     pair[0].settings["agent"].selected().unwrap().key,
@@ -271,9 +280,7 @@ fn graph_preferences_keep_authored_identity_through_composition_capture_and_rete
             ".lf/graphs/inner.yaml",
             "- step: {name: probe, id: work, agent: claude:repository}\n",
         );
-        let repository =
-            crate::config::api::inspect(repo.path(), None, None, Some("inner"), Some("work"))
-                .unwrap();
+        let repository = inspected(repo.path(), None, Some("inner"), Some("work"));
         assert_eq!(
             repository[0]["settings"]["agent"]["value"],
             "claude:repository"
@@ -366,7 +373,7 @@ fn captured_origin_instructions_keep_executor_host_preferences() {
     );
     let selected = resolve(repo.path(), captured[0].clone());
     assert_eq!(selected.config.agent().unwrap(), "codex:origin");
-    assert!(!selected.config.chrome);
+    assert_eq!(selected.config.chrome, Some(false));
     assert_eq!(
         selected.settings["chrome"].selected().unwrap().locator,
         executor

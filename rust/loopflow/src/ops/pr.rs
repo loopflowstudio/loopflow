@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::{load_config_or_default, MergeMethod};
@@ -32,7 +32,8 @@ pub struct PrResult {
     pub created: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PrInfo {
     pub url: String,
     pub number: u64,
@@ -535,7 +536,6 @@ pub fn generate_pr_copy(
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {
-        isolate: None,
         chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),

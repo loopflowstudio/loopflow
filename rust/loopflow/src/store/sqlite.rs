@@ -19,7 +19,6 @@ use crate::store::{
 use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -27,6 +26,7 @@ mod github_people;
 mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+mod project_adoption;
 
 mod linear_team_checks;
 mod machine_records;
@@ -42,9 +42,7 @@ mod pr_landings;
 mod processes;
 mod program_status;
 pub(crate) mod project_content;
-mod project_rotation;
 pub(crate) mod project_selection;
-mod project_transitions;
 mod rentals;
 mod repositories;
 pub(crate) mod retention;
@@ -59,6 +57,8 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+mod task_retirement;
+pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
@@ -66,7 +66,7 @@ pub(crate) mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
+pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub use task_details::TaskDetailFacts;
@@ -76,6 +76,10 @@ pub(crate) use task_work::TaskShipping;
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A provider hook at a turn or tool boundary waits this long for a locked
+/// store, then treats it as unavailable: a busy install never stalls a turn.
+pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
@@ -100,8 +104,12 @@ fn unapplied_message(path: &Path, pending: &str) -> String {
     }
 }
 
-fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
-    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+fn configure_write_connection(
+    conn: &mut Connection,
+    path: &Path,
+    busy: Duration,
+) -> StoreResult<()> {
+    conn.busy_timeout(busy)?;
     // A deferred transaction that reads, then writes after another process
     // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
     // never runs. Taking the write lock at BEGIN makes it wait instead.
@@ -261,8 +269,16 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
         [],
         |row| row.get(0),
     )?;
-    let local = if placed {
+    let (local_flag, local_route): (bool, bool) = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
+         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let local = if placed && local_flag {
         "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
+    } else if placed && local_route {
+        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
     } else {
         "0"
     };
@@ -441,6 +457,8 @@ fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<A
         plan: row.get(5)?,
         observed_at: row.get(6)?,
         source: row.get(7)?,
+        model: row.get(8)?,
+        limited_until: row.get(9)?,
     }))
 }
 
@@ -491,7 +509,18 @@ impl SqliteStore {
     /// shared frontier is the promotion boundary's job — see
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden)
+        Self::open(
+            path,
+            super::FrontierAdvance::Forbidden,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
+    }
+
+    /// Open for a provider hook at a turn or tool boundary. It waits at most
+    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
+    /// a recording gap and lets the turn continue.
+    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.
@@ -504,7 +533,11 @@ impl SqliteStore {
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Authorized)
+        Self::open(
+            path,
+            super::FrontierAdvance::Authorized,
+            SQLITE_WRITE_BUSY_TIMEOUT,
+        )
     }
 
     /// Open a hermetic, fully-migrated store at `path`: this build's whole
@@ -522,51 +555,26 @@ impl SqliteStore {
         }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
-        if super::serves_in_app() {
-            return Self::open_in_app(path);
-        }
-        Self::open_with(path, &super::machine_home_dir(), advance)
-    }
-
-    /// An app's in-process reads and writes: the store `lf` prepared, at this
-    /// build's schema. It never creates or migrates one.
-    fn open_in_app(path: &Path) -> StoreResult<Self> {
-        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
-            return Err(StoreError::InvalidData(format!(
-                "store {} is not prepared; run `lf` once to create it",
-                path.display()
-            )));
-        }
-        let mut conn = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        crate::performance::observe_sqlite(&conn);
-        super::migrations::validate_sqlite_schema(&conn)?;
-        if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
-            return Err(StoreError::InvalidData(format!(
-                "store {} does not have migration {pending} yet; run `lf` once to migrate it",
-                path.display()
-            )));
-        }
-        configure_write_connection(&mut conn, path)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+    fn open(path: &Path, advance: super::FrontierAdvance, busy: Duration) -> StoreResult<Self> {
+        Self::open_with(path, &super::machine_home_dir(), advance, busy)
     }
 
     /// Open resolving the migration decision against an explicit machine home.
     /// Production opens pass the real one through [`Self::open`]; the
     /// same-module shared-frontier regressions pass a temp home.
-    fn open_with(path: &Path, home: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+    fn open_with(
+        path: &Path,
+        home: &Path,
+        advance: super::FrontierAdvance,
+        busy: Duration,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
@@ -600,7 +608,7 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&mut conn, path)?;
+        configure_write_connection(&mut conn, path, busy)?;
 
         if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
@@ -647,12 +655,6 @@ impl SqliteStore {
             validate_process_schema(&conn)?;
         }
         Ok(store)
-    }
-
-    /// The migration a reader must know to open this store; `None` when it is empty.
-    pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        crate::store::migrations::store_reader_floor(&conn)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
@@ -1120,63 +1122,6 @@ impl SqliteStore {
             .collect()
     }
 
-    /// Store a long-lived token on an existing account. False when no such account.
-    pub fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &str,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to encrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                encrypted,
-                minted_at,
-                now_unix()
-            ],
-        )?;
-        Ok(changed == 1)
-    }
-
-    pub fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<super::LongLivedToken>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let row: Option<(Option<String>, Option<i64>)> = conn
-            .query_row(
-                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
-                 WHERE provider = ?1 AND account_id = ?2",
-                params![provider, account_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((Some(encrypted), Some(minted_at))) = row else {
-            return Ok(None);
-        };
-        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to decrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        Ok(Some(super::LongLivedToken {
-            token: secrecy::SecretString::new(token),
-            minted_at,
-        }))
-    }
-
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let exists: bool = conn.query_row(
@@ -1308,14 +1253,16 @@ impl SqliteStore {
         for window in windows {
             transaction.execute(
                 "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(provider, account_id, window) DO UPDATE SET
                      used_percent = excluded.used_percent,
                      resets_at = excluded.resets_at,
                      plan = excluded.plan,
                      observed_at = excluded.observed_at,
-                     source = excluded.source",
+                     source = excluded.source,
+                     model = excluded.model,
+                     limited_until = excluded.limited_until",
                 params![
                     provider,
                     account_id.as_str(),
@@ -1325,6 +1272,8 @@ impl SqliteStore {
                     window.plan,
                     now,
                     source,
+                    window.model,
+                    window.limited_until,
                 ],
             )?;
         }
@@ -1338,7 +1287,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
              FROM provider_account_limits
              WHERE ?1 IS NULL OR provider = ?1
              ORDER BY provider, account_id, window",
@@ -1349,6 +1298,43 @@ impl SqliteStore {
             limits.push(row??);
         }
         Ok(limits)
+    }
+
+    // -- Session moves --------------------------------------------------------
+
+    /// Leave a move for a busy Session; its next Stop hook applies it.
+    pub fn record_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_moves (session_id, agent, requested_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET
+                agent = excluded.agent,
+                requested_at = excluded.requested_at",
+            params![session, agent, now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// The agent a move left for `session` names, if one waits.
+    pub fn pending_session_move(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT agent FROM session_moves WHERE session_id = ?1",
+                [session],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Clear an applied move. A move re-requested for another agent meanwhile stays.
+    pub fn clear_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM session_moves WHERE session_id = ?1 AND agent = ?2",
+            [session, agent],
+        )?;
+        Ok(())
     }
 
     // -- Access profiles and provider routes ----------------------------------
@@ -1600,44 +1586,46 @@ impl SqliteStore {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
+        // Every launch runs in the shared home, so the conversation lives
+        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
                 provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ) VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 created_at = excluded.created_at,
-                isolated = excluded.isolated",
+                isolated = 0",
             params![
                 provider.as_str(),
                 agent_session,
                 account_id.as_str(),
                 now_unix(),
-                isolated,
             ],
         )?;
         Ok(())
     }
 
-    /// The home a recorded conversation lives in: its account's own
-    /// (`true`) or the provider's native one.
-    pub fn provider_session_isolated(
+    /// The account a launch last ran this conversation on.
+    pub fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT isolated FROM provider_session_accounts
-                 WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), agent_session],
-                |row| row.get(0),
-            )
-            .optional()?)
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), agent_session],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
     }
 
     pub fn record_provider_account_switch(
@@ -1678,7 +1666,9 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
-    pub fn provider_session_account(
+    /// The account whose own home still holds this conversation: it ran
+    /// there before every launch shared one, and has not resumed since.
+    pub fn provider_session_account_home(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
@@ -1697,11 +1687,34 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
+    /// Record that `agent_session` ran in `account_id`'s own home, as every
+    /// conversation did before launches shared one. Nothing writes this now.
+    #[cfg(test)]
+    pub(crate) fn record_account_home_conversation(
+        &self,
+        provider: Provider,
+        agent_session: &str,
+        account_id: &str,
+    ) {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                params![provider.as_str(), agent_session, account_id],
+            )
+            .expect("record account-home conversation");
+    }
+
+    /// The most urgent eligible candidate for `model` (`None`: a
+    /// launch whose model the provider picks, held back by every scoped limit).
     pub fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1716,20 +1729,9 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match agent_session {
-            Some(session_id) => transaction
-                .query_row(
-                    "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-                    params![provider.as_str(), session_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?,
-            None => None,
-        };
         let limits = {
             let mut statement = transaction.prepare(
-                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
                  FROM provider_account_limits
                  WHERE provider = ?1
                  ORDER BY account_id, window",
@@ -1760,31 +1762,18 @@ impl SqliteStore {
                         .map_err(|error| StoreError::InvalidData(error.to_string()))
                 })
                 .transpose()?;
-            if let Some(account) = account
-                .filter(|account| crate::provider_account::account_route_eligible(account, now))
-            {
+            if let Some(account) = account.filter(|account| {
+                crate::provider_account::account_route_eligible(account, &limits, model, now)
+            }) {
                 available.push(account);
             }
         }
         drop(account_statement);
 
-        let resumed = requested.as_ref().and_then(|account_id| {
-            available
-                .iter()
-                .position(|account| account.account_id.as_str() == account_id)
-        });
-        let mut account = match resumed {
-            Some(index) => available.remove(index),
-            None => {
-                crate::provider_account::order_accounts_by_room(&mut available, &limits, now);
-                match available.into_iter().next() {
-                    Some(selection) => selection,
-                    None => {
-                        transaction.commit()?;
-                        return Ok(None);
-                    }
-                }
-            }
+        crate::provider_account::order_accounts_by_urgency(&mut available, &limits, model, now);
+        let Some(mut account) = available.into_iter().next() else {
+            transaction.commit()?;
+            return Ok(None);
         };
         transaction.execute(
             "UPDATE provider_accounts
@@ -2142,7 +2131,7 @@ mod frontier_tests {
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, home, advance)
+        SqliteStore::open_with(path, home, advance, super::SQLITE_WRITE_BUSY_TIMEOUT)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2189,8 +2178,8 @@ mod frontier_tests {
         open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer build that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the migration that locked it out.
+    /// A newer build leaves this lf reading and writing the shared store.
+    /// Promotion selecting this build applies nothing to history it does not know.
     #[test]
     fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
@@ -2202,13 +2191,12 @@ mod frontier_tests {
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, &shared.home, Forbidden)
-            .expect("an additive newer release leaves the store readable");
+        let store =
+            open(&path, &shared.home, Forbidden).expect("a newer build leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(
@@ -2220,36 +2208,38 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, &shared.home, Authorized)
-            .expect_err("promotion never accepts history it does not know");
+        open(&path, &shared.home, Authorized).expect("selecting an older build applies nothing");
+        assert_eq!(frontier(&path), newer);
+    }
 
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
+    /// A contract migration past its staging window still opens: the one
+    /// statement that reads what it dropped fails, naming the column.
+    #[test]
+    fn a_dropped_column_fails_the_statement_that_reads_it_and_nothing_else() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let newer = apply_newer_migration(
-            &conn,
-            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            false,
-        )
-        .unwrap();
-        let refusal = open(&path, &broken.home, Forbidden)
-            .expect_err("a breaking newer migration locks this lf out")
-            .to_string();
-        assert!(
-            refusal.contains(&format!(
-                "this store needs an lf that knows {newer} (it has "
-            )) && refusal.ends_with("run `lf install`"),
-            "{refusal}"
-        );
+        apply_newer_migration(&conn, "ALTER TABLE waves DROP COLUMN promoted_at;").unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("the running reader keeps its store");
+        let store = open(&path, &shared.home, Forbidden).expect("a fresh open keeps working");
+
+        let error = store.get_wave(&WaveId::new()).unwrap_err().to_string();
+
+        assert!(error.contains("promoted_at"), "{error}");
+        assert!(!error.contains("lf install"), "{error}");
+        store.health_check().expect("the rest of the store answers");
     }
 
     /// A Graph holds its store across steps and revalidates it after each one
     /// (`validate_current_schema`). A newer build that adds a slug migration
-    /// meanwhile leaves that running reader working; one that breaks stops it
-    /// with the skew and `lf install`, never advice to delete the database.
+    /// meanwhile leaves that running reader working.
     #[test]
-    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+    fn a_running_older_reader_survives_an_upgrade_under_it() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, &shared.home, Authorized).unwrap();
@@ -2262,13 +2252,12 @@ mod frontier_tests {
             &newer,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
-            true,
         )
         .unwrap();
 
         running
             .validate_current_schema()
-            .expect("an additive newer migration keeps the running reader valid");
+            .expect("a newer migration keeps the running reader valid");
         let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
         running.create_wave(&after).unwrap();
         for wave in [&before, &after] {
@@ -2280,27 +2269,6 @@ mod frontier_tests {
                 Some(wave.name().to_string())
             );
         }
-
-        let broken = SharedMachine::new();
-        let path = broken.shared_db();
-        open(&path, &broken.home, Authorized).unwrap();
-        let running = open(&path, &broken.home, Forbidden).unwrap();
-        let newer = apply_newer_migration(
-            &rusqlite::Connection::open(&path).unwrap(),
-            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
-            false,
-        )
-        .unwrap();
-        let refusal = running
-            .validate_current_schema()
-            .expect_err("a breaking newer migration stops the running reader")
-            .to_string();
-        assert!(
-            refusal.contains(&format!("this store needs an lf that knows {newer}"))
-                && refusal.ends_with("run `lf install`")
-                && !refusal.contains("delete"),
-            "{refusal}"
-        );
     }
 
     #[test]
@@ -2506,14 +2474,14 @@ mod frontier_tests {
 
 #[cfg(test)]
 mod wal_tests {
-    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+    use super::{configure_write_connection, SQLITE_WRITE_BUSY_TIMEOUT, WAL_SIZE_LIMIT_BYTES};
 
     #[test]
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let mut conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&mut conn, &path).unwrap();
+        configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2537,7 +2505,7 @@ mod wal_tests {
         let path = directory.path().join("loopflow.db");
         let open = || {
             let mut conn = rusqlite::Connection::open(&path).unwrap();
-            configure_write_connection(&mut conn, &path).unwrap();
+            configure_write_connection(&mut conn, &path, SQLITE_WRITE_BUSY_TIMEOUT).unwrap();
             conn
         };
         let mut first = open();
@@ -2743,6 +2711,8 @@ mod account_observation_tests {
             used_percent: 98,
             resets_at: Some(1900000000),
             plan: Some("max".into()),
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[weekly], "stream")
@@ -2766,6 +2736,8 @@ mod account_observation_tests {
             used_percent: 2,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[session], "poll")
@@ -2789,6 +2761,8 @@ mod account_observation_tests {
             used_percent: 22,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits(

@@ -197,6 +197,9 @@ fn validate_document(value: &Value, scope: SettingScope) -> Result<()> {
 }
 
 pub fn incoming() -> Result<Option<Profile>> {
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     std::env::var(PROFILE_ENV)
         .ok()
         .map(|text| {
@@ -584,7 +587,7 @@ mod tests {
                 prepared.config.agent().unwrap(),
                 inspection.config.agent().unwrap()
             );
-            assert!(prepared.config.chrome);
+            assert_eq!(prepared.config.chrome, Some(true));
             inspection.config.agent().unwrap().to_owned()
         };
         {

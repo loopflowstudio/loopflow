@@ -1,0 +1,321 @@
+# Execution
+
+```bash
+lf -b implement
+lf session list --interactive false --json
+lf resume SESSION
+```
+
+These commands use the current parser. This guide specifies the accepted
+lifecycle; [cutover status](reference-cutover.md#cutover-status) records
+which owners and proofs remain unfinished.
+
+The command has a process. The agent has an LfSession. A Graph is one lf process and the step processes it starts. Their completion and authority are different
+facts.
+
+## Request flow
+
+```text
+argv -> Process admission -> Skill discovery -> prompt -> provider route
+                                                        |
+                                                        v
+                                     LfSession reservation + input capture
+                                                        |
+                                                        v
+                                      AgentProcess and native conversation
+                                                        |
+                                     provider outcomes / retries / usage
+                                                        |
+                                                        v
+                                           LfSession history
+```
+
+The same admission applies to headless and interactive skills, inline prompts,
+helpers and reviews. It needs no planning parents, but requires its Machine's
+writable conversation store before provider launch. Optional Work enrichment
+confers no Graph authority. A failed admission cannot become an invisible file-only
+conversation. Large captured payloads remain outside SQLite behind indexed references.
+
+## Capture intent once
+
+Discovery selects one repository override, builtin or installed Skill. Prompt
+assembly captures the selected instructions, exact provider strings, attribution,
+explicit documents and launch options. Definitions are not reconstructed from
+current files when continuing historical work.
+
+A Graph process compiles its graph and all routing alternatives before the
+first step and holds them in memory. A direct conversation captures its selected
+Skill or inline prompt. Reconnect retains that conversation; a new Graph compiles
+current source. Current credentials and checkout contents remain live inputs to execution,
+not evidence that old captured intent changed.
+
+## Record actual processes
+
+Process admission records one actual lf process and immutable causal ancestry.
+Nested wrappers reuse the process identity and cannot finish the outer command
+early. Direct child commands name their invoking Process. Agent-issued commands
+record the incoming agent bit plus stable Session/AgentProcess provenance,
+then resolve the current attached LfProcess once at admission.
+
+AgentProcess rows use the same `processes` inventory, with kind `agent`, exact
+PID/birth, served Session, original parent and current attachment. Session rows
+retain the current AgentProcess reference and native thread. Detached and replaced
+rows survive until positive terminal evidence; attachment absence never removes
+them from inventory. Shell helpers do not become fake lf invocations. After handoff, new
+commands from the continuing provider name the newly attached LfProcess; delayed commands from
+a replaced provider retain their historical origin. A parent exiting never
+rewrites existing descendants. These causal links grant neither signaling nor
+Graph authority.
+
+Process completion records the observed command result, end time and known exit
+code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
+commands must reach their exact-store authority checks before any logging-induced
+store open; unavailable-store coverage is reported explicitly. An inspection
+Process does not reserve agent work or claim a Task.
+
+The source cut is incomplete: optional/unattributed launches still need conversion.
+Captured Claude and native restarts reserve a fresh AgentProcess and update the
+capture's attachment; pending operations retain their old snapshots. Owned native
+launches record before exec without changing their terminal or process group.
+Focused admission, replacement and cleanup fixtures pass. Top and Task gates
+share unfinished-row selection and identity judgment. Missing lf receipts,
+missing agent birth and unavailable OS samples remain Unknown rows with LfProcess IDs;
+active Sessions retain their records while reporting unavailable sampling.
+Zombies, birth mismatch and valid absence count as death. Observations grant no
+signal or settlement authority. Public Task-status/scheduled agreement and
+installed acceptance remain unproved.
+Invocation-owned retry settles the exact old AgentProcess before reserving its
+replacement, retaining native/account history. Account failover selects a fresh
+thread; same-account retry retains it. Generic stop still preserves takeover.
+Generation-based caller/status wires and optional launches remain publication
+blockers.
+
+## Publish before spawn
+
+1. Resolve one Machine for the store and payload root; validate typed ancestry.
+2. Reserve the conversation, history/capture reference and exact attachment together.
+3. Publish immutable launch input and record publication before spawning.
+4. Start or connect the native provider and retain exact AgentProcess/thread/client
+   evidence, distinct from the attached LfProcess.
+5. Append correlated provider outcomes and usage; settle command completion
+   under its Process lifetime.
+
+Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
+establishes its process group, waits for watchdog readiness, then asks a parent
+thread to run its recording callback before exec. This persists OS identity in the
+required AgentProcess record. The shared harness launch holds the attachment fence
+through recording
+and saves failed spawns on the record. Admission is synchronous so async cancellation
+cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
+a failed exec retains any recorded identity without claiming provider execution.
+No post-spawn bind is needed. The Codex launcher holds the endpoint's FIFO lifeline
+across its exec into the client; Claude and OpenCode currently use anonymous lifelines
+without that handoff path.
+The launcher records terminal versus headless mode on each AgentProcess; the
+Session’s historical interactive flag does not select its cleanup policy.
+Writers remain held across attachment transfer. Closing the last holder stops
+the group, including when OS exit or SIGKILL closes it. Under the attachment fence, a launcher settling its naturally exited provider
+releases its own retained writer and waits for the watchdog to finish the group.
+Without that owned writer, leader death grants no permission to stop survivors.
+The lifeline does not itself enforce current attachment authority.
+Headless launch requires the invocation's attachment: Claude, Codex and OpenCode
+refuse to start a provider without one, and their writes and signals have no
+unfenced path. Owned native launches use the same pre-exec recording channel under
+the attachment lock, but no headless group/watchdog setup. Failed recording prevents provider code
+from running. Captured native waits retain the spawned attachment snapshot: a late
+wait cannot mark a replacement exited. Native terminal process groups are unchanged;
+foreground orphan cleanup remains unfinished.
+Fresh native launches and saved-history resumes share invocation admission and
+attachment settlement. A recorded client move is an intentional command exit,
+not provider failure; it does not establish a successful provider turn.
+
+### Runs are not resumed
+
+`lf resume` takes only Sessions. A Run's id (`-b`, a Graph step), running or
+finished, is refused, with `--fork`, `--prepare`, `-b resume --message` and
+`lf --explain resume` alike, and the refusal points to `lf resume --task <task>`.
+Resume never stops a Run; stopping a Graph is `lf task interrupt`. The one exception
+is the Graph process continuing its own step's Run to correct a structured answer.
+
+Harness stop and resume use common exact-identity group close under the frozen
+attachment fence. Superseded callers, unknown identity and duplicate OS owners
+cannot signal. Foreground providers are excluded even after exit. Leader death
+alone cannot settle surviving helpers. Codex keeps its refusal to close a server
+hosting unrelated conversations.
+
+OpenCode abort uses its existing fenced HTTP writer, without write retries. New
+sessions receive permission rules on creation, not through an unsupported PATCH.
+There is no OpenCode native relay or Claude result-replay transport.
+
+Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
+termination covers noninteractive providers only: Codex app-server, OpenCode
+serve and headless Claude groups. Native foreground coverage remains unfinished;
+recording a foreground provider alone does not establish orphan cleanup. Unknown identities and
+duplicate PID/birth records remain non-signallable. Failed OS observation makes
+scheduled reconciliation fail with the affected LfProcess ID, without settling that row.
+The reaper's identity, command and descendant observations use the shared OS
+reader; failed descendant inventory refuses before signaling. Codex close and
+scheduled termination share group-wide observation: unreaped zombies are dead,
+but a live helper prevents settlement even after the leader exits.
+
+Prepared rows without publication are recoverable preparation failures. Missing
+spawn evidence is uncertainty, not permission to duplicate a possibly live AgentProcess.
+Recovery preserves recorded inputs and exact native evidence. File publication
+and SQLite settlement have an explicit recoverable boundary; neither alone is a
+claim of successful execution.
+
+Resume checks the attached LfProcess through the shared record/OS judgment.
+One attachment lock spans observation, exact AgentProcess close and replacement;
+SQLite is released during provider I/O. Detached does not imply dead. Resume and
+invocation retry use the recorded provider/interactivity and refuse duplicate
+live PID/birth ownership. Unknown spawn remains unresolved; never-launched
+reservations can retire without claiming OS exit. Death and the new attachment
+commit together, preserving native history and without inventing an outcome.
+Native foreground and non-Codex live close still require their own lifecycle
+coverage; this source path does not establish configured resume acceptance.
+
+## Connect and transfer attachment
+
+The Codex terminal talks to its app-server directly, on the private Unix WebSocket
+the AgentProcess opened; lf carries none of its bytes. lf's instructions, hooks,
+shell policy and writable roots are `-c` overrides on that private `codex app-server`,
+so every thread on it has them, including one the person starts with `/new` or
+`/fork`; they extend what the account route, a wrapper and the user's config already
+give it, read first from a short-lived stdio app-server started the same way. The
+launcher starts or resumes the thread, names a new thread so it has a rollout to
+resume (Codex 0.166.0 has none until a first turn or a name), then execs into
+`codex --remote <endpoint> resume <thread>`. The app-server's
+lifeline writer crosses the exec, so the client holds the provider alive and no lf
+process has to. The execution owner settles the client's exit from a `NativeExit`
+marked as a client, which leaves the AgentProcess's own exit to attachment close.
+
+`lf __codex-observe` watches from the side as one more subscriber, in its own
+session. app-server sends every subscriber every event, so it records turns, usage
+and attention, submits the launch's first turn, and delivers Task updates while the
+conversation is idle, each under the Session fence. A pending approval goes to every
+subscriber and the first answer wins; the observer never answers, and Codex replays
+a pending approval to a client that joins mid-turn. Store errors are recording gaps:
+the observer logs one per outage, retries the store, and history recovery fills the
+gap at the next launch. Stopping the observer stops recording, not the conversation.
+When the person starts or forks a conversation, the observer selects it as the
+Session's AgentSession and binds it to the Session's context, so lf's hooks answer
+there too.
+
+Attachment alone does not revoke the old client's writes, and with lf out of the path
+no dispatch can check them. The observer ends the exact client its attachment opened
+once a mover replaces that attachment. Native launch carries the frozen attachment
+in memory, separately from stable tool provenance. Admission validates that token;
+it never reconstructs authority from the current record. Both initial validation
+and the launch reject a replaced attachment, including A → B → A.
+
+A passive viewer subscribes without claiming the Session. A formerly attached LfProcess
+cannot change current attachment, connection, process evidence or stream attention.
+Retaining history grants no Graph authority.
+
+Native request correlation freezes its initiating Process, Work and capture before sending, not when a delayed
+start arrives. Claude input UUIDs, OpenCode message IDs and Codex request/reply
+correlation carry that snapshot. Broadcast-only starts retain unknown attribution;
+late correlated replies can fill it, but cannot borrow a newer capture or bind.
+The snapshot supplies history only and never authorizes dispatch.
+
+Headless Claude uses the same stream-input harness and correlated turn history as
+chat. Deciding Graph steps pass their JSON schema to Claude, including correction
+turns. Headless Claude, Codex and OpenCode all use their harness; unknown provider
+names fail instead of selecting Claude. Graph decisions and final-answer reads use
+only correlated native `started`/`output`/successful `completed` rows. Capture
+prose remains history, never an answer fallback. Terminal launches retain native
+terminal behavior. Headless human-readable output prints assistant text without
+the former tool summaries or cost/time footer. Failed Claude results retain their
+error messages for retry classification.
+
+The continuing AgentProcess retains its identity while each attachment
+receives a fresh opaque token, including reattachment of the same lf Process.
+Release revokes that token as well. The token is a compare-and-swap witness,
+not another process identity or lifecycle owner. Caller provenance, turn origin
+and Program Status name the AgentProcess itself; no generation counter remains.
+
+Attachment exit retains an exact history-event reference rather than deriving a
+receipt from counter arithmetic. Migration preserves old event keys and payloads,
+including captured input, native identity and historical outcomes.
+
+`lf resume` attaches to a live owner. A live turn, draft or pending request keeps
+its provider: a failed attachment reports the failure, discards no work and replays
+no input. Only a safely replaceable owner has its exact owned clients stopped and
+the same provider thread resumed, preserving sibling conversations.
+`--fork` leaves the holder running and starts a new Session from its log.
+There is no separate Session AgentProcess-restart operation. Mere process silence,
+tmux visibility, causal ancestry or a stored active label grants no termination
+authority, and recovery never authorizes killing a shared AgentProcess for one thread.
+
+## Outcomes, retries and usage
+
+LfSession history owns provider outcomes. Process owns command completion. A
+provider can succeed before the command fails later, and a stopped Graph's history
+outlives its command. Failed or interrupted conversation work remains history;
+continuation appends a new result to the same conversation.
+
+The Graph process holds the cursor and starts each step as a child `lf` process: the
+plain command, `lf -b skill <name> [message]` or the operation's own. A step
+knows nothing of its Graph. The Graph process appends the step's Process, graph node and
+iteration counts to GraphProcess, beside the Graph's name and launched graph. A
+step's result is how its process exited. A deciding or routing step gets its
+answer contract in its message and the Graph process reads the final answer of the
+Session turn that step Process captured; an invalid answer is corrected by
+resuming the same conversation (`lf -b resume ID --message TEXT`), at most
+twice, then the Graph fails. A mechanical step is its own child Process and invents
+no LfSession. After an operation the Graph process stops the Graph when a landing of
+its checkout is still being watched; neither failed. A killed Graph process leaves its Processes
+as history; nothing resumes it. The caller inspects them before launching fresh
+work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
+external effects.
+
+Blocked records the reason and stops at the current Graph position. Existing logs
+and outcomes provide the evidence. The Wave operator resolves
+impediments or discusses missing judgment in its ongoing chat. Nothing retries
+or resumes a stopped Graph.
+
+Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
+once; never add checkpoints as independent consumption. Retries retain separate
+outcomes and measurements. Missing counters and unknown finality stay missing.
+The shared typed history reader selects captured events and unlinked native turns
+before decoding payloads. Native receipts without a start stay discoverable with
+unknown Process/Work ownership and partial usage coverage. Recorder outcomes remain
+separate from provider completion and Process exit.
+Binding affects later work and preserves earlier usage ownership. The history
+reader owns this single attribution choice. Active-turn allocation uses recorded
+start/assignment evidence; uncertainty never becomes an invented token split.
+
+## Read indexed history
+
+Conversation, Graph and command summaries filter and page in SQL before opening
+payloads. Exact detail can load the selected captured input, transcript or final
+answer. Without correlated native output from a completed turn, the final answer
+is absent; retained transcript prose never substitutes for it.
+
+Session inventory reads the selected rows, Work labels and indexed Graph metadata;
+it does not decode captures or Session history. Readiness text remains the exact
+recorded Session field. Local active-client receipts may establish Active; without
+that observation, explicit readiness or closure, the displayed state is Unknown.
+It does not mean failed or unavailable for connection. Connect and completion
+validate the exact capture and native history before acting. A recorded Graph with
+no selected occurrence keeps its membership with an unknown position; missing
+historical membership never becomes Independent. Unknown or corrupt detail remains
+available for exact inspection instead of preventing unrelated rows from listing.
+
+Session lists support contains-search and title/ID ordering; stable ID pages serve
+Desktop's complete-inventory reconciliation. Names, readiness text and iteration
+tuples vary in size, and listing checks exact client receipts. The query therefore
+has no constant-byte or constant-time guarantee. Measurement status belongs in
+the [cutover status](reference-cutover.md#cutover-status).
+
+Typed Task/Wave links survive landing and provider replacement and takeover. Readers
+never use live PR eligibility, path names or mutable manifests to recover identity.
+Default interactive visibility does not hide headless history from explicit queries
+or make it impossible to resume. Desktop and CLI consume the same fields.
+
+Current-state conversion and its preservation boundary belong in
+[Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
+owners, with no legacy import or file fallback.
+
+[Planning](planning.md) owns Graph progression and planning ancestry.
+[Data and persistence](data.md) distinguishes record ownership from payload storage.

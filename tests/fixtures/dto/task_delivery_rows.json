@@ -19,7 +19,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -56,7 +56,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -304,7 +304,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -341,7 +341,7 @@
       "owner": "wave",
       "reason": "Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -589,7 +589,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -626,7 +626,7 @@
       "owner": "wave",
       "reason": "Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -874,7 +874,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -888,7 +888,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -946,7 +946,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -960,7 +960,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1018,7 +1018,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1055,7 +1055,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1303,7 +1303,7 @@
         "state": "available",
         "observed_at": null
       },
-      "repository_id": "repo_00000000000040008000000000000001",
+      "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
       "project_id": null,
       "wave_id": null
@@ -1340,7 +1340,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

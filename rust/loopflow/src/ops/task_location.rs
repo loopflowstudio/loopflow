@@ -39,7 +39,7 @@ async fn observe_peer(
         let bytes = crate::lf::commands::ssh::request(
             machine,
             &[
-                "--repository".into(),
+                "--repo-id".into(),
                 repository.to_string(),
                 "task".into(),
                 "location".into(),

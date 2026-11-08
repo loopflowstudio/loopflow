@@ -161,19 +161,20 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             _ => None,
         },
     };
-    let taken = conversation
-        .as_ref()
-        .map(|session| {
-            take(
+    let taken = match conversation.as_ref() {
+        Some(session) => {
+            await_provider_identity(&store.sqlite, &session.id).await?;
+            Some(take(
                 store,
                 session,
                 Departure::Machine {
                     machine: to.clone(),
                     task: Some(task.id.clone()),
                 },
-            )
-        })
-        .transpose()?;
+            )?)
+        }
+        None => None,
+    };
     let handoff = hand_off(&store.sqlite, &task.id, to)?;
     if let Some(session) = &conversation {
         store.sqlite.complete_moved_session(&session.id, to)?;
@@ -192,6 +193,25 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             graph: store.sqlite.task_graph_record(&task.id)?,
         }),
     })
+}
+
+/// A conversation checked out moments ago may still be launching: its
+/// attachment exists, but its provider has not recorded a PID. Give it the
+/// owner's bind time so the stop meets a provider, or an attempt that ended.
+async fn await_provider_identity(store: &SqliteStore, session: &str) -> Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let starting = store
+            .session_attachment(session)?
+            .is_some_and(|attachment| {
+                crate::journal::agent_evidence(store, &attachment.agent_process_id)
+                    == ProcessIdentityEvidence::Unknown
+            });
+        if !starting || std::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// The Session as it leaves: its agent stopped, its transcript read.

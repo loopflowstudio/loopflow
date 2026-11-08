@@ -4620,8 +4620,8 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     first.input("done\n");
     first.finish();
     second.finish();
-    assert!(first.next().is_none());
-    assert!(second.next().is_none());
+    assert_eq!(first.until_close(), json!({"reason":"finished"}));
+    assert_eq!(second.until_close(), json!({"reason":"finished"}));
 }
 
 #[test]
@@ -4720,7 +4720,7 @@ fn an_immediate_resume_can_reclaim_input_and_resize() {
     until_out(&mut resumed, "35 110");
     resumed.input("done\n");
     resumed.finish();
-    assert!(resumed.next().is_none());
+    assert_eq!(resumed.until_close(), json!({"reason":"finished"}));
 }
 
 #[test]

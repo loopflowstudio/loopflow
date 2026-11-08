@@ -163,6 +163,7 @@ Fixes 1–4, built November 7:
 4. `provider_account::clear_refuted_cooldown` on the `lf account` refresh: no account-wide polled window spent clears the cooldown; scoped holds stay.
 
 ## Remaining
+- Concept review after fixes 1–4 (headless, November 7): a fresh poll refutes a rejection's account cooldown only in `lf account` (`clear_refuted_cooldown` in `account_status.rs`); `record_stated_limit` polls right after a limit and stores the windows without that check. One owner would be the poll's own write: clear a refuted cooldown wherever `upsert_provider_account_limits(.., "poll")` runs. Not built (single pass); a non-credits rejection on a step still cools the account until someone runs `lf account`.
 - Credits limits share one window key (`seven_day_overage_included`), so a credits rejection on a second model moves the hold to it. Only Fable needs credits today.
 - `ops::task::tests::{nonresumable_execution_blocker_remains_a_launch_refusal, a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout, task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes}` fail here with "claiming needs your Git user.email" even with a global identity in the test HOME; not reached by this pass's diff, not checked on origin/main.
 - Single-pass review, November 7: the old-spelling correction treats any leading target as a provider. `lf account alice@ use bob@` suggests `lf account use alice@=bob@`, which cannot resolve as a provider. Keep for verify; the intended `lf account claude use bob@` correction works.

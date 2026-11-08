@@ -308,7 +308,8 @@ final class ServerLink: @unchecked Sendable {
             state.withLock { watches.removeValue(forKey: id) }?.finish(throwing: refusal)
         case .error(nil, let code, let message, _):
             throw RegistryQueryError("\(code): \(message)")
-        case .welcome, .status:
+        case .welcome, .status, .bridged:
+            // A client connection is never a bridge; `lf session resume` opens those.
             throw RegistryQueryError("Server repeated its greeting; update the client")
         }
     }

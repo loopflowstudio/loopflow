@@ -98,13 +98,19 @@ struct ServerProtocolTests {
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(renamed["title"] == .string("Served name"))
-        guard case .response(_, _, .object(let owned)) = try message("attached"), case .string(let process)? = owned["owner_lf_process_id"] else {
-            Issue.record("Missing owner"); return
+        guard case .response(_, _, .object(let issued)) = try message("attached"),
+              case .string(let process)? = issued["owner_lf_process_id"], case .string(let ticket)? = issued["ticket"] else {
+            Issue.record("Missing ticket"); return
         }
         #expect(process == trace)
+        #expect(issued["expires_in_ms"] == .integer(60000))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(
             session: "session_5e55105e000040008000000000000001", owner: trace))
         #expect(try encoded(attach) == self.value("attach"))
+        // The bridge presents the ticket on a connection of its own.
+        #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
+        guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
+        #expect(owner == trace)
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {

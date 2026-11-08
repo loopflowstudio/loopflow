@@ -14,7 +14,10 @@ pub const REVISION: u32 = 2;
 /// The oldest revision this build speaks.
 pub const MIN_REVISION: u32 = 2;
 pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
+/// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
+/// How long a `session.attach` ticket opens a bridge.
+pub const TICKET_LIFETIME: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// One message from the client.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,6 +27,11 @@ pub enum ClientMessage {
     Hello(Hello),
     /// A pre-hello readiness probe; the server answers `status` and closes.
     Status,
+    /// A bridge's first and only message: the ticket `session.attach` issued.
+    /// The server answers `bridged`, and the connection then speaks the owner
+    /// protocol. A ticket opens one bridge, within [`TICKET_LIFETIME`], for the
+    /// user who requested it; otherwise the answer is `error` and the connection closes.
+    Attach { ticket: String },
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
     /// A read with a watch; answers a null `response`, then `reading` messages
@@ -69,12 +77,14 @@ pub enum Operation {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
-    /// Attach this connection to the Session's terminal: the server resolves
-    /// the Session's current owner LfProcess, answers `{owner_lf_process_id}`, and the
-    /// connection then speaks the owner protocol. When that owner ends, the
-    /// connection closes; attaching again by the same Session reaches its
-    /// next owner. With `owner_lf_process_id`, the Session must still be owned by
-    /// exactly that LfProcess, for a client that reconnects only to the owner it had.
+    /// A ticket for the Session's terminal: the server resolves the Session's
+    /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
+    /// expires_in_ms}`. A new connection presents the ticket as its first
+    /// message (`attach`) and becomes the bridge; this connection stays a
+    /// client. When the owner ends, the bridge closes; attaching again by the
+    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// Session must still be owned by exactly that LfProcess, for a client that
+    /// reconnects only to the owner it had.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
@@ -83,11 +93,15 @@ pub enum ServerOperation {
     },
 }
 
-/// What `session.attach` answers before the owner protocol begins.
+/// What `session.attach` answers: a ticket that opens one bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAttached {
+    /// 16 random bytes as 22 base64url characters; single use.
+    pub ticket: String,
     pub owner_lf_process_id: LfProcessId,
+    /// How long the ticket opens a bridge, from when it was issued.
+    pub expires_in_ms: u64,
 }
 
 /// One message from the server.
@@ -97,12 +111,17 @@ pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
     /// What the request returned: the value its operation's `x-result` names,
-    /// null once a watch or attachment is confirmed. `trace_id`
-    /// correlates the server's diagnostics for it.
+    /// null once a watch is confirmed. `trace_id` correlates the server's
+    /// diagnostics for it.
     Response {
         id: String,
         trace_id: crate::id::TraceId,
         result: serde_json::Value,
+    },
+    /// The answer to `attach`: the connection now speaks the owner protocol
+    /// with this LfProcess, and nothing more arrives from the server.
+    Bridged {
+        owner_lf_process_id: LfProcessId,
     },
     /// One watch line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -199,6 +218,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/checkpoint.json"),
             include_str!("../../../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),
+            include_str!("../../../../tests/fixtures/dto/server/attach_ticket.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
@@ -251,6 +271,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/status.json"),
             include_str!("../../../../tests/fixtures/dto/server/response.json"),
             include_str!("../../../../tests/fixtures/dto/server/attached.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bridged.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),

@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerMessage,
-    ServerOperation, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ServerOperation, SessionAttached, Welcome, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::Error;
 use crate::id::{LfProcessId, LfSessionId};
@@ -323,22 +323,53 @@ pub(crate) fn bridge_existing(session: &LfSessionId, owner: &LfProcessId) -> Res
     attach(&super::socket_path()?, session, Some(owner))
 }
 
-/// Hello, `session.attach`, its answer: the stream then speaks the owner
-/// protocol. Until then it reads one byte at a time, so no owner byte is
-/// left in a buffer. With `owner`, only that exact owner is attached.
+/// Two connections: a client asks `session.attach` for a ticket, and a fresh
+/// one presents it. After `bridged`, that stream speaks the owner protocol;
+/// until then it reads one byte at a time, so no owner byte is left in a
+/// buffer. With `owner`, only that exact owner is attached.
 pub fn attach(
     path: &Path,
     session: &LfSessionId,
     owner: Option<&LfProcessId>,
 ) -> Result<UnixStream> {
-    let mut connection = Connection::start(connect(path)?, 1)?;
-    connection
+    let mut connection = Connection::start(connect(path)?, 64 * 1024)?;
+    let issued = connection
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),
             owner_lf_process_id: owner.cloned(),
         }))
-        .map_err(|error| stalled(error, "open the owner bridge"))?;
-    let stream = connection.socket.reader.into_inner();
+        .map_err(|error| stalled(error, "issue the attach ticket"))?;
+    let issued: SessionAttached = serde_json::from_value(issued.result)
+        .context("Loopflow server answered session.attach without a ticket")?;
+    drop(connection);
+    let stream = connect(path)?;
+    stream.set_read_timeout(Some(HANDSHAKE))?;
+    let mut socket = Socket::new(stream, 1)?;
+    socket.send(&ClientMessage::Attach {
+        ticket: issued.ticket,
+    })?;
+    match socket
+        .receive()
+        .map_err(|error| stalled(error, "open the owner bridge"))?
+    {
+        Some(ServerMessage::Bridged { .. }) => {}
+        Some(ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        }) => {
+            return Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into())
+        }
+        Some(other) => anyhow::bail!("unexpected server message: {other:?}"),
+        None => anyhow::bail!("Loopflow server closed the connection before bridging"),
+    }
+    let stream = socket.reader.into_inner();
     stream.set_read_timeout(None)?;
     Ok(stream)
 }
@@ -480,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_gives_up_on_a_server_that_never_bridges() {
+    fn attach_gives_up_on_a_server_that_never_issues_a_ticket() {
         let (_home, path) = silent_server(true);
         let started = Instant::now();
         let error = attach(
@@ -492,7 +523,7 @@ mod tests {
         within_bound(started);
         assert_eq!(
             error.to_string(),
-            "Loopflow server did not open the owner bridge within 10s; check `lf server status`"
+            "Loopflow server did not issue the attach ticket within 10s; check `lf server status`"
         );
     }
 

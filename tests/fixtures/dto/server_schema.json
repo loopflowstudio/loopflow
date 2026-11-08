@@ -1651,6 +1651,24 @@
         },
         {
           "additionalProperties": false,
+          "description": "A bridge's first and only message: the ticket `session.attach` issued.\nThe server answers `bridged`, and the connection then speaks the owner\nprotocol. A ticket opens one bridge, within [`TICKET_LIFETIME`], for the\nuser who requested it; otherwise the answer is `error` and the connection closes.",
+          "properties": {
+            "ticket": {
+              "type": "string"
+            },
+            "type": {
+              "const": "attach",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "ticket"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "`id` is 1–128 bytes and unique among this connection's unanswered requests.",
           "properties": {
             "id": {
@@ -9291,7 +9309,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "What the request returned: the value its operation's `x-result` names,\nnull once a watch or attachment is confirmed. `trace_id`\ncorrelates the server's diagnostics for it.",
+          "description": "What the request returned: the value its operation's `x-result` names,\nnull once a watch is confirmed. `trace_id` correlates the server's\ndiagnostics for it.",
           "properties": {
             "id": {
               "type": "string"
@@ -9310,6 +9328,24 @@
             "id",
             "trace_id",
             "result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The answer to `attach`: the connection now speaks the owner protocol\nwith this LfProcess, and nothing more arrives from the server.",
+          "properties": {
+            "owner_lf_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            "type": {
+              "const": "bridged",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "owner_lf_process_id"
           ],
           "type": "object"
         },
@@ -9393,7 +9429,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Attach this connection to the Session's terminal: the server resolves\nthe Session's current owner LfProcess, answers `{owner_lf_process_id}`, and the\nconnection then speaks the owner protocol. When that owner ends, the\nconnection closes; attaching again by the same Session reaches its\nnext owner. With `owner_lf_process_id`, the Session must still be owned by\nexactly that LfProcess, for a client that reconnects only to the owner it had.",
+          "description": "A ticket for the Session's terminal: the server resolves the Session's\ncurrent owner LfProcess and answers `{ticket, owner_lf_process_id,\nexpires_in_ms}`. A new connection presents the ticket as its first\nmessage (`attach`) and becomes the bridge; this connection stays a\nclient. When the owner ends, the bridge closes; attaching again by the\nsame Session reaches its next owner. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
           "examples": [
             {
               "kind": "session.attach",
@@ -9430,7 +9466,9 @@
             "$ref": "#/$defs/SessionAttached"
           },
           "x-result-example": {
-            "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46"
+            "expires_in_ms": 60000,
+            "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
           }
         }
       ]
@@ -9471,14 +9509,26 @@
     },
     "SessionAttached": {
       "additionalProperties": false,
-      "description": "What `session.attach` answers before the owner protocol begins.",
+      "description": "What `session.attach` answers: a ticket that opens one bridge.",
       "properties": {
+        "expires_in_ms": {
+          "description": "How long the ticket opens a bridge, from when it was issued.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "owner_lf_process_id": {
           "$ref": "#/$defs/LfProcessId"
+        },
+        "ticket": {
+          "description": "16 random bytes as 22 base64url characters; single use.",
+          "type": "string"
         }
       },
       "required": [
-        "owner_lf_process_id"
+        "ticket",
+        "owner_lf_process_id",
+        "expires_in_ms"
       ],
       "type": "object"
     },

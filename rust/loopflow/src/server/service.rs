@@ -11,16 +11,17 @@ use fs2::FileExt;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
     ServerOperation, SessionAttached, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
-    REVISION,
+    REVISION, TICKET_LIFETIME,
 };
 use crate::engine::{Error, ErrorCode};
+use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, watch::Watch};
 
 /// How long a connection has to send its first message.
@@ -38,6 +39,53 @@ type Lines = Framed<UnixStream, LinesCodec>;
 
 /// Welcomed connections by client ID, as `lf server status` lists them.
 type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
+
+/// Bridges `session.attach` has granted and no connection has opened yet.
+#[derive(Debug, Default)]
+struct Tickets(Mutex<HashMap<String, Ticket>>);
+
+#[derive(Debug)]
+struct Ticket {
+    owner: LfProcessId,
+    /// The user who requested it; only that user's connection may present it.
+    uid: u32,
+    issued: Instant,
+}
+
+impl Tickets {
+    /// Grant `uid` one bridge to `owner`, open until `TICKET_LIFETIME` passes.
+    fn issue(&self, owner: LfProcessId, uid: u32, now: Instant) -> String {
+        use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+        let ticket = BASE64_URL_SAFE_NO_PAD.encode(uuid::Uuid::new_v4().as_bytes());
+        let mut tickets = lock(&self.0);
+        tickets.retain(|_, held| now.duration_since(held.issued) < TICKET_LIFETIME);
+        tickets.insert(
+            ticket.clone(),
+            Ticket {
+                owner,
+                uid,
+                issued: now,
+            },
+        );
+        ticket
+    }
+
+    /// The owner `ticket` opens for `uid`; the ticket is spent either way.
+    /// Unknown, spent, expired and another user's tickets are alike: there is
+    /// nothing to tell a presenter who was never granted one.
+    fn redeem(&self, ticket: &str, uid: u32, now: Instant) -> Result<LfProcessId, Error> {
+        let granted = lock(&self.0).remove(ticket);
+        match granted {
+            Some(held) if held.uid == uid && now.duration_since(held.issued) < TICKET_LIFETIME => {
+                Ok(held.owner)
+            }
+            _ => Err(Error::new(
+                ErrorCode::NotFound,
+                "attach ticket is unknown, spent or expired; request session.attach again",
+            )),
+        }
+    }
+}
 
 /// A welcomed connection's row, removed when the connection ends.
 struct Admitted {
@@ -79,8 +127,8 @@ impl Drop for Admitted {
     }
 }
 
-fn lock(clients: &Clients) -> std::sync::MutexGuard<'_, HashMap<String, ConnectedClient>> {
-    clients.lock().unwrap_or_else(|poison| poison.into_inner())
+fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    shared.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 /// Oldest connection first.
@@ -116,6 +164,7 @@ pub(super) async fn run() -> Result<()> {
     let instance: Arc<str> = uuid::Uuid::new_v4().to_string().into();
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let clients = Clients::default();
+    let tickets = Arc::new(Tickets::default());
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on
@@ -131,34 +180,25 @@ pub(super) async fn run() -> Result<()> {
         // Unix admission is deliberately unavailable to remote proxies. macOS
         // has no peer to name once a client has closed, so that client is gone.
         // SAFETY: geteuid has no preconditions.
-        if !socket
-            .peer_cred()
-            .is_ok_and(|peer| peer.uid() == unsafe { libc::geteuid() })
-        {
-            continue;
-        }
-        let Ok(permit) = slots.clone().try_acquire_owned() else {
-            tracing::warn!(%instance, "Server connection capacity reached");
-            tokio::spawn(refuse_busy(socket));
-            continue;
+        let uid = match socket.peer_cred() {
+            Ok(peer) if peer.uid() == unsafe { libc::geteuid() } => peer.uid(),
+            _ => continue,
         };
-        tracing::debug!(
-            active = MAX_CONNECTIONS - slots.available_permits(),
-            "Server connection admitted"
-        );
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
         let clients = clients.clone();
+        let slots = slots.clone();
+        let tickets = tickets.clone();
         tokio::spawn(async move {
-            if let Err(error) = connection(
-                socket,
-                &instance,
-                &executable_sha256,
-                &clients,
-                Some(permit),
-            )
-            .await
-            {
+            let connection = Connection {
+                instance: &instance,
+                executable_sha256: &executable_sha256,
+                clients: &clients,
+                slots: &slots,
+                tickets: &tickets,
+                uid,
+            };
+            if let Err(error) = connection.serve(socket).await {
                 tracing::warn!(%instance, %error, "Server connection ended");
             }
         });
@@ -166,16 +206,20 @@ pub(super) async fn run() -> Result<()> {
 }
 
 /// Capacity answers before closing, so the client knows nothing ran.
-async fn refuse_busy(mut socket: UnixStream) {
-    let line = line(&ServerMessage::error(
-        None,
-        Error::new(
-            ErrorCode::Busy,
-            format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
-        )
-        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS })),
-    ));
-    let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
+async fn refuse_busy(mut lines: Lines) {
+    let _ = send(
+        &mut lines,
+        &ServerMessage::error(
+            None,
+            Error::new(
+                ErrorCode::Busy,
+                format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
+            )
+            .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS })),
+        ),
+    )
+    .await;
+    let mut socket = lines.into_inner();
     let _ = socket.shutdown().await;
     drain(&mut socket).await;
 }
@@ -192,64 +236,120 @@ async fn drain(socket: &mut UnixStream) {
     .await;
 }
 
-async fn connection(
-    mut socket: UnixStream,
-    instance: &str,
-    executable_sha256: &str,
-    clients: &Clients,
-    permit: Option<OwnedSemaphorePermit>,
-) -> Result<()> {
-    let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
-        .await
-        .context("no message within five seconds")??;
-    // A revision-1 request begins with its four-byte length; JSON begins with
-    // `{`. Delete this branch with revision 1.
-    if first < 0x20 {
-        return refuse_revision_one(socket, instance).await;
+/// What one accepted socket is served with. Its first message decides what
+/// it is: a client (`hello`, which takes one of the `MAX_CONNECTIONS` slots),
+/// a probe (`status`) or a terminal bridge (`attach`, bounded by its ticket,
+/// never by the client cap).
+struct Connection<'a> {
+    instance: &'a str,
+    executable_sha256: &'a str,
+    clients: &'a Clients,
+    slots: &'a Arc<Semaphore>,
+    tickets: &'a Tickets,
+    uid: u32,
+}
+
+impl Connection<'_> {
+    async fn serve(self, mut socket: UnixStream) -> Result<()> {
+        let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
+            .await
+            .context("no message within five seconds")??;
+        // A revision-1 request begins with its four-byte length; JSON begins with
+        // `{`. Delete this branch with revision 1.
+        if first < 0x20 {
+            return refuse_revision_one(socket, self.instance).await;
+        }
+        let mut lines = Framed::new(socket, LinesCodec::new_with_max_length(MAX_MESSAGE));
+        lines.read_buffer_mut().extend_from_slice(&[first]);
+        let line = tokio::time::timeout(FIRST_MESSAGE, lines.next())
+            .await
+            .context("no message within five seconds")?
+            .context("closed before its first message")??;
+        match serde_json::from_str::<ClientMessage>(&line) {
+            Ok(ClientMessage::Hello(hello)) => {
+                let Ok(_slot) = self.slots.clone().try_acquire_owned() else {
+                    tracing::warn!(instance = %self.instance, "Server connection capacity reached");
+                    refuse_busy(lines).await;
+                    return Ok(());
+                };
+                tracing::debug!(
+                    active = MAX_CONNECTIONS - self.slots.available_permits(),
+                    "Server connection admitted"
+                );
+                self.client(lines, hello).await
+            }
+            Ok(ClientMessage::Attach { ticket }) => {
+                let owner = match self.tickets.redeem(&ticket, self.uid, Instant::now()) {
+                    Ok(owner) => owner,
+                    Err(refusal) => {
+                        return send(&mut lines, &ServerMessage::error(None, refusal)).await
+                    }
+                };
+                let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?)
+                    .await
+                {
+                    Ok(destination) => destination,
+                    Err(failure) => {
+                        // A missing owner endpoint means the owner ended.
+                        return send(&mut lines, &ServerMessage::error(None, Error::new(ErrorCode::NotFound, format!(
+                            "Session owner is not running; no provider restarted and no input replayed: {failure}"
+                        )).with(serde_json::json!({ "owner_lf_process_id": owner })))).await;
+                    }
+                };
+                send(
+                    &mut lines,
+                    &ServerMessage::Bridged {
+                        owner_lf_process_id: owner,
+                    },
+                )
+                .await?;
+                bridge(lines, destination).await
+            }
+            Ok(ClientMessage::Status) => {
+                send(
+                    &mut lines,
+                    &ServerMessage::Status(Status {
+                        revision: REVISION,
+                        min_revision: MIN_REVISION,
+                        instance: self.instance.into(),
+                        executable_sha256: self.executable_sha256.into(),
+                        clients: connected(self.clients),
+                    }),
+                )
+                .await
+            }
+            Ok(_) => {
+                send(
+                    &mut lines,
+                    &error(
+                        None,
+                        ErrorCode::Invalid,
+                        "the first message must be hello, status or attach",
+                    ),
+                )
+                .await
+            }
+            Err(parse) => {
+                send(
+                    &mut lines,
+                    &error(None, ErrorCode::Invalid, parse.to_string()),
+                )
+                .await
+            }
+        }
     }
-    let mut lines = Framed::new(socket, LinesCodec::new_with_max_length(MAX_MESSAGE));
-    lines.read_buffer_mut().extend_from_slice(&[first]);
-    let line = tokio::time::timeout(FIRST_MESSAGE, lines.next())
-        .await
-        .context("no message within five seconds")?
-        .context("closed before its first message")??;
-    let hello = match serde_json::from_str::<ClientMessage>(&line) {
-        Ok(ClientMessage::Hello(hello)) => hello,
-        Ok(ClientMessage::Status) => {
+
+    /// Welcome a client and serve its requests until it closes.
+    async fn client(self, mut lines: Lines, hello: Hello) -> Result<()> {
+        let instance = self.instance;
+        let executable_sha256 = self.executable_sha256;
+        let Some(revision) = negotiate(&hello) else {
+            let side = if hello.min_revision > REVISION {
+                "selected installation"
+            } else {
+                "client"
+            };
             return send(
-                &mut lines,
-                &ServerMessage::Status(Status {
-                    revision: REVISION,
-                    min_revision: MIN_REVISION,
-                    instance: instance.into(),
-                    executable_sha256: executable_sha256.into(),
-                    clients: connected(clients),
-                }),
-            )
-            .await;
-        }
-        Ok(_) => {
-            return send(
-                &mut lines,
-                &error(None, ErrorCode::Invalid, "the first message must be hello"),
-            )
-            .await;
-        }
-        Err(parse) => {
-            return send(
-                &mut lines,
-                &error(None, ErrorCode::Invalid, parse.to_string()),
-            )
-            .await;
-        }
-    };
-    let Some(revision) = negotiate(&hello) else {
-        let side = if hello.min_revision > REVISION {
-            "selected installation"
-        } else {
-            "client"
-        };
-        return send(
             &mut lines,
             &ServerMessage::error(None, Error::new(
                 ErrorCode::Incompatible,
@@ -265,34 +365,36 @@ async fn connection(
             ),
         )
         .await;
-    };
-    let admitted = Admitted::new(clients, hello.client);
-    tracing::debug!(%instance, client = %admitted.id, revision, "Server connection welcomed");
-    // A Machine registry that is unavailable or uninitialized leaves `machine`
-    // null; file settings stay reachable through the same connection.
-    let machine =
-        tokio::task::spawn_blocking(|| crate::journal::request::isolate(|| Read::MachineId.read()))
-            .await?
-            .ok();
-    send(
-        &mut lines,
-        &ServerMessage::Welcome(Welcome {
-            client_id: admitted.id.clone(),
-            revision,
-            server_revision: REVISION,
-            min_revision: MIN_REVISION,
-            instance: instance.into(),
-            build: crate::build_info::BUILD_VERSION.to_owned(),
-            executable_sha256: executable_sha256.into(),
-            machine,
-            limits: Limits {
-                max_message: MAX_MESSAGE,
-                max_connections: MAX_CONNECTIONS,
-            },
-        }),
-    )
-    .await?;
-    session(lines, instance.into(), &admitted, permit).await
+        };
+        let admitted = Admitted::new(self.clients, hello.client);
+        tracing::debug!(%instance, client = %admitted.id, revision, "Server connection welcomed");
+        // A Machine registry that is unavailable or uninitialized leaves `machine`
+        // null; file settings stay reachable through the same connection.
+        let machine = tokio::task::spawn_blocking(|| {
+            crate::journal::request::isolate(|| Read::MachineId.read())
+        })
+        .await?
+        .ok();
+        send(
+            &mut lines,
+            &ServerMessage::Welcome(Welcome {
+                client_id: admitted.id.clone(),
+                revision,
+                server_revision: REVISION,
+                min_revision: MIN_REVISION,
+                instance: instance.into(),
+                build: crate::build_info::BUILD_VERSION.to_owned(),
+                executable_sha256: executable_sha256.into(),
+                machine,
+                limits: Limits {
+                    max_message: MAX_MESSAGE,
+                    max_connections: MAX_CONNECTIONS,
+                },
+            }),
+        )
+        .await?;
+        session(lines, instance.into(), &admitted, self.tickets, self.uid).await
+    }
 }
 
 /// The newest revision both sides speak.
@@ -334,7 +436,8 @@ async fn session(
     mut lines: Lines,
     instance: Arc<str>,
     admitted: &Admitted,
-    permit: Option<OwnedSemaphorePermit>,
+    tickets: &Tickets,
+    uid: u32,
 ) -> Result<()> {
     let (outgoing, mut queue) = mpsc::channel::<ServerMessage>(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
@@ -386,7 +489,7 @@ async fn session(
                         }
                         continue;
                     }
-                    ClientMessage::Hello(_) | ClientMessage::Status => {
+                    ClientMessage::Hello(_) | ClientMessage::Status | ClientMessage::Attach { .. } => {
                         send(&mut lines, &error(None, ErrorCode::Invalid, "hello was already exchanged")).await?;
                         return Ok(());
                     }
@@ -409,26 +512,22 @@ async fn session(
                                 continue;
                             }
                         };
-                        let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
-                            Ok(destination) => destination,
-                            Err(failure) => {
-                                // A missing owner endpoint means the owner ended.
-                                send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound, format!(
-                                    "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                                )).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
-                                continue;
-                            }
-                        };
-                        let result = serde_json::to_value(SessionAttached { owner_lf_process_id: owner }).expect("an owner serializes");
+                        // An owner whose endpoint is gone has ended; the bridge
+                        // itself connects when the ticket is presented.
+                        if !crate::transport::endpoint(&owner)?.exists() {
+                            send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                                "Session owner is not running; no provider restarted and no input replayed",
+                            ).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
+                            continue;
+                        }
+                        let ticket = tickets.issue(owner.clone(), uid, Instant::now());
+                        let result = serde_json::to_value(SessionAttached {
+                            ticket,
+                            owner_lf_process_id: owner,
+                            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                        }).expect("a ticket serializes");
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
-                        // The connection now speaks only the owner protocol, for as
-                        // long as the terminal stays: nothing else on it may keep
-                        // running. Admitted writes finish on their workers.
-                        tasks.abort_all();
-                        // The cap is for clients. Terminals are bounded by their
-                        // Sessions, and panes must never crowd one out.
-                        drop(permit);
-                        return bridge(lines, destination).await;
+                        continue;
                     }
                     Admission::Watch(query) => {
                         let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
@@ -465,9 +564,6 @@ enum Admission {
     Watch(Read),
 }
 
-/// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
-/// closing either side releases the owner claim, and no service state can
-/// restore it on another connection.
 /// The owner `session.attach` reaches: the Session's current owner Process,
 /// which must be `exact` when the client names one. Resolution never starts a
 /// provider.
@@ -558,10 +654,13 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
     Some((id, refusal.with(serde_json::json!({ "kind": kind }))))
 }
 
+/// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
+/// closing either side releases the owner claim, and no service state can
+/// restore it on another connection.
 async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     let parts = lines.into_parts();
     let mut socket = parts.io;
-    // Owner-protocol bytes the client pipelined behind its attach request.
+    // Owner-protocol bytes the client pipelined behind its ticket.
     if !parts.read_buf.is_empty() {
         destination.write_all(&parts.read_buf).await?;
     }
@@ -785,14 +884,20 @@ async fn send(lines: &mut Lines, message: &ServerMessage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{connection, Clients};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::{Clients, Connection, Tickets};
     use crate::engine::ErrorCode;
+    use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, MAX_MESSAGE, REVISION,
     };
+    use crate::server::wire::{MAX_CONNECTIONS, TICKET_LIFETIME};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
+    use tokio::sync::Semaphore;
 
     struct Client {
         reader: BufReader<tokio::net::unix::OwnedReadHalf>,
@@ -810,7 +915,17 @@ mod tests {
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
             let server = tokio::spawn(async move {
-                connection(server, "incarnation", "fixture", &clients, None).await
+                let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+                Connection {
+                    instance: "incarnation",
+                    executable_sha256: "fixture",
+                    clients: &clients,
+                    slots: &slots,
+                    tickets: &Tickets::default(),
+                    uid: 501,
+                }
+                .serve(server)
+                .await
             });
             let (read, writer) = client.into_split();
             Self {
@@ -950,7 +1065,17 @@ mod tests {
     async fn revision_one_frame_gets_a_revision_one_refusal() {
         let (mut client, server) = UnixStream::pair().unwrap();
         let server = tokio::spawn(async move {
-            connection(server, "incarnation", "fixture", &Clients::default(), None).await
+            let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+            Connection {
+                instance: "incarnation",
+                executable_sha256: "fixture",
+                clients: &Clients::default(),
+                slots: &slots,
+                tickets: &Tickets::default(),
+                uid: 501,
+            }
+            .serve(server)
+            .await
         });
         let request = br#"{"version":1,"id":"old","operation":{"kind":"status"}}"#;
         client.write_u32(request.len() as u32).await.unwrap();
@@ -1151,6 +1276,62 @@ mod tests {
             assert_eq!(code, ErrorCode::Invalid);
             assert!(message.contains("no watch"), "{message}");
         });
+    }
+
+    #[test]
+    fn a_ticket_opens_one_bridge_for_its_user_within_its_lifetime() {
+        let tickets = Tickets::default();
+        let owner = LfProcessId::new();
+        let issued = Instant::now();
+        let ticket = tickets.issue(owner.clone(), 501, issued);
+        assert_eq!(ticket.len(), 22, "16 bytes as base64url: {ticket}");
+        // Another user's connection cannot present it, and trying spends it.
+        assert_eq!(
+            tickets.redeem(&ticket, 502, issued).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        assert_eq!(
+            tickets.redeem(&ticket, 501, issued).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        let ticket = tickets.issue(owner.clone(), 501, issued);
+        assert_eq!(
+            tickets
+                .redeem(
+                    &ticket,
+                    501,
+                    issued + TICKET_LIFETIME - Duration::from_millis(1)
+                )
+                .unwrap(),
+            owner
+        );
+        // Single use.
+        assert!(tickets.redeem(&ticket, 501, issued).is_err());
+        // Expired at exactly its lifetime.
+        let ticket = tickets.issue(owner.clone(), 501, issued);
+        assert!(tickets
+            .redeem(&ticket, 501, issued + TICKET_LIFETIME)
+            .is_err());
+        // Issuing sweeps the expired.
+        let stale = tickets.issue(owner.clone(), 501, issued);
+        tickets.issue(owner, 501, issued + TICKET_LIFETIME);
+        assert!(!super::lock(&tickets.0).contains_key(&stale));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_ticket_is_refused_before_any_bridge() {
+        let mut client = Client::connect();
+        client
+            .send(&ClientMessage::Attach {
+                ticket: "Qk9nM3hLcjJwVnc5YVptRQ".into(),
+            })
+            .await;
+        let ServerMessage::Error { id, code, .. } = client.receive().await.unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(id, None);
+        assert_eq!(code, ErrorCode::NotFound);
+        client.ended().await;
     }
 
     #[tokio::test]

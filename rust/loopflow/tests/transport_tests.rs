@@ -5818,7 +5818,8 @@ fn terminal_bridges_leave_the_client_connections_free() {
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = loopflow::id::LfSessionId::from(fixture.session(&owner).as_str());
     let service = ServerProof::start(&fixture, false);
-    // More bridges than the server admits clients.
+    // More bridges than the server admits clients: each takes a ticket on a
+    // client connection it closes, then opens the bridge on its own.
     let bridges: Vec<_> = (0..loopflow::server::wire::MAX_CONNECTIONS + 8)
         .map(|_| {
             loopflow::server::client::attach(&fixture.endpoint("machine"), &session, None).unwrap()
@@ -5831,6 +5832,86 @@ fn terminal_bridges_leave_the_client_connections_free() {
         loopflow::server::wire::MAX_CONNECTIONS
     );
     drop(bridges);
+}
+
+/// One line to a fresh connection and the server's one-line answer.
+fn first_exchange(socket: &Path, line: &str) -> Value {
+    let mut stream = UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    writeln!(stream, "{line}").unwrap();
+    let mut answer = String::new();
+    BufReader::new(&stream).read_line(&mut answer).unwrap();
+    serde_json::from_str(&answer).unwrap()
+}
+
+#[test]
+fn an_attach_ticket_opens_one_bridge_from_any_connection_of_its_user() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let session = fixture.session(&owner);
+    let service = ServerProof::start(&fixture, false);
+    let socket = fixture.endpoint("machine");
+    let mut client = service.connect();
+    let issued = client
+        .request(
+            serde_json::from_value(
+                json!({"kind":"session.attach","session":session,"owner_lf_process_id":null}),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .result;
+    assert_eq!(issued["owner_lf_process_id"], owner);
+    assert_eq!(
+        issued["expires_in_ms"],
+        loopflow::server::wire::TICKET_LIFETIME.as_millis() as u64
+    );
+    let ticket = issued["ticket"].as_str().unwrap();
+    assert_eq!(ticket.len(), 22, "{ticket}");
+    // The client connection that asked stays a client.
+    assert!(client
+        .request(serde_json::from_value(json!({"kind":"config.catalog"})).unwrap())
+        .is_ok());
+    // The ticket works on a connection the requester did not open, and once.
+    let bridged = first_exchange(
+        &socket,
+        &json!({"type":"attach","ticket":ticket}).to_string(),
+    );
+    assert_eq!(bridged["type"], "bridged", "{bridged}");
+    assert_eq!(bridged["owner_lf_process_id"], owner);
+    let spent = first_exchange(
+        &socket,
+        &json!({"type":"attach","ticket":ticket}).to_string(),
+    );
+    assert_eq!(spent["type"], "error", "{spent}");
+    assert_eq!(spent["code"], "not_found");
+    assert!(spent["id"].is_null());
+    // Unknown and malformed first lines are refused before any bridge.
+    let unknown = first_exchange(
+        &socket,
+        r#"{"type":"attach","ticket":"AAAAAAAAAAAAAAAAAAAAAA"}"#,
+    );
+    assert_eq!(unknown["code"], "not_found", "{unknown}");
+    let malformed = first_exchange(&socket, r#"{"type":"attach"}"#);
+    assert_eq!(malformed["code"], "invalid", "{malformed}");
+    // After hello, attach is no longer a first message.
+    let mut late = service.connect();
+    let error = late
+        .request(
+            serde_json::from_value(json!({"kind":"session.attach","session":"session_missing","owner_lf_process_id":null}))
+                .unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error
+            .downcast_ref::<loopflow::engine::Error>()
+            .unwrap()
+            .code,
+        loopflow::engine::ErrorCode::NotFound
+    );
 }
 
 #[test]

@@ -51,8 +51,11 @@ public enum ServerClientMessage: Encodable, Sendable {
     case checkpoint(id: String, checkpoint: UInt64)
     /// Forget a request's answer, or end a watch.
     case cancel(id: String)
+    /// A bridge's first and only message: the ticket `session.attach` issued.
+    /// The server answers `bridged`, and the connection then speaks the owner protocol.
+    case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, checkpoint, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, checkpoint, ticket, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -77,6 +80,9 @@ public enum ServerClientMessage: Encodable, Sendable {
         case .cancel(let id):
             try box.encode("cancel", forKey: .type)
             try box.encode(id, forKey: .id)
+        case .attach(let ticket):
+            try box.encode("attach", forKey: .type)
+            try box.encode(ticket, forKey: .ticket)
         }
     }
 }
@@ -87,7 +93,8 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
-    /// The Session's terminal; with `owner`, only while that exact LfProcess owns it.
+    /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
+    /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case attach(session: String, owner: String?)
 
     private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id" }
@@ -149,9 +156,11 @@ public enum ConfigOperation: Encodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
-    /// What the request returned: a read's or write's value, or `{owner_lf_process_id}` for
+    /// What the request returned: a read's or write's value, or the ticket for
     /// `session.attach`; null once a watch is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
+    /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
+    case bridged(ownerLfProcessID: String)
     case reading(id: String, frame: JSONValue)
     /// The watch's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
@@ -162,7 +171,9 @@ public enum ServerMessage: Decodable, Sendable {
     /// structured detail, `.null` when there is none.
     case error(id: String?, code: String, message: String, data: JSONValue)
 
-    private enum Keys: String, CodingKey { case type, id, result, frame, code, message, data, traceID = "trace_id" }
+    private enum Keys: String, CodingKey {
+        case type, id, result, frame, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+    }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .type) {
@@ -171,6 +182,7 @@ public enum ServerMessage: Decodable, Sendable {
         case "response":
             self = .response(id: try box.decode(String.self, forKey: .id), traceID: try box.decode(String.self, forKey: .traceID),
                              result: try box.decode(JSONValue.self, forKey: .result))
+        case "bridged": self = .bridged(ownerLfProcessID: try box.decode(String.self, forKey: .ownerLfProcessID))
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))

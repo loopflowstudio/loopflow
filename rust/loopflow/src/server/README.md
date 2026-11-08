@@ -35,8 +35,9 @@ Work and credentials stay in place.
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Messages are
-capped at 32 MiB and client connections at 64, which terminal bridges leave once attached; a connection has five seconds to send
-its first message and five seconds to take any message the server sends. The
+capped at 32 MiB and client connections at 64; terminal bridges are separate
+connections that never count against that cap. A connection has five seconds to
+send its first message and five seconds to take any message the server sends. The
 socket and its directory are private; remote proxies must never forward this
 endpoint. Remote admission is outside this revision.
 
@@ -113,8 +114,9 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
-operation's value: what its CLI spelling prints with `--json`,
-`{owner_lf_process_id}` for `session.attach`, and null once a watch is confirmed.
+operation's value: what its CLI spelling prints with `--json`, a ticket
+`{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
+once a watch is confirmed.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
 answer or ends a watch; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every watch and releases
@@ -277,22 +279,31 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. IDs correlate
   diagnostics and are **not** durable deduplication receipts. No automatic
   resubmission.
-- `session.attach {session, owner_lf_process_id}` takes a Session on a
-  connection of its own: hello, one attach request, its response
-  `{owner_lf_process_id}`, then the unchanged binary owner protocol in
-  `transport/README.md` and `transport/wire.rs`. The owner is the LfProcess
-  holding the Session's terminal (`lf session serve`), never the provider's
-  AgentProcess beneath it. The server resolves the Session's current owner;
-  resolution never starts a provider. A Session with no running owner is
-  `not_found {session}`; an owner whose endpoint refuses is `not_found
-  {owner_lf_process_id}`: it ended. When the owner ends, the bridge closes, and
-  attaching again by the same Session reaches its next owner, as after `lf
+- `session.attach {session, owner_lf_process_id}` answers a ticket
+  `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
+  connection, which stays a client. The bridge is a new connection whose first
+  and only message is `{"type":"attach","ticket"}`; the server answers
+  `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
+  binary owner protocol in `transport/README.md` and `transport/wire.rs`. A
+  ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
+  60 seconds and works only for the user who requested it; an unknown, spent,
+  expired or foreign ticket is `not_found` with a null `id` and the connection
+  closes. This is Rex's `data.connect` shape: a connection is a client or a
+  bridge from its first line, never one that turns into the other, so bridges
+  are bounded by their Sessions and never crowd a client out of the 64 slots.
+  The owner is the LfProcess holding the Session's terminal (`lf session
+  serve`), never the provider's AgentProcess beneath it. The server resolves the
+  Session's current owner when it issues the ticket; resolution never starts a
+  provider. A Session with no running owner is `not_found {session}`; an owner
+  whose endpoint is gone is `not_found {owner_lf_process_id}`: it ended, at
+  issue or when the ticket is presented. When the owner ends, the bridge closes,
+  and attaching again by the same Session reaches its next owner, as after `lf
   install`. A client that reconnects only to the owner it had passes it as
   `owner_lf_process_id`; a Session now owned by another LfProcess is then
   `not_found {owner_lf_process_id, current_lf_process_id}`. Desktop's relays do
-  this. Each terminal has
-  its own socket, so readings never wait behind terminal bytes and a control
-  failure never closes a bridged terminal. The owner alone grants input/geometry,
+  this; `lf session resume` and `server::client::attach` perform both steps.
+  Each terminal has its own connection, so readings never wait behind terminal
+  bytes and a control failure never closes a bridged terminal. The owner alone grants input/geometry,
   handles bounded output continuation and revokes stale control. No automatic
   owner replacement or raw-input replay. Desktop automatically reconnects the
   exact owner with bounded backoff, keeping connection status in native chrome
@@ -308,9 +319,9 @@ backoff (100 ms doubling to 3.2 s). Its watches share that connection; losing it
 fails every pending request as outcome unknown and every watch, which the
 window reopens for a complete reading.
 
-Every client gives the server ten seconds to answer `status`, `hello` or
-`attach`; a server that accepts and stalls fails the open with that diagnosis
-and the caller's backoff retries. A welcomed session's waits and the bridged
+Every client gives the server ten seconds to answer `status`, `hello`,
+`session.attach` or `attach`; a server that accepts and stalls fails the open
+with that diagnosis and the caller's backoff retries. A welcomed session's waits and the bridged
 stream are unbounded unless the caller sets its own limit.
 
 Request diagnostics correlate the response trace with its target, duration,

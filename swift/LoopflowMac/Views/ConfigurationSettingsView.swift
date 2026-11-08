@@ -41,7 +41,7 @@ struct ConfigurationSettingsView: View {
                     }
                 }
             }
-            if let definition = catalogue.filter({ key == $0.key || key.hasPrefix($0.key + ".") }).max(by: { $0.key.count < $1.key.count }) {
+            if let definition = catalogue.filter({ definition in ([definition.key] + definition.shorthands).contains { key == $0 || key.hasPrefix($0 + ".") } }).max(by: { $0.key.count < $1.key.count }) {
                 Text(definition.description).font(.callout)
                 Text("\(definition.applicability) · \(definition.combination) · \(definition.portability)")
                     .font(.caption).foregroundStyle(.secondary)
@@ -63,7 +63,7 @@ struct ConfigurationSettingsView: View {
         .onChange(of: wave) { _, _ in resetSelection() }
         .onChange(of: key) { _, _ in resetSelection() }
         .task {
-            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: await ServerClient.configuration(.object(["action": .string("catalog")]))); await load() }
+            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: await ServerClient.configuration(.catalog)); await load() }
             catch { notice = error.localizedDescription }
         }
     }
@@ -78,13 +78,6 @@ struct ConfigurationSettingsView: View {
         destination.address(repository: (repository as NSString).expandingTildeInPath, wave: wave)
     }
 
-    private func request(value: String?, unset: Bool) -> JSONValue {
-        .object([
-            "action": .string("declaration"), "destination": address, "key": .string(key),
-            "value": value.map(JSONValue.string) ?? .null, "unset": .bool(unset),
-        ])
-    }
-
     private func resetSelection() {
         value = ""
         locator = ""
@@ -97,7 +90,7 @@ struct ConfigurationSettingsView: View {
     private func load() async {
         let selection = selectionID
         do {
-            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(request(value: nil, unset: false)))
+            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(.get(destination: address, key: key)))
             guard selection == selectionID else { return }
             locator = result.path
             if result.value != .null {
@@ -113,7 +106,8 @@ struct ConfigurationSettingsView: View {
         selectionID = UUID()
         defer { saving = false }
         do {
-            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(request(value: unset ? nil : value, unset: unset)))
+            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(
+                unset ? .unset(destination: address, key: key) : .set(destination: address, key: key, value: value)))
             locator = result.path
             if unset { value = "" }
             notice = "\(unset ? "Removed declaration from" : "Saved to") \(result.path) · \(result.lifecycle.replacingOccurrences(of: "_", with: " "))"
@@ -125,9 +119,7 @@ struct ConfigurationSettingsView: View {
         let selection = selectionID
         explanation = ""
         do {
-            let data = try await ServerClient.configuration(.object([
-                "action": .string("explain"), "destination": address, "key": .string(key),
-            ]))
+            let data = try await ServerClient.configuration(.explain(destination: address, key: key))
             let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
             guard selection == selectionID else { return }
             locator = result.path
@@ -150,8 +142,8 @@ struct ConfigurationSettingsView: View {
 // This mirrors destination identity only; Rust derives paths and applicability.
 enum ConfigurationDestination: String, CaseIterable, Identifiable {
     case personalGlobal = "personal_global"
-    case personalRepository = "personal_repository"
-    case sharedRepository = "shared_repository"
+    case personalRepository = "personal_repo"
+    case sharedRepository = "shared_repo"
     case personalWave = "personal_wave"
     case sharedWave = "shared_wave"
 
@@ -169,7 +161,7 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
 
     func address(repository: String, wave: String) -> JSONValue {
         var value: [String: JSONValue] = ["kind": .string(rawValue)]
-        if self != .personalGlobal { value["repository"] = .string(repository) }
+        if self != .personalGlobal { value["repo"] = .string(repository) }
         if isWave { value["wave"] = .string(wave) }
         return .object(value)
     }
@@ -182,7 +174,9 @@ struct ConfigurationExplanation: Decodable {
 }
 
 struct ConfigurationDefinition: Decodable {
+    /// The canonical key on its primitive; `shorthands` are the other spellings lf accepts.
     let key: String
+    let shorthands: [String]
     let category: String
     let schema: JSONValue
     let `default`: String

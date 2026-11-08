@@ -136,6 +136,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let wave = crate::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
         preview: None,
+        has_provider_history: true,
         program_status: None,
         agent_process_id: None,
         primary_scope: None,
@@ -258,6 +259,7 @@ fn session_metadata_keeps_unknown_position_visible() {
 use std::ffi::OsString;
 
 use super::human_session_argv;
+use crate::lf::commands::write::SessionOpenIntent;
 use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
@@ -321,7 +323,16 @@ fn session_action_fixtures_match_the_shared_boundary() {
     ))
     .unwrap();
     for case in cases {
-        assert_eq!(super::session_actions(case.state, true), case.actions);
+        assert_eq!(
+            super::session_actions(
+                case.state,
+                true,
+                true,
+                case.state == super::SessionState::Active,
+                false
+            ),
+            case.actions
+        );
     }
     for fixture in [
         include_str!("../../../../../tests/fixtures/dto/session.json"),
@@ -334,7 +345,13 @@ fn session_action_fixtures_match_the_shared_boundary() {
         let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
         assert_eq!(
             session.actions,
-            super::session_actions(session.state, session.interactive)
+            super::session_actions(
+                session.state,
+                session.interactive,
+                true,
+                session.state == super::SessionState::Active,
+                false
+            )
         );
         assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
         let mut untitled = serde_json::to_value(&session).unwrap();
@@ -358,7 +375,13 @@ fn graph_membership_fixtures_cover_every_projection_and_are_required() {
     for session in &sessions {
         assert_eq!(
             session.actions,
-            super::session_actions(session.state, session.interactive)
+            super::session_actions(
+                session.state,
+                session.interactive,
+                true,
+                session.state == super::SessionState::Active,
+                false
+            )
         );
         kinds.push(match &session.graph_membership {
             super::SessionGraphMembership::Step { occurrence, .. } => match occurrence {
@@ -663,4 +686,402 @@ fn session_page_preserves_the_continuation_and_required_entries() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
     assert!(serde_json::from_str::<super::SessionPage>(r#"{"next":null}"#).is_err());
+}
+
+#[test]
+fn only_a_consumed_first_launch_offers_try_again() {
+    use super::{SessionActionKind::*, SessionState::*};
+    let kinds = |state, history, occupied, consumed| -> Vec<_> {
+        super::session_actions(state, true, history, occupied, consumed)
+            .into_iter()
+            .map(|action| (action.kind, action.label))
+            .collect()
+    };
+    assert_eq!(
+        kinds(Closed, false, false, true),
+        [
+            (MoveHere, "Try again".to_string()),
+            (Reveal, "Show conversation".to_string())
+        ]
+    );
+    assert_eq!(kinds(Closed, true, false, true)[0].0, Open);
+    assert_eq!(kinds(Closed, false, false, false)[0].0, Open);
+    let held = kinds(Active, false, true, true);
+    assert_eq!(held[0].0, Open);
+    assert_eq!(held[1], (MoveHere, "Take back".to_string()));
+    assert!(super::session_actions(Closed, false, false, false, true).is_empty());
+}
+
+#[test]
+fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let first = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(first.open_argv.ends_with(&["--start-if-free".into()]));
+        assert!(first.actions.iter().any(|action| {
+            action.kind == super::SessionActionKind::Open && action.unavailable_reason.is_none()
+        }));
+
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        let session = super::append_input(&store, session).await.unwrap();
+        let (dir, _) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(),
+            session.input_key().unwrap(),
+        )
+        .unwrap();
+        // The launcher consumes this marker before starting the provider. A
+        // crash at that boundary must not replay the captured request on load.
+        std::fs::remove_file(dir.join("prepared")).unwrap();
+        let error = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            true,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("retry it explicitly"));
+        let retry = |record: &super::SessionRecord| {
+            let action = record
+                .actions
+                .iter()
+                .find(|action| action.kind == super::SessionActionKind::MoveHere)
+                .unwrap()
+                .clone();
+            assert!(!record
+                .actions
+                .iter()
+                .any(|action| action.kind == super::SessionActionKind::Open));
+            action
+        };
+        let listed = super::listed(&store, &record.id).unwrap().unwrap();
+        assert_eq!(retry(&listed).label, "Try again");
+        assert!(retry(&listed).unavailable_reason.is_none());
+        let refused = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Start,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(retry(&refused), retry(&listed));
+        // The click prepares the launch that `open_waiting` gives a new attempt.
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &record.id,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(!prepared.open_argv.contains(&"--start-if-free".into()));
+        let after = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(after.captured, session.captured);
+        assert_eq!(after.artifact_key, session.artifact_key);
+        assert!(store
+            .sqlite
+            .session_attachment(&record.id)
+            .unwrap()
+            .is_none());
+    });
+}
+
+#[test]
+fn reveal_requires_history_and_never_publishes_a_first_turn() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let before = store.session(&record.id).await.unwrap().unwrap();
+        let prepared = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
+        let action = prepared
+            .actions
+            .iter()
+            .find(|action| action.kind == super::SessionActionKind::Reveal)
+            .unwrap();
+        assert!(action
+            .unavailable_reason
+            .as_ref()
+            .unwrap()
+            .contains("No saved provider history"));
+        for refreshed in [
+            super::surface(&store, &before).await.unwrap(),
+            super::listed(&store, &record.id).unwrap().unwrap(),
+            super::list(&store, &crate::session::SessionFilter::default())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == record.id)
+                .unwrap(),
+        ] {
+            assert_eq!(refreshed.actions, prepared.actions);
+            let start = refreshed
+                .actions
+                .iter()
+                .find(|action| action.kind == super::SessionActionKind::Open)
+                .unwrap();
+            assert_eq!(start.label, "Start conversation");
+            assert!(start.unavailable_reason.is_none());
+        }
+        let error = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            true,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("start this conversation explicitly"));
+        let after = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(after.artifact_key, before.artifact_key);
+        assert_eq!(after.captured, before.captured);
+        assert_eq!(after.input_published, before.input_published);
+        assert!(store
+            .sqlite
+            .session_attachment(&record.id)
+            .unwrap()
+            .is_none());
+    });
+}
+
+#[test]
+fn recovery_refresh_follows_current_holder_and_history() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let prepared = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(!prepared
+            .actions
+            .iter()
+            .any(|a| a.kind == super::SessionActionKind::MoveHere));
+
+        let launcher = store.sqlite.test_lf_process();
+        let holder = store
+            .sqlite
+            .claim_session_attachment(&record.id, None, &launcher, true)
+            .unwrap();
+        store
+            .sqlite
+            .record_agent_process_launch(
+                &record.id,
+                &holder,
+                &std::process::Command::new("fixture-provider"),
+                true,
+            )
+            .unwrap();
+        // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
+        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        let takeover = refreshed
+            .actions
+            .iter()
+            .find(|a| a.kind == super::SessionActionKind::MoveHere)
+            .unwrap();
+        assert_eq!(takeover.label, "Take back");
+        let reveal = super::open_without_replacing(
+            &store,
+            &record.id,
+            SessionOpenIntent::Reveal,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(reveal.actions, refreshed.actions);
+        assert_eq!(
+            store.sqlite.session_attachment(&record.id).unwrap(),
+            Some(holder.clone())
+        );
+
+        store
+            .sqlite
+            .record_session_agent_session(&record.id, &holder, &"saved-thread".into())
+            .unwrap();
+        store
+            .sqlite
+            .record_agent_process_exit(&record.id, &holder, true)
+            .unwrap();
+        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        assert!(!refreshed
+            .actions
+            .iter()
+            .any(|a| a.kind == super::SessionActionKind::MoveHere));
+        assert!(refreshed
+            .actions
+            .iter()
+            .find(|a| a.kind == super::SessionActionKind::Reveal)
+            .unwrap()
+            .unavailable_reason
+            .is_some());
+        assert_eq!(
+            refreshed
+                .actions
+                .iter()
+                .find(|a| a.kind == super::SessionActionKind::Open)
+                .unwrap()
+                .label,
+            "Start conversation"
+        );
+    });
+}
+
+#[test]
+fn recovery_refresh_recognizes_imported_history_before_attachment() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        for source in ["provider-session:imported", "events.jsonl:1"] {
+            let repo = loopflow_test_support::TestRepo::new();
+            let (record, _) = super::primary::ensure(&store, repo.path(), None)
+                .await
+                .unwrap();
+            let session = store.session(&record.id).await.unwrap().unwrap();
+            let session = super::append_input(&store, session).await.unwrap();
+            let mut observation = crate::session_record::provider_session_observation(
+                &session,
+                session.input_key().unwrap(),
+                &"imported-history".into(),
+                None,
+            );
+            observation.source = source.into();
+            observation.payload["source"] = source.into();
+            if source.starts_with("events") {
+                observation.payload["evidence"] = serde_json::json!({
+                    "schema_version": 1, "seq": 1, "observed_at": "2026-11-04T00:00:00Z",
+                    "type": "provider_session_observed", "attempt_key": "imported",
+                    "provider_session_id": "imported-history"
+                });
+            }
+            store
+                .sqlite
+                .retain_session_observation(&session, &observation)
+                .unwrap();
+            let prepared = super::open_without_replacing(
+                &store,
+                &record.id,
+                SessionOpenIntent::Reveal,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+            let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+            assert_eq!(prepared.actions, refreshed.actions);
+            assert_eq!(
+                refreshed
+                    .actions
+                    .iter()
+                    .find(|a| a.kind == super::SessionActionKind::Open)
+                    .unwrap()
+                    .label,
+                "Open here"
+            );
+            assert!(refreshed
+                .actions
+                .iter()
+                .find(|a| a.kind == super::SessionActionKind::Reveal)
+                .unwrap()
+                .unavailable_reason
+                .is_none());
+            assert!(store
+                .sqlite
+                .session_attachment(&record.id)
+                .unwrap()
+                .is_none());
+            // A new captured input cannot borrow the older input's resume reference.
+            let next = super::append_input(&store, session).await.unwrap();
+            let prepared = super::open_without_replacing(
+                &store,
+                &next.id,
+                SessionOpenIntent::Reveal,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+            let refreshed = super::listed(&store, &next.id).unwrap().unwrap();
+            assert_eq!(prepared.actions, refreshed.actions);
+            assert_eq!(
+                refreshed
+                    .actions
+                    .iter()
+                    .find(|a| a.kind == super::SessionActionKind::Open)
+                    .unwrap()
+                    .label,
+                "Start conversation"
+            );
+        }
+    });
+}
+
+#[test]
+fn opening_any_primary_without_a_request_only_reads() {
+    let opening = super::first_turn(None);
+    assert!(opening.contains("change no Work"));
+    assert!(opening.contains("launch no Graph"));
+    assert!(opening.contains("claim or start no Task"));
+    assert!(opening.contains("Steers delivered with this turn are recorded direction"));
+    assert_eq!(
+        super::first_turn(Some("land it")),
+        "land it",
+        "a person's stored request is the first turn"
+    );
+    for skill in [
+        include_str!("../../builtins/task/skill/task_session.md"),
+        include_str!("../../builtins/ops/skill/repo_session.md"),
+        include_str!("../../builtins/wave/skill/wave_session.md"),
+    ] {
+        let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(skill.contains("request is a reading pass"));
+        assert!(skill.contains("Steers delivered with that turn are recorded direction"));
+        assert!(!skill.contains("without waiting for a greeting"));
+    }
 }

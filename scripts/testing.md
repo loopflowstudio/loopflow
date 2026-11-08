@@ -47,7 +47,7 @@ fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
-`local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
+`local_planning`) and can exhaust the Rust phase's 2400 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
 pin/build reach both Desktop build paths: run `--swift --loopflow`. Desktop
 talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
@@ -63,10 +63,23 @@ The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
 the docs check on the candidate's command tree inside that boundary.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
-unless the diff reaches them; together they exceed the 1200 s Rust budget, and
-CI's partitions run them.
+unless the diff reaches them; together they exceed the 2400 s Rust budget, and
+CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
+the union first: `(test(a::) | test(b::)) - test(slow)`; without the
+parentheses the subtraction applies only to the last term.
+A filter matching only `#[ignore]` tests (the loopback-SSH `ssh_shells::`
+suite) runs nothing and fails with `no tests to run`; run those by name with
+`cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`, then
+clippy.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 `rust-test` failure; CI's eight partitions own the full Rust matrix.
+
+## macOS traps
+
+- `served_reads` compares paths, and macOS temp directories are symlinks: run it
+  with a resolved `TMPDIR` (`/private/var/...`).
+- File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
+  If they fail, first check whether `fseventsd` is pinned at 100% CPU.
 
 ## Builds
 

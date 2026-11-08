@@ -8,51 +8,93 @@ use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
-pub(super) async fn show_route(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
-    let repo_id = if default {
-        None
+pub(super) fn show_route(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
+    let reports = crate::engine::account::route(&std::env::current_dir()?, repo, default)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&reports)?);
     } else {
-        resolve_repo_id(repo)?
-    };
-    show_routes(
-        crate::provider_account::read_account_store()?.as_ref(),
-        repo_id.as_ref(),
-        json,
-    )
-    .await
+        for report in reports {
+            print!("{}", report.render());
+        }
+    }
+    Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RouteReport {
-    provider: Provider,
-    scope: String,
-    ambient: bool,
+/// How one provider's account is selected for a repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RouteReport {
+    pub provider: Provider,
+    pub scope: String,
+    pub ambient: bool,
     /// Each conversation runs in its account's own home rather than the
     /// provider's native one.
-    isolated: bool,
+    pub isolated: bool,
     /// The stored account the native home is signed in as; absent when
     /// isolated or when its login belongs to no stored account.
-    active_account: Option<ProviderAccountId>,
-    candidates: Vec<RouteAccount>,
-    diagnostic: Option<String>,
+    pub active_account: Option<ProviderAccountId>,
+    pub candidates: Vec<RouteAccount>,
+    pub diagnostic: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RouteAccount {
-    account_id: ProviderAccountId,
-    login: Option<String>,
-    credential_state: String,
-    routing: String,
-    cooldown_until: Option<i64>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RouteAccount {
+    pub account_id: ProviderAccountId,
+    pub login: Option<String>,
+    pub credential_state: String,
+    pub routing: String,
+    pub cooldown_until: Option<i64>,
     /// The account's most-used window that has not reset.
-    tightest: Option<String>,
+    pub tightest: Option<String>,
 }
 
-async fn show_routes(
+impl RouteReport {
+    /// The route as `lf account route` prints it.
+    pub fn render(&self) -> String {
+        let mut out = format!("{} ({})\n", self.provider, self.scope);
+        if self.isolated {
+            out.push_str("  isolated: each conversation runs in its account's own home\n");
+        } else {
+            let active = self.active_account.as_ref().map(|active| {
+                self.candidates
+                    .iter()
+                    .find(|account| account.account_id == *active)
+                    .and_then(|account| account.login.clone())
+                    .unwrap_or_else(|| active.to_string())
+            });
+            out.push_str(&format!(
+                "  shared: {} is signed in as {}\n",
+                crate::provider_account::activation::native_home(self.provider, None).display(),
+                active.as_deref().unwrap_or("no stored account")
+            ));
+        }
+        if self.ambient {
+            out.push_str("  ambient\n");
+        } else if self.candidates.is_empty() {
+            out.push_str("  no eligible managed account\n");
+        }
+        for (position, account) in self.candidates.iter().enumerate() {
+            out.push_str(&format!(
+                "  {}. {} · {} · {}\n",
+                position + 1,
+                account.account_id,
+                account.login.as_deref().unwrap_or("login unknown"),
+                account.credential_state
+            ));
+            if let Some(tightest) = &account.tightest {
+                out.push_str(&format!("     {tightest}\n"));
+            }
+        }
+        out
+    }
+}
+
+/// Each provider's route for `repo_id` (the default route with none).
+pub(crate) async fn routes(
     store: Option<&SharedStore>,
     repo_id: Option<&CanonicalRepo>,
-    json: bool,
-) -> Result<()> {
+) -> Result<Vec<RouteReport>> {
     let mut reports = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {
         let route = match store {
@@ -127,49 +169,7 @@ async fn show_routes(
             diagnostic,
         });
     }
-    if json {
-        println!("{}", serde_json::to_string_pretty(&reports)?);
-    } else {
-        for report in reports {
-            println!("{} ({})", report.provider, report.scope);
-            if report.isolated {
-                println!("  isolated: each conversation runs in its account's own home");
-            } else {
-                let active = report.active_account.as_ref().map(|active| {
-                    report
-                        .candidates
-                        .iter()
-                        .find(|account| account.account_id == *active)
-                        .and_then(|account| account.login.clone())
-                        .unwrap_or_else(|| active.to_string())
-                });
-                println!(
-                    "  shared: {} is signed in as {}",
-                    crate::provider_account::activation::native_home(report.provider, None)
-                        .display(),
-                    active.as_deref().unwrap_or("no stored account")
-                );
-            }
-            if report.ambient {
-                println!("  ambient");
-            } else if report.candidates.is_empty() {
-                println!("  no eligible managed account");
-            }
-            for (position, account) in report.candidates.iter().enumerate() {
-                println!(
-                    "  {}. {} · {} · {}",
-                    position + 1,
-                    account.account_id,
-                    account.login.as_deref().unwrap_or("login unknown"),
-                    account.credential_state
-                );
-                if let Some(tightest) = &account.tightest {
-                    println!("     {tightest}");
-                }
-            }
-        }
-    }
-    Ok(())
+    Ok(reports)
 }
 
 pub(crate) async fn find_provider_account(
@@ -198,13 +198,6 @@ pub(crate) async fn find_provider_account(
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
-    }
-}
-
-fn resolve_repo_id(raw_repo: Option<&str>) -> Result<Option<CanonicalRepo>> {
-    match raw_repo {
-        Some(repo) => Ok(Some(CanonicalRepo::discover(std::path::Path::new(repo))?)),
-        None => CanonicalRepo::current(),
     }
 }
 

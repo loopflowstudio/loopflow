@@ -1,8 +1,1 @@
-{
-  "type": "request",
-  "id": "start-1",
-  "operation": {
-    "kind": "session.start",
-    "id": "session_5e55105e000040008000000000000001"
-  }
-}
+{"type":"request","id":"start-1","operation":{"kind":"session.start","id":"session_5e55105e000040008000000000000001"},"select":null}

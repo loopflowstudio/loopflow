@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "00f64597ef49219baa70e678d99af0c0dd6cb4d41ba06f82f7a4524bd0bdd5a8",
+    "Cargo.lock": "13f169271657f6921c1ba76457de3c6273a06e4cda7c17d663cfb8c52c91ff65",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -56,6 +56,9 @@
     "swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/nushell/vendor/autoload/ghostty.nu": "304bee845de6794082e13f8555aa207ad32c3c81ebe2d8d7db161e76e02ea092",
     "swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/.zshenv": "a9885383cd13cd9f0297b1d13a7bade2526f7f91c0a097f255e9a39a508fcba4",
     "swift/LoopflowMac/GhosttyResources/share/ghostty/shell-integration/zsh/ghostty-integration": "1a2bcb867f06667d5d743221aea42b1d322f3ae402e1a62ba941cba3c5d17f19",
+    "swift/LoopflowMac/GhosttyResources/share/ghostty/task-bash-env": "8933a68b1b968cca13b7a41a23cddfb8861fb1ef7bd28e132bc887ddf4b47a31",
+    "swift/LoopflowMac/GhosttyResources/share/ghostty/task-shell.sh": "bf21f1bf18910244e3d5aa7578573a2c86789b6e9cf90af14c7d1e16abc3b498",
+    "swift/LoopflowMac/GhosttyResources/share/ghostty/task-zshenv": "0715d128d19394a49da4a136a8f1760cf72c516898203d91e471f0cc76f5bb8d",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/67/ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
@@ -2749,14 +2752,14 @@
       }
     },
     {
-      "id": "zmij@1.0.21",
+      "id": "zmij@1.0.23",
       "scope": "lf",
       "license": "MIT",
       "source": {
-        "url": "https://static.crates.io/crates/zmij/zmij-1.0.21.crate",
-        "sha256": "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+        "url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+        "sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
       }
     }
   ],
-  "notices_sha256": "72a17ce1df76a9c6a07a773a0399b52f35167bb43079ce75b30f4284ffe40099"
+  "notices_sha256": "bfcc1d9ce13eee531f3e7dee178de1a8c17e0359ea753313212b918c565a14ae"
 }

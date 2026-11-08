@@ -20,6 +20,7 @@ extension Notification.Name {
     static let loopflowThemeChanged = Notification.Name("loopflow.themeChanged")
     static let ghosttyCopyConfirmation = Notification.Name("loopflow.ghosttyCopyConfirmation")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
+    static let ghosttySessionReady = Notification.Name("loopflow.ghosttySessionReady")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
 }
@@ -39,10 +40,6 @@ struct GhosttyTerminalTitle {
     let terminal: TerminalIdentity
     let title: String
 }
-
-#if GHOSTTY_ENABLED
-import GhosttyKit
-import CoreVideo
 
 enum GhosttyRuntimeResources {
     static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
@@ -82,6 +79,33 @@ enum GhosttyRuntimeResources {
         return directory
     }
 }
+
+// Resource bytes travel with creation, so a remote Machine needs no app bundle.
+func desktopShellBootstrap() throws -> String {
+    guard let root = GhosttyRuntimeResources.directoryURL else {
+        throw RegistryQueryError("Desktop shell integration is unavailable")
+    }
+    let resources = [
+        ".zshenv": "task-zshenv",
+        "bash-env": "task-bash-env",
+        "ghostty/shell-integration/zsh/.zshenv": "shell-integration/zsh/.zshenv",
+        "ghostty/shell-integration/zsh/ghostty-integration": "shell-integration/zsh/ghostty-integration",
+        "ghostty/shell-integration/bash/ghostty.bash": "shell-integration/bash/ghostty.bash",
+        "ghostty/shell-integration/bash/bash-preexec.sh": "shell-integration/bash/bash-preexec.sh",
+        "ghostty/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish": "shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish",
+    ]
+    var files: [String: String] = [:]
+    for (destination, source) in resources {
+        files[destination] = try String(contentsOf: root.appendingPathComponent(source), encoding: .utf8)
+    }
+    let script = try String(contentsOf: root.appendingPathComponent("task-shell.sh"), encoding: .utf8)
+    let data = try JSONSerialization.data(withJSONObject: ["script": script, "files": files], options: [.sortedKeys])
+    return String(decoding: data, as: UTF8.self)
+}
+
+#if GHOSTTY_ENABLED
+import GhosttyKit
+import CoreVideo
 
 @MainActor
 final class GhosttyManager: ObservableObject {
@@ -277,6 +301,18 @@ final class GhosttyManager: ObservableObject {
             if action.tag == GHOSTTY_ACTION_SET_TITLE,
                let title = action.action.set_title.title {
                 let value = String(cString: title)
+                if value == "loopflow:input-ready" {
+                    guard case .session = terminal else { return true }
+                    let incarnation = MainActor.assumeIsolated {
+                        Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                            .programStatus.incarnation.uuidString.lowercased()
+                    }
+                    Task { @MainActor in
+                        NotificationCenter.default.post(name: .ghosttySessionReady, object: terminal,
+                            userInfo: ["surface": incarnation])
+                    }
+                    return true
+                }
                 MainActor.assumeIsolated {
                     Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminalTitle = value
                 }

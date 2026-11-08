@@ -1,4 +1,4 @@
-//! `lf ops tokens` — how big is this codebase, in the units a model pays for.
+//! `lf repo tokens` — how big is this codebase, in the units a model pays for.
 //!
 //! Lines measure source size; tokens are what a run costs. They disagree
 //! wildly — a minified file or a lockfile is cheap in lines and ruinous in
@@ -32,7 +32,7 @@ const NUM_WIDTH: usize = 12;
 const MAX_DEPTH: usize = 3;
 
 /// One directory or file in the codebase tree. Wire type: every field required.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeNode {
     /// Repo-relative path. Empty at the root.
     pub path: String,
@@ -65,7 +65,7 @@ pub fn run(json: bool, days: Option<u32>) -> Result<()> {
 }
 
 /// How big the codebase was, per top-level directory, on each day it changed.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeSnapshot {
     /// `YYYY-MM-DD`, the day of the sampled commit.
     pub date: String,
@@ -77,7 +77,7 @@ pub struct CodeSnapshot {
 
 /// One file extension's weight in a snapshot. `ext` is lowercase and carries no
 /// dot; a file with no extension is `(none)`, and the long tail is `other`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct CodeSlice {
     pub ext: String,
     pub lines: usize,
@@ -320,7 +320,7 @@ fn print_history(snapshots: &[CodeSnapshot]) {
     }
 }
 
-/// What `lf ops tokens --json` prints in `directory`: its repository's
+/// What `lf repo tokens --json` prints in `directory`: its repository's
 /// tree, or with `days`, how big it was on each day it changed.
 pub(crate) fn codebase(directory: &Path, days: Option<u32>) -> Result<serde_json::Value> {
     let root = repo_root(directory)?;

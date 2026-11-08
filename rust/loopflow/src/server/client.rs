@@ -10,13 +10,14 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerError, ServerMessage,
-    ServerOperation, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Operation, ServerMessage,
+    ServerOperation, SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
-use crate::id::LfProcessId;
+use crate::engine::Error;
+use crate::id::{LfProcessId, LfSessionId};
 use crate::lf::commands::read::Read;
 
-/// How long the server has to answer `status`, `hello`, `terminal.attach` or
+/// How long the server has to answer `status`, `hello`, `session.attach` or
 /// a ticket. A session's later waits are unbounded unless the caller sets its
 /// own limit.
 const HANDSHAKE: Duration = Duration::from_secs(10);
@@ -61,6 +62,9 @@ pub fn status() -> Result<Status> {
         .and_then(|()| socket.receive())
     {
         Ok(None) => Some(OLDER_PROTOCOL.into()),
+        // Linux resets a Unix socket closed with the probe's bytes unread,
+        // where macOS reports a clean close; both mean the same older server.
+        Err(error) if resets(&error) => Some(OLDER_PROTOCOL.into()),
         Ok(Some(ServerMessage::Status(answer))) => {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
@@ -90,6 +94,18 @@ pub fn status() -> Result<Status> {
     };
     status.ready = status.error.is_none();
     Ok(status)
+}
+
+fn resets(error: &anyhow::Error) -> bool {
+    error
+        .root_cause()
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| {
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+            )
+        })
 }
 
 /// A revision-1 server reads `{"ty` as an absurd frame length and closes.
@@ -151,6 +167,17 @@ impl Connection {
                 pending: VecDeque::new(),
                 path: path.to_path_buf(),
             }),
+            Some(ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            }) => Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into()),
             Some(other) => anyhow::bail!("Server did not welcome the connection: {other:?}"),
             None => anyhow::bail!(OLDER_PROTOCOL),
         }
@@ -173,6 +200,7 @@ impl Connection {
         let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
             operation,
+            select: None,
         })?;
         if line.len() <= MAX_MESSAGE {
             self.socket.write(&line)?;
@@ -221,6 +249,17 @@ impl Connection {
             ServerMessage::Response {
                 trace_id, result, ..
             } => Ok(Response { trace_id, result }),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -231,20 +270,45 @@ impl Connection {
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation,
+            select: None,
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
 
-    /// The next reading of subscription `id`; an error for it ends the subscription.
-    pub fn reading(&mut self, id: &str) -> Result<serde_json::Value> {
+    /// The next reading of subscription `id`, or `None` once it ended after
+    /// its last; an error for it ends the subscription.
+    pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
         match self.wait(|message| {
-            matches!(message, ServerMessage::Reading { id: of, .. } if of == id)
+            matches!(message, ServerMessage::Reading { id: of, .. } | ServerMessage::Ended { id: of } if of == id)
                 || answers(message, id)
         })? {
-            ServerMessage::Reading { frame, .. } => Ok(frame),
+            ServerMessage::Reading { frame, .. } => Ok(Some(frame)),
+            ServerMessage::Ended { .. } => Ok(None),
+            ServerMessage::Error {
+                code,
+                message,
+                data,
+                ..
+            } => Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into()),
             other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
@@ -291,7 +355,7 @@ fn answers(message: &ServerMessage, id: &str) -> bool {
     }
 }
 
-/// The message, unless the server refused: then its [`ServerError`].
+/// The message, unless the server refused: then its [`Error`].
 fn accepted(message: ServerMessage) -> Result<ServerMessage> {
     match message {
         ServerMessage::Error {
@@ -299,7 +363,7 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
             message,
             data,
             ..
-        } => Err(ServerError {
+        } => Err(Error {
             code,
             message,
             data,
@@ -309,7 +373,9 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
     }
 }
 
-pub fn bridge(owner: &LfProcessId) -> Result<UnixStream> {
+/// The exact `owner` of `session` through the server: the bridge refuses
+/// once another Process owns the Session.
+pub fn bridge(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
     // Restored terminals can open before Desktop's first Work reading obtains
     // the helper. Setup delegates through the same selected installation.
     let setup = crate::installation::server::readiness_command()?.output()?;
@@ -318,56 +384,61 @@ pub fn bridge(owner: &LfProcessId) -> Result<UnixStream> {
         "Loopflow server unavailable: {}",
         String::from_utf8_lossy(&setup.stderr)
     );
-    bridge_existing(owner)
+    bridge_existing(session, owner)
 }
 
 /// Recovery never registers a service or changes installation policy.
-pub(crate) fn bridge_existing(owner: &LfProcessId) -> Result<UnixStream> {
-    attach(&super::socket_path()?, owner)
+pub(crate) fn bridge_existing(session: &LfSessionId, owner: &LfProcessId) -> Result<UnixStream> {
+    attach(&super::socket_path()?, session, Some(owner))
 }
 
-/// `terminal.attach` on a control connection answers `{ticket}`; the terminal
-/// connection redeems it and then speaks the owner protocol.
-pub fn attach(path: &Path, owner: &LfProcessId) -> Result<UnixStream> {
+/// Two connections: a client asks `session.attach` for a ticket, and a fresh
+/// one presents it. After `bridged`, that stream speaks the owner protocol;
+/// until then it reads one byte at a time, so no owner byte is left in a
+/// buffer. With `owner`, only that exact owner is attached.
+pub fn attach(
+    path: &Path,
+    session: &LfSessionId,
+    owner: Option<&LfProcessId>,
+) -> Result<UnixStream> {
     let mut connection = Connection::start(connect(path)?, path)?;
-    let answer = connection
-        .request(Operation::Server(ServerOperation::Attach {
-            owner: owner.clone(),
+    let issued = connection
+        .request(Operation::Server(ServerOperation::SessionAttach {
+            session: session.clone(),
+            owner_lf_process_id: owner.cloned(),
         }))
-        .map_err(|error| stalled(error, "open the owner bridge"))?;
-    let ticket = answer.result["ticket"]
-        .as_str()
-        .with_context(|| format!("Server did not open the owner bridge: {answer:?}"))?;
-    redeem(path, ticket)
-}
-
-/// A ticketed connection past `admitted`. The answer is read one byte at a
-/// time, so no byte of what follows is left in a buffer.
-fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
-    let mut stream = connect(path)?;
+        .map_err(|error| stalled(error, "issue the attach ticket"))?;
+    let issued: SessionAttached = serde_json::from_value(issued.result)
+        .context("Loopflow server answered session.attach without a ticket")?;
+    drop(connection);
+    let stream = connect(path)?;
     stream.set_read_timeout(Some(HANDSHAKE))?;
-    stream.write_all(
-        Socket::line(&ClientMessage::Ticket {
-            ticket: ticket.into(),
-        })?
-        .as_bytes(),
-    )?;
-    let mut line = Vec::new();
-    let mut byte = [0u8; 1];
-    while !line.ends_with(b"\n") {
-        anyhow::ensure!(
-            line.len() <= MAX_MESSAGE,
-            "Server answer to a ticket exceeds {MAX_MESSAGE} bytes"
-        );
-        stream
-            .read_exact(&mut byte)
-            .map_err(|error| stalled(error.into(), "admit the ticket"))?;
-        line.push(byte[0]);
+    let mut socket = Socket::with_capacity(stream, 1)?;
+    socket.send(&ClientMessage::Attach {
+        ticket: issued.ticket,
+    })?;
+    match socket
+        .receive()
+        .map_err(|error| stalled(error, "open the owner bridge"))?
+    {
+        Some(ServerMessage::Bridged { .. }) => {}
+        Some(ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        }) => {
+            return Err(Error {
+                code,
+                message,
+                data,
+            }
+            .into())
+        }
+        Some(other) => anyhow::bail!("unexpected server message: {other:?}"),
+        None => anyhow::bail!("Loopflow server closed the connection before bridging"),
     }
-    match accepted(serde_json::from_slice(&line)?)? {
-        ServerMessage::Admitted => {}
-        other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
-    }
+    let stream = socket.reader.into_inner();
     stream.set_read_timeout(None)?;
     Ok(stream)
 }
@@ -404,9 +475,13 @@ struct Socket {
 
 impl Socket {
     fn new(stream: UnixStream) -> Result<Self> {
+        Self::with_capacity(stream, 64 * 1024)
+    }
+
+    fn with_capacity(stream: UnixStream, capacity: usize) -> Result<Self> {
         Ok(Self {
             writer: stream.try_clone()?,
-            reader: BufReader::with_capacity(64 * 1024, stream),
+            reader: BufReader::with_capacity(capacity, stream),
         })
     }
 
@@ -450,6 +525,35 @@ impl Socket {
     }
 }
 
+fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
+    let mut stream = connect(path)?;
+    stream.set_read_timeout(Some(HANDSHAKE))?;
+    stream.write_all(
+        Socket::line(&ClientMessage::Attach {
+            ticket: ticket.into(),
+        })?
+        .as_bytes(),
+    )?;
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while !line.ends_with(b"\n") {
+        anyhow::ensure!(
+            line.len() <= MAX_MESSAGE,
+            "Server answer to a ticket exceeds {MAX_MESSAGE} bytes"
+        );
+        stream
+            .read_exact(&mut byte)
+            .map_err(|error| stalled(error.into(), "admit the ticket"))?;
+        line.push(byte[0]);
+    }
+    match accepted(serde_json::from_slice(&line)?)? {
+        ServerMessage::Admitted => {}
+        other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
+    }
+    stream.set_read_timeout(None)?;
+    Ok(stream)
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
@@ -457,7 +561,7 @@ mod tests {
     use std::time::Instant;
 
     use super::{attach, Connection, HANDSHAKE};
-    use crate::id::LfProcessId;
+    use crate::id::{LfProcessId, LfSessionId};
     use crate::server::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
@@ -517,14 +621,19 @@ mod tests {
     }
 
     #[test]
-    fn attach_gives_up_on_a_server_that_never_tickets() {
+    fn attach_gives_up_on_a_server_that_never_issues_a_ticket() {
         let (_home, path) = silent_server(true);
         let started = Instant::now();
-        let error = attach(&path, &LfProcessId::new()).expect_err("attach stalled");
+        let error = attach(
+            &path,
+            &LfSessionId::from("session"),
+            Some(&LfProcessId::new()),
+        )
+        .expect_err("attach stalled");
         within_bound(started);
         assert_eq!(
             error.to_string(),
-            "Loopflow server did not open the owner bridge within 10s; check `lf server status`"
+            "Loopflow server did not issue the attach ticket within 10s; check `lf server status`"
         );
     }
 

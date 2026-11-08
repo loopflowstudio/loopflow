@@ -225,8 +225,8 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
 mod installation_tests;
 mod lifeline;
 pub(crate) use lifeline::{
-    agent_process_lifeline_path, hold_agent_process_lifeline, release_agent_lifeline,
-    spawn_agent_process, spawn_native_agent_process, watch_tool_lifeline,
+    agent_process_lifeline_path, hold_agent_process_lifeline, inherit_lifelines,
+    release_agent_lifeline, spawn_agent_process, spawn_native_agent_process, watch_tool_lifeline,
 };
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
@@ -634,5 +634,120 @@ mod tests {
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
+    }
+}
+
+/// Ordinary jobs belong to the fresh OS session created for a terminal child.
+/// Job control changes process groups, so killing only the leader's group leaks
+/// background/stopped jobs. Daemons that create a different session are separate.
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalJobs {
+    session: Arc<std::sync::Mutex<u32>>,
+}
+
+impl TerminalJobs {
+    pub(crate) fn new(session: u32) -> Self {
+        Self {
+            session: Arc::new(std::sync::Mutex::new(session)),
+        }
+    }
+
+    pub(crate) fn terminate(&self) -> std::io::Result<()> {
+        let mut session = self.session.lock().expect("owned shell session lock");
+        terminate_terminal_jobs(*session)?;
+        *session = 0;
+        Ok(())
+    }
+}
+
+impl Drop for TerminalJobs {
+    fn drop(&mut self) {
+        let _ = self.terminate();
+    }
+}
+
+fn terminate_terminal_jobs(session: u32) -> std::io::Result<()> {
+    if session <= 1 {
+        return Ok(());
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let members = crate::journal::OsProcess::session(session)?;
+        if members.is_empty() {
+            return Ok(());
+        }
+        for process in members {
+            // SAFETY: recheck session membership immediately before signaling;
+            // this never targets by cwd or another owner's process group.
+            unsafe {
+                if libc::getsid(process.pid as i32) == session as i32 {
+                    libc::kill(process.pid as i32, libc::SIGKILL);
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Shell jobs have not settled",
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg(test)]
+mod terminal_jobs_tests {
+    use super::{ProcessGroupGuard, TerminalJobs};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn shell_close_settles_background_and_stopped_jobs_without_touching_other_owners() {
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join("jobs");
+        let mut unrelated = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let independent = ProcessGroupGuard::new(unrelated.id());
+        let mut command = Command::new("/bin/bash");
+        command.args(["-c", "set -m; sleep 30 & a=$!; sleep 30 & b=$!; kill -STOP $b; printf '%s %s' $a $b > \"$1\"; wait", "fixture"])
+            .arg(&receipt).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        // SAFETY: this syscall only creates a fresh OS session in the child.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut shell = command.spawn().unwrap();
+        let jobs = TerminalJobs::new(shell.id());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let pids = loop {
+            let pids = std::fs::read_to_string(&receipt)
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter_map(|p| p.parse::<u32>().ok())
+                .collect::<Vec<_>>();
+            if pids.len() == 2 {
+                break pids;
+            }
+            assert!(Instant::now() < deadline, "shell did not report its jobs");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        jobs.terminate().unwrap();
+        shell.wait().unwrap();
+        for pid in pids {
+            assert!(crate::journal::OsProcess::read(pid)
+                .unwrap()
+                .is_none_or(|p| p.has_exited()));
+        }
+        assert!(unrelated.try_wait().unwrap().is_none());
+        independent.terminate();
+        unrelated.wait().unwrap();
     }
 }

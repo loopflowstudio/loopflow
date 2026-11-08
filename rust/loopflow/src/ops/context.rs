@@ -174,12 +174,12 @@ async fn read_context(
                 anyhow::bail!(error);
             }
         };
-        report.process = ContextFact::bound(record.id, "explicit");
+        report.process = ContextFact::bound(record.id(), "explicit");
         // The caller is provenance, not the work this command performed.
-        if let Some(id) = record.caller_session_id {
+        if let Some(id) = record.as_lf().and_then(|lf| lf.caller_session_id.clone()) {
             report.session = ContextFact::bound(id, "process_caller");
         }
-        let Some(path) = record.cwd else {
+        let Some(path) = record.cwd() else {
             anyhow::bail!("Process has no recorded checkout")
         };
         directory = path.into();

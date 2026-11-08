@@ -24,14 +24,14 @@ pub fn identity(
 }
 
 /// The repository containing `directory` and its planning identity,
-/// registering it on first sight as `lf config repository` does.
+/// registering it on first sight as `lf config repo` does.
 pub fn repository_identity(
     directory: &std::path::Path,
     bind: Option<&RepositoryId>,
     relocate: Option<&RepositoryId>,
 ) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
     let repo = crate::repository::CanonicalRepo::containing(directory)?
-        .ok_or_else(|| anyhow!("run `lf repository` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf repo` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
         let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
@@ -49,7 +49,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repository --bind {id}` in its repository on this Machine"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 
@@ -329,6 +329,55 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     }))
 }
 
+/// The route of the Task `selector` names, when its Work lives on another
+/// Machine. Reads records only.
+pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    let Some(task) = resolve_task_id(&store, selector, None)? else {
+        return Ok(None);
+    };
+    let route = store.task_execution_route(&task)?;
+    Ok((route.machine_id != store.local_machine()?.id).then_some(route))
+}
+
+/// What `lf <args> --json` prints on the route's Machine: its API's value.
+/// Its diagnostics go to the request's log.
+pub(crate) fn run_remote(
+    route: TaskExecutionRoute,
+    directory: &Path,
+    args: &[String],
+) -> Result<serde_json::Value> {
+    let spelled = std::iter::once("lf".to_owned()).chain(args.iter().cloned());
+    let cli = <Cli as clap::Parser>::try_parse_from(spelled)?.checked()?;
+    let (mut output, mut error) = (Vec::new(), Vec::new());
+    let ran = super::ssh::run_with_io(
+        route.machine_id.clone().as_str(),
+        false,
+        &cli,
+        args,
+        Some(route),
+        directory,
+        Some(&mut super::mutation::CommandIo {
+            input: &mut std::io::empty(),
+            output: &mut output,
+            error: &mut error,
+        }),
+    );
+    let diagnostics = String::from_utf8_lossy(&error);
+    if let Err(failed) = ran {
+        return Err(match diagnostics.trim() {
+            "" => failed,
+            said => failed.context(format!("the destination said: {said}")),
+        });
+    }
+    for line in diagnostics.lines() {
+        crate::journal::request::diagnostic(format_args!("{line}"));
+    }
+    Ok(serde_json::from_slice(&output)?)
+}
+
 /// The Session an explicit `resume <session>` names.
 pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
     match &cli.command {
@@ -537,8 +586,8 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     }
     if cli.repository.is_none() {
         let repository = repository
-        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repository` here so it can address the repository"))?;
-        forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo` here so it can address the repository"))?;
+        forwarded.splice(0..0, ["--repo-id".into(), repository.to_string()]);
     }
     Ok(Some(Forward {
         machine,
@@ -729,7 +778,7 @@ mod tests {
         let prior = store.repository_id(selected_repo).unwrap().unwrap();
         let selected = RepositoryId::new();
         store.bind_repository(selected_repo, &selected).unwrap();
-        let cli = Cli::try_parse_from(["lf", "--repository", prior.as_str()]).unwrap();
+        let cli = Cli::try_parse_from(["lf", "--repo-id", prior.as_str()]).unwrap();
         assert_eq!(
             resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
             Some(store.task_execution_route(&first).unwrap())
@@ -749,7 +798,7 @@ mod tests {
             .unwrap()
             .is_none());
         let unbound = RepositoryId::new();
-        let cli = Cli::try_parse_from(["lf", "--repository", unbound.as_str()]).unwrap();
+        let cli = Cli::try_parse_from(["lf", "--repo-id", unbound.as_str()]).unwrap();
         assert!(resolve_task(&store, &cli, first.as_str(), Path::new("/"))
             .unwrap_err()
             .to_string()

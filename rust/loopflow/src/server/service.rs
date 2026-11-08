@@ -20,11 +20,12 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use super::remote::Control;
 use super::ticket::{Admission, Purpose, Tickets};
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, ErrorCode, Hello, Limits, Operation,
-    ServerError, ServerMessage, ServerOperation, Status, Welcome, MAX_BULK, MAX_CONNECTIONS,
-    MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
+    ServerOperation, SessionAttached, Status, Welcome, MAX_BULK, MAX_CONNECTIONS, MAX_MESSAGE,
+    MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
-use crate::lf::commands::{read::Read, watch::Subscription, write::Write};
+use crate::engine::{Error, ErrorCode};
+use crate::lf::commands::{read::Read, subscribe::Subscription, write::Write};
 
 /// How long a connection has to send its first message.
 pub(super) const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -36,6 +37,8 @@ const BULK: Duration = Duration::from_secs(120);
 const QUEUE: usize = 64;
 /// Checkpoints one subscription may have waiting.
 const CHECKPOINTS: usize = 64;
+/// How long the listener rests after `accept` fails, as it does out of descriptors.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 type Lines = Framed<UnixStream, LinesCodec>;
 
@@ -61,10 +64,15 @@ pub(super) type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
 pub(super) struct Listed {
     clients: Clients,
     id: String,
+    _permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Listed {
-    fn new(clients: &Clients, client: ClientIdentity) -> Self {
+    fn new(
+        clients: &Clients,
+        client: ClientIdentity,
+        permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let connected_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -81,6 +89,7 @@ impl Listed {
         Self {
             clients: clients.clone(),
             id,
+            _permit: permit,
         }
     }
 
@@ -97,8 +106,8 @@ impl Drop for Listed {
     }
 }
 
-fn lock(clients: &Clients) -> std::sync::MutexGuard<'_, HashMap<String, ConnectedClient>> {
-    clients.lock().unwrap_or_else(|poison| poison.into_inner())
+fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    shared.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 /// Oldest connection first.
@@ -164,7 +173,14 @@ async fn local(
     tickets: Arc<Tickets>,
 ) -> Result<()> {
     loop {
-        let (socket, _) = listener.accept().await?;
+        let (socket, _) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                tracing::warn!(%error, "Server accept failed; retrying");
+                tokio::time::sleep(ACCEPT_RETRY).await;
+                continue;
+            }
+        };
         // Unix admission is deliberately unavailable to remote proxies.
         let credentials = match socket.peer_cred() {
             Ok(credentials) => credentials,
@@ -179,22 +195,13 @@ async fn local(
         if credentials.uid() != unsafe { libc::geteuid() } {
             continue;
         }
-        let Ok(permit) = slots.clone().try_acquire_owned() else {
-            tracing::warn!(%instance, "Server connection capacity reached");
-            tokio::spawn(refuse_busy(socket));
-            continue;
-        };
-        tracing::debug!(
-            active = MAX_CONNECTIONS - slots.available_permits(),
-            "Server connection admitted"
-        );
+        let slots = slots.clone();
         let instance = instance.clone();
         let executable_sha256 = executable_sha256.clone();
         let clients = clients.clone();
         let remote_control = remote_control.clone();
         let tickets = tickets.clone();
         tokio::spawn(async move {
-            let _permit = permit;
             if let Err(error) = connection(
                 socket,
                 &instance,
@@ -202,6 +209,7 @@ async fn local(
                 &clients,
                 Some(remote_control),
                 tickets,
+                &slots,
             )
             .await
             {
@@ -209,19 +217,6 @@ async fn local(
             }
         });
     }
-}
-
-/// Capacity answers before closing, so the client knows nothing ran.
-async fn refuse_busy(mut socket: UnixStream) {
-    let line = line(
-        &ServerError::new(
-            ErrorCode::Busy,
-            format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
-        )
-        .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS }))
-        .into_message(None),
-    );
-    let _ = tokio::time::timeout(SEND, socket.write_all(line.as_bytes())).await;
 }
 
 /// Local connections may configure mobile access; `remote_control` is absent
@@ -233,6 +228,7 @@ pub(super) async fn connection(
     clients: &Clients,
     remote_control: Option<mpsc::Sender<Control>>,
     tickets: Arc<Tickets>,
+    slots: &Arc<Semaphore>,
 ) -> Result<()> {
     let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
         .await
@@ -250,8 +246,22 @@ pub(super) async fn connection(
         .await
         .context("no message within five seconds")?
         .context("closed before its first message")??;
-    match welcome(&mut lines, &line, instance, executable_sha256, clients).await? {
-        Greeting::Ended => Ok(()),
+    match welcome(
+        &mut lines,
+        &line,
+        instance,
+        executable_sha256,
+        clients,
+        slots,
+    )
+    .await?
+    {
+        Greeting::Ended => {
+            let mut socket = lines.into_inner();
+            let _ = socket.shutdown().await;
+            drain(&mut socket).await;
+            Ok(())
+        }
         Greeting::Session(listed) => {
             session(
                 &mut lines,
@@ -290,10 +300,11 @@ pub(super) async fn welcome<C: Carrier>(
     instance: &str,
     executable_sha256: &str,
     clients: &Clients,
+    slots: &Arc<Semaphore>,
 ) -> Result<Greeting> {
     let hello = match serde_json::from_str::<ClientMessage>(line) {
         Ok(ClientMessage::Hello(hello)) => hello,
-        Ok(ClientMessage::Ticket { ticket }) => return Ok(Greeting::Ticket(ticket)),
+        Ok(ClientMessage::Attach { ticket }) => return Ok(Greeting::Ticket(ticket)),
         Ok(ClientMessage::Status) => {
             send(
                 carrier,
@@ -329,7 +340,7 @@ pub(super) async fn welcome<C: Carrier>(
         };
         send(
             carrier,
-            &ServerError::new(
+            &ServerMessage::error(None, Error::new(
                 ErrorCode::Incompatible,
                 format!(
                     "Server speaks protocol revisions {MIN_REVISION}–{REVISION}; the client speaks {}–{}; update the {side}",
@@ -340,12 +351,27 @@ pub(super) async fn welcome<C: Carrier>(
                 "server": { "revision": REVISION, "min_revision": MIN_REVISION },
                 "update": if hello.min_revision > REVISION { "server" } else { "client" },
             }))
-            .into_message(None),
+            ),
         )
         .await?;
         return Ok(Greeting::Ended);
     };
-    let listed = Listed::new(clients, hello.client);
+    let Ok(permit) = slots.clone().try_acquire_owned() else {
+        send(
+            carrier,
+            &ServerMessage::error(
+                None,
+                Error::new(
+                    ErrorCode::Busy,
+                    format!("Server has {MAX_CONNECTIONS} connections; retry shortly"),
+                )
+                .with(serde_json::json!({ "max_connections": MAX_CONNECTIONS })),
+            ),
+        )
+        .await?;
+        return Ok(Greeting::Ended);
+    };
+    let listed = Listed::new(clients, hello.client, permit);
     tracing::debug!(%instance, client = %listed.id, revision, "Server connection welcomed");
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
@@ -395,9 +421,11 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
     }))?;
     tokio::time::timeout(SEND, async {
         socket.write_u32(body.len() as u32).await?;
-        socket.write_all(&body).await
+        socket.write_all(&body).await?;
+        socket.shutdown().await
     })
     .await??;
+    drain(&mut socket).await;
     Ok(())
 }
 
@@ -409,12 +437,12 @@ struct Inflight {
 
 /// What a request or subscription asks the session to start.
 enum Start {
-    Request(Operation),
-    Subscribe(Read),
+    Request(Operation, Option<Vec<String>>),
+    Subscribe(Read, Option<Vec<String>>),
 }
 
 /// Requests until the client closes. Terminal bytes and messages over the
-/// control limit never travel here: `terminal.attach` and `request.upload`
+/// control limit never travel here: `session.attach` and `request.upload`
 /// answer with tickets for connections of their own.
 pub(super) async fn session<C: Carrier>(
     lines: &mut C,
@@ -438,17 +466,26 @@ pub(super) async fn session<C: Carrier>(
                 let line = line.map_err(Into::into)?;
                 if line.len() > MAX_MESSAGE {
                     // A null-id error is the connection's last message.
-                    send(lines, &ServerError::new(ErrorCode::Invalid, format!(
+                    send(lines, &ServerMessage::error(None, Error::new(ErrorCode::Invalid, format!(
                         "message exceeds {MAX_MESSAGE} bytes; request an upload ticket for it"
-                    )).with(serde_json::json!({ "max_message": MAX_MESSAGE })).into_message(None)).await?;
+                    )).with(serde_json::json!({ "max_message": MAX_MESSAGE })))).await?;
                     return Ok(());
                 }
                 match serde_json::from_str::<ClientMessage>(&line) {
                     Ok(message) => message,
-                    Err(parse) => {
-                        send(lines, &error(None, ErrorCode::Invalid, parse.to_string())).await?;
-                        return Ok(());
-                    }
+                    Err(parse) => match refused_operation(&line) {
+                        // A well-formed request this build cannot run fails alone,
+                        // so a newer client keeps its other requests and subscriptions.
+                        Some((id, refusal)) => {
+                            send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+                            continue;
+                        }
+                        None => {
+                            // A null-id error is the connection's last message.
+                            send(lines, &error(None, ErrorCode::Invalid, parse.to_string())).await?;
+                            return Ok(());
+                        }
+                    },
                 }
             }
             Some(message) = uploaded.recv() => message,
@@ -471,8 +508,16 @@ pub(super) async fn session<C: Carrier>(
             }
         };
         let (id, start) = match message {
-            ClientMessage::Request { id, operation } => (id, Start::Request(operation)),
-            ClientMessage::Subscribe { id, operation } => (id, Start::Subscribe(operation)),
+            ClientMessage::Request {
+                id,
+                operation,
+                select,
+            } => (id, Start::Request(operation, select)),
+            ClientMessage::Subscribe {
+                id,
+                operation,
+                select,
+            } => (id, Start::Subscribe(operation, select)),
             ClientMessage::Checkpoint { id, checkpoint } => {
                 match inflight
                     .get(&id)
@@ -499,12 +544,11 @@ pub(super) async fn session<C: Carrier>(
                     None => {
                         send(
                             lines,
-                            &ServerError::new(
-                                ErrorCode::NotFound,
-                                "no live subscription has this ID",
-                            )
-                            .with(serde_json::json!({ "id": id }))
-                            .into_message(Some(id)),
+                            &ServerMessage::error(
+                                Some(id.clone()),
+                                Error::new(ErrorCode::NotFound, "no live subscription has this ID")
+                                    .with(serde_json::json!({ "id": id })),
+                            ),
                         )
                         .await?
                     }
@@ -518,22 +562,10 @@ pub(super) async fn session<C: Carrier>(
                 }
                 continue;
             }
-            ClientMessage::Hello(_) | ClientMessage::Status => {
+            ClientMessage::Hello(_) | ClientMessage::Status | ClientMessage::Attach { .. } => {
                 send(
                     lines,
                     &error(None, ErrorCode::Invalid, "hello was already exchanged"),
-                )
-                .await?;
-                return Ok(());
-            }
-            ClientMessage::Ticket { .. } => {
-                send(
-                    lines,
-                    &error(
-                        None,
-                        ErrorCode::Invalid,
-                        "a ticket is a connection's first message",
-                    ),
                 )
                 .await?;
                 return Ok(());
@@ -555,29 +587,76 @@ pub(super) async fn session<C: Carrier>(
         if inflight.contains_key(&id) {
             send(
                 lines,
-                &ServerError::new(ErrorCode::Conflict, "request ID is still unanswered")
-                    .with(serde_json::json!({ "id": id }))
-                    .into_message(Some(id)),
+                &ServerMessage::error(
+                    Some(id.clone()),
+                    Error::new(ErrorCode::Conflict, "request ID is still unanswered")
+                        .with(serde_json::json!({ "id": id })),
+                ),
             )
             .await?;
             continue;
         }
         let entry = match start {
-            Start::Request(Operation::Server(ServerOperation::Attach { owner })) => {
-                let ticket = tickets.issue(admission.clone(), Purpose::Terminal(owner));
-                send(lines, &ticket_response(id, ticket)).await?;
+            Start::Request(ref operation, Some(_)) if !matches!(operation, Operation::Read(_)) => {
+                send(
+                    lines,
+                    &error(Some(id), ErrorCode::Invalid, "select applies to reads"),
+                )
+                .await?;
                 continue;
             }
-            Start::Request(Operation::Server(ServerOperation::Upload { bytes })) => {
+            Start::Request(
+                Operation::Server(ServerOperation::SessionAttach {
+                    session,
+                    owner_lf_process_id: exact,
+                }),
+                None,
+            ) => {
+                let owner = match attached_owner(session, exact).await {
+                    Ok(owner) => owner,
+                    Err(refusal) => {
+                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+                        continue;
+                    }
+                };
+                // An owner whose endpoint is gone has ended; the bridge
+                // itself connects when the ticket is presented.
+                if !crate::transport::endpoint(&owner)?.exists() {
+                    send(lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                        "Session owner is not running; no provider restarted and no input replayed",
+                    ).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
+                    continue;
+                }
+                let ticket = tickets.issue(admission.clone(), Purpose::Terminal(owner.clone()));
+                let result = serde_json::to_value(SessionAttached {
+                    ticket,
+                    owner_lf_process_id: owner,
+                    expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                })
+                .expect("a ticket serializes");
+                send(
+                    lines,
+                    &ServerMessage::Response {
+                        id,
+                        trace_id: crate::id::TraceId::default(),
+                        result,
+                    },
+                )
+                .await?;
+                continue;
+            }
+            Start::Request(Operation::Server(ServerOperation::Upload { bytes }), None) => {
                 if bytes > MAX_BULK {
                     send(
                         lines,
-                        &ServerError::new(
-                            ErrorCode::Invalid,
-                            format!("an uploaded request carries at most {MAX_BULK} bytes"),
-                        )
-                        .with(serde_json::json!({ "max_bulk": MAX_BULK }))
-                        .into_message(Some(id)),
+                        &ServerMessage::error(
+                            Some(id),
+                            Error::new(
+                                ErrorCode::Invalid,
+                                format!("an uploaded request carries at most {MAX_BULK} bytes"),
+                            )
+                            .with(serde_json::json!({ "max_bulk": MAX_BULK })),
+                        ),
                     )
                     .await?;
                     continue;
@@ -586,18 +665,25 @@ pub(super) async fn session<C: Carrier>(
                 send(lines, &ticket_response(id, ticket)).await?;
                 continue;
             }
-            Start::Subscribe(query) => {
+            Start::Subscribe(query, select) => {
                 let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                let task = tasks.spawn(subscription(id.clone(), query, outgoing.clone(), inbox));
+                let task = tasks.spawn(subscribing(
+                    id.clone(),
+                    query,
+                    select,
+                    outgoing.clone(),
+                    inbox,
+                ));
                 Inflight {
                     task,
                     checkpoints: Some(checkpoints),
                 }
             }
-            Start::Request(operation) => {
+            Start::Request(operation, select) => {
                 let task = tasks.spawn(request(
                     id.clone(),
                     operation,
+                    select,
                     instance.clone(),
                     outgoing.clone(),
                     remote_control.clone(),
@@ -633,12 +719,14 @@ pub(super) async fn ticketed<C: Carrier>(
     let Some(purpose) = tickets.redeem(ticket, admission) else {
         send(
             carrier,
-            &ServerError::new(
-                ErrorCode::NotFound,
-                "ticket is unknown, expired or was issued to another connection",
-            )
-            .with(serde_json::json!({ "ticket": ticket }))
-            .into_message(None),
+            &ServerMessage::error(
+                None,
+                Error::new(
+                    ErrorCode::NotFound,
+                    "ticket is unknown, expired or was issued to another connection",
+                )
+                .with(serde_json::json!({ "ticket": ticket })),
+            ),
         )
         .await?;
         return Ok(None);
@@ -649,13 +737,19 @@ pub(super) async fn ticketed<C: Carrier>(
                 Ok(destination) => destination,
                 Err(failure) => {
                     // A missing owner endpoint means the owner ended.
-                    send(carrier, &ServerError::new(ErrorCode::NotFound, format!(
+                    send(carrier, &ServerMessage::error(None, Error::new(ErrorCode::NotFound, format!(
                         "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                    )).with(serde_json::json!({ "owner": owner })).into_message(None)).await?;
+                    )).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
                     return Ok(None);
                 }
             };
-            send(carrier, &ServerMessage::Admitted).await?;
+            send(
+                carrier,
+                &ServerMessage::Bridged {
+                    owner_lf_process_id: owner,
+                },
+            )
+            .await?;
             Ok(Some(destination))
         }
         Purpose::Download(message) => {
@@ -717,18 +811,110 @@ async fn deliver_or_spill<C: Carrier>(
     if text.len() > MAX_BULK {
         return send(
             carrier,
-            &ServerError::new(
-                ErrorCode::Unavailable,
-                format!("answer exceeds {MAX_BULK} bytes"),
-            )
-            .with(serde_json::json!({ "max_bulk": MAX_BULK }))
-            .into_message(Some(id)),
+            &ServerMessage::error(
+                Some(id),
+                Error::new(
+                    ErrorCode::Unavailable,
+                    format!("answer exceeds {MAX_BULK} bytes"),
+                )
+                .with(serde_json::json!({ "max_bulk": MAX_BULK })),
+            ),
         )
         .await;
     }
     let bytes = text.len();
     let ticket = tickets.issue(admission.clone(), Purpose::Download(text));
     send(carrier, &ServerMessage::Bulk { id, ticket, bytes }).await
+}
+
+/// The owner `session.attach` reaches: the Session's current owner Process,
+/// which must be `exact` when the client names one. Resolution never starts a
+/// provider.
+async fn attached_owner(
+    session: crate::id::LfSessionId,
+    exact: Option<crate::id::LfProcessId>,
+) -> Result<crate::id::LfProcessId, Error> {
+    let current = tokio::task::spawn_blocking({
+        let session = session.clone();
+        move || -> Result<_> {
+            let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
+                Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                    .with(serde_json::json!({ "resource": "machine_registry" }))
+            })?;
+            Ok(registry.sqlite.session_transport(session.as_str())?)
+        }
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)?;
+    let Some(current) = current else {
+        return Err(Error::new(
+            ErrorCode::NotFound,
+            format!(
+                "Session {} has no running owner; nothing was started",
+                session.as_str()
+            ),
+        )
+        .with(serde_json::json!({ "session": session })));
+    };
+    match exact {
+        Some(exact) if exact != current => Err(Error::new(
+            ErrorCode::NotFound,
+            format!(
+                "owner {exact} no longer holds Session {}; its owner is now {current}",
+                session.as_str()
+            ),
+        )
+        .with(
+            serde_json::json!({ "owner_lf_process_id": exact, "current_lf_process_id": current }),
+        )),
+        _ => Ok(current),
+    }
+}
+
+/// A `request` or `subscription` whose envelope parses but whose operation this
+/// build does not accept: its id and why. An unknown kind is `invalid` with
+/// `data.kind`; a known kind names the argument it refused.
+fn refused_operation(line: &str) -> Option<(String, Error)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let kind_of = value.get("type")?.as_str()?;
+    if !matches!(kind_of, "request" | "subscribe") {
+        return None;
+    }
+    let id = value.get("id")?.as_str()?.to_owned();
+    if id.is_empty() || id.len() > 128 {
+        return None;
+    }
+    let operation = value.get("operation")?;
+    let kind = operation.get("kind")?.as_str()?.to_owned();
+    // A `subscription` reaches here for any kind that is not a read.
+    if kind_of == "subscribe"
+        && (serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).is_ok()
+            || serde_json::from_value::<ServerOperation>(operation.clone()).is_ok())
+    {
+        let refusal = Error::new(
+            ErrorCode::Invalid,
+            format!("`{kind}` is not a read, so it has no subscription; send it as a request"),
+        );
+        return Some((id, refusal.with(serde_json::json!({ "kind": kind }))));
+    }
+    let refusals = [
+        serde_json::from_value::<crate::lf::commands::read::Read>(operation.clone()).err(),
+        serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).err(),
+        serde_json::from_value::<ServerOperation>(operation.clone()).err(),
+    ];
+    let known = refusals
+        .iter()
+        .flatten()
+        .find(|refusal| !refusal.to_string().starts_with("unknown variant"));
+    let refusal = match known {
+        Some(refusal) => Error::new(ErrorCode::Invalid, format!("{kind}: {refusal}")),
+        None => Error::new(
+            ErrorCode::Invalid,
+            format!("this server has no operation `{kind}`; update the selected installation"),
+        ),
+    };
+    Some((id, refusal.with(serde_json::json!({ "kind": kind }))))
 }
 
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
@@ -748,26 +934,15 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
     Ok(())
 }
 
-/// The [`ServerError`] a shared operation named anywhere in `error`'s chain,
-/// else `otherwise` with the error's text.
-fn refused(error: anyhow::Error, otherwise: ErrorCode) -> ServerError {
-    match error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ServerError>())
-    {
-        Some(named) => named.clone(),
-        None => ServerError::new(otherwise, error.to_string()),
-    }
-}
-
 /// A read that failed without naming a code depends on something unavailable.
-fn unavailable(error: impl Into<anyhow::Error>) -> ServerError {
-    refused(error.into(), ErrorCode::Unavailable)
+fn unavailable(error: impl Into<anyhow::Error>) -> Error {
+    Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
 async fn request(
     id: String,
     operation: Operation,
+    select: Option<Vec<String>>,
     instance: Arc<str>,
     outgoing: mpsc::Sender<ServerMessage>,
     remote_control: Option<mpsc::Sender<Control>>,
@@ -780,11 +955,14 @@ async fn request(
         Ok(result) => ServerMessage::Response {
             id: id.clone(),
             trace_id,
-            result,
+            result: match &select {
+                Some(paths) => crate::engine::select::select(&result, paths),
+                None => result,
+            },
         },
         Err(refusal) => {
             tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
-            refusal.into_message(Some(id.clone()))
+            ServerMessage::error(Some(id.clone()), refusal)
         }
     };
     // A closed connection drops the answer; the effect stands.
@@ -798,7 +976,7 @@ async fn operate(
     instance: &str,
     trace_id: &crate::id::TraceId,
     remote_control: Option<mpsc::Sender<Control>>,
-) -> Result<serde_json::Value, ServerError> {
+) -> Result<serde_json::Value, Error> {
     match operation {
         Operation::Server(ServerOperation::MobileStatus) => {
             let (reply, result) = tokio::sync::oneshot::channel();
@@ -818,21 +996,8 @@ async fn operate(
             let configuration = result
                 .await
                 .map_err(unavailable)?
-                .map_err(|message| ServerError::new(ErrorCode::Unavailable, message))?;
+                .map_err(|message| Error::new(ErrorCode::Unavailable, message))?;
             Ok(serde_json::json!({ "configuration": configuration }))
-        }
-        Operation::Server(ServerOperation::SessionOwner { session }) => {
-            let owner = tokio::task::spawn_blocking(move || -> Result<_> {
-                let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
-                    ServerError::new(ErrorCode::Unavailable, "Machine registry is unavailable")
-                        .with(serde_json::json!({ "resource": "machine_registry" }))
-                })?;
-                Ok(registry.sqlite.session_transport(session.as_str())?)
-            })
-            .await
-            .map_err(unavailable)?
-            .map_err(unavailable)?;
-            Ok(serde_json::json!({ "owner": owner }))
         }
         Operation::Read(query) => {
             tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
@@ -840,39 +1005,39 @@ async fn operate(
                 .map_err(unavailable)?
                 .map_err(unavailable)
         }
-        Operation::Server(ServerOperation::Configuration { request }) => {
-            let mut target = serde_json::to_value(&request).map_err(unavailable)?;
-            target
-                .as_object_mut()
-                .expect("configuration request is an object")
-                .remove("value");
-            effect(target, id, instance, trace_id, move || {
-                crate::config::api::run(request)
-            })
-            .await
-        }
         Operation::Write(change) => {
             if let Some(argv) = change.delegated() {
                 let recovery = change_recovery(&change);
                 return delegate(argv, &change, id, instance, trace_id)
                     .await
                     .map_err(|error| {
-                        ServerError::new(
-                            ErrorCode::OutcomeUnknown,
-                            format!("{error:#}; {recovery}"),
-                        )
+                        Error::new(ErrorCode::OutcomeUnknown, format!("{error:#}; {recovery}"))
                     });
             }
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
-                for field in ["content", "notes", "plan", "layout", "slots", "expression"] {
+                // Setting values and authored text stay out of request telemetry.
+                for field in [
+                    "content",
+                    "notes",
+                    "plan",
+                    "layout",
+                    "slots",
+                    "expression",
+                    "value",
+                ] {
                     fields.remove(field);
                 }
             }
-            effect(target, id, instance, trace_id, move || change.run()).await
+            effect(target, id, instance, trace_id, move || {
+                crate::lf::commands::account::served(|| change.run())
+            })
+            .await
         }
-        Operation::Server(ServerOperation::Attach { .. } | ServerOperation::Upload { .. }) => {
-            unreachable!("the session answers tickets")
+        Operation::Server(
+            ServerOperation::SessionAttach { .. } | ServerOperation::Upload { .. },
+        ) => {
+            unreachable!("the session dispatches attachment")
         }
     }
 }
@@ -881,9 +1046,9 @@ async fn operate(
 async fn mobile_control(
     remote_control: Option<mpsc::Sender<Control>>,
     request: Control,
-) -> Result<(), ServerError> {
+) -> Result<(), Error> {
     let Some(control) = remote_control else {
-        return Err(ServerError::new(
+        return Err(Error::new(
             ErrorCode::Invalid,
             "Mobile access is configured on the Machine itself",
         ));
@@ -891,7 +1056,7 @@ async fn mobile_control(
     control
         .send(request)
         .await
-        .map_err(|_| ServerError::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
+        .map_err(|_| Error::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
     Ok(())
 }
 
@@ -987,7 +1152,7 @@ async fn effect(
     instance: &str,
     trace_id: &crate::id::TraceId,
     run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
-) -> Result<serde_json::Value, ServerError> {
+) -> Result<serde_json::Value, Error> {
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
     tokio::task::spawn_blocking(move || {
         let mut diagnostics = Vec::new();
@@ -998,96 +1163,63 @@ async fn effect(
             tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
         }
         tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-        result.map_err(written)
+        result.map_err(|error| Error::written(&error))
     })
     .await
-    .map_err(|join| outcome_unknown(join.into()))?
+    .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-/// The code a failed write names, else the one its error's type implies.
-/// A write that failed for another reason may have taken partial effect.
-fn written(error: anyhow::Error) -> ServerError {
-    use crate::store::StoreError;
-    use crate::work::selection::SelectionError;
-    if let Some(named) = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ServerError>())
-    {
-        return named.clone();
-    }
-    let code = error.chain().find_map(|cause| {
-        if let Some(store) = cause.downcast_ref::<StoreError>() {
-            return match store {
-                StoreError::NotFound => Some(ErrorCode::NotFound),
-                StoreError::Stale(_) => Some(ErrorCode::Conflict),
-                StoreError::InvalidData(_) | StoreError::Serde(_) => Some(ErrorCode::Invalid),
-                _ => None,
-            };
-        }
-        if cause.is::<SelectionError>() || cause.is::<serde_json::Error>() {
-            return Some(ErrorCode::Invalid);
-        }
-        None
-    });
-    match code {
-        Some(code) => ServerError::new(code, format!("{error:#}")),
-        None => outcome_unknown(error),
-    }
-}
-
-fn outcome_unknown(error: anyhow::Error) -> ServerError {
-    ServerError::new(
-        ErrorCode::OutcomeUnknown,
-        format!("{error:#}; inspect the affected work before retrying"),
-    )
-}
-
-async fn subscription(
+async fn subscribing(
     id: String,
     query: Read,
+    select: Option<Vec<String>>,
     outgoing: mpsc::Sender<ServerMessage>,
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
-    if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
-        // The error ends the subscription for the client; a watch that
+    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
+        // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
         let _ = outgoing
-            .send(unavailable(failure).into_message(Some(id.clone())))
+            .send(ServerMessage::error(Some(id.clone()), unavailable(failure)))
             .await;
     }
     id
 }
 
-/// The shared watch owns a blocking runtime, which cannot be dropped on an
-/// async worker. However its task ends, the watch leaves through a blocking one.
-struct Watch(Option<Arc<Subscription>>);
+/// The shared subscription owns a blocking runtime, which cannot be dropped on an
+/// async worker. However its task ends, the subscription leaves through a blocking one.
+struct Held(Option<Arc<Subscription>>);
 
-impl std::ops::Deref for Watch {
+impl std::ops::Deref for Held {
     type Target = Arc<Subscription>;
 
     fn deref(&self) -> &Arc<Subscription> {
-        self.0.as_ref().expect("the watch is held until drop")
+        self.0
+            .as_ref()
+            .expect("the subscription is held until drop")
     }
 }
 
-impl Drop for Watch {
+impl Drop for Held {
     fn drop(&mut self) {
         let subscription = self.0.take();
         tokio::task::spawn_blocking(move || drop(subscription));
     }
 }
 
-async fn watch(
+async fn subscribe(
     id: &str,
     query: Read,
+    select: Option<Vec<String>>,
     outgoing: &mpsc::Sender<ServerMessage>,
     mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
-    let watch = Watch(Some(Arc::new(
+    let ends = query.clone();
+    let subscription = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
+            crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
         })
         .await??,
     )));
@@ -1104,19 +1236,23 @@ async fn watch(
         tokio::select! {
             checkpoint = checkpoints.recv() => {
                 let Some(checkpoint) = checkpoint else { return Ok(()) };
-                watch.checkpoint(checkpoint);
+                subscription.checkpoint(checkpoint);
             }
             () = notify.notified() => {
-                let pull = Arc::clone(&watch);
+                let pull = Arc::clone(&subscription);
                 let frame = tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| pull.pull())).await?;
                 let mut reason = None;
                 if let Some(frame) = frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
+                    let last = ends.ends_after(&frame["body"]);
                     deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
+                    if last {
+                        return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
+                    }
                 }
-                if watch.ended() {
-                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the watch ended".into()));
+                if subscription.ended() {
+                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
                 }
             }
         }
@@ -1124,7 +1260,7 @@ async fn watch(
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
-    ServerError::new(code, message).into_message(id)
+    ServerMessage::error(id, Error::new(code, message))
 }
 
 fn line(message: &ServerMessage) -> String {
@@ -1156,20 +1292,32 @@ async fn send_line<C: Carrier>(carrier: &mut C, line: String) -> Result<()> {
     Ok(())
 }
 
+async fn drain(socket: &mut UnixStream) {
+    let mut rest = [0; 4096];
+    let _ = tokio::time::timeout(Duration::from_millis(250), async {
+        while socket.read(&mut rest).await? > 0 {}
+        std::io::Result::Ok(())
+    })
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use super::{connection, deliver_or_spill, Clients};
+    use crate::engine::ErrorCode;
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
-    use crate::server::ticket::{Admission, Tickets};
+    use crate::server::ticket::{Admission, Purpose, Tickets};
+    use crate::server::wire::MAX_CONNECTIONS;
     use crate::server::wire::{
-        ClientIdentity, ClientMessage, ErrorCode, Hello, Operation, ServerMessage, ServerOperation,
-        MAX_BULK, MAX_MESSAGE, REVISION,
+        ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
+        MAX_MESSAGE, REVISION,
     };
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
+    use tokio::sync::Semaphore;
     use tokio_util::codec::{Framed, LinesCodec};
 
     struct Client {
@@ -1189,7 +1337,16 @@ mod tests {
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
             let server = tokio::spawn(async move {
-                connection(server, "incarnation", "fixture", &clients, None, tickets).await
+                connection(
+                    server,
+                    "incarnation",
+                    "fixture",
+                    &clients,
+                    None,
+                    tickets,
+                    &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                )
+                .await
             });
             let (read, writer) = client.into_split();
             Self {
@@ -1235,12 +1392,15 @@ mod tests {
         async fn redeem(tickets: Arc<Tickets>, ticket: &str) -> Self {
             let mut connection = Self::connect_with(&Clients::default(), tickets);
             connection
-                .send(&ClientMessage::Ticket {
+                .send(&ClientMessage::Attach {
                     ticket: ticket.into(),
                 })
                 .await;
             assert!(
-                matches!(connection.receive().await, Some(ServerMessage::Admitted)),
+                matches!(
+                    connection.receive().await,
+                    Some(ServerMessage::Admitted | ServerMessage::Bridged { .. })
+                ),
                 "ticket was not admitted"
             );
             connection
@@ -1259,9 +1419,7 @@ mod tests {
     }
 
     fn catalog() -> Operation {
-        Operation::Server(ServerOperation::Configuration {
-            request: crate::config::api::Request::Catalog,
-        })
+        Operation::Read(crate::lf::commands::read::Read::ConfigCatalog)
     }
 
     /// Serialize the tests that read an empty Machine registry through env.
@@ -1289,6 +1447,7 @@ mod tests {
             // is answered on the control connection under its own id.
             client
                 .send(&ClientMessage::Request {
+                    select: None,
                     id: "u".into(),
                     operation: Operation::Server(ServerOperation::Upload { bytes: 200 }),
                 })
@@ -1297,6 +1456,7 @@ mod tests {
             let mut upload = Client::redeem(tickets.clone(), &ticket).await;
             upload
                 .send(&ClientMessage::Request {
+                    select: None,
                     id: "r".into(),
                     operation: catalog(),
                 })
@@ -1309,7 +1469,7 @@ mod tests {
             upload.ended().await;
             // A ticket is single use.
             let mut again = Client::connect_with(&clients, tickets.clone());
-            again.send(&ClientMessage::Ticket { ticket }).await;
+            again.send(&ClientMessage::Attach { ticket }).await;
             assert!(matches!(
                 again.receive().await.unwrap(),
                 ServerMessage::Error {
@@ -1358,7 +1518,7 @@ mod tests {
             fetch.ended().await;
             // A ticket is a connection's first message, not a session request.
             client
-                .send(&ClientMessage::Ticket {
+                .send(&ClientMessage::Attach {
                     ticket: "late".into(),
                 })
                 .await;
@@ -1381,15 +1541,7 @@ mod tests {
                     .unwrap();
             let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
-            client
-                .send(&ClientMessage::Request {
-                    id: "t".into(),
-                    operation: Operation::Server(ServerOperation::Attach {
-                        owner: owner.clone(),
-                    }),
-                })
-                .await;
-            let ticket = ticket_reply(&mut client, "t").await;
+            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(owner.clone()));
             let terminal = Client::redeem(tickets.clone(), &ticket).await;
             let (mut owned, _) = listener.accept().await.unwrap();
             let Client {
@@ -1414,6 +1566,7 @@ mod tests {
             // The control connection is unchanged by the terminal it ticketed.
             client
                 .send(&ClientMessage::Request {
+                    select: None,
                     id: "a".into(),
                     operation: catalog(),
                 })
@@ -1424,15 +1577,9 @@ mod tests {
             ));
             // An owner that ended between ticket and redemption fails by name.
             drop(listener);
-            client
-                .send(&ClientMessage::Request {
-                    id: "gone".into(),
-                    operation: Operation::Server(ServerOperation::Attach { owner }),
-                })
-                .await;
-            let ticket = ticket_reply(&mut client, "gone").await;
+            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(owner));
             let mut late = Client::connect_with(&clients, tickets.clone());
-            late.send(&ClientMessage::Ticket { ticket }).await;
+            late.send(&ClientMessage::Attach { ticket }).await;
             let ServerMessage::Error {
                 id: None,
                 code: ErrorCode::NotFound,
@@ -1442,7 +1589,7 @@ mod tests {
             else {
                 panic!("expected the owner to be missing")
             };
-            assert!(data.unwrap()["owner"].is_string());
+            assert!(data.unwrap()["owner_lf_process_id"].is_string());
             late.ended().await;
             drop(client.writer);
             client.server.await.unwrap().unwrap();
@@ -1466,6 +1613,7 @@ mod tests {
                     .send(&ClientMessage::Request {
                         id: id.into(),
                         operation: catalog(),
+                        select: None,
                     })
                     .await;
             }
@@ -1485,6 +1633,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "a".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             assert!(matches!(
@@ -1535,6 +1684,7 @@ mod tests {
                 &Clients::default(),
                 None,
                 Default::default(),
+                &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             )
             .await
         });
@@ -1587,6 +1737,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "a".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             desktop.receive().await.unwrap();
@@ -1614,6 +1765,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::MonitorPs,
+                    select: None,
                 })
                 .await;
             assert!(matches!(
@@ -1642,6 +1794,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "after".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             // Nothing follows the cancel for `ps`; the sibling still answers.
@@ -1678,6 +1831,138 @@ mod tests {
         };
         assert_eq!(id, None);
         assert_eq!(code, ErrorCode::Invalid);
+        client.ended().await;
+    }
+
+    #[test]
+    fn an_unknown_operation_fails_alone_and_the_connection_stays() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+            .writer
+            .write_all(b"{\"type\":\"request\",\"id\":\"new\",\"operation\":{\"kind\":\"task.teleport\"}}\n")
+            .await
+            .unwrap();
+            let ServerMessage::Error { id, code, data, .. } = client.receive().await.unwrap()
+            else {
+                panic!("expected an error")
+            };
+            assert_eq!(id.as_deref(), Some("new"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert_eq!(data.unwrap()["kind"], "task.teleport");
+            client
+                .send(&ClientMessage::Request {
+                    id: "next".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            let ServerMessage::Response { id, .. } = client.receive().await.unwrap() else {
+                panic!("the connection should still answer")
+            };
+            assert_eq!(id, "next");
+        });
+    }
+
+    #[test]
+    fn select_keeps_only_the_named_paths_of_a_reads_answer() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+                .send(&ClientMessage::Request {
+                    id: "keys".into(),
+                    operation: catalog(),
+                    select: Some(vec!["key".into()]),
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected the catalog")
+            };
+            let entries = result.as_array().expect("the catalog is a list");
+            assert!(!entries.is_empty());
+            for entry in entries {
+                let fields: Vec<&String> = entry.as_object().unwrap().keys().collect();
+                assert_eq!(fields, ["key"], "{entry}");
+            }
+            client
+                .send(&ClientMessage::Subscribe {
+                    id: "ps".into(),
+                    operation: Read::MonitorPs,
+                    select: Some(vec!["absent".into()]),
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Response { id, .. } if id == "ps"
+            ));
+            let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
+                panic!("expected the first reading")
+            };
+            assert_eq!(frame["body"], serde_json::json!({}), "{frame}");
+            // A write has no answer to select from.
+            client
+                .writer
+                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"]}\n")
+                .await
+                .unwrap();
+            let ServerMessage::Error {
+                id, code, message, ..
+            } = client.receive().await.unwrap()
+            else {
+                panic!("expected a refusal")
+            };
+            assert_eq!(id.as_deref(), Some("w"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert_eq!(message, "select applies to reads");
+        });
+    }
+
+    #[test]
+    fn subscribing_to_a_write_says_it_has_no_subscription() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+                .writer
+                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
+                .await
+                .unwrap();
+            let ServerMessage::Error {
+                id, code, message, ..
+            } = client.receive().await.unwrap()
+            else {
+                panic!("expected an error")
+            };
+            assert_eq!(id.as_deref(), Some("w"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert!(message.contains("no subscription"), "{message}");
+        });
+    }
+
+    #[tokio::test]
+    async fn an_unknown_ticket_is_refused_before_any_bridge() {
+        let mut client = Client::connect();
+        client
+            .send(&ClientMessage::Attach {
+                ticket: "Qk9nM3hLcjJwVnc5YVptRQ".into(),
+            })
+            .await;
+        let ServerMessage::Error { id, code, .. } = client.receive().await.unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(id, None);
+        assert_eq!(code, ErrorCode::NotFound);
         client.ended().await;
     }
 

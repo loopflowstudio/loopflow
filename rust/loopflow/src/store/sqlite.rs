@@ -19,7 +19,6 @@ use crate::store::{
 use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
-mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -27,6 +26,7 @@ mod github_people;
 mod graph_inventory;
 #[cfg(test)]
 mod linear_migration_tests;
+mod project_adoption;
 
 mod linear_team_checks;
 mod machine_records;
@@ -42,9 +42,7 @@ mod pr_landings;
 mod processes;
 mod program_status;
 pub(crate) mod project_content;
-mod project_rotation;
 pub(crate) mod project_selection;
-mod project_transitions;
 mod rentals;
 mod repositories;
 pub(crate) mod retention;
@@ -60,6 +58,8 @@ mod task_comments;
 mod task_content;
 mod task_create_requests;
 mod task_details;
+mod task_retirement;
+pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;

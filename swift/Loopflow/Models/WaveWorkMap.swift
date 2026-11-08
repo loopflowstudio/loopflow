@@ -82,7 +82,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
-        case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
+        case repositoryId = "repo_id", projectId = "project_id", waveId = "wave_id"
         case repo
         case id, identifier, name, description, rank, state, assignee, sync, acquisition
         case linearId = "linear_id"
@@ -183,11 +183,10 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public enum RoadmapSection: String, Decodable, Sendable, Hashable {
-    case now
-    case waiting
-    case notStarted = "not_started"
-    case later
+/// Where a Task sits on the Wave board, derived once in Rust: the board, the
+/// sidebar's Working Tasks and every count read it.
+public enum TaskSection: String, Decodable, Sendable, Hashable {
+    case backlog, working, autonomous, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -207,7 +206,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let shipControl: TaskRunControl
     public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
-    public let section: RoadmapSection
+    public let section: TaskSection
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr
@@ -224,6 +223,21 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var isUnassigned: Bool {
         guard let runtime else { return false }
         return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
+    }
+
+    // What a Task's Session slot does follows its state alone, never its owner:
+    // unstarted offers Start, working opens with Start, finished reveals history.
+
+    /// Not yet started and still open: it has no checkout, so no conversation to
+    /// open, and its Session slot offers Start instead.
+    public var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
+
+    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
+
+    /// Working Tasks start their conversation when opened, owned or not: opening
+    /// claims nothing. Unstarted and finished Tasks only show history.
+    public var conversationIntent: SessionOpenIntent {
+        runtime?.status.isWorking == true ? .start : .reveal
     }
 }
 

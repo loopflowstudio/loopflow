@@ -44,10 +44,60 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
 }
 
 #[test]
+fn describe_prints_the_protocol_with_no_server_and_no_store() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let described: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["server", "describe", "--json"],
+        None,
+    ))
+    .unwrap();
+    assert_eq!(described, loopflow::server::schema::describe());
+    let summary = read(repo.path(), home.path(), &["server", "describe"], None);
+    assert!(summary.starts_with("Server protocol revision"), "{summary}");
+    assert!(!home.path().join("loopflow.db").exists());
+}
+
+#[test]
+fn a_client_that_closes_at_once_leaves_the_server_listening() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let mut server = Server::start(repo.path(), home.path());
+    let socket = loopflow::server::socket_path().unwrap();
+    for _ in 0..2000 {
+        // A full listen queue refuses; only the server's exit fails the test.
+        if std::os::unix::net::UnixStream::connect(&socket).is_err() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
+    // Closed clients leave as their connections notice; until then it may be `busy`.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        match loopflow::server::client::Connection::open() {
+            Ok(_) => break,
+            Err(error) => {
+                let busy = error
+                    .downcast_ref::<loopflow::engine::Error>()
+                    .is_some_and(|error| error.code == loopflow::engine::ErrorCode::Busy);
+                assert!(busy, "{error:#}");
+                assert!(std::time::Instant::now() < deadline, "{error:#}");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+#[test]
 fn configuration_edits_use_the_server_without_work_processes() {
-    use loopflow::config::api::Request;
     use loopflow::config::files::Destination;
-    use loopflow::server::wire::{Operation, ServerError, ServerOperation};
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -65,15 +115,13 @@ fn configuration_edits_use_the_server_without_work_processes() {
         connection.welcome().machine.is_none(),
         "an unreadable registry leaves the Machine unknown, not the connection refused"
     );
-    let mut request = |request| {
+    let mut request = |operation| {
         connection
-            .request(Operation::Server(ServerOperation::Configuration {
-                request,
-            }))
+            .request(operation)
             .map(|response| response.result)
-            .map_err(|error| error.downcast::<ServerError>().unwrap())
+            .map_err(|error| error.downcast::<loopflow::engine::Error>().unwrap())
     };
-    let catalog = request(Request::Catalog).unwrap();
+    let catalog = request(Operation::Read(Read::ConfigCatalog)).unwrap();
     assert!(catalog
         .as_array()
         .unwrap()
@@ -84,31 +132,31 @@ fn configuration_edits_use_the_server_without_work_processes() {
         "# retained\ntheme: Linen\n",
     )
     .unwrap();
-    let declaration = |value: &str| Request::Declaration {
-        destination: Destination::PersonalGlobal {},
-        key: "theme".into(),
-        value: Some(value.into()),
-        unset: false,
+    let declaration = |value: &str| {
+        Operation::Write(Write::ConfigSet {
+            destination: Destination::PersonalGlobal {},
+            key: "theme".into(),
+            value: value.into(),
+        })
     };
     assert_eq!(request(declaration("Hearth")).unwrap()["value"], "Hearth");
     let saved = fs::read_to_string(home.path().join("config.yaml")).unwrap();
     assert!(saved.contains("# retained"));
     assert!(saved.contains("Hearth"));
-    let refused = request(Request::Declaration {
+    let refused = request(Operation::Write(Write::ConfigSet {
         destination: Destination::SharedRepository {
             repository: repo.path().to_owned(),
         },
         key: "user.name".into(),
-        value: Some("Wrong scope".into()),
-        unset: false,
-    })
+        value: "Wrong scope".into(),
+    }))
     .unwrap_err();
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    let theme = request(Request::Theme {
+    let theme = request(Operation::Write(Write::ConfigTheme {
         path: home.path().join("config.yaml"),
         value: None,
-    })
+    }))
     .unwrap();
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
@@ -169,7 +217,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
 #[test]
 fn served_session_adoption_matches_cli_without_new_execution() {
     use loopflow::lf::commands::write::Write;
-    use loopflow::server::wire::{Operation, ServerError};
+    use loopflow::server::wire::Operation;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -191,7 +239,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         ))
         .unwrap();
         let id = session["id"].as_str().unwrap();
-        let change = Write::TaskCreate {
+        let change = Write::TaskFromSession {
             directory: repo.path().to_owned(),
             id: id.into(),
             title: "Keep the conversation".into(),
@@ -261,13 +309,13 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap();
         // A failed request has its own trace, changes no Task and launches nothing.
-        let refused = served(Write::TaskCreate {
+        let refused = served(Write::TaskFromSession {
             directory: repo.path().to_owned(),
             id: id.into(),
             title: " ".into(),
         })
         .unwrap_err()
-        .downcast::<ServerError>()
+        .downcast::<loopflow::engine::Error>()
         .unwrap();
         assert!(!refused.message.is_empty());
         assert_eq!(
@@ -284,6 +332,155 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             0
         );
     }
+}
+
+/// A client that knows only what `lf server describe --json` prints, as a
+/// phone or a headless agent client would: raw JSON lines, no Rust types.
+/// Everything it sends and every line it receives match the description, and
+/// each answer matches its operation's declared result.
+#[test]
+fn a_client_built_from_the_description_alone_speaks_the_protocol() {
+    use std::io::Write as _;
+    use std::os::unix::net::UnixStream;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let schema: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["server", "describe", "--json"],
+        None,
+    ))
+    .unwrap();
+    let definition = |name: &str| {
+        let mut root = serde_json::json!({ "$ref": format!("#/$defs/{name}") });
+        root["$defs"] = schema["$defs"].clone();
+        jsonschema::draft202012::new(&root).unwrap()
+    };
+    let (client, server) = (definition("ClientMessage"), definition("ServerMessage"));
+    let declared = |kind: &str| {
+        let arm = ["Read", "Write", "ServerOperation"]
+            .iter()
+            .flat_map(|group| schema["$defs"][*group]["oneOf"].as_array().unwrap())
+            .find(|arm| arm["properties"]["kind"]["const"] == kind)
+            .unwrap_or_else(|| panic!("{kind} is not described"));
+        let mut result = arm["x-result"].clone();
+        result["$defs"] = schema["$defs"].clone();
+        jsonschema::draft202012::new(&result).unwrap()
+    };
+    let conforms = |validator: &jsonschema::Validator, value: &Value| {
+        let failed: Vec<_> = validator
+            .iter_errors(value)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(failed.is_empty(), "{value}: {failed:#?}");
+    };
+
+    let _server = Server::start(repo.path(), home.path());
+    let socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut lines = BufReader::new(socket.try_clone().unwrap()).lines();
+    let mut writer = socket;
+    // `described` is false only for the line that deliberately names an
+    // operation the description lacks.
+    let mut write = |message: Value, described: bool| {
+        if described {
+            conforms(&client, &message);
+        }
+        writeln!(writer, "{message}").unwrap();
+    };
+    let mut receive = || -> Option<Value> {
+        let line = lines.next()?.unwrap();
+        let message: Value = serde_json::from_str(&line).unwrap();
+        conforms(&server, &message);
+        Some(message)
+    };
+
+    let revision = schema["x-revision"].clone();
+    write(
+        serde_json::json!({"type": "hello", "revision": revision, "min_revision": revision,
+        "client": {"kind": "phone", "platform": "ios", "name": "described", "version": "0"}}),
+        true,
+    );
+    assert_eq!(receive().unwrap()["type"], "welcome");
+
+    write(
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null}),
+        true,
+    );
+    let answer = receive().unwrap();
+    assert_eq!(
+        (&answer["type"], &answer["id"]),
+        (&"response".into(), &"catalog".into())
+    );
+    conforms(&declared("config.catalog"), &answer["result"]);
+
+    write(
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null}),
+        true,
+    );
+    let mut subscribed = false;
+    let mut answered = false;
+    while !(subscribed && answered) {
+        let message = receive().unwrap();
+        assert_eq!(message["id"], "processes", "{message}");
+        match message["type"].as_str().unwrap() {
+            "response" => {
+                assert!(message["result"].is_null());
+                subscribed = true;
+                write(
+                    serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
+                    true,
+                );
+            }
+            "reading" => {
+                conforms(&declared("process.list"), &message["frame"]["body"]);
+                answered |= message["frame"]["answers"] == 1;
+            }
+            other => panic!("unexpected {other}: {message}"),
+        }
+    }
+    write(
+        serde_json::json!({"type": "cancel", "id": "processes"}),
+        true,
+    );
+
+    // An operation this server lacks fails alone; the connection keeps working.
+    write(
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null}),
+        false,
+    );
+    let refused = loop {
+        let message = receive().unwrap();
+        if message["id"] == "newer" {
+            break message;
+        }
+        assert_eq!(
+            message["id"], "processes",
+            "only the cancelled subscription may still speak"
+        );
+    };
+    assert_eq!(
+        (&refused["type"], &refused["code"]),
+        (&"error".into(), &"invalid".into())
+    );
+    assert_eq!(refused["data"]["kind"], "task.teleport");
+    write(
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null}),
+        true,
+    );
+    let after = loop {
+        let message = receive().unwrap();
+        if message["id"] == "after" {
+            break message;
+        }
+    };
+    assert_eq!(after["type"], "response", "{after}");
+    conforms(&declared("process.list"), &after["result"]);
 }
 
 #[test]
@@ -308,6 +505,7 @@ fn server_operations_match_their_lf_commands() {
     repo.create_file("edit.txt", "working\n");
     let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
     let task_diff = |path: Option<&str>, draft: Option<&str>| Read::TaskDiff {
+        head: None,
         issue: "INF-123".into(),
         path: path.map(str::to_owned),
         base: "parent".into(),
@@ -404,7 +602,7 @@ fn server_operations_match_their_lf_commands() {
         directory: repo.path().to_owned(),
     };
     // A new Read fails to compile here until it is compared too.
-    let (reads, watches) = match task_diff(None, None) {
+    let (reads, subscriptions) = match task_diff(None, None) {
         Read::MonitorPs
         | Read::DesktopPlans { .. }
         | Read::AllViewPlans { .. }
@@ -417,6 +615,9 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineId
         | Read::Portfolio
         | Read::Settings { .. }
+        | Read::ConfigCatalog
+        | Read::ConfigGet { .. }
+        | Read::ConfigExplain { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -430,19 +631,27 @@ fn server_operations_match_their_lf_commands() {
         | Read::Machines
         | Read::History(_)
         | Read::Roadmap { .. }
-        | Read::PlanningStatus { .. }
+        | Read::PlanStatus { .. }
         | Read::WorkLink { .. }
         | Read::RepositoryPath { .. }
         | Read::WaveGraph { .. }
         | Read::Tokens { .. }
         | Read::Retention
-        | Read::Doctor => (
+        | Read::Doctor
+        | Read::Ci { .. }
+        | Read::AccountList { .. }
+        | Read::AccountRoute { .. }
+        | Read::SkillList { .. }
+        | Read::PrChecks { .. }
+        | Read::PrReviews { .. }
+        | Read::TaskWait { .. } => (
             [
                 Read::MonitorPs,
                 plans(),
                 sessions(true),
                 task_pane(),
                 Read::TaskChanges {
+                    head: None,
                     issue: "INF-123".into(),
                     base: "parent".into(),
                 },
@@ -462,6 +671,19 @@ fn server_operations_match_their_lf_commands() {
                     skill: Some("implement".into()),
                     graph: None,
                     step: None,
+                },
+                Read::ConfigCatalog,
+                Read::ConfigGet {
+                    destination: loopflow::config::files::Destination::SharedRepository {
+                        repository: repo.path().to_owned(),
+                    },
+                    key: "agent".into(),
+                },
+                Read::ConfigExplain {
+                    destination: loopflow::config::files::Destination::PersonalRepository {
+                        repository: repo.path().to_owned(),
+                    },
+                    key: "agent".into(),
                 },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
@@ -521,7 +743,7 @@ fn server_operations_match_their_lf_commands() {
                     task: Some("INF-123".into()),
                     all: false,
                 },
-                Read::PlanningStatus {
+                Read::PlanStatus {
                     directory: repo.path().to_owned(),
                 },
                 Read::WorkLink {
@@ -563,6 +785,20 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::Retention,
                 Read::Doctor,
+                // An absolute window: a relative one is measured from each run's now.
+                Read::Ci {
+                    since: "2026-01-01T00:00:00Z".into(),
+                    wave: None,
+                    repo: None,
+                },
+                Read::TaskWait {
+                    issue: "INF-123".into(),
+                    until: loopflow::ops::task::TaskWaitUntil::Terminal,
+                },
+                Read::SkillList {
+                    directory: repo.path().to_owned(),
+                    path: vec!["graph".into()],
+                },
             ],
             [
                 history(),
@@ -574,7 +810,7 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(false),
                 sessions(true),
-                Read::PlanningStatus {
+                Read::PlanStatus {
                     directory: work_folder,
                 },
                 task_pane(),
@@ -596,21 +832,21 @@ fn server_operations_match_their_lf_commands() {
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
-            // `config repository --path` prints a path, not JSON: its value is that text.
+            // `config repo --path` prints a path, not JSON: its value is that text.
             assert_eq!(served, Value::String(printed.trim().into()), "{argv:?}");
             continue;
         };
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
-    for served in watches {
+    for served in subscriptions {
         let mut argv = served.argv();
-        argv.push("--watch".into());
+        argv.push("--subscribe".into());
         let mut frame = Value::Null;
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow::server::client::Connection::open().unwrap();
             let id = connection.subscribe(served.clone()).unwrap();
-            frame = connection.reading(&id).unwrap();
+            frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
@@ -687,7 +923,7 @@ fn server_operations_match_their_lf_commands() {
     }) {
         // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution;
         // task.start and session.start run as their own lf process (task_create_tests).
-        Write::TaskCreate { .. }
+        Write::TaskFromSession { .. }
         | Write::TaskStart { .. }
         | Write::SessionStart { .. }
         | Write::TaskComplete { .. }
@@ -696,17 +932,51 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskNotes { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::ShipStop { .. }
+        | Write::TaskHold { .. }
         | Write::TaskMove { .. }
+        // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
+        // compares the run, and comments differ by their saved IDs.
+        | Write::TaskRun { .. }
+        | Write::TaskShip { .. }
+        | Write::TaskSteer { .. }
+        | Write::TaskReport { .. }
+        | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
+        | Write::SessionSteer { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::WaveAdd { .. }
         | Write::PlanningRefresh { .. }
-        | Write::NewChapter { .. }
+        // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
+        // compares their spelling.
+        | Write::WavePlanningBind { .. }
+        | Write::WavePlanningConnect { .. }
+        | Write::WavePlanningReteam { .. }
         | Write::GraphCustomize { .. }
+        // Releasing, committing, syncing and creating worktrees change the
+        // repository and its remote; their spellings are compared below.
+        | Write::RepositoryRelease { .. }
+        | Write::CheckoutCommit { .. }
+        | Write::CheckoutSync { .. }
+        | Write::CheckoutCreate { .. }
+        | Write::AccountDisconnect { .. }
+        | Write::AccountConnect { .. }
+        | Write::AccountSet { .. }
+        | Write::AccountToken { .. }
+        | Write::AccountRedeemReset { .. }
+        | Write::AccountUse { .. }
+        | Write::GraphRun { .. }
+        | Write::SkillRun { .. }
+        | Write::PrPublish { .. }
+        | Write::PrOpen { .. }
+        | Write::PrSubmit { .. }
+        | Write::PrArm { .. }
+        | Write::PrLand { .. }
+        | Write::PrAbandon { .. }
+        | Write::PrReconcile { .. }
+        | Write::PrRequestReview { .. }
         | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
         | Write::DashboardPin { .. }
@@ -716,6 +986,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::DashboardShow { .. }
         | Write::DashboardSlots { .. }
         | Write::TileMove { .. }
+        // configuration_edits_use_the_server_without_work_processes covers settings.
+        | Write::ConfigSet { .. }
+        | Write::ConfigUnset { .. }
+        | Write::ConfigTheme { .. }
         | Write::PaneLayout { .. } => (
             [
                 Write::TaskNotes {
@@ -747,6 +1021,7 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
+                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -754,6 +1029,7 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
+                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     directory: directory.clone(),
@@ -914,7 +1190,65 @@ fn server_operations_match_their_lf_commands() {
     // from approving it until `lf ship`, retaining who requested the stop. The
     // ship process it kills and the merge request it takes back are the ship
     // tests'.
-    let stop = Write::ShipStop {
+    // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
+    let interrupt = Write::TaskInterrupt {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    };
+    compare(interrupt.clone(), &|| interrupt.clone(), &|| {
+        effect("INF-123")
+    });
+    // A steer and a comment save the same text by the same author; each save
+    // has its own ID.
+    for steer in [true, false] {
+        let (directory, issue, message) = (
+            directory.clone(),
+            "INF-123".to_owned(),
+            format!("served {steer}"),
+        );
+        let saved = if steer {
+            Write::TaskSteer {
+                directory,
+                issue,
+                message,
+            }
+        } else {
+            Write::TaskReport {
+                directory,
+                issue,
+                message,
+            }
+        };
+        let last = |thread: &Value| {
+            let comment = thread["comments"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .clone();
+            let body = comment["body"].as_str().unwrap();
+            (
+                body[..body.find("<!--").unwrap_or(body.len())]
+                    .trim()
+                    .to_owned(),
+                comment["author"].clone(),
+            )
+        };
+        let before = processes(&database);
+        let written = server_write(saved.clone());
+        assert_eq!(
+            processes(&database),
+            before,
+            "served comment fabricated a Process"
+        );
+        let args = spelled(&saved);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let printed: Value =
+            serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
+        assert_eq!(last(&written), last(&printed), "{args:?}");
+        assert_eq!(last(&written).0, format!("served {steer}"));
+    }
+    let stop = Write::TaskHold {
         directory: directory.clone(),
         issue: "INF-123".into(),
     };
@@ -929,6 +1263,7 @@ fn server_operations_match_their_lf_commands() {
     };
     assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
     assert_eq!(stopped()["kind"], "person", "no stop saved");
+
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::Portfolio.read().unwrap());
     let manual = Write::Portfolio {
@@ -951,37 +1286,6 @@ fn server_operations_match_their_lf_commands() {
         customize.clone()
     };
     assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
-    // A chapter preview reads the rotation it would make and records nothing.
-    let waves = Read::Waves.read().unwrap();
-    let wave_id = waves
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|wave| wave.to_string().contains("\"task-pr-tests\""))
-        .and_then(|wave| wave["id"].as_str())
-        .unwrap_or_else(|| panic!("no task-pr-tests Wave in {waves}"))
-        .to_owned();
-    let preview = Write::NewChapter {
-        directory: directory.clone(),
-        name: "October".into(),
-        plan: serde_json::json!({
-            "name": "October",
-            "waves": [{
-                "wave_id": wave_id,
-                "successor_id": "proj_4f6c2b8e-3d5a-4c1e-9b7a-2e8d6f0a1c3b",
-                "create": true,
-                "project_name": "October",
-                "krs": [{"text": "Desktop writes through the server", "holds": false}],
-                "metric_targets": []
-            }]
-        })
-        .to_string(),
-        preview: true,
-    };
-    assert_eq!(
-        compare(preview.clone(), &|| preview.clone(), &|| effect("INF-123")),
-        0
-    );
     // A bind preview names the Task a bind would assign and assigns nothing.
     let bind_preview = Write::SessionBind {
         directory: directory.clone(),
@@ -1011,7 +1315,8 @@ fn server_operations_match_their_lf_commands() {
     // A refused write names its code and changes nothing; the CLI refuses
     // the same spelling. The default diagnostic log includes the request
     // trace, target, outcome and real server PID.
-    use loopflow::server::wire::{ErrorCode, Operation, ServerError};
+    use loopflow::engine::ErrorCode;
+    use loopflow::server::wire::Operation;
     let failure = Write::SessionRename {
         directory: directory.clone(),
         id: session.clone(),
@@ -1021,7 +1326,7 @@ fn server_operations_match_their_lf_commands() {
         .unwrap()
         .request(Operation::Write(failure.clone()))
         .unwrap_err()
-        .downcast::<ServerError>()
+        .downcast::<loopflow::engine::Error>()
         .unwrap();
     assert_eq!(refused.code, ErrorCode::Invalid, "{refused:?}");
     let cli = isolated_lf(repo.path(), home.path(), &spelled(&failure))
@@ -1117,6 +1422,7 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
+                        intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -1182,6 +1488,29 @@ fn server_operations_match_their_lf_commands() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Last, since the detached run's Processes finish on their own clock:
+    // `task.run` starts `lf task run` detached and answers what it reports.
+    // This fixture's Task has no launchable planning, so the run it started
+    // reports the refusal `lf task run` prints, and nothing ran.
+    let run = Write::TaskRun {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        from: Some("demo".into()),
+        agent: None,
+        approve: false,
+    };
+    let refused = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(run))
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
+    assert!(
+        refused
+            .message
+            .contains("Task planning has invalid ownership"),
+        "{refused:?}"
+    );
 }
 
 /// The processes this test started that are still running.
@@ -1242,7 +1571,7 @@ fn processes(database: &Path) -> i64 {
         .unwrap()
 }
 
-/// The first frame `lf <args>` prints, with its stdin held open as a watch's
+/// The first frame `lf <args>` prints, with its stdin held open as a subscription's
 /// parent holds it.
 fn first_frame(repo: &Path, home: &Path, args: &[String]) -> Value {
     let mut child = isolated_lf(repo, home, args);
@@ -1302,11 +1631,33 @@ impl Drop for Server {
 }
 
 fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
-    loopflow::server::client::Connection::open()
+    let kind = serde_json::to_value(&query).unwrap()["kind"].clone();
+    let result = loopflow::server::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Read(query))
         .unwrap()
-        .result
+        .result;
+    assert_declared_result(kind.as_str().unwrap(), &result);
+    result
+}
+
+/// `result` has the shape `lf server describe` declares for `kind`.
+fn assert_declared_result(kind: &str, result: &Value) {
+    let schema = loopflow::server::schema::describe();
+    let read = schema["$defs"]["Read"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|arm| arm["properties"]["kind"]["const"] == kind)
+        .unwrap_or_else(|| panic!("{kind} is not in the schema"));
+    let mut declared = read["x-result"].clone();
+    declared["$defs"] = schema["$defs"].clone();
+    let validator = jsonschema::draft202012::new(&declared).unwrap();
+    let failed: Vec<_> = validator
+        .iter_errors(result)
+        .map(|error| format!("{}: {error}", error.instance_path()))
+        .collect();
+    assert!(failed.is_empty(), "{kind} answered {result}: {failed:#?}");
 }
 
 fn server_write(change: loopflow::lf::commands::write::Write) -> Value {
@@ -1329,7 +1680,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 .delegated()
                 .expect("delegated writes spell their lf child");
         }
-        Write::TaskCreate {
+        Write::TaskFromSession {
             directory,
             id,
             title,
@@ -1371,9 +1722,52 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::ShipStop { directory, issue } => (
+        Write::TaskHold { directory, issue } => {
+            (path(directory), words(&["task", "hold", issue, "--json"]))
+        }
+        Write::TaskRun {
+            directory,
+            issue,
+            from,
+            agent,
+            approve,
+        } => {
+            let mut spelled = Vec::new();
+            if *approve {
+                spelled.push("--batch".to_owned());
+            }
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["task", "run", issue]));
+            if let Some(from) = from {
+                spelled.extend(words(&["--from", from]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::TaskShip { directory, issue } => {
+            (path(directory), words(&["--task", issue, "ship", "--json"]))
+        }
+        Write::TaskSteer {
+            directory,
+            issue,
+            message,
+        } => (
             path(directory),
-            words(&["--task", issue, "ship", "--stop", "--json"]),
+            words(&["task", "steer", issue, message, "--json"]),
+        ),
+        Write::TaskReport {
+            directory,
+            issue,
+            message,
+        } => (
+            path(directory),
+            words(&["task", "report", issue, message, "--json"]),
+        ),
+        Write::TaskInterrupt { directory, issue } => (
+            path(directory),
+            words(&["task", "interrupt", issue, "--json"]),
         ),
         Write::TaskMove {
             directory,
@@ -1406,6 +1800,21 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 "--json",
             ]),
         ),
+        Write::SessionSteer {
+            directory,
+            session,
+            wave,
+            message,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(wave) = wave {
+                spelled.extend(words(&["--wave", wave]));
+            }
+            spelled.extend(words(&["session", "steer"]));
+            spelled.extend(session.clone());
+            spelled.extend(words(&[message, "--json"]));
+            (path(directory), spelled)
+        }
         Write::SessionRename {
             directory,
             id,
@@ -1433,6 +1842,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             task,
             wave,
             agent,
+            intent,
         } => {
             let mut spelled = Vec::new();
             if id.is_none() && task.is_none() && wave.is_none() {
@@ -1442,6 +1852,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["session", "resume"]));
+            spelled.extend(intent.flag().map(str::to_owned));
             spelled.extend(id.clone());
             if let Some(task) = task {
                 spelled.extend(words(&["--task", task]));
@@ -1476,36 +1887,417 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::PlanningRefresh { directory, wave } => (
-            path(directory),
-            words(&["wave", "status", wave, "--sync", "--json"]),
-        ),
-        Write::NewChapter {
+        Write::PlanningRefresh { directory, wave } => {
+            (path(directory), words(&["wave", "sync", wave, "--json"]))
+        }
+        Write::WavePlanningBind {
             directory,
-            name,
-            preview,
-            ..
+            wave,
+            project,
+        } => (
+            path(directory),
+            words(&["wave", "plan", "bind", wave, project, "--json"]),
+        ),
+        Write::WavePlanningConnect {
+            directory,
+            wave,
+            all,
+            team_key,
+            team_name,
         } => {
-            let mut spelled = words(&[
-                "wave",
-                "new-chapter",
-                "--all",
-                name,
-                "--plan",
-                "/dev/stdin",
-                "--json",
-            ]);
-            if *preview {
-                spelled.push("--dry-run".into());
+            let mut spelled = words(&["wave", "plan", "connect"]);
+            spelled.extend(wave.clone());
+            if *all {
+                spelled.push("--all".into());
             }
+            if let Some(key) = team_key {
+                spelled.extend(words(&["--team-key", key]));
+            }
+            if let Some(name) = team_name {
+                spelled.extend(words(&["--team-name", name]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::WavePlanningReteam { directory, apply } => {
+            let mut spelled = words(&["wave", "plan", "reteam"]);
+            if *apply {
+                spelled.push("--apply".into());
+            }
+            spelled.push("--json".into());
             (path(directory), spelled)
         }
         Write::GraphCustomize { directory, name } => (
             path(directory),
             words(&["graph", "customize", name, "--json"]),
         ),
+        Write::RepositoryRelease {
+            directory,
+            version,
+            target,
+        } => {
+            let mut spelled = words(&["repo", "release", "run"]);
+            spelled.extend(version.clone());
+            if let Some(target) = target {
+                spelled.extend(words(&["--target", target]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutCommit {
+            directory,
+            message,
+            push,
+            no_add,
+            paths,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.push("commit".into());
+            if let Some(message) = message {
+                spelled.extend(words(&["--message", message]));
+            }
+            if *push {
+                spelled.push("--push".into());
+            }
+            if *no_add {
+                spelled.push("--no-add".into());
+            }
+            spelled.extend(paths.iter().cloned());
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutSync {
+            directory,
+            onto,
+            preview,
+            manual,
+            continue_sync,
+            abort,
+            adopt,
+        } => {
+            let mut spelled = words(&["sync"]);
+            spelled.extend(onto.clone());
+            for (flag, on) in [
+                ("--plan", preview),
+                ("--manual", manual),
+                ("--continue", continue_sync),
+                ("--abort", abort),
+                ("--adopt", adopt),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::AccountDisconnect { provider, email } => {
+            let mut spelled = words(&["account", "disconnect", provider]);
+            spelled.extend(email.clone());
+            ("/".into(), spelled)
+        }
+        Write::AccountConnect {
+            provider,
+            email,
+            chrome_profile,
+            import,
+            api_key,
+        } => {
+            let mut spelled = words(&["account", "connect", provider]);
+            spelled.extend(email.clone());
+            if let Some(profile) = chrome_profile {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            for (flag, on) in [("--import", import), ("--api-key", api_key)] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountSet {
+            provider,
+            email,
+            login_email,
+            routing,
+            plan,
+            clear_plan,
+            paid_through,
+            clear_paid_through,
+            clear_cooldown,
+            chrome_profiles,
+            clear_chrome_profiles,
+        } => {
+            let mut spelled = words(&["account", "set", provider]);
+            spelled.extend(email.clone());
+            for (flag, value) in [
+                ("--login-email", login_email),
+                ("--routing", routing),
+                ("--plan", plan),
+                ("--paid-through", paid_through),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            for (flag, on) in [
+                ("--clear-plan", clear_plan),
+                ("--clear-paid-through", clear_paid_through),
+                ("--clear-cooldown", clear_cooldown),
+                ("--clear-chrome-profiles", clear_chrome_profiles),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for profile in chrome_profiles {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountToken {
+            provider,
+            email,
+            file,
+            chrome_profile,
+        } => {
+            let mut spelled = words(&["account", "token", provider, email]);
+            if let Some(file) = file {
+                spelled.extend(words(&["--file", &path(file)]));
+            }
+            if let Some(profile) = chrome_profile {
+                spelled.extend(words(&["--chrome-profile", profile]));
+            }
+            ("/".into(), spelled)
+        }
+        Write::AccountRedeemReset {
+            provider,
+            email,
+            idempotency_key,
+            credit_id,
+        } => {
+            let mut spelled = words(&["account", "redeem-reset", provider, email]);
+            for (flag, value) in [
+                ("--idempotency-key", idempotency_key),
+                ("--credit-id", credit_id),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            ("/".into(), spelled)
+        }
+        Write::AccountUse { provider, email } => {
+            ("/".into(), words(&["account", provider, "use", email]))
+        }
+        Write::GraphRun {
+            directory,
+            name,
+            message,
+            agent,
+        }
+        | Write::SkillRun {
+            directory,
+            name,
+            message,
+            agent,
+        } => {
+            let noun = if matches!(write, Write::GraphRun { .. }) {
+                "graph"
+            } else {
+                "skill"
+            };
+            let mut spelled = words(&["--batch"]);
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&[noun, name]));
+            spelled.extend(message.clone());
+            (path(directory), spelled)
+        }
+        Write::PrPublish {
+            directory,
+            title,
+            body,
+            agent,
+        }
+        | Write::PrOpen {
+            directory,
+            title,
+            body,
+            agent,
+        } => {
+            let verb = if matches!(write, Write::PrOpen { .. }) {
+                "open"
+            } else {
+                "publish"
+            };
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", verb]));
+            for (flag, value) in [("--title", title), ("--body", body)] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrSubmit {
+            directory,
+            strict,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "submit"]));
+            if *strict {
+                spelled.push("--strict".into());
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrArm {
+            directory,
+            strict,
+            local,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "arm"]));
+            for (flag, on) in [("--strict", strict), ("--local", local)] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrLand {
+            directory,
+            wait_and_fix,
+            strict,
+            local,
+            worktree,
+            message,
+            title,
+            body,
+            agent,
+        } => {
+            let mut spelled = Vec::new();
+            if let Some(agent) = agent {
+                spelled.extend(words(&["--agent", agent]));
+            }
+            spelled.extend(words(&["pr", "land"]));
+            for (flag, on) in [
+                ("--wait-and-fix", wait_and_fix),
+                ("--strict", strict),
+                ("--local", local),
+            ] {
+                if *on {
+                    spelled.push(flag.into());
+                }
+            }
+            for (flag, value) in [
+                ("--worktree", worktree),
+                ("--message", message),
+                ("--title", title),
+                ("--body", body),
+            ] {
+                if let Some(value) = value {
+                    spelled.extend(words(&[flag, value]));
+                }
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrAbandon {
+            directory,
+            branch,
+            force,
+        } => {
+            let mut spelled = words(&["pr", "abandon"]);
+            spelled.extend(branch.clone());
+            if *force {
+                spelled.push("--force".into());
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::PrReconcile { directory } => {
+            (path(directory), words(&["pr", "reconcile", "--json"]))
+        }
+        Write::PrRequestReview {
+            directory,
+            pr,
+            reviewers,
+        } => {
+            let mut spelled = words(&["pr", "request-review"]);
+            spelled.extend(pr.clone());
+            for reviewer in reviewers {
+                spelled.extend(words(&["-r", reviewer]));
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
+        Write::CheckoutCreate {
+            directory,
+            name,
+            preview,
+            persistent,
+        } => {
+            let mut spelled = words(&["wt", "create", name]);
+            if *preview {
+                spelled.push("--plan".into());
+            }
+            if *persistent {
+                spelled.push("--persistent".into());
+            }
+            spelled.push("--json".into());
+            (path(directory), spelled)
+        }
         Write::Portfolio { change } => {
-            let mut spelled = vec!["portfolio".to_owned()];
+            let mut spelled = words(&["desktop", "portfolio"]);
             match change {
                 PortfolioCommand::Folder { path: folder } => {
                     spelled.push("folder".into());
@@ -1534,7 +2326,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             expression,
             revision,
         } => {
-            let mut spelled = words(&["desktop", "query"]);
+            let mut spelled = words(&["desktop", "dashboard", "query"]);
             spelled.extend(revision.map(|revision| format!("--revision={revision}")));
             spelled.extend(words(&["--", id, expression]));
             (path(directory), spelled)
@@ -1547,6 +2339,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "pin",
                 &format!("--revision={revision}"),
                 "--",
@@ -1561,6 +2354,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "unpin",
                 &format!("--revision={revision}"),
                 "--",
@@ -1576,6 +2370,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "rename",
                 &format!("--revision={revision}"),
                 "--",
@@ -1589,7 +2384,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             member,
         } => (
             path(directory),
-            words(&["desktop", "hide", "-p", &format!("query:{id}/{member}")]),
+            words(&[
+                "desktop",
+                "dashboard",
+                "hide",
+                &format!("query:{id}/{member}"),
+            ]),
         ),
         Write::DashboardShow {
             directory,
@@ -1597,7 +2397,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             member,
         } => (
             path(directory),
-            words(&["desktop", "show", "-p", &format!("query:{id}/{member}")]),
+            words(&[
+                "desktop",
+                "dashboard",
+                "show",
+                &format!("query:{id}/{member}"),
+            ]),
         ),
         Write::DashboardSlots {
             directory,
@@ -1608,9 +2413,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
-                "layout",
+                "dashboard",
+                "slots",
                 &format!("query:{id}"),
-                "--save",
                 &format!("--revision={revision}"),
             ]),
         ),
@@ -1623,8 +2428,8 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&[
                 "desktop",
+                "dashboard",
                 "move",
-                "-p",
                 &format!("{board}/{member}"),
                 "--destination",
                 destination,
@@ -1636,6 +2441,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["desktop", "layout", work, "--save"]),
         ),
+        Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
+            unreachable!("settings writes are compared on their own")
+        }
     };
     let mut argv = vec!["--cwd".to_owned(), directory];
     argv.extend(words);

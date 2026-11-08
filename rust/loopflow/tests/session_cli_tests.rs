@@ -417,7 +417,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
-        let recorded: (Option<loopflow::id::LfProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        let recorded: (Option<loopflow::id::AgentProcessId>, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
                 "SELECT p.id,p.parent_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
@@ -738,7 +738,7 @@ for line in sys.stdin:
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
     let process_cwd = store
-        .process(&agent_caller.origin_lf_process_id)
+        .lf_process(&agent_caller.origin_lf_process_id)
         .unwrap()
         .unwrap()
         .cwd
@@ -801,7 +801,7 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["available"], true);
+    assert_eq!(available[0]["availability"], "available");
     assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }
@@ -1805,10 +1805,10 @@ fn program_status_cli_observes_available_without_completing_work() {
         [&lf_process_id],
     )
     .unwrap();
-    let mut watch = Child(
+    let mut subscription = Child(
         command(
             home.path(),
-            &["desktop", "sessions", "--all", "--json", "--watch"],
+            &["desktop", "sessions", "--all", "--json", "--subscribe"],
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1816,7 +1816,7 @@ fn program_status_cli_observes_available_without_completing_work() {
         .spawn()
         .unwrap(),
     );
-    let stdout = watch.0.stdout.take().unwrap();
+    let stdout = subscription.0.stdout.take().unwrap();
     let (sender, frames) = std::sync::mpsc::channel::<serde_json::Value>();
     let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
@@ -1834,7 +1834,9 @@ fn program_status_cli_observes_available_without_completing_work() {
         loop {
             let frame = frames
                 .recv_timeout(until.saturating_duration_since(Instant::now()))
-                .unwrap_or_else(|error| panic!("watch missed {state:?}: {error}; last: {last:?}"));
+                .unwrap_or_else(|error| {
+                    panic!("subscription missed {state:?}: {error}; last: {last:?}")
+                });
             assert!(frame["unavailable"].is_null(), "{frame}");
             if let Some(item) = frame["body"].as_array().unwrap().iter().find(|item| {
                 item["id"] == id
@@ -1922,12 +1924,12 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     writeln!(input, "{}", records("done")).unwrap();
     watch_for(Some("done"));
-    drop(watch.0.stdin.take());
-    assert!(watch.0.wait().unwrap().success());
+    drop(subscription.0.stdin.take());
+    assert!(subscription.0.wait().unwrap().success());
     reader.join().unwrap();
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
-        .process(&lf_process_id)
+        .lf_process(&lf_process_id)
         .unwrap()
         .unwrap()
         .completed_at

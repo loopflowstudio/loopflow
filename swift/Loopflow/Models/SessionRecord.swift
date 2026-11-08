@@ -20,6 +20,7 @@ public enum SessionAvailability: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
+    case reveal
     case open
     case moveHere = "move_here"
 }
@@ -184,7 +185,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let availability: SessionAvailability?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    public let agentProcessId: String?
+    public let agentProcessId: AgentProcessId?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -223,6 +224,25 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     public func action(_ kind: SessionActionKind) -> SessionAction? {
         actions.first { $0.kind == kind }
+    }
+
+    /// Every Task this Session belongs to: its memberships, its checkout's Task
+    /// and its own Work when that is a Task.
+    public var taskMemberships: Set<String> {
+        Set(taskIds + [workspace?.taskId, work?.kind == .task ? work?.id : nil].compactMap { $0 })
+    }
+
+    public func names(task id: String) -> Bool { taskMemberships.contains(id) }
+
+    /// A first launch ended with no history, so there is nothing to open and no
+    /// holder: MoveHere is the explicit click that repeats it.
+    public var launchRetry: SessionAction? {
+        action(.open) == nil ? action(.moveHere) : nil
+    }
+
+    /// Another client holds input; only Take back transfers it.
+    public var heldElsewhere: Bool {
+        action(.moveHere) != nil && launchRetry == nil
     }
 
     enum CodingKeys: String, CodingKey {
@@ -271,7 +291,7 @@ extension SessionRecord {
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
-        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        agentProcessId = try values.decodeIfPresent(AgentProcessId.self, forKey: .agentProcessId)
         taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
         taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))

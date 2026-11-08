@@ -200,7 +200,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     .unwrap();
     let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
     let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
-    let record = store.process(&id).unwrap().unwrap();
+    let record = store.lf_process(&id).unwrap().unwrap();
     let retained_path = store.process_receipt_path(&id).unwrap().unwrap();
     assert_eq!(retained_path.file_name(), path.file_name());
     assert_eq!(
@@ -211,7 +211,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        crate::journal::recorded_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
+        crate::journal::lf_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
             assert_eq!((pid, start), (std::process::id(), 1));
             ProcessIdentityEvidence::Dead
         }),
@@ -231,7 +231,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     )
     .unwrap();
     assert_eq!(
-        crate::journal::process_evidence(&store, &id),
+        crate::journal::lf_evidence(&store, &id),
         ProcessIdentityEvidence::Dead
     );
     assert!(conn
@@ -893,7 +893,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id.as_str(),
+        store.resolve_process(PROCESS).unwrap().unwrap().id(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn

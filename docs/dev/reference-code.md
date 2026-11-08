@@ -12,7 +12,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Territory | Main paths | Approx. LOC | What lives there |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/chapter control, sessions, PR, Git, release, metrics, PM operations |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
@@ -55,7 +55,7 @@ kernel locks                 live local exclusion authority
 | Rental | `ondemands`, `pools`, `rentals`, `machine_records` | Creation receipts, owned machine commitments, admitted rentals with caps and deadlines, and records copied back before a machine is given back; templates, availability and admission limits live in personal configuration |
 | Machine and provider authority | `machines`, `access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_session_accounts`, `provider_tokens` | Observed machine and browser identities, credentials, observed limits, shared-home account switches and delivery receipts; declared routes and browser selection live in personal configuration |
 | Local observation/cache | `blob_tokens`, `github_people` | Deterministic Git-blob token counts and the GitHub user behind each Task owner's email |
-| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Task's graph and step `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. Every `--watch` read compares it to decide whether to read again |
+| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Task's graph and step `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. Every `--subscribe` read compares it to decide whether to read again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
 Migration files on origin/main remain immutable. Three direct draft groups establish
@@ -118,9 +118,9 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf <skill>` and `lf graph` | Direct Skill execution and Graph composition | Current process and Machine |
 | `lf wave`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf session` | Sessions and explicit resolution | Current Machine LfSession state |
-| `lf ops wt`, `commit`, `sync`, `pr`, `ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
-| `lf monitor`, `ps`, `top`, `prune`; `lf history usage`, `lf history linear`; `lf self doctor` | Execution and process observation | Current Machine only |
-| `lf ops machine` | Machine identity | Current Machine unless routed explicitly |
+| `lf wt`, `commit`, `sync`, `pr`, `repo ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
+| `lf process list`, `process top`, `process prune`; `lf session usage`, `lf session history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
+| `lf machine` | Machine identity | Current Machine unless routed explicitly |
 | `lf task claim`, `unassign` | Task ownership | The writer Machine, reached over `lf --machine` |
 | `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |
 | Loopflow.app | Swift projections and user interaction | Queries the same DTOs and remote routes; owns no lifecycle |

@@ -2,7 +2,6 @@
 // Uses NSViewRepresentable to bridge the Metal-rendered terminal surface.
 
 import SwiftUI
-import Synchronization
 import AppKit
 import OSLog
 import QuartzCore
@@ -86,10 +85,10 @@ struct GhosttyTerminalView: View {
     }
 
     private var shellCommand: String? {
-        if case .shell(let id, _) = terminal {
-            return buildWorkspaceShellCommand(id: id, argv: argv, env: env)
-        }
-        return buildGhosttyShellCommand(argv: argv, env: env)
+        let command = buildGhosttyShellCommand(argv: argv, env: env)
+        // An attachment with no command must never become a local login shell.
+        if case .shell = terminal { return command ?? "/usr/bin/false" }
+        return command
     }
 }
 
@@ -194,9 +193,18 @@ final class GhosttyTerminalMount: NSView {
 /// Retains live terminal views for one repository across navigation and window
 /// closure. Its current window mounts the views; different repositories have
 /// separate pools because an NSView can only live in one view hierarchy.
+/// With a runtime, a Session's terminal can start before any pane mounts it;
+/// a pool without one (a headless store) only retains views mounts create.
 @MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]
+    @ObservationIgnored private let runtime: GhosttyManager?
+    /// The size mounts last gave a terminal; an unmounted start uses it so the
+    /// provider lays out for the pane it will appear in.
+    @ObservationIgnored var lastMountedSize: CGSize?
+    private static let unmountedSize = CGSize(width: 1100, height: 700)
+
+    init(runtime: GhosttyManager? = nil) { self.runtime = runtime }
 
     func view(for id: TerminalIdentity) -> GhosttyMetalView {
         if let existing = views[id] { return existing }
@@ -204,6 +212,33 @@ final class GhosttySurfacePool {
         view.pool = self
         views[id] = view
         return view
+    }
+
+    /// Start `argv` in a Session's terminal now, mounted or not. The view later
+    /// mounted for this identity adopts the running surface. Nothing starts without
+    /// a runtime, a command, or after this view's child exited.
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool {
+        guard let runtime, let command = buildGhosttyShellCommand(argv: argv, env: [:]) else { return false }
+        let view = view(for: id)
+        guard view.surface == nil, !view.childExited else { return false }
+        view.workingDirectory = workingDirectory
+        view.command = command
+        view.onSurfaceCreated = onSurfaceCreated
+        view.onSurfaceFailed = onSurfaceFailed
+        if case .uninitialized = runtime.state { runtime.initialize() }
+        switch runtime.state {
+        case .ready:
+            view.sizeDidChange(lastMountedSize ?? Self.unmountedSize)
+            view.createSurface(manager: runtime)
+            return view.surface != nil
+        case .failed(let reason):
+            onSurfaceFailed(reason)
+            return false
+        case .uninitialized, .initializing:
+            return false
+        }
     }
 
     /// Type `line` and Enter into a shell, as a person would: at once when its
@@ -331,8 +366,42 @@ final class GhosttySurfacePool {
         views.removeValue(forKey: view.terminal)
     }
 
+    func scrollToBottom(_ id: TerminalIdentity) {
+        guard let surface = views[id]?.surface else { return }
+        let action = "scroll_to_bottom"
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+    }
+
+    func screen(_ id: TerminalIdentity) -> String? {
+        guard let view = views[id], case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return nil }
+        return text
+    }
+
+    /// Leaving a pane detaches its lf relay (Ctrl+]) before freeing the surface,
+    /// so the Session owner records a deliberate leave without waiting for
+    /// connection-loss detection across SSH.
     func release(_ id: TerminalIdentity) {
-        views.removeValue(forKey: id)?.destroySurface()
+        guard let view = views.removeValue(forKey: id) else { return }
+        guard view.detachRelay() else {
+            view.destroySurface()
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            view.destroySurface()
+        }
+    }
+
+    /// Begin ordinary leave for every attached relay before the app exits.
+    func detachForQuit() {
+        for view in views.values { _ = view.detachRelay() }
+    }
+
+    var hasRunningRelays: Bool {
+        views.values.contains { view in
+            guard let surface = view.surface else { return false }
+            return !ghostty_surface_process_exited(surface)
+        }
     }
 
     func clearFocus() {
@@ -687,6 +756,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         return .available(text: text, truncated: truncated)
     }
 
+    /// Released by Desktop: the child's exit is our detach, not a closed pane.
+    private var detaching = false
+
+    /// Type the relay's detach key into a running child; false when none runs.
+    func detachRelay() -> Bool {
+        guard let surface, !childExited, !ghostty_surface_process_exited(surface) else { return false }
+        detaching = true
+        ghostty_surface_text(surface, "\u{1d}", 1)
+        return true
+    }
+
     func destroySurface() {
         serverConnection?.stop()
         serverConnection = nil
@@ -721,9 +801,12 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// UI can reclassify immediately instead of waiting for the next poll.
     func handleSurfaceClose() {
         guard surface != nil else { return }
+        if detaching {
+            destroySurface()
+            return
+        }
         var output: String?
-        if case .session = terminal,
-           case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
+        if case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
             let excerpt = text.trimmingCharacters(in: .whitespacesAndNewlines)
             output = excerpt.isEmpty ? nil : excerpt + (truncated ? "\n[Terminal output truncated]" : "")
         }
@@ -981,13 +1064,17 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func updateSurfaceSize() {
         guard let surface else { return }
-        let backingSize = convertToBacking(bounds).size
+        // Unmounted, the view has no window to convert through; use the scale the
+        // surface was given so its grid matches the pane it will mount in.
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+        let backingSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         guard backingSize.width > 0, backingSize.height > 0 else { return }
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
     }
 
     func sizeDidChange(_ newSize: CGSize) {
         guard newSize.width > 0, newSize.height > 0 else { return }
+        if window != nil { pool?.lastMountedSize = newSize }
         if frame.size != newSize { setFrameSize(newSize) }
         updateContentScale()
     }
@@ -1627,6 +1714,11 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 // Stub view when GhosttyKit is not available
 @MainActor @Observable
 final class GhosttySurfacePool {
+    var lastMountedSize: CGSize?
+    init(runtime: GhosttyManager? = nil) {}
+    @discardableResult
+    func start(_ id: TerminalIdentity, workingDirectory: String, argv: [String],
+               onSurfaceCreated: @escaping () -> Void, onSurfaceFailed: @escaping (String) -> Void) -> Bool { false }
     func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         .unavailable(reason: .missingSurface)
@@ -1647,7 +1739,11 @@ final class GhosttySurfacePool {
     func associateProgramStatus(_ records: [SessionRecord]) {}
     func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
     func title(for id: TerminalIdentity) -> String? { nil }
+    func scrollToBottom(_ id: TerminalIdentity) {}
+    func screen(_ id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
+    func detachForQuit() {}
+    var hasRunningRelays: Bool { false }
     func clearFocus() {}
     func focus(_ id: TerminalIdentity) {}
 }
@@ -1709,8 +1805,8 @@ struct GhosttyTerminalView: View {
 
 #endif
 
-// Block geometry and the header format stay outside the Ghostty build: the
-// shell bootstrap below names the header marker in every configuration.
+// Block geometry and the header format stay outside the Ghostty build.
+// GhosttyResources/task-zshenv prints the same marker in the shell prompt.
 
 /// The directory line above a command. The Loopflow prompt prints it as
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;
@@ -1785,106 +1881,6 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     return ["env", envPrefix, command].joined(separator: " ")
 }
 
-/// zsh reads `ZDOTDIR/.zshenv` first. Loopflow's gives a shell still on the
-/// macOS default prompt a blank row, a header row holding the directory, and a
-/// command line, leaves every other prompt alone, then hands over to Ghostty's
-/// integration, which restores the user's own ZDOTDIR.
-///
-/// The header row is concealed text behind `GhosttyBlockHeader.marker`: the
-/// terminal keeps it as the directory at submission, and the overlay draws it
-/// in its own size and color.
-enum LoopflowZshBootstrap {
-    static let macOSDefaultPrompt = "%n@%m %1~ %# "
-
-    static let zshenv = """
-    if [[ -o interactive ]]; then
-        # Runs once, after the user's rc files have had their say.
-        _loopflow_prompt() {
-            precmd_functions=(${precmd_functions:#_loopflow_prompt})
-            # Login rc files may replace PATH. Keep this app's lf first for
-            # nested commands without changing the user's shell configuration.
-            if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
-            [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
-            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{5}\u{276F}%f '
-            # The command is bold; zsh ends the highlight before output starts.
-            zle_highlight=(${zle_highlight:#default:*} default:bold)
-        }
-        builtin typeset -ga precmd_functions zle_highlight
-        precmd_functions+=(_loopflow_prompt)
-    fi
-    builtin source -- "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv"
-
-    """
-
-
-    /// Writes the bootstrap and returns its directory. Rewritten per shell:
-    /// the system may clear temporary files while the app stays open, and a
-    /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
-    static func install() -> String? {
-        install(contents: zshenv, name: ".zshenv")?.deletingLastPathComponent().path
-    }
-
-    static func installBash() -> String? {
-        install(contents: """
-        source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
-        if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN%/*}:$PATH"; fi
-        """, name: "bash-env")?.path
-    }
-
-    /// Files written this process. Shell panes build their command in `body`, so
-    /// installing writes once and later calls only confirm the file survives.
-    private static let installed = Mutex<[String: URL]>([:])
-
-    private static func install(contents: String, name: String) -> URL? {
-        if let file = installed.withLock({ $0[name] }), FileManager.default.fileExists(atPath: file.path) {
-            return file
-        }
-        let directory = terminalTemporaryDirectory()
-            .appendingPathComponent("loopflow-shell", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent(name)
-            try contents.write(to: file, atomically: true, encoding: .utf8)
-            installed.withLock { $0[name] = file }
-            return file
-        } catch {
-            return nil
-        }
-    }
-}
-
-/// Keep a real shell after the initial conversation exits or hands off to an
-/// app. The PTY marker lets successive manual lf launches find this terminal.
-func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String]) -> String {
-    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-    let initial = buildGhosttyShellCommand(argv: argv, env: env).map { $0 + "\n" } ?? ""
-    let script = """
-    export LF_TERMINAL_ID=\(shellEscape(id))
-    export LF_TERMINAL_TTY="$(tty)"
-    \(initial)
-    if [ -n "$GHOSTTY_RESOURCES_DIR" ]; then
-        export GHOSTTY_SHELL_FEATURES="${GHOSTTY_SHELL_FEATURES-}"
-        case \(shellEscape(URL(fileURLWithPath: shell).lastPathComponent)) in
-            zsh)
-                if [ "${ZDOTDIR+x}" = x ]; then export GHOSTTY_ZSH_ZDOTDIR="$ZDOTDIR"; fi
-                export ZDOTDIR=\(LoopflowZshBootstrap.install().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/zsh""#)
-                ;;
-            bash)
-                export GHOSTTY_BASH_ENV="${ENV-}"
-                export GHOSTTY_BASH_INJECT=1
-                export ENV=\(LoopflowZshBootstrap.installBash().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash""#)
-                exec \(shellEscape(shell)) --posix -l
-                ;;
-            fish)
-                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish"; if test -n "$LF_BIN"; set -gx PATH (dirname "$LF_BIN") $PATH; end'
-                ;;
-        esac
-    fi
-    exec \(shellEscape(shell)) -l
-    """
-    return ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
-}
-
 func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
     let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
     guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
@@ -1936,7 +1932,7 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
     }
 }
 
-private func shellEscape(_ value: String) -> String {
+func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
 }

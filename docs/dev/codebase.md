@@ -22,7 +22,7 @@ complexity.
 | Territory | Main paths | Approx. LOC | Owns |
 | --- | --- | ---: | --- |
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Project operations, sessions, PR, Git, release, metrics, PM |
+| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Wave operations, sessions, PR, Git, release, metrics, planning |
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocess streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
@@ -48,7 +48,7 @@ subprocess edge to one concept.
 | provider streams | [`harness/`](../../rust/loopflow/src/harness) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
-| Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
+| Wave operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave) | goals, metrics, memory, relocation |
@@ -63,6 +63,7 @@ lf                         foreground command and Skill/Graph launches
 lf-prompt                  prompt-oriented executable surface
 lf-world                   builds fake worlds for demos and tests through production writers
 lf __context-block         provider turn-boundary hook: context at start/compaction, steers at tool and prompt boundaries, Linear acquisition at turn end
+lf __codex-observe         side subscriber to a Codex Session's app-server: records turns, sends the first turn and Task updates
 Loopflow.app               client over shared server/CLI DTOs
 ```
 
@@ -74,9 +75,9 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf <skill>`, `lf graph` | direct execution and composition |
 | `lf wave`, `repo`, `task` | planning and Work coordination |
 | `lf session` | durable Sessions and resolution |
-| `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
-| `lf history`, `history show`, `usage` | durable execution/history projections |
-| `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
+| `lf wt`, `commit`, `sync`, `pr`, `repo ci` | worktree and delivery operations |
+| `lf session history`, `session history show`, `session usage` | durable execution/history projections |
+| `lf process list`, `process top`, `process prune`, `machine doctor` | local OS and command-journal observation |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
 | `lf account` | provider credential and account authority |
@@ -104,7 +105,7 @@ execution ⇏ work, task launch
 work      ⇏ task launch
 ```
 
-Keep these directions literal. Work types own Project/Task domain progression;
+Keep these directions literal. Work types own Wave/Task domain progression;
 Task launch joins them by starting an ordinary Graph in the Task checkout.
 Execution accepts preassembled Wave memory and opaque Work attribution; it does
 not resolve either from the planning store.
@@ -133,7 +134,7 @@ usage receipt.
 
 1. Name the real owner and stable key.
 2. Put the type in the owning domain, using shared `WorkRef` only when the fact
-   truly applies to Wave, Project, and Task.
+   truly applies to Wave and Task.
 3. Add one store operation with the narrow transaction the transition needs.
 4. Rebuild prompts or views from the fact at a boundary.
 5. Keep provider observation and authored state distinguishable.

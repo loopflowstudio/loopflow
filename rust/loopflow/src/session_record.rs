@@ -319,7 +319,7 @@ fn read_fact(evidence: &serde_json::Value) -> Option<FactEnvelope> {
 ///
 /// Optional counters stay unknown when no stream reported them. Finality is a
 /// count of direct provider receipts; Recorder settlement never upgrades it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionUsage {
     pub streams: usize,
     pub final_streams: usize,
@@ -338,7 +338,7 @@ pub struct SessionUsage {
 /// History beneath one conversation's immutable captured input. This is not a
 /// resumable object. Provider records retain separate outcomes and driving Processes;
 /// recorder completion is historical evidence, never native success or process exit.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
     pub session_id: crate::id::LfSessionId,
     pub captured: Option<i64>,
@@ -367,7 +367,7 @@ pub struct SessionHistory {
 
 /// An exact native turn, or an older provider observation with unknown native
 /// identity. References identify evidence; they confer no process/settlement API.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
     pub lf_process_id: Option<crate::id::LfProcessId>,
@@ -379,7 +379,7 @@ pub struct ProviderHistory {
     pub usage: SessionUsage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderHistoryReference {
     NativeTurn {
@@ -1167,7 +1167,7 @@ pub(crate) fn stdin_tty() -> Option<String> {
 /// Who chose a Session's current title. A human name is never replaced by a
 /// generated suggestion. `Unavailable` is never stored: the canonical name
 /// lives on another Machine and the reader only has a local display label.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionTitleSource {
     Generated,
@@ -2910,7 +2910,7 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             // Observed wait, not successful spawn or a finished capture, ends it.
             capture.record_native_agent_exit(&first)?;
-            let ended = store.process(&first.agent_process_id)?.unwrap();
+            let ended = store.agent_process(&first.agent_process_id)?.unwrap();
             assert_eq!(ended.pid, Some(child.id()));
             assert!(ended.completed_at.is_some());
 
@@ -2924,14 +2924,14 @@ mod tests {
             assert_eq!(child.wait()?.code(), Some(42));
             assert!(capture.record_native_agent_exit(&first).is_err());
             assert!(store
-                .process(&second.agent_process_id)?
+                .agent_process(&second.agent_process_id)?
                 .unwrap()
                 .completed_at
                 .is_none());
             // The child exited but without its wait receipt another launch is refused.
             assert!(capture.spawn_native_agent(command()).is_err());
             capture.record_native_agent_exit(&second)?;
-            assert_eq!(store.process(&first.agent_process_id)?, Some(ended));
+            assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
             capture.finish("completed")?;
             assert!(capture.spawn_native_agent(command()).is_err());
             assert!(store

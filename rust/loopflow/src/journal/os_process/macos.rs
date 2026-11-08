@@ -54,7 +54,9 @@ pub(super) fn read(pid: u32) -> io::Result<Option<OsProcess>> {
     }
     // SAFETY: the shim returned a complete initialized structure.
     let info = unsafe { info.assume_init() };
-    let command = arguments(pid)?.unwrap_or_else(|| name(&info.name));
+    let command = arguments(pid)?
+        .map(|args| args.join(" "))
+        .unwrap_or_else(|| name(&info.name));
     Ok(Some(info.into_process(command)))
 }
 
@@ -111,7 +113,7 @@ fn kernel_state(status: u32, flags: u32) -> &'static str {
     }
 }
 
-pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
+pub(super) fn pids() -> io::Result<Vec<u32>> {
     // PROC_ALL_PIDS = 1. The first call sizes the byte buffer; leave room for
     // processes born between reads, as ps also samples a changing inventory.
     // SAFETY: a null, zero-sized buffer asks libproc for the required size.
@@ -132,13 +134,18 @@ pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
     if bytes < 0 {
         return Err(io::Error::last_os_error());
     }
-    let mut processes = Vec::new();
-    for pid in pids
+    Ok(pids
         .into_iter()
         .take(bytes as usize / size_of::<i32>())
         .filter(|pid| *pid > 0)
-    {
-        match read(pid as u32)? {
+        .map(|pid| pid as u32)
+        .collect())
+}
+
+pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
+    let mut processes = Vec::new();
+    for pid in pids()? {
+        match read(pid)? {
             Some(process) => processes.push(process),
             None => continue,
         }
@@ -169,7 +176,7 @@ pub(super) fn executable(pid: u32) -> Option<PathBuf> {
     Some(PathBuf::from(path.to_string_lossy().as_ref()))
 }
 
-fn arguments(pid: u32) -> io::Result<Option<String>> {
+pub(super) fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
     let mut buffer = vec![0u8; 1024 * 1024];
     let mut length = buffer.len();
@@ -200,7 +207,7 @@ fn arguments(pid: u32) -> io::Result<Option<String>> {
     Ok(decode_arguments(&buffer))
 }
 
-fn decode_arguments(buffer: &[u8]) -> Option<String> {
+fn decode_arguments(buffer: &[u8]) -> Option<Vec<String>> {
     let count = i32::from_ne_bytes(buffer.get(..4)?.try_into().ok()?);
     let body = buffer.get(4..)?;
     let executable_end = body.iter().position(|byte| *byte == 0)?;
@@ -211,9 +218,9 @@ fn decode_arguments(buffer: &[u8]) -> Option<String> {
     let args = body[start..]
         .split(|byte| *byte == 0)
         .take(usize::try_from(count).ok()?)
-        .map(String::from_utf8_lossy)
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
         .collect::<Vec<_>>();
-    Some(args.join(" "))
+    Some(args)
 }
 
 #[cfg(test)]
@@ -230,13 +237,18 @@ mod tests {
 
     #[test]
     fn arguments_exclude_environment() {
-        let mut bytes = 3i32.to_ne_bytes().to_vec();
+        let mut bytes = 4i32.to_ne_bytes().to_vec();
         bytes.extend_from_slice(
-            b"/bin/codex\0\0/bin/codex\0app-server\0--listen\0SECRET=never-log\0",
+            b"/bin/rex\0\0/bin/rex\0server\0--listen\0unix:///Task servers/rex.sock\0SECRET=never-log\0",
         );
         assert_eq!(
-            decode_arguments(&bytes).as_deref(),
-            Some("/bin/codex app-server --listen")
+            decode_arguments(&bytes).unwrap(),
+            [
+                "/bin/rex",
+                "server",
+                "--listen",
+                "unix:///Task servers/rex.sock"
+            ]
         );
     }
 }

@@ -265,9 +265,7 @@ async fn run(
             result = &mut maintenance => return result,
             Some(certificate) = renewals.recv() => { tls = certificate; continue; }
         };
-        let Ok(permit) = slots.clone().try_acquire_owned() else {
-            continue;
-        };
+        let slots = slots.clone();
         let (host, owner, tls, instance, executable, clients, tickets) = (
             bound.host.clone(),
             bound.config.owner.clone(),
@@ -278,13 +276,21 @@ async fn run(
             tickets.clone(),
         );
         connections.spawn(async move {
-            let _permit = permit;
             let result = async {
                 let admission =
                     tokio::task::spawn_blocking(move || host.permits(peer, &owner)).await??;
                 let socket =
                     tokio::time::timeout(Duration::from_secs(5), tls.accept(socket)).await??;
-                connection(socket, admission, &instance, &executable, &clients, tickets).await
+                connection(
+                    socket,
+                    admission,
+                    &instance,
+                    &executable,
+                    &clients,
+                    tickets,
+                    &slots,
+                )
+                .await
             }
             .await;
             if let Err(error) = result {
@@ -314,6 +320,7 @@ async fn connection<S>(
     executable: &str,
     clients: &Clients,
     tickets: Arc<Tickets>,
+    slots: &Arc<Semaphore>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
@@ -351,7 +358,8 @@ where
         .await
         .context("no message within five seconds")?
         .context("closed before its first message")??;
-    let ended = match service::welcome(&mut messages, &first, instance, executable, clients).await?
+    let ended = match service::welcome(&mut messages, &first, instance, executable, clients, slots)
+        .await?
     {
         Greeting::Ended => Ok(()),
         Greeting::Ticket(ticket) if ticket_path => {
@@ -567,6 +575,9 @@ mod tests {
                 "test-executable",
                 &Clients::default(),
                 tickets,
+                &Arc::new(tokio::sync::Semaphore::new(
+                    crate::server::wire::MAX_CONNECTIONS,
+                )),
             )
             .await;
         });
@@ -650,6 +661,7 @@ mod tests {
             let operation = Operation::Server(operation);
             client
                 .send(text(&ClientMessage::Request {
+                    select: None,
                     id: id.into(),
                     operation,
                 }))
@@ -661,19 +673,21 @@ mod tests {
                 "{answer:?}"
             );
         }
-        // Attach answers a ticket; the terminal connection is separate.
+        // A Session without an owner is refused without starting a provider.
         client
             .send(text(&ClientMessage::Request {
+                select: None,
                 id: "terminal".into(),
-                operation: Operation::Server(ServerOperation::Attach {
-                    owner: crate::id::LfProcessId::new(),
+                operation: Operation::Server(ServerOperation::SessionAttach {
+                    session: crate::id::LfSessionId::from("session_missing"),
+                    owner_lf_process_id: None,
                 }),
             }))
             .await
             .unwrap();
         assert!(matches!(
             receive(&mut client).await.unwrap(),
-            ServerMessage::Response { result, .. } if result["ticket"].is_string()
+            ServerMessage::Error { id: Some(id), .. } if id == "terminal"
         ));
         // Binary frames belong to a bridged terminal, never to the control connection.
         client
@@ -700,14 +714,14 @@ mod tests {
         // A ticket presented on the control endpoint admits nothing.
         let mut wrong = connect(&tickets, true, "/v1/machine", false).await.unwrap();
         wrong
-            .send(text(&ClientMessage::Ticket {
+            .send(text(&ClientMessage::Attach {
                 ticket: ticket.clone(),
             }))
             .await
             .unwrap();
         assert!(receive(&mut wrong).await.is_none());
         let mut bulk = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
-        bulk.send(text(&ClientMessage::Ticket { ticket }))
+        bulk.send(text(&ClientMessage::Attach { ticket }))
             .await
             .unwrap();
         assert!(matches!(
@@ -732,7 +746,7 @@ mod tests {
         );
         let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
         refused
-            .send(text(&ClientMessage::Ticket { ticket: foreign }))
+            .send(text(&ClientMessage::Attach { ticket: foreign }))
             .await
             .unwrap();
         assert!(matches!(

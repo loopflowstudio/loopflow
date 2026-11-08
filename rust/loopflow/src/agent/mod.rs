@@ -6,7 +6,7 @@
 mod session;
 pub(crate) use session::{
     build_session_command, native_connection_command, resolve_session_config, session_environment,
-    NativeConnection, ProviderInvocation, SessionCommand,
+    ProviderInvocation, SessionCommand,
 };
 
 use crate::id::AgentSessionId;
@@ -313,6 +313,7 @@ fn resolve_account_route_blocking(
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
             launch.isolate,
+            launch.cwd.clone(),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),

@@ -575,13 +575,13 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(ServerMessage.self,
             from: Data(#"{"type":"response","id":"x","result":{"kind":"read"}}"#.utf8)))
 
-        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .roadmap(directory: "/", wave: nil, task: nil, all: true))
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try machineFixture("subscribe"))
 
-        let ownerResponse: ServerMessage = try machineFixture("owner")
+        let ownerResponse: ServerMessage = try machineFixture("attached")
         guard case .response(_, _, let owner) = ownerResponse else { return XCTFail("Expected Session owner") }
-        XCTAssertEqual(owner["owner"], .string("85c31c1e-850c-4821-878d-55527b6dba46"))
+        XCTAssertEqual(owner["owner_lf_process_id"], .string("85c31c1e-850c-4821-878d-55527b6dba46"))
         let renamed: ServerMessage = try machineFixture("response")
         guard case .response(_, let trace, let result) = renamed else { return XCTFail("Expected a write's value") }
         XCTAssertFalse(trace.isEmpty)

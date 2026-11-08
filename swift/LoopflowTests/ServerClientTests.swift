@@ -42,6 +42,33 @@ struct ServerClientTests {
         #expect(!reading.contains("late"))
     }
 
+    @Test func unansweredReadsExpireThenEndAStalledConnection() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            if message["type"] as? String == "subscribe" {
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+            }
+            return true // Reads are never answered.
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        var frames = subscription.lines.makeAsyncIterator()
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
+        for _ in 0..<ServerLink.stalledReads {
+            do {
+                _ = try await ServerClient.read(.machineId, location: peer.location, deadline: .milliseconds(20))
+                Issue.record("An unanswered read returned")
+            } catch {
+                #expect(error.localizedDescription.contains("did not answer in time"))
+            }
+        }
+        do {
+            _ = try await frames.next()
+            Issue.record("A stalled connection kept its subscription")
+        } catch {
+            #expect(!(error is CancellationError))
+        }
+    }
+
     @Test func refusedWriteThrowsItsCodeAndWritesReturnTheirValue() async throws {
         let peer = try ServerPeer()
         let refused = Mutex<Bool>(false)
@@ -60,7 +87,9 @@ struct ServerClientTests {
             _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
             Issue.record("A refused write succeeded")
         } catch {
-            #expect(error.localizedDescription == "conflict: Dashboard changed; read it again before editing")
+            #expect((error as? ServerError)?.code == .conflict)
+            #expect((error as? ServerError)?.mayHaveHappened == false)
+            #expect(error.localizedDescription == "Dashboard changed; read it again before editing")
         }
         let written = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
         #expect(try JSONDecoder().decode([String: String].self, from: Data(written.utf8)) == ["path": "/r/.lf/graphs/code.yaml"])
@@ -120,14 +149,14 @@ struct ServerClientTests {
             guard message["type"] as? String == "request", let id = message["id"] as? String,
                   let operation = message["operation"] as? [String: Any] else { return true }
             switch operation["kind"] as? String {
-            case "repository.path":
+            case "repo.path":
                 respond(["type": "bulk", "id": id, "ticket": "download", "bytes": big.utf8.count])
                 try? peer.admit("download") { try $0.write(["type": "response", "id": id, "trace_id": "trace", "result": big]) }
             case "request.upload":
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": ["ticket": "upload"]])
                 try? peer.admit("upload") { connection in
                     let request = try connection.read()
-                    let uploaded = ((request?["operation"] as? [String: Any])?["request"] as? String)?.utf8.count ?? 0
+                    let uploaded = ((request?["operation"] as? [String: Any])?["value"] as? String)?.utf8.count ?? 0
                     respond(["type": "response", "id": request?["id"] ?? "", "trace_id": "trace", "result": uploaded])
                 }
             default: break
@@ -135,23 +164,23 @@ struct ServerClientTests {
             return true
         }
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == big)
-        let output = try await ServerClient.configuration(.string(big), location: peer.location)
+        let output = try await ServerClient.configuration(.theme(path: "/unused", value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
 
     @Test func serverEndingASubscriptionFailsItsWatchAlone() async throws {
         let peer = try ServerPeer()
-        let subscription = Mutex<String?>(nil)
+        let subscriptionID = Mutex<String?>(nil)
         peer.serve { message, respond in
             switch (message["type"] as? String, (message["operation"] as? [String: Any])?["kind"] as? String) {
             case ("subscribe", _):
                 let id = message["id"] as! String
-                subscription.set(id)
+                subscriptionID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
                 respond(["type": "reading", "id": id, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
-                let id = subscription.get()!
+                let id = subscriptionID.get()!
                 respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
@@ -160,22 +189,23 @@ struct ServerClientTests {
             }
             return true
         }
-        let watch = ServerClient.watch(.allPlans, location: peer.location)
-        var frames = watch.lines.makeAsyncIterator()
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
-        watch.send(Data(#"{"id":4}"#.utf8 + [10]))
+        subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
         let last = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
             _ = try await frames.next()
-            Issue.record("An ended subscription kept its watch open")
+            Issue.record("An ended subscription kept its stream open")
         } catch {
-            #expect(error.localizedDescription == "unavailable: gone")
+            #expect((error as? ServerError)?.code == .unavailable)
+            #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")
-        await watch.cancel()
+        await subscription.cancel()
     }
 
     @Test(arguments: [false, true])
@@ -218,7 +248,7 @@ struct ServerClientTests {
             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
         }
         try Data().write(to: root.appendingPathComponent("setup-allowed"))
-        // Both a refreshed reading and reopened watches share one consumed
+        // Both a refreshed reading and reopened subscriptions share one consumed
         // readiness attempt. Installation is now possible but remains untouched.
         try await withThrowingTaskGroup(of: Void.self) { group in
             for attempt in 0..<3 {
@@ -231,14 +261,14 @@ struct ServerClientTests {
                             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
                         }
                     } else {
-                        let watch = ServerClient.watch(query, location: location)
+                        let subscription = ServerClient.subscribe(query, location: location)
                         do {
-                            for try await _ in watch.lines { Issue.record("The server is still unavailable") }
-                            Issue.record("The watch must report unavailability")
+                            for try await _ in subscription.lines { Issue.record("The server is still unavailable") }
+                            Issue.record("The subscription must report unavailability")
                         } catch {
                             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
                         }
-                        await watch.cancel()
+                        await subscription.cancel()
                     }
                 }
             }
@@ -253,16 +283,16 @@ struct ServerClientTests {
             _ = try await server.status()
             let reading = try await ServerClient.read(query, location: location)
             #expect(reading.contains("Recovered Work"))
-            let watch = ServerClient.watch(query, location: location)
+            let subscription = ServerClient.subscribe(query, location: location)
             do {
-                var frames = watch.lines.makeAsyncIterator()
+                var frames = subscription.lines.makeAsyncIterator()
                 let first = try #require(try await frames.next())
                 #expect(String(decoding: first, as: UTF8.self).contains("Recovered Work"))
             } catch {
-                await watch.cancel()
+                await subscription.cancel()
                 throw error
             }
-            await watch.cancel()
+            await subscription.cancel()
             #expect(try String(contentsOf: root.appendingPathComponent("setup-attempts"), encoding: .utf8) == "attempt\n")
             #expect(!fm.fileExists(atPath: root.appendingPathComponent("registered-again").path))
         } catch {
@@ -352,7 +382,7 @@ private final class ServerPeer: @unchecked Sendable {
         let connection = PeerConnection(fd: fd)
         defer { connection.close() }
         let presented = try connection.read()
-        guard presented?["type"] as? String == "ticket", presented?["ticket"] as? String == ticket else {
+        guard presented?["type"] as? String == "attach", presented?["ticket"] as? String == ticket else {
             throw RegistryQueryError("The ticketed connection presented \(presented ?? [:])")
         }
         try connection.write(["type": "admitted"])

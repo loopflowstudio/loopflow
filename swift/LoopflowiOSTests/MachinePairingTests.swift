@@ -10,10 +10,6 @@ import XCTest
 final class MachinePairingTests: XCTestCase {
     func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
         let bundle = Bundle(for: Self.self)
-        let configURL = try XCTUnwrap(bundle.url(forResource: "mobile_configuration", withExtension: "json", subdirectory: "server"))
-        let config = try JSONDecoder().decode(MachineMobileConfiguration.self, from: Data(contentsOf: configURL))
-        XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(config)),
-                       try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: configURL)))
         let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))
         guard case .response("mobile-1", _, let result) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
             return XCTFail("Expected listener configuration")

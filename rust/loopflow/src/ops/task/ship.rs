@@ -47,7 +47,7 @@ pub enum ShipStep {
 
 /// What a shipping Task is doing, derived from its ship process, its state
 /// and its landing. Nothing here waits on a person.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ShippingSnapshot {
     /// When the Task was handed off.
     pub shipped_at: i64,
@@ -56,7 +56,7 @@ pub struct ShippingSnapshot {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ShippingState {
@@ -110,7 +110,7 @@ fn carrier_evidence(
     shipping: &TaskShipping,
 ) -> ProcessIdentityEvidence {
     match &shipping.process {
-        Some(process) => crate::journal::process_evidence(sqlite, process),
+        Some(process) => crate::journal::lf_evidence(sqlite, process),
         None => ProcessIdentityEvidence::Dead,
     }
 }
@@ -260,7 +260,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .and_then(|shipping| shipping.process)
         {
             if carrier != process
-                && crate::journal::process_evidence(&store.sqlite, &carrier)
+                && crate::journal::lf_evidence(&store.sqlite, &carrier)
                     != ProcessIdentityEvidence::Dead
             {
                 return Ok(ShipStart::AlreadyShipping {
@@ -370,12 +370,11 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
             .and_then(|shipping| shipping.process.as_ref())
             .filter(|process| current.as_ref() != Some(*process))
         {
-            if crate::journal::process_evidence(&store.sqlite, process)
-                == ProcessIdentityEvidence::Live
+            if crate::journal::lf_evidence(&store.sqlite, process) == ProcessIdentityEvidence::Live
             {
                 if let Some(pid) = store
                     .sqlite
-                    .process(process)
+                    .lf_process(process)
                     .ok()
                     .flatten()
                     .and_then(|record| record.pid)

@@ -3,8 +3,8 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf graph show GRAPH_PROCESS --processes --json
-lf ps --json
+lf process show GRAPH_PROCESS --json
+lf process list --json
 ```
 
 A conversation, a Graph and an operating-system process answer different
@@ -116,7 +116,7 @@ private writes back to the installation.
 ## Attribution and ownership
 
 Typed ancestry belongs to LfSession and Process. Tasks require repository identity
-and have optional Project membership, which determines their optional Wave.
+and have optional Wave membership, recorded through the Wave's planning row.
 Constructors derive ancestors and reject contradictions in the transaction.
 Graph members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or attachment.
@@ -131,7 +131,7 @@ and its limits are in the
 Actual work reservation, when `lf task run` or `lf task checkout` allocates a
 checkout, claims an unowned Task in its append-only `task_ownership` log. Merely
 recording an inspection Process does not, nor does bind. Entries are never updated
-or deleted; completion, abandonment, reopening and chapter transfer write none.
+or deleted; completion, abandonment, reopening and Wave moves write none.
 
 ## Reads and cutover
 
@@ -153,12 +153,11 @@ branch binary at the installed Machine.
 
 ## Planning and external transitions
 
-A Chapter is the shared name of each Wave's In Progress Linear Project. Project
-status owns current, planned and historical plans; there is no Chapter table,
-packet or Machine-local switch. The local Project row is a synchronized projection.
-Rotation converges through fresh provider facts and stable identities, preserving
-started Tasks and their worktree, PR and execution. Partial rotation remains
-retryable; unrelated competing current Projects remain unresolved.
+A Wave's planning is one In Progress Linear Project when connected. Linear
+Project status owns current, planned and historical plans; there is no Chapter
+or Machine-local switch. The local Project row is a synchronized projection. A
+plan is replaced in place, preserving started Tasks and their worktree, PR and
+execution; unrelated competing current Linear Projects remain unresolved.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider
 processes. Use the smallest boundary that can prove the operation: a SQLite

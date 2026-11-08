@@ -5,7 +5,7 @@ use anyhow::{bail, Context};
 
 use serde::{Deserialize, Serialize};
 
-use super::waves::Shape;
+use super::write::SessionOpenIntent;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
@@ -18,7 +18,23 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
         return crate::transport::serve(argv, *terminal);
     }
     if let SessionCommand::List(args) = command {
-        return list_sessions(args, Shape::Tasks);
+        return list_sessions(args);
+    }
+    if let SessionCommand::Usage(args) = command {
+        return super::history::usage(args);
+    }
+    if let SessionCommand::Retention { json } = command {
+        return super::history_transcript::retention(*json);
+    }
+    match command {
+        SessionCommand::History { cmd: Some(cmd), .. } => return super::history::run(cmd),
+        SessionCommand::History {
+            id: None,
+            feed,
+            cmd: None,
+            ..
+        } => return super::activity::run(feed),
+        _ => {}
     }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
@@ -35,36 +51,25 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
-        SessionCommand::Steer { id, message } => {
+        SessionCommand::Serve { .. } => {
+            unreachable!("serve owns its process before any runtime")
+        }
+        SessionCommand::Steer { id, message, json } => {
+            use crate::engine::session::SteerScope;
             let store = open_shared_store().await?;
-            let author = crate::config::participant_name()?
-                .unwrap_or_else(|| "attribution unresolved".into());
-            let Some(id) = id else {
-                // Global `--repo` has already entered the selected repository.
-                let steer = match cli.wave.as_deref() {
-                    Some(wave) => {
-                        crate::lf::commands::waves::save_steer(&store, wave, &author, message)
-                            .await?
-                    }
-                    None => {
-                        let root = crate::repo::find_repo_root()?;
-                        let repo = crate::repository::CanonicalRepo::discover(&root)?;
-                        store
-                            .sqlite
-                            .save_repository_steer(&repo, &author, message)?
-                    }
-                };
-                println!("Saved {}", steer.id);
-                return Ok(());
+            // Global `--repo` has already entered the selected repository.
+            let scope = match (id.as_deref(), cli.wave.as_deref()) {
+                (Some(id), _) => SteerScope::Session(id),
+                (None, Some(wave)) => SteerScope::Wave(wave),
+                (None, None) => SteerScope::Repository,
             };
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            let steer = store
-                .sqlite
-                .save_session_steer(&session.id, &author, message)?;
-            println!("Saved {}", steer.id);
+            let directory = std::env::current_dir()?;
+            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
+            if *json {
+                println!("{}", serde_json::to_string(&steer)?);
+            } else {
+                println!("Saved {}", steer.id);
+            }
             Ok(())
         }
         SessionCommand::Steers {
@@ -113,7 +118,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let store = open_shared_store().await?;
             let agent_process = agent_process
                 .as_deref()
-                .map(crate::id::LfProcessId::parse)
+                .map(crate::id::AgentProcessId::parse)
                 .transpose()?;
             crate::ops::human_session::observe_program_status(
                 &store,
@@ -123,18 +128,23 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
+        SessionCommand::History { id: None, .. } => {
+            unreachable!("the history feed and its commands return before any runtime")
+        }
         SessionCommand::History {
-            id,
-            json,
+            id: Some(id),
+            feed,
             after,
-            limit,
+            ..
         } => {
             let store = open_shared_store().await?;
             let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
                 bail!("Session {id} was not found");
             };
-            let events = store.sqlite.session_history(&session.id, *after, *limit)?;
-            if *json {
+            let events = store
+                .sqlite
+                .session_history(&session.id, *after, feed.limit)?;
+            if feed.json {
                 println!("{}", serde_json::to_string(&events)?);
             } else {
                 for event in events {
@@ -149,7 +159,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) => unreachable!("lists return before any runtime"),
+        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+            unreachable!("reads return before any runtime")
+        }
         SessionCommand::Resume {
             id,
             connection,
@@ -262,17 +274,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
     }
 }
 
-/// `lf session list --json`: one Session and the Work it belongs to. Wire
-/// type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionRow {
-    #[serde(flatten)]
-    pub session: SessionFacts,
-    pub task: Option<crate::durable::TaskId>,
-    /// Wave name, as `--wave` takes it.
-    pub wave: Option<String>,
-}
-
 /// One Session's own facts; `lf task status` lists its Task's Sessions with them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionFacts {
@@ -288,23 +289,7 @@ pub struct SessionFacts {
     pub available: bool,
     pub cwd: String,
     /// The provider's current AgentProcess, as `lf ps` lists it.
-    pub agent_process_id: Option<crate::id::LfProcessId>,
-}
-
-impl SessionRow {
-    fn of(session: SessionRecord, waves: &std::collections::HashMap<String, String>) -> Self {
-        Self {
-            task: match &session.work {
-                Some(crate::durable::WorkRef::Task(task)) => Some(task.clone()),
-                _ => None,
-            },
-            wave: session
-                .wave_id
-                .as_ref()
-                .and_then(|wave| waves.get(&wave.to_string()).cloned()),
-            session: SessionFacts::of(session),
-        }
-    }
+    pub agent_process_id: Option<crate::id::AgentProcessId>,
 }
 
 impl SessionFacts {
@@ -322,15 +307,15 @@ impl SessionFacts {
     }
 }
 
-/// `lf session list` (`Shape::Tasks`) and `lf desktop sessions` (`Shape::Desktop`).
-pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()> {
+/// `lf session list`.
+pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
-    if args.watch {
-        return watch_list(filter, shape, super::watch::Transport::Stdio).map(drop);
+    if args.subscribe {
+        return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        list(&store, args.json || shape == Shape::Desktop, &filter, shape).await
+        list(&store, args.json, &filter).await
     })
 }
 
@@ -358,7 +343,7 @@ pub(crate) fn list_filter(
     })
 }
 
-/// What a `lf session list --watch` request can select instead.
+/// What a `lf session list --subscribe` request can select instead.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionWatchArgs {
@@ -370,11 +355,10 @@ struct SessionWatchArgs {
     interactive: Option<bool>,
 }
 
-pub(crate) fn watch_list(
+pub(crate) fn subscribe_list(
     filter: crate::session::SessionFilter,
-    shape: Shape,
-    transport: super::watch::Transport,
-) -> anyhow::Result<Option<super::watch::Subscription>> {
+    transport: super::subscribe::Transport,
+) -> anyhow::Result<Option<super::subscribe::Subscription>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),
@@ -384,12 +368,13 @@ pub(crate) fn watch_list(
     // A clock tick rereads every summary only when an AgentProcess lived or
     // died, a Session went quiet long enough to become available, or a
     // persistent checkout appeared or vanished.
-    let watched = super::watch::Watched::every(super::watch::ACTIVITY_CLOCK).probing(|store| {
-        Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
-    });
-    super::watch::start(
+    let subscribed =
+        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK).probing(|store| {
+            Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
+        });
+    super::subscribe::start(
         args,
-        watched,
+        subscribed,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,
@@ -400,7 +385,7 @@ pub(crate) fn watch_list(
             };
             async move {
                 match store {
-                    Some(store) => read_list(&store, &filter, shape).await,
+                    Some(store) => read_list(&store, &filter).await,
                     None => Ok(serde_json::Value::Array(Vec::new())),
                 }
             }
@@ -443,48 +428,26 @@ pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde
     })
 }
 
-/// What `lf session list --json` prints for `filter` in `shape`.
+/// What `lf session list --json` prints for `filter`.
 pub(crate) fn read_once(
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
-        read_list(&store, filter, shape).await
+        read_list(&store, filter).await
     })
 }
 
-/// What `lf session list --json` prints: a page with `--page`, else every row.
+/// What `lf session list --json` prints: a page with `--page`, else every
+/// Session record.
 async fn read_list(
     store: &Arc<Store>,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<serde_json::Value> {
-    let waves = match shape {
-        Shape::Desktop => None,
-        Shape::Tasks => Some(
-            store
-                .list_waves(None)
-                .await?
-                .iter()
-                .map(|wave| (wave.id().to_string(), wave.name().to_owned()))
-                .collect::<std::collections::HashMap<_, _>>(),
-        ),
-    };
-    let rows = |sessions: Vec<SessionRecord>| -> anyhow::Result<Vec<serde_json::Value>> {
-        sessions
-            .into_iter()
-            .map(|session| match &waves {
-                None => serde_json::to_value(session),
-                Some(waves) => serde_json::to_value(SessionRow::of(session, waves)),
-            })
-            .collect::<Result<_, _>>()
-            .map_err(Into::into)
-    };
     if filter.after.is_none() {
-        return Ok(serde_json::to_value(rows(
+        return Ok(serde_json::to_value(
             crate::ops::human_session::list(store, filter).await?,
-        )?)?);
+        )?);
     }
     anyhow::ensure!(
         filter.limit > 0,
@@ -504,7 +467,10 @@ async fn read_list(
     };
     Ok(serde_json::to_value(
         crate::ops::human_session::SessionPage {
-            entries: rows(entries)?,
+            entries: entries
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<_, _>>()?,
             next,
         },
     )?)
@@ -514,12 +480,13 @@ async fn list(
     store: &Arc<Store>,
     json: bool,
     filter: &crate::session::SessionFilter,
-    shape: Shape,
 ) -> anyhow::Result<()> {
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&read_list(store, filter, shape).await?)?
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(
+                &read_list(store, filter).await?
+            )?)?
         );
         return Ok(());
     }
@@ -643,8 +610,8 @@ async fn resume(
         &store,
         &cwd,
         target,
+        connection,
         fork,
-        true,
         connection.json || cli.json,
     )
     .await?;
@@ -657,7 +624,13 @@ async fn select(
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     if selected.started {
         crate::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
@@ -667,17 +640,31 @@ async fn select(
 }
 
 /// `lf session resume` without a message: the selected conversation, opened
-/// here, and its provider started unless `launch` is false (`--prepare`).
+/// here, and its provider started unless `--prepare` was requested.
 async fn reopen(
     store: &Arc<Store>,
     directory: &Path,
     target: crate::ops::human_session::SessionTarget<'_>,
+    connection: &SessionConnectionArgs,
     fork: bool,
-    launch: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
+    let intent = connection.intent();
+    if intent != SessionOpenIntent::Resume {
+        anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
+        let selected =
+            crate::ops::human_session::select_connection(store, directory, target, intent).await?;
+        return crate::ops::human_session::open_without_replacing(
+            store,
+            &selected.id,
+            intent,
+            !connection.prepare,
+            json,
+        )
+        .await;
+    }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, launch, json).await
+    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -697,7 +684,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, *fork, false, false).await
+                reopen(&store, directory, target, connection, *fork, false).await
             }
             SessionCommand::New { id, connection } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
@@ -740,7 +727,13 @@ async fn restarted(
     launch: bool,
     json: bool,
 ) -> anyhow::Result<SessionRecord> {
-    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    let selected = crate::ops::human_session::select_connection(
+        store,
+        directory,
+        target,
+        SessionOpenIntent::Resume,
+    )
+    .await?;
     let session = crate::ops::human_session::session_by_id(store, &selected.id)
         .await?
         .context("Session not found")?;
@@ -826,8 +819,8 @@ async fn rename(
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
-        return Err(crate::server::wire::ServerError::new(
-            crate::server::wire::ErrorCode::Invalid,
+        return Err(crate::engine::Error::new(
+            crate::engine::ErrorCode::Invalid,
             format!("{label} cannot be empty"),
         )
         .into());
@@ -835,7 +828,7 @@ fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     Ok(text)
 }
 
-async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
+pub(crate) async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     Ok(Arc::new(
         open_store(&config)

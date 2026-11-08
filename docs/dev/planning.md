@@ -6,15 +6,14 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run
+lf wave update-plan --wave product --plan scratch/product-plan.json
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
-cadence, budget and metric instruments across plans. Its one In Progress
-Project owns Tasks, KRs and targets. A Chapter is the shared
-name of those current Projects across the repository. The rotation below describes
-the explicit shared Project binding. Rotation retains exact destinations and selected
-issue IDs for recovery, while unreviewed backlog stays in its original Project.
+cadence, budget and metric instruments across plans. Its planning owns Tasks,
+KRs and targets; connected to Linear, that planning is one In Progress Linear
+Project. Each Wave's plan is authored in place and `lf wave plan bind`
+selects another existing Linear Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
@@ -22,11 +21,11 @@ other implementation and proof gaps.
 
 ```bash
 lf task create --title "Fix the parser" --json
-lf task comment <id> "Keep quoted input"
+lf task steer <id> "Keep quoted input"
 lf checkout <id>
 ```
 
-Wave, Project and Task planning use one local SQLite owner with optional
+Wave and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave makes a standalone repository Task.
 Wave goals, memory and other Markdown live only in `.lf/wave/<name>/` in the
 checkout. Edit them like any other file; context and summaries read them directly.
@@ -48,7 +47,7 @@ never participate in Git planning exchange; Wave identity and retirement remain
 planning-writer facts.
 A Wave's default graph is a committed `.lf/graphs/` file or a builtin. A Wave
 records only the selected name, which travels with planning.
-Wave list, status and roadmap emit each Wave's `machine` from the reader's
+Wave list, status and `plan list` emit each Wave's `machine` from the reader's
 Machine-local Wave → Machine default (the Wave, then its parents), or
 `machine: null` when unset, never a fabricated local Machine.
 Desktop consumes the same optional value.
@@ -86,7 +85,7 @@ live state; its stored values and historical judgment events remain readable evi
 The typed field writer—not either complete domain struct—defines portable content;
 flattening records does not make checkout or execution fields synchronizable.
 
-`linear/` owns provider responses and acceptance; there is no generic PM facade.
+`linear/` owns provider responses and acceptance; there is no generic planning facade.
 `ops/planning_sync.rs` owns foreground exchange, store access and Wave locks for
 both transports. Ordinary Task lookup and comments belong to `ops/task.rs`.
 A Git lookup miss stays a Git lookup miss; it cannot fall through to Linear.
@@ -113,7 +112,7 @@ retaining the original schema and input on failure.
 `lf task create` generates the durable ID, saves the Task and returns that ID.
 Each explicit invocation creates a distinct Task, including identical titles.
 Internal synchronization retries reuse the saved identity. The transactional creation
-receipt retains the original Project and input through later edits and rotation. The same transaction owns local field edits,
+receipt retains the original Project and input through later edits. The same transaction owns local field edits,
 assignment, Project ordering and comments. Revisions are local write concurrency,
 not fabricated provider observation times. Local Task selection displays the shortest
 unique UUID prefix of at least seven digits; full IDs remain stable. References
@@ -145,8 +144,7 @@ even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
 provider deletion evidence apply regardless of planning mode. Local completion
 records its planning decision and optional delivery receipt without moving the Task's graph.
-GitHub delivery still requires confirmed merge evidence. Chapter rotation commits
-all selected Waves together, carrying started Tasks and preserving backlog. Stable
+GitHub delivery still requires confirmed merge evidence. Stable
 local IDs select the rows and retry receipts; provider aliases select existing
 Projects through their stored mapping. Membership, Project fields, selection and
 pending effects commit together. Connected commands report a pending planning sync.
@@ -218,9 +216,9 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `lf planning status`
+`PlanningSyncStatus` presents local Linear delivery evidence; `lf repo plan`
 presents Git acquisition/publication receipts and held projections. The retained
-mutation journal grows with every edit, so `lf planning journal` reads it on
+mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
@@ -252,7 +250,7 @@ Failed checks keep the prior watermark and local planning.
 
 Teams without live Tasks are not checked. Locally finished/abandoned identities
 are excluded from acquisition. Explicit detail reads remain available. Desktop and
-`--watch` alone own a clock: 30–60 seconds initially, backing off to four minutes
+`--subscribe` alone own a clock: 30–60 seconds initially, backing off to four minutes
 while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Git exchange retains its foreground lifetime.
 Projection functions remain local; command boundaries acquire before projecting.
 
@@ -270,11 +268,11 @@ local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.
 
-## Project creation and selection
+## Plan creation and selection
 
 ```bash
-lf wave bind-project product <project-uuid> --json
-lf wave add product --json
+lf wave plan bind product <project-uuid> --json
+lf wave create product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's
@@ -283,12 +281,12 @@ a different existing binding is left unchanged. Setup preserves provider status,
 content and identity, including a Backlog Project. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
-roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
+`plan list` retain predecessor plans and Tasks. Registration and unstarted managed
 work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
-Wave and roadmap Task summaries read saved Work directly: `id` is the local Task
+Wave and `plan list` Task summaries read saved Work directly: `id` is the local Task
 identity, `linear_id` is its optional provider binding, and `sync` is required
 read-only evidence. Missing provider inventory does not erase saved prose, due
 dates or assignments. Graph, execution and checkout evidence remain separate.
@@ -305,16 +303,15 @@ Project export uses the original transition receipt on the foreground connection
 Creation and Initiative attachment retain separate attempted effects and exact
 mutation acknowledgements; a missing response never permits another create or attachment.
 Mapped status receipts use foreground delivery;
-a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates or rotates
-Projects; status and roadmap never call it. Desktop
+a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates; status and `plan list` never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf wave show --watch --json`. Committed selection,
+`project_readiness` through `lf wave show --subscribe --json`. Committed selection,
 accepted facts, transitions and exact activation Process outcomes invalidate that reading.
 A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.
 
-The first explicit ensure, binding setup or applied rotation imports an existing
+The first explicit ensure or binding setup imports an existing
 `<Machine>/waves/<WaveId>/config.yaml` selection once. Binding and import resolve
 exact durable or mapped IDs in the same SQLite transaction as selection; names and
 slugs never select a Project. SQLite commits the selected Project and original YAML
@@ -326,75 +323,36 @@ untouched. An imported completed Project stays selected history and cannot be re
 Activation records its exact Process on the Wave; that Process remains the sole owner of
 its terminal outcome and error. Swift retains command transport feedback only.
 
-## Rotate the plan, preserve the work
+## Replace the plan, preserve the work
 
 ```bash
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --dry-run --json
-lf wave new-chapter --all 2026-10 --plan scratch/chapter.json --json
-lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
+lf wave edit-plan product --name "2026-10 — customer work"
+lf wave update-plan --wave product --plan scratch/product-plan.json
+lf wave plan bind product <Project UUID>     # select another existing Project
 ```
 
-Rotation previews and results return canonical Tasks with local IDs and explicit
-Linear bindings. Classification reads their saved disposition and independent local
-start evidence; it does not reconstruct provider records or resolve the Task twice.
-
-Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
-`successor_id`, `create`, `project_name`, `metric_targets` and `krs`:
-
-```json
-{
-  "name": "2026-10",
-  "waves": [{
-    "wave_id": "<registered-wave-id>",
-    "successor_id": "<new-or-existing-project-uuid>",
-    "create": true,
-    "project_name": "Autumn customer work",
-    "metric_targets": [],
-    "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
-  }]
-}
-```
-
-Allocate a new UUID once when authoring a creation plan. Set `create` to false
-for an existing exact destination; absence never turns that instruction into
-creation. Every destination requires authored KRs before any provider write.
-Existing Projects keep their names, summaries and unrelated content; supplied
-KRs and targets replace only those planning fields. Rotation preserves the Wave
-default graph.
-
-The repository operation validates all selected Waves, destinations, legacy
-conversions and Task evidence before reserving every pair and applying the first
-Wave. The Wave command consumes only its entry through the same operation.
-The shared binding identifies the predecessor. Names never select either endpoint.
-Unfinished Tasks with any ownership entry move with identity, checkout, PR and
-captured execution intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
-
-Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
-selected issue IDs; those records never select the current Project. Before the
-binding switch, retry permits corrected planning fields and reclassifies new work. After it, only retained
-selected issues are reconciled; new historical starts stay put and external moves
-remain conflicts. Predecessor completion follows the binding switch. Settled
-Waves can be retried alongside unfinished ones without new Projects, and an old
-plan cannot overwrite an intervening binding. No Chapter table is required.
-
-Task candidate admission follows Project creation separately. Retain those
-candidates alongside the input and use the existing Task creation operation;
-failure there does not undo the selected Projects or their KRs.
+`update-plan` replaces the current Project's KRs and metric targets with the
+supplied JSON (`{"metric_targets":[],"krs":[]}`); names, summaries and
+unrelated content stay. `bind` moves the Wave's shared selection to an
+existing non-terminal Project. Neither moves a Task: started Tasks keep their
+identity, checkout, PR and captured execution where they are, and `lf task
+move` is the one way a Task changes Wave. There is no rotation operation and
+no Chapter.
 
 ## Inspect planning before starting execution
 
 ```bash
 lf task status INF-124 --json      # the Task row, Sessions, Graph processes, comments
-lf desktop task INF-124 --json     # the planning evidence below
+lf task show INF-124 --json     # the planning evidence below
 ```
 
-`lf desktop task` returns canonical `task` and `project` records, `planning_state`,
-`observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
+`lf task show` returns canonical `task` and `project` records, `plan_state`,
+`observed_at`, `plan_error`, `plan_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned
 Work; its concrete record remains retained internally. Status may acquire planning
 but never completes a Task, allocates a checkout or moves a Task's graph.
-Wave, roadmap and Work frames expose the same acquisition state and age separately
+Wave, `plan list` and Work frames expose the same acquisition state and age separately
 from saved content and outbound delivery.
 
 Exact lookups and Wave views share normalized SQLite entities scoped to a
@@ -407,7 +365,7 @@ read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
 Status preserves dated facts even after hard-stale or forced acquisition fails.
-`planning_state` distinguishes `available`, `unavailable` acquisition, `invalid`
+`plan_state` distinguishes `available`, `unavailable` acquisition, `invalid`
 evidence, confirmed `removed` planning, and an `absent` detail response. A null
 provider response observes absence for that acquisition; the stored record stays
 invalid until complete detail repairs it. This creates no deletion receipt.
@@ -440,8 +398,7 @@ revision/state/completion evidence. Historical receipts keep their original byte
 acquisition time, never the Wave's aggregate sync time. A projection failure rolls
 back observation acceptance. It preserves execution fields and retained identity;
 an unknown destination does not authorize a Task transfer. Restart changes
-execution without rewriting accepted planning. Rotation accepts confirmed Project
-and transfer readbacks through the same owner. A single Project observation does
+execution without rewriting accepted planning. A single Project observation does
 not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
 readbacks through that same owner and reconciles confirmed Team relationships
 without changing Initiative ownership or independently newer Project facts.
@@ -454,7 +411,7 @@ Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
 the operation boundary reports an error. Both Project and Task projection require
 an exact accepted Initiative match. Snapshot acquisition and cold-detail readback
 hold the Wave planning lock through SQLite acceptance. Queued workers retain
-shared ownership after their async caller is canceled. Reteam and rotation acquire
+shared ownership after their async caller is canceled. Reteam acquires
 participating Wave locks in stable ID order; already-held refresh paths reuse them.
 Cold detail discovers ownership, locks, then reads ownership again. Null detail
 invalidates only the cached revision and observation it queried; it cannot invalidate
@@ -474,17 +431,8 @@ last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under acquisition ownership; it cannot reconcile a changed Initiative.
 
-Chapter rollover transfers started work and retains unreviewed backlog in its
-predecessor Project. The same local transaction marks the predecessor completed,
-selects the successor and retains each pending provider field change. It changes
-neither Task execution nor historical KR results. Retry consumes the original plan
-and selected membership, preserving later edits. Pre-cutover unfinished provider
-transitions remain unresolved with their original receipts; local rotation does not
-claim to recover their uncertain external effects.
-
-Historical provider transitions and archival acknowledgements remain evidence;
-local rotation does not recreate the removed provider-first chapter operation
-or infer that its uncertain effects settled.
+Historical provider transitions and archival acknowledgements remain evidence of
+the removed rotation; nothing infers that their uncertain effects settled.
 
 ## Capture a Graph once
 
@@ -497,7 +445,7 @@ or infer that its uncertain effects settled.
 
 ```bash
 lf graph build
-lf graph show GRAPH_PROCESS --processes --json
+lf process show GRAPH_PROCESS --json
 ```
 
 A Graph is one lf process and the step processes it starts; its ID is the Graph
@@ -617,7 +565,7 @@ or resumes a stopped Graph.
 
 ```bash
 lf task status INF-124
-lf graph show GRAPH_PROCESS --processes --json
+lf process show GRAPH_PROCESS --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
@@ -636,7 +584,7 @@ from the worktree. It blocks until the Graph ends; a caller that will not wait
 backgrounds it. `--reason` publishes direction to the Task first. To change
 direction, interrupt, inspect, then run.
 
-Task status and roadmap `execution` observe the Task's most recently launched
+Task status and `plan list` `execution` observe the Task's most recently launched
 Graph: `none`, `latest` or `finished`. Its only control is `start`, available
 whenever the Task can run, even when an earlier Graph exists.
 
@@ -672,7 +620,7 @@ Task selects its primary conversation without reopening the Task; earlier usage
 attribution remains unchanged.
 
 ```bash
-lf comment INF-124 "keep the public name"
+lf task steer INF-124 "keep the public name"
 lf --wave product wave-operate "recover the stopped release Task"
 ```
 
@@ -683,7 +631,7 @@ conflict adopts Linear’s body, author and time while the receipt retains both
 complete comments; no replacement comment is created. Connected repositories show
 pending sync, including comments on unmapped Tasks. Saves and on-demand boundaries
 attempt delivery; team checks acquire incoming comments independently. Desktop and
-`--watch` continue checks while open. Lost replies are resolved by exact UUID,
+`--subscribe` continue checks while open. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved steers. Comments and adopted definition revisions save immutable
 steers. Each Session selects steers from checkout/explicit Task associations, Wave
@@ -694,7 +642,7 @@ remains unconfirmed and does not prove the model followed a correction. Wave
 planning uses ordinary finite LfSessions.
 
 Work reservation claims an unowned Task in its ownership log; an inspection Process does not. Constructors
-validate Task/Wave ancestry, and chapter transfers preserve historical event
+validate Task/Wave ancestry, and Wave moves preserve historical event
 attribution. Task delivery separately owns Git/PR mutations. Conversation identity
 and Graph membership never substitute for that authority.
 

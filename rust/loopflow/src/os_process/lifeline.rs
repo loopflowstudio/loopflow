@@ -202,6 +202,23 @@ fn retain_lifeline(group: Option<u32>, writer: File) {
         .push((group, writer));
 }
 
+/// Keep this process's lifeline writers across exec, so the program it becomes
+/// holds its provider alive and no lf process has to.
+pub(crate) fn inherit_lifelines() -> std::io::Result<()> {
+    for (_, writer) in HELD_LIFELINES
+        .lock()
+        .expect("lifeline list poisoned")
+        .iter()
+    {
+        // SAFETY: the descriptor is open for as long as the list owns it, and
+        // F_SETFD changes only its close-on-exec flag.
+        if unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFD, 0) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// Release only this process's retained spawn writer. The already-owned watchdog
 /// performs shutdown; no signal authority is inferred from a dead leader.
 pub(crate) fn release_agent_lifeline(group: u32) {

@@ -24,7 +24,7 @@ use super::mutation::CommandIo;
 /// Task, the graph it took up and its admitted conversation. A headless (`-b`)
 /// run admits no conversation; a run that failed leaves both absent and the
 /// command still exits non-zero, so callers never file the request twice.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskCreateReceipt {
     pub task: Task,
     pub graph: Option<String>,
@@ -182,16 +182,17 @@ fn launch(
 
 /// A recoverable create/start result. In-progress and uncertain outcomes never
 /// authorize another Graph run; clients keep the same request ID and Task ID.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskCreateOutcome {
     pub task_id: crate::durable::TaskId,
     pub state: TaskCreateState,
     pub receipt: Option<TaskCreateReceipt>,
     pub message: Option<String>,
+    #[serde(rename = "owner_lf_process_id")]
     pub owner: Option<crate::id::LfProcessId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskCreateState {

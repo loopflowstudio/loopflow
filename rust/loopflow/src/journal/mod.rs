@@ -673,8 +673,6 @@ fn record_process_interruption(context: &ProcessContext) {
 /// same row in its own transaction, so an agent never names an unrecorded parent.
 fn start_record(context: &ProcessContext) -> LfProcess {
     LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: context.process_started_at,
         id: context.lf_process_id.clone(),
         pid: Some(std::process::id()),
@@ -1193,27 +1191,51 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
     }
 }
 
-pub(crate) fn process_evidence(
-    store: &SqliteStore,
-    process: &LfProcessId,
-) -> ProcessIdentityEvidence {
-    let Ok(Some(record)) = store.process(process) else {
+pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> ProcessIdentityEvidence {
+    let Ok(Some(record)) = store.lf_process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    recorded_process_evidence(
+    lf_process_evidence(
         &record,
         &recorded_process_receipt(store, &record),
         process_identity_evidence,
     )
 }
 
+/// A provider OS process's liveness, by its own recorded identity.
+pub(crate) fn agent_evidence(
+    store: &SqliteStore,
+    process: &crate::id::AgentProcessId,
+) -> ProcessIdentityEvidence {
+    let Ok(Some(record)) = store.agent_process(process) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    recorded_process_evidence(
+        &crate::process::ProcessEntry::Agent(record),
+        &Ok(None),
+        process_identity_evidence,
+    )
+}
+
+/// Either kind's liveness: an lf row by its receipt, an agent by its own OS identity.
+pub(crate) fn process_entry_evidence(
+    store: &SqliteStore,
+    record: &crate::process::ProcessEntry,
+) -> ProcessIdentityEvidence {
+    let receipt = match record {
+        crate::process::ProcessEntry::Lf(process) => recorded_process_receipt(store, process),
+        crate::process::ProcessEntry::Agent(_) => Ok(None),
+    };
+    recorded_process_evidence(record, &receipt, process_identity_evidence)
+}
+
 /// The OS PID a recorded Process runs under now; `None` unless its recorded
 /// identity proves it live.
 pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Option<u32> {
-    let record = store.process(process).ok()??;
+    let record = store.lf_process(process).ok()??;
     let receipt = recorded_process_receipt(store, &record);
     let mut live = None;
-    recorded_process_evidence(&record, &receipt, |pid, started_at| {
+    lf_process_evidence(&record, &receipt, |pid, started_at| {
         let evidence = process_identity_evidence(pid, started_at);
         if evidence == ProcessIdentityEvidence::Live {
             live = Some(pid);
@@ -1228,9 +1250,6 @@ pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,
     record: &crate::process::LfProcess,
 ) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    if record.kind == crate::process::ProcessKind::Agent {
-        return Ok(None);
-    }
     match store
         .process_receipt_path(&record.id)
         .map_err(std::io::Error::other)?
@@ -1282,22 +1301,31 @@ pub(crate) fn agent_process_evidence(
     }
 }
 
-/// One identity rule for control readers and sampled activity. An unreadable
-/// receipt is not an absent one; neither permits invented OS identity.
+/// One identity rule for control readers and sampled activity. An agent has
+/// no receipt; it is judged by its own recorded OS identity.
 pub(crate) fn recorded_process_evidence(
-    record: &crate::process::LfProcess,
+    record: &crate::process::ProcessEntry,
     receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
-    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+    observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
-    if record.kind == crate::process::ProcessKind::Agent {
-        return agent_process_evidence(
+    match record {
+        crate::process::ProcessEntry::Lf(record) => lf_process_evidence(record, receipt, observe),
+        crate::process::ProcessEntry::Agent(record) => agent_process_evidence(
             record.completed_at,
             record.pid,
             record.os_started_at,
             Some(record.started_at),
             observe,
-        );
+        ),
     }
+}
+
+/// An unreadable receipt is not an absent one; neither permits invented OS identity.
+pub(crate) fn lf_process_evidence(
+    record: &crate::process::LfProcess,
+    receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
+    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+) -> ProcessIdentityEvidence {
     let Ok(receipt) = receipt else {
         return ProcessIdentityEvidence::Unknown;
     };
@@ -1457,7 +1485,7 @@ pub(crate) fn prune_process_receipts_at(
         let record = match retained {
             Some(record) => Some(record),
             None => match LfProcessId::parse(&receipt.lf_process_id) {
-                Ok(id) => store.process(&id).map_err(std::io::Error::other)?,
+                Ok(id) => store.lf_process(&id).map_err(std::io::Error::other)?,
                 Err(_) => None,
             },
         };
@@ -1687,7 +1715,7 @@ mod tests {
             let process = super::current_lf_process_id().unwrap();
             let store = super::open_ledger().unwrap();
             assert_eq!(
-                super::process_evidence(&store, &process),
+                super::lf_evidence(&store, &process),
                 ProcessIdentityEvidence::Live
             );
             Ok(())
@@ -2139,7 +2167,7 @@ mod tests {
         // Traversal permits the ID-keyed read; enumerating unrelated receipts
         // is unavailable. This bounds the work without a wall-time assertion.
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o111)).unwrap();
-        let evidence = super::process_evidence(&store, &context.lf_process_id);
+        let evidence = super::lf_evidence(&store, &context.lf_process_id);
         std::fs::set_permissions(&root, permissions).unwrap();
         assert_eq!(evidence, ProcessIdentityEvidence::Live);
     }
@@ -2180,24 +2208,24 @@ mod tests {
         ] {
             std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
             assert_eq!(
-                super::process_evidence(&store, &context.lf_process_id),
+                super::lf_evidence(&store, &context.lf_process_id),
                 ProcessIdentityEvidence::Unknown
             );
         }
         std::fs::write(&path, b"partial json").unwrap();
         assert_eq!(
-            super::process_evidence(&store, &context.lf_process_id),
+            super::lf_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Unknown
         );
         // Without a receipt, the Process row's own OS identity still answers.
         std::fs::remove_file(&path).unwrap();
         assert_eq!(
-            super::process_evidence(&store, &context.lf_process_id),
+            super::lf_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Live
         );
         std::fs::create_dir(&path).unwrap();
         assert_eq!(
-            super::process_evidence(&store, &context.lf_process_id),
+            super::lf_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Unknown
         );
         std::fs::remove_dir(&path).unwrap();
@@ -2209,7 +2237,7 @@ mod tests {
             LfEventFields::default(),
         );
         assert_eq!(
-            super::process_evidence(&store, &context.lf_process_id),
+            super::lf_evidence(&store, &context.lf_process_id),
             ProcessIdentityEvidence::Dead
         );
     }
@@ -2272,7 +2300,7 @@ mod tests {
             );
             let context = super::current_context().unwrap();
             let store = super::open_ledger().unwrap();
-            let before = store.process(&context.lf_process_id).unwrap().unwrap();
+            let before = store.lf_process(&context.lf_process_id).unwrap().unwrap();
             assert!(before.completed_at.is_none());
             assert_eq!(before.pid, Some(std::process::id()));
             let foreign = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
@@ -2293,7 +2321,7 @@ mod tests {
             }
             foreign.execute_batch("ROLLBACK").unwrap();
             assert_eq!(
-                super::process_evidence(&store, &context.lf_process_id),
+                super::lf_evidence(&store, &context.lf_process_id),
                 ProcessIdentityEvidence::Live
             );
 
@@ -2307,14 +2335,14 @@ mod tests {
                 0
             );
             assert_eq!(
-                super::process_evidence(&store, &context.lf_process_id),
+                super::lf_evidence(&store, &context.lf_process_id),
                 ProcessIdentityEvidence::Live
             );
 
             // macOS reads identity natively; other hosts need ps on PATH.
             let previous_path = std::env::var_os("PATH");
             std::env::set_var("PATH", guard.home().join("no-programs"));
-            let without_path = super::process_evidence(&store, &context.lf_process_id);
+            let without_path = super::lf_evidence(&store, &context.lf_process_id);
             let pruned = super::prune_process_receipts_at(guard.home(), &[std::process::id()]);
             match previous_path {
                 Some(path) => std::env::set_var("PATH", path),
@@ -2335,7 +2363,7 @@ mod tests {
             dead.process_started_at = Some(context.process_started_at.unwrap() - 60);
             super::write_process_receipt(&dead).unwrap();
             assert_eq!(
-                super::process_evidence(&store, &context.lf_process_id),
+                super::lf_evidence(&store, &context.lf_process_id),
                 ProcessIdentityEvidence::Dead
             );
             assert_eq!(
@@ -2343,7 +2371,7 @@ mod tests {
                 0
             );
             assert_eq!(
-                store.process(&context.lf_process_id).unwrap().unwrap(),
+                store.lf_process(&context.lf_process_id).unwrap().unwrap(),
                 before
             );
         }

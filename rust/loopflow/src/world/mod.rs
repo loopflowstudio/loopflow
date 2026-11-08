@@ -26,7 +26,7 @@ use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
 use crate::portfolio::{self, PortfolioCommand};
-use crate::process::{LfProcess, ProcessKind};
+use crate::process::LfProcess;
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
@@ -47,7 +47,7 @@ const PERSON: &str = "Demo";
 /// (`GUIProcessEnvironment.enrichedPath` in
 /// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
 /// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-const DESKTOP_PATH: [&str; 6] = [
+pub(crate) const DESKTOP_PATH: [&str; 6] = [
     "~/.local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
@@ -797,13 +797,13 @@ impl World {
         Ok(session_id)
     }
 
-    /// Comment on a Task the way `lf task comment` does.
+    /// Post to a Task's thread the way `lf task report` does.
     pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
         crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
         Ok(())
     }
 
-    /// Open `wave`'s ongoing conversation the way `lf wave session` does and
+    /// Open `wave`'s ongoing conversation the way `lf --wave W session connect` does and
     /// give it `turns` as its Claude history.
     pub fn wave_conversation(
         &self,
@@ -1111,8 +1111,6 @@ impl World {
         LfProcess {
             id: LfProcessId::new(),
             pid: None,
-            kind: ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             trace_id: trace.clone(),
             parent_lf_process_id: parent.cloned(),

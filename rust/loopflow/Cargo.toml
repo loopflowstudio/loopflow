@@ -165,6 +165,7 @@ sha2 = { version = "0.10", features = ["asm"] }
 rcgen = "0.14"
 axum = "0.8"
 ctor = "1.0.13"
+jsonschema = { version = "0.60", default-features = false }
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
 

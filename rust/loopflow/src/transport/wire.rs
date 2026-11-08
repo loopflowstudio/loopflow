@@ -186,6 +186,7 @@ pub(super) enum Request {
         hint: String,
     },
     /// Whether some viewer holds input control, asked before opening another.
+    /// On an attached connection this also refreshes the viewer's liveness.
     Controlled,
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {
@@ -283,6 +284,12 @@ pub(super) enum Event {
     /// How a viewer that detaches can return.
     Return {
         detach: String,
+    },
+    /// The execution's directory. Hosts read a terminal's foreground process as
+    /// well as its reports, so the viewer enters it: owner and viewer share a
+    /// Machine, and the two sources must not disagree.
+    Directory {
+        cwd: std::path::PathBuf,
     },
 }
 

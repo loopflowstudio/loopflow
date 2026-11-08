@@ -67,7 +67,7 @@ impl TaskId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum WorkRef {
     Wave(WaveId),
@@ -148,7 +148,7 @@ pub enum OwningMachineSource {
 /// Where a person sets a default above a single Task. A Task's own Machine is
 /// its ownership claim, not a default. Resolution walks Wave → parent Waves →
 /// repository → the setting's fallback.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum DefaultScope {
     Wave(crate::id::WaveId),
@@ -156,7 +156,7 @@ pub enum DefaultScope {
 }
 
 /// Which part of a Wave or repository a Machine default places.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MachineSetting {
     /// Where the scope's new Tasks run.
@@ -166,7 +166,7 @@ pub enum MachineSetting {
 }
 
 /// One of your Machine defaults, with the scope's name on this Machine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct MachineDefault {
     pub scope: DefaultScope,
     /// The Wave's name, or the repository's path on this Machine.
@@ -192,7 +192,7 @@ prefixed_uuid_id!(
     DurableDataError::InvalidId
 );
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OwnershipKind {
     Claim,
@@ -226,7 +226,7 @@ impl OwnershipKind {
 
 /// One immutable entry in a Task's ownership log. `machine_id` names the
 /// claimant, the handoff target, or the unclaiming Machine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwnershipEntry {
     pub id: OwnershipEntryId,
     pub task_id: TaskId,
@@ -241,13 +241,13 @@ pub struct TaskOwnershipEntry {
 }
 
 /// A Machine for display; a missing id reads as "Machine unknown".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MachineRef {
     pub id: Option<MachineId>,
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwner {
     pub person: Option<String>,
     pub person_key: Option<String>,
@@ -292,20 +292,22 @@ impl std::fmt::Display for TaskOwner {
 
 /// This Machine's reading of a Task's ownership. `superseded_by` names a later
 /// claim that every other Machine follows while this Machine keeps its own.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwnership {
     pub owner: Option<TaskOwner>,
     pub superseded_by: Option<TaskOwner>,
     pub log: Vec<TaskOwnershipEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Machine {
     pub label: Option<String>,
     pub id: MachineId,
     pub route: String,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub observed_at: OffsetDateTime,
 }
@@ -317,7 +319,7 @@ impl Machine {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
@@ -355,7 +357,7 @@ pub struct ToolResponseReceipt {
     pub responded_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkStatus {
     Ready,
@@ -387,7 +389,7 @@ impl std::fmt::Display for WorkStatus {
 /// Graph runs for it and the Auto-Ship approval. Completion and abandonment
 /// are durable; the open states follow what the Task is doing now. Whether
 /// anyone owns it is ownership, not state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
     /// No checkout yet.
@@ -456,6 +458,40 @@ impl TaskState {
     }
 }
 
+/// Where a Task sits on the Wave board. The one bucketing rule: the board, the
+/// sidebar's Working Tasks, Wave counts and `lf wave show` all read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskSection {
+    /// Waiting for someone to pick it up: unstarted, or started and unassigned.
+    Backlog,
+    /// Someone's idle, active or moving Task.
+    Working,
+    /// Someone's shipping Task, running to merge with nothing left for a person.
+    Autonomous,
+    Done,
+    Abandoned,
+}
+
+impl TaskSection {
+    /// `owned`: someone holds the Task's claim. `plan_state` is planning's state
+    /// type; closing a Task there withdraws it only if it never started.
+    pub fn of(state: TaskState, owned: bool, plan_state: Option<&str>) -> Self {
+        match state {
+            TaskState::Done => Self::Done,
+            TaskState::Abandoned => Self::Abandoned,
+            TaskState::Unstarted => match plan_state {
+                Some("completed") => Self::Done,
+                Some("canceled" | "duplicate") => Self::Abandoned,
+                _ => Self::Backlog,
+            },
+            _ if !owned => Self::Backlog,
+            TaskState::Shipping => Self::Autonomous,
+            TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
+        }
+    }
+}
+
 impl std::fmt::Display for TaskState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.label().replace('_', " "))
@@ -481,7 +517,7 @@ pub struct GraphProcessFilter {
     pub search: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphProcessInventoryEntry {
     #[serde(flatten)]
     pub summary: crate::session::GraphProcessSummary,
@@ -489,7 +525,7 @@ pub struct GraphProcessInventoryEntry {
     pub ended_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphProcessPage {
     pub entries: Vec<GraphProcessInventoryEntry>,
     pub next: Option<String>,
@@ -497,7 +533,7 @@ pub struct GraphProcessPage {
 
 /// One Graph drawn from its Processes: the authored graph while its steps still fit
 /// it, else the sequence the steps recorded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphProcessDetail {
     pub entry: GraphProcessInventoryEntry,
     pub compiled: crate::graph::compiled::CompiledGraph,
@@ -512,7 +548,7 @@ pub struct GraphProcessDetail {
 }
 
 /// One launched step and how its process ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphStepProcess {
     pub lf_process_id: crate::id::LfProcessId,
     pub label: String,
@@ -534,18 +570,32 @@ impl GraphStepProcess {
     }
 }
 
-impl schemars::JsonSchema for MachineId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "MachineId".into()
-    }
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <String as schemars::JsonSchema>::json_schema(generator)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::WorkStatus;
+    use super::{TaskSection, TaskState, WorkStatus};
+
+    #[test]
+    fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {
+        let of = TaskSection::of;
+        assert_eq!(of(TaskState::Idle, true, None), TaskSection::Working);
+        assert_eq!(
+            of(TaskState::Moving, true, Some("completed")),
+            TaskSection::Working
+        );
+        assert_eq!(of(TaskState::Idle, false, None), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Shipping, true, None), TaskSection::Autonomous);
+        assert_eq!(of(TaskState::Shipping, false, None), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Unstarted, true, None), TaskSection::Backlog);
+        assert_eq!(
+            of(TaskState::Unstarted, false, Some("completed")),
+            TaskSection::Done
+        );
+        assert_eq!(
+            of(TaskState::Unstarted, false, Some("canceled")),
+            TaskSection::Abandoned
+        );
+        assert_eq!(of(TaskState::Abandoned, true, None), TaskSection::Abandoned);
+    }
 
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {

@@ -43,9 +43,10 @@ owners. An API connection introduces no new retention authority.
 Desktop ── private Unix socket ── server
 phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
-server read/subscribe ─ shared Rust readers
+server read/subscription ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
-CLI mutation ─ mutation dispatcher ─────────┴─ shared Rust write functions
+CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
+server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
 server attach ─ exact existing Session owner ─ provider / PTY
 
 Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
@@ -78,8 +79,10 @@ A lost reply means outcome unknown: refresh authoritative state before another
 deliberate edit, and never automatically replay the request.
 
 Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
-Create-and-run and other execution launches retain their ordinary CLI path and
-existing Session/Graph owners. Ghostty rendering and app-owned automation retain
+`task.run` and `task.ship` start the same command a terminal would, detached
+under its own execution owner, and answer the typed value that process reports
+(`engine/launch.rs`); the request never carries the run. Create-and-run and
+Session launches retain their ordinary CLI path and existing Session/Graph owners. Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
@@ -88,6 +91,73 @@ its own authenticated admission even over Tailscale. Never forward a trusted loc
 socket and treat the proxy's UID as the phone's identity. Disabling remote access
 or revoking a client must preserve local access and existing execution owners;
 client credentials grant no permission to disregard owner control claims.
+
+## One namespace in three places
+
+An operation's API kind, its `lf` spelling and any setting for it share one
+name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
+Old spellings live in `lf/aliases.rs` for one release.
+
+| API kind | CLI | Engine |
+| --- | --- | --- |
+| `task.get` | `lf task show <issue>` | read |
+| `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
+| `task.changes` | `lf task changes <issue>` | read |
+| `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
+| `task.context` | `lf task context <issue>` | read |
+| `task.runs` | `lf task runs <issue>` | read |
+| `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
+| `task.create` | `lf task create --session <id>` | write |
+| `task.run` | `lf task run <issue>` | `engine::task` |
+| `task.ship` | `lf ship` | `engine::task` |
+| `task.hold` | `lf task hold <issue>` | `engine::task` |
+| `task.steer` | `lf task steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.report` | `lf task report <issue> <message>` | `engine::task` |
+| `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
+| `task.update` | `lf task update <issue>` | write |
+| `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
+| `session.list` | `lf session list` | read |
+| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
+| `session.usage` | `lf session usage` (`lf usage`) | read |
+| `session.history` | `lf session history` (`lf history`) | read |
+| `session.retention` | `lf session retention` | read |
+| `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
+| `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
+| `wave.plan` | `lf wave plan <wave>` | read |
+| `wave.create` | `lf wave create` | write |
+| `wave.sync` | `lf wave sync <wave>` | write |
+| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
+| `plan.list` | `lf plan list` | read |
+| `repo.plan` | `lf repo plan` | read |
+| `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
+| `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
+| `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
+| `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
+| `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
+| `process.get` | `lf process show <id>` | read |
+| `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
+| `process.list` | `lf process list` | read |
+| `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
+| `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
+| `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
+| `config.theme` | none; Appearance's theme file | `engine::config` |
+| `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
+| `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
+| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
+| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
+| `account.list`, `.route` | `lf account [<provider>]`, `lf account route` | read; `engine::account::list`, `route` |
+| `account.connect`, `.disconnect`, `.set`, `.token`, `.use`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `token`, `lf account <provider> use`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `token`, `activate`, `redeem_reset` (none prompts) |
+| `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
+| `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
+| `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
+| `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
+| `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
+| `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
+| `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
+
+"CLI handler; not served" is an operation only the CLI dispatcher runs today;
+its kind fixes the name a served version keeps.
 
 ## Installation owns registration
 
@@ -112,7 +182,9 @@ product choices. Removal must preserve Work and credentials.
 
 ## Commands and installed-state migration
 
-`lf server run` is the supervisor's foreground entry. `lf server status` reports
+`lf server run` is the supervisor's foreground entry. `lf server describe --json`
+prints the protocol's JSON Schema, generated from the wire types, with no server
+running. `lf server status` reports
 readiness without registering a helper. The hidden `install server` operation
 lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.

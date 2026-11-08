@@ -46,3 +46,12 @@ connection. Assumptions made while implementing, each reversible:
 - The portfolio is Machine state served as `portfolio.get`/`portfolio.set`;
   the phone's Task list, its creation destinations and Desktop's sidebar all read
   it. A portfolio member with no recorded Work identity contributes no plan.
+
+## Session attachment — November 7
+
+Jack Heart's latest steer settles `session.attach` and removes the earlier
+owner-query/terminal-attach split. The November 7 section in `mobile-ios.md`
+supersedes the November 5 operation names above. Shared tickets now expire in
+60 s, matching LOO-593; the phone retains only its Session identity between
+attachments. Jack's key-bar choice remains unresolved and is outside this
+protocol reconciliation.

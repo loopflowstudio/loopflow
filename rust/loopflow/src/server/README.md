@@ -1,7 +1,8 @@
 # Connect to the local Loopflow server
 
 ```sh
-lf server status   # readiness, socket, protocol revision, incarnation and connected clients as JSON
+lf server status          # readiness, socket, protocol revision, incarnation and connected clients as JSON
+lf server describe --json # the JSON Schema of the protocol this build speaks
 ```
 
 Installation prepares client access automatically. Desktop's first connection
@@ -48,6 +49,31 @@ bytes. It admits another untagged node of the approved owner through
 mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
 
+`lf server describe --json` prints the protocol as one JSON Schema, generated
+from those types by `schema.rs`; bare `lf server describe` summarizes it. It
+reads no store and needs no running server, so a client asks the `lf` on its host
+rather than the connection. The root accepts any message either side sends;
+`$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
+`Write`, `ServerOperation` and every type they reach, and `x-revision` and
+`x-min-revision` are this build's range. Each operation's kind is a `const` as
+on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
+subscription frame's `body` refers to `$defs/Untyped`, because its shape is the
+`x-result` of the read that opened it. The serialize contract keeps a nullable
+field required, as both sides send it.
+
+Rust validates every fixture against its definition, every `response` fixture
+against its operation's `x-result` and, in `served_reads`, every live read.
+`tests/fixtures/dto/server_schema.json` is the same document checked in. A Rust
+test fails when it is stale and names the regeneration command:
+
+```sh
+cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json
+```
+
+`ServerProtocolTests` reads that file: every operation Desktop encodes must have
+a described kind with exactly its fields, every client fixture must be encoded
+by a test and every server fixture must decode.
+
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
@@ -59,6 +85,11 @@ mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
+← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
+← {"type":"ended","id":"d"}
 ```
 
 The first message is `hello` with the revisions the client speaks. The server
@@ -88,86 +119,112 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
-operation's value: what its CLI spelling prints with `--json`, `{owner}` for
-`session.owner`, and null once a subscription or attachment is confirmed.
+operation's value: what its CLI spelling prints with `--json`, a ticket
+`{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
+once a subscription is confirmed.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
 answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
 (nothing ran; retry shortly) and after `invalid` for a malformed line or a
-repeated `hello`/`status`. `data` is structured detail or null. Clients branch
+repeated `hello`/`status`. A well-formed `request` or `subscribe` whose
+operation this build does not accept fails alone: `invalid` with its own `id`
+and `data.kind`, and the connection stays open, so a newer client loses only
+that request. `data` is structured detail or null. Clients branch
 on `code`; only `outcome_unknown` means the request may have taken effect:
 
 | `code` | Meaning | `data` |
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
-| `invalid` | Malformed message or refused arguments, such as subscribing to a read with no watch | null |
-| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner}`, `{id}`, `{repository}`, `{expression}` |
+| `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no subscription | `{kind}` for a refused operation, else null |
+| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
 | `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
-| `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
+| `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
 | `outcome_unknown` | The operation may have run; inspect state before retrying | null |
 | `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
 
-A shared operation names its code by returning `wire::ServerError` inside its
+A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own:
 
-| Resource | Reads | Writes |
+| API kind | CLI | Engine |
 | --- | --- | --- |
 | `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.start`, `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
-| `session` | `session.list` (`limit` pages it), `session.owner` | `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new`, `session.start` |
+| `session` | `session.list` (`limit` pages it) | `session.attach`, `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new`, `session.start` |
 | `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
-| `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repository.path` | |
+| `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repo.path` | |
 | `graph` | `graph.list`, `graph.run` | `graph.customize` |
 | `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
 | `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
-| `work`, `view`, `config` | `work.resolve`, `view.list`, `view.select`, `view.get`, `config.settings` | `config.file` |
-| `portfolio` | `portfolio.get` | `portfolio.set` |
+| `work`, `view`, `config` | `work.resolve`, `desktop.view.list`, `view.select`, `view.get`, `config.settings` | `config.file` |
+| `desktop.portfolio` | `desktop.portfolio` | `desktop.portfolio.set` |
 | `mobile` | `mobile.status` | `mobile.configure` |
-| `terminal`, `request` | | `terminal.attach`, `request.upload` |
+| `request` | | `request.upload` |
 | `desktop` | `desktop.layout` | `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
 
 `desktop.*` is Desktop's own arrangement state: saved pane layouts and
 Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
 the phone's `view.select` Task list and its creation destinations all read it.
 
-- `config.file {request}` uses `config::api::Request` for catalogue, declaration,
-  explanation and theme access. CLI and Desktop share the same Rust validation
-  and file writer. It returns the value `config::api::run` returns and never
-  replays a failed or uncertain save. Setting values are omitted from request telemetry.
+- `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
+  lists the typed settings, `config.settings {directory, wave, skill, graph,
+  step}` resolves them with their sources, and `config.get`, `config.set
+  {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
+  a destination names an owner (`personal_global`, `shared_repo {repo}`,
+  …), never a file plus a scope. `config.theme {path, value}` is Appearance's
+  theme file. A failed or uncertain save is never replayed; setting values are
+  omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
-  supported. Repository IDs resolve on the destination with `repository.path`;
+  supported. Repository IDs resolve on the destination with `repo.path`;
   paths in local reads are destination paths. `view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
-  cannot select one. A missing primary stays absent. Resolve its owner with
-  `session.owner` before attachment.
-- `subscribe {id, operation}` takes a read with a watch: `view.list`, `view.select`,
+  cannot select one. A missing primary stays absent. Attach by that Session ID; the server resolves its current owner.
+- `subscribe {id, operation}` takes a read with a watch: `desktop.view.list`, `view.select`,
   `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
   `repository.planning` and `process.list`. It answers
   `subscribed`, then `reading {id,frame}` messages wrapping
   the existing complete `answers/unavailable/body` watch frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that number, changed or not. A subscription's arguments are fixed: new
-  arguments are a new subscription with a complete first reading. A watch that
+  arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
-  ends the subscription; the connection stays open. A read with no watch is
+  ends the subscription; the connection stays open. A read with no subscription is
   `invalid`. Reconnect opens a fresh subscription
-  and receives a complete reading; no replay cursor exists.
+  and receives a complete reading; no replay cursor exists. `task.wait {issue,
+  until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
+  changes; after the reading whose `reached` is true the server sends `ended
+  {id}` and nothing more for it. Requested once, it is that reading now, as
+  `lf task wait --timeout 0s --json` prints it.
+- The core loop is `engine::task`, which the CLI handlers call too.
+  `task.run {directory, issue, from, agent, approve}` and `task.ship
+  {directory, issue}` outlive the request, so the server starts their
+  command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
+  detached under its own execution owner and answers what that process
+  reports once it knows: `{state: running, graph_process, log}` when the
+  Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
+  {process, log}`, or the refusal it printed. The connection never waits on
+  the run. `approve` is `-b`: every step headless to `end`, approving
+  Auto-Ship; without it the run stops before the next interactive step, and
+  one with none ahead reaches `end` as bare `lf task run` does. A null `agent`
+  uses each step's configured harness. `lf task run <issue> --json` and `lf
+  ship --json` print the same value. `task.hold` withdraws the approval
+  (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
+  thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
   standard output. `task.create {directory,id,title}` adopts the selected
   conversation and returns the Task without launching work. A write whose Work
-  lives on another Machine (`task.claim`, `task.unassign`, `task.hold`,
-  `session.resume`) runs its `lf … --json` spelling there over SSH and returns
-  what that prints, which is the destination's value; it never falls back to
-  local execution. Requests create no Process rows; diagnostics the shared
+  lives on another Machine (`task.run`, `task.ship`, `task.hold`,
+  `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
+  spelling there over SSH and returns what that prints, which is the
+  destination's value; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
@@ -175,17 +232,17 @@ the phone's `view.select` Task list and its creation destinations all read it.
   response means outcome unknown; inspect state before retrying. IDs correlate
   diagnostics and are **not** durable deduplication receipts. No automatic
   resubmission.
-- `session.owner {session}` resolves a Session ID to `{owner}`.
-  A null owner means no recorded transport; resolution never starts a provider.
-  An owner can finish between lookup and attachment, which then fails explicitly.
-- `terminal.attach {owner}` names the exact existing owner Process ID and answers
-  `{ticket}`. The terminal opens a connection of its own, sends `ticket` as its
-  first message, reads `admitted`, then carries the unchanged binary owner
-  protocol in `transport/README.md` and `transport/wire.rs`: raw bytes locally,
+- `session.attach {session, owner_lf_process_id?}` resolves the Session's current
+  owner and answers `{ticket, owner_lf_process_id, expires_in_ms}`. Resolution
+  never starts a provider. An optional owner ID requires that exact owner;
+  reconnecting by Session alone reaches its current owner after replacement.
+  The terminal opens a separate connection and sends `attach {ticket}` as its
+  first message. It reads `bridged {owner_lf_process_id}`, then carries the
+  unchanged binary owner protocol in `transport/README.md`: raw bytes locally,
   binary frames remotely. An owner whose endpoint refuses at redemption is
-  `not_found {owner}`: it ended. A ticket (`ticket.rs`) is single use, expires
-  unused after 30 s and is redeemable only by the admission that requested it:
-  the same user locally, the same Tailscale node and user remotely; any other
+  `not_found {owner_lf_process_id}`. Tickets (`ticket.rs`) are single use, expire
+  after 60 s, and bind to the same local user or remote Tailscale node and user.
+  Terminal bridges and bulk transfers do not consume control-connection slots. Any other
   ticket is `not_found {ticket}`. Each terminal has its own connection, so
   readings never wait behind terminal bytes, a control failure never closes a
   bridged terminal, and the bridge reads no Work. The owner alone grants input/geometry,
@@ -220,9 +277,9 @@ window reopens for a complete reading. Bulk fetches and oversize uploads use
 ticketed connections of their own. The phone (`swift/LoopflowiOS/MachineConnection.swift`)
 keeps one control connection per foreground session and the same ticket flow.
 
-Every client gives the server ten seconds to answer `status`, `hello` or
-`attach`; a server that accepts and stalls fails the open with that diagnosis
-and the caller's backoff retries. A welcomed session's waits and the bridged
+Every client gives the server ten seconds to answer `status`, `hello`,
+`session.attach` or `attach`; a server that accepts and stalls fails the open
+with that diagnosis and the caller's backoff retries. A welcomed session's waits and the bridged
 stream are unbounded unless the caller sets its own limit.
 
 Request diagnostics correlate the response trace with its target, duration,

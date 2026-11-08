@@ -449,7 +449,7 @@ private final class CreationClient: MobileTaskCreationClient {
         let object: [String: Any] = ["task_id": task.work.id, "state": state,
             "receipt": ["task": ["id": task.work.id, "identifier": "LOO-TEST", "title": "Keyboard"],
                         "graph": "code", "session_id": task.primarySession as Any],
-            "message": NSNull(), "owner": "owner-test"]
+            "message": NSNull(), "owner_lf_process_id": "owner-test"]
         return try JSONDecoder().decode(TaskCreateOutcome.self, from: JSONSerialization.data(withJSONObject: object))
     }
 }

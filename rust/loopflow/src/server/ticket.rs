@@ -4,15 +4,16 @@
 //! expires unused. It grants nothing the control connection did not already have.
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use base64::Engine as _;
 use tokio::sync::mpsc;
 
 use super::wire::ClientMessage;
 use crate::id::LfProcessId;
 
 /// How long an unused ticket stays redeemable.
-pub const TICKET_TTL: Duration = Duration::from_secs(30);
+pub use super::wire::TICKET_LIFETIME as TICKET_TTL;
 
 /// Who a connection was admitted as; a ticket is redeemable by the same party.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +49,8 @@ pub(super) struct Tickets(Mutex<HashMap<String, Ticket>>);
 
 impl Tickets {
     pub(super) fn issue(&self, admission: Admission, purpose: Purpose) -> String {
-        let ticket = uuid::Uuid::new_v4().to_string();
+        let ticket = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(uuid::Uuid::new_v4().as_bytes());
         let mut issued = self.0.lock().expect("ticket store is never poisoned");
         let now = Instant::now();
         issued.retain(|_, ticket| ticket.expires > now);
@@ -79,6 +81,16 @@ impl Tickets {
 #[cfg(test)]
 mod tests {
     use super::{Admission, Purpose, Tickets};
+
+    #[test]
+    fn expired_tickets_cannot_be_redeemed() {
+        let tickets = Tickets::default();
+        let ticket = tickets.issue(Admission::Local, Purpose::Download("body".into()));
+        tickets.0.lock().unwrap().get_mut(&ticket).unwrap().expires = std::time::Instant::now();
+        assert!(tickets.redeem(&ticket, &Admission::Local).is_none());
+        tickets.issue(Admission::Local, Purpose::Download("next".into()));
+        assert!(!tickets.0.lock().unwrap().contains_key(&ticket));
+    }
 
     #[test]
     fn tickets_are_single_use_and_bound_to_their_admission() {

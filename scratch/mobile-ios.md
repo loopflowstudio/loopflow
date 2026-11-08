@@ -2,7 +2,8 @@
 
 Jack Heart requested sustained improvement toward an excellent iOS app, prioritizing
 polish, performance and UX over feature count. Continue in this checkout and
-PR #1812. No merge or Auto-Ship authorization. Apple registration, signing for
+PR #1812. Jack authorized the local LOO-593 protocol merge described below;
+there is no PR landing or Auto-Ship authorization. Apple registration, signing for
 distribution and TestFlight remain LOO-721; no Apple account work has been
 performed here. The dated proof history (November 3–4) and its failure logs are
 committed at `4070315ab3:scratch/mobile-ios.md`; this note keeps the live design,
@@ -59,7 +60,7 @@ RemoteMobileClient holds one server connection while the app is in use. It
 watches one all-repository WorkViewPlan subscription for Task primary Sessions,
 rejects unavailable or truncated readings, caches the last list per verified
 Machine, and offers explicit Open Session for a missing owner; navigation and
-reconnect never start a provider. Attach resolves the Session owner, then bridges
+reconnect never start a provider. Attach asks `session.attach` for the Session’s current owner and ticket, then bridges
 the owner's unchanged binary protocol on a connection of its own. OwnerStream
 handles fragmented frames, nonce-qualified events, snapshot assembly at canonical
 geometry, gaps and size bounds. Input and geometry are separate claims: opening
@@ -136,6 +137,43 @@ is `portfolio.get`/`portfolio.set`; `Write::TaskStart` is `task.start` and
 `Write::TaskCreate` is `task.create` (Swift `.taskStart`); the operation table
 lists every kind. The merge's `transport_tests` compile break (moving
 `Terminal.child` out of a `Drop` type) is fixed with `wait_exit`.
+
+### Reconcile with LOO-593 — November 7
+
+Jack Heart's latest steer settles attachment by Session. The local merge takes
+PR #1813's pinned `971897b8b982b3332b349d96db57c9aa0b2f04d5` into LOO-718 with
+`lf sync --manual`; the preceding November 5 names are historical where they
+conflict with this contract:
+
+- One `session.attach {session, owner_lf_process_id?}` request resolves the owner
+  and returns `{ticket, owner_lf_process_id, expires_in_ms}`. The phone reconnects
+  by Session, with no cached owner ID and no provider start. An exact owner is
+  available for Desktop's existing-owner recovery.
+- One ticket store covers Unix and WebSocket terminal and bulk connections.
+  Redemption is `attach {ticket}`; terminal tickets answer `bridged` before the
+  unchanged binary stream, bulk tickets answer `admitted`. Lifetime is 60 s to
+  match LOO-593. Terminal/bulk connections consume no control slot.
+- Keep the 1 MiB control and 64 MiB bulk limits and off-reader fetches. Existing
+  whole-message spill decisions stand; no second paged read shape is added.
+- Preserve typed errors, request-local unknown-operation refusals, read
+  projections (`select`) and subscription `ended`. The generated
+  `lf server describe --json` schema includes this Task's phone operations.
+- Portfolio naming follows LOO-593: `desktop.portfolio` and
+  `desktop.portfolio.set`. The portfolio-wide `view.select` uses
+  `lf desktop view list --all`, extending the existing list command.
+- Retain shared request diagnostics and execution attribution. The two existing
+  delegated launch operations remain child processes; serving reads or attaching
+  a terminal creates no second execution or usage owner.
+
+Validation on November 7: Rust server tests 33 pass; served reads 8 pass;
+transport server tests 17 pass (2 opt-in tests ignored), ticket isolation and
+control-slot tests 2 pass, startup/recovery tests 4 pass. The remote transport
+proof now redeems a Session attachment over a separate TLS WebSocket and exchanges
+the unchanged owner frames. Desktop protocol/client/query/pairing tests 52 pass;
+iOS suite 81 executed, 2 skipped, no failures, followed by 18 passing focused
+pairing/creation tests after fixture alignment. The schema snapshot agrees with
+`lf server describe --json`; `cargo fmt` and all-target clippy pass. Physical-device and live host-Tailscale acceptance
+remain below; fixture identity is not that proof.
 
 ## Unresolved product choice — November 5 concept review
 

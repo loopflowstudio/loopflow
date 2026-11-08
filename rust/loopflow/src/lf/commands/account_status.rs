@@ -8,66 +8,92 @@ use crate::provider_account::{account_login, acquire_managed_login_lock, open_ac
 use crate::provider_auth::{Provider, ProviderAuthService};
 use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedStore};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-enum Verification {
+pub enum Verification {
     Accepted,
     Rejected,
     Unavailable,
     NotChecked,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-enum Scope {
+pub enum Scope {
     Managed,
     Local,
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
-#[derive(Debug, Serialize, Deserialize)]
-struct AccountReport {
-    accounts: Vec<AccountRow>,
-    browser: Option<BrowserDetails>,
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountReport {
+    pub accounts: Vec<AccountRow>,
+    pub browser: Option<BrowserDetails>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AccountRow {
-    provider: Provider,
-    account_id: Option<ProviderAccountId>,
-    login: Option<String>,
-    scope: Scope,
-    source: String,
-    cached_credential_state: String,
-    verification: Verification,
-    diagnostic: Option<String>,
-    recovery: Option<String>,
-    observed_plan: Option<String>,
-    configured_plan: Option<String>,
-    routing: Option<String>,
-    cooldown_until: Option<i64>,
-    expires_at: Option<i64>,
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountRow {
+    pub provider: Provider,
+    pub account_id: Option<ProviderAccountId>,
+    pub login: Option<String>,
+    pub scope: Scope,
+    pub source: String,
+    pub cached_credential_state: String,
+    pub verification: Verification,
+    pub diagnostic: Option<String>,
+    pub recovery: Option<String>,
+    pub observed_plan: Option<String>,
+    pub configured_plan: Option<String>,
+    pub routing: Option<String>,
+    pub cooldown_until: Option<i64>,
+    pub expires_at: Option<i64>,
     /// When the long-lived token lf machine connect installs stops working.
-    long_lived_token_expires_at: Option<i64>,
-    windows: Vec<AccountLimitRow>,
-    verified_windows: Vec<String>,
-    reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    pub long_lived_token_expires_at: Option<i64>,
+    pub windows: Vec<AccountLimitRow>,
+    pub verified_windows: Vec<String>,
+    pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct BrowserDetails {
-    profiles: Vec<AccessProfile>,
-    bindings: Vec<AuthBrowserBinding>,
-    local_choices: Vec<LocalChromeProfile>,
-    discovery_diagnostic: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserDetails {
+    pub profiles: Vec<AccessProfile>,
+    pub bindings: Vec<AuthBrowserBinding>,
+    pub local_choices: Vec<LocalChromeProfile>,
+    pub discovery_diagnostic: Option<String>,
 }
 
-pub(super) async fn run(
+pub(super) fn run(
     provider: Option<Provider>,
     verify: bool,
     details: bool,
     json: bool,
 ) -> Result<()> {
+    let report = crate::engine::account::list(provider, verify, details)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        let width = std::env::var("COLUMNS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(80);
+        print!(
+            "{}",
+            render(&report, width, OffsetDateTime::now_utc().unix_timestamp())
+        );
+    }
+    Ok(())
+}
+
+/// Every login's state; `verify` contacts providers, `details` adds
+/// credential sources and browser choices.
+pub(crate) async fn report(
+    provider: Option<Provider>,
+    verify: bool,
+    details: bool,
+) -> Result<AccountReport> {
     let store = if verify {
         Some(open_account_store().await?)
     } else {
@@ -101,23 +127,10 @@ pub(super) async fn run(
     } else {
         None
     };
-    let report = AccountReport {
+    Ok(AccountReport {
         accounts: rows,
         browser,
-    };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        let width = std::env::var("COLUMNS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(80);
-        print!(
-            "{}",
-            render(&report, width, OffsetDateTime::now_utc().unix_timestamp())
-        );
-    }
-    Ok(())
+    })
 }
 
 async fn local_rows(

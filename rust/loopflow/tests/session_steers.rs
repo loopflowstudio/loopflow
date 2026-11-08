@@ -524,12 +524,7 @@ fn public_commands_save_steers_without_launching_providers() {
         "steer",
         "WAVE_DIRECTION",
     ]);
-    run(&[
-        "comment",
-        task.task.id.as_str(),
-        "TASK_DIRECTION",
-        "--steer",
-    ]);
+    run(&["task", "steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)

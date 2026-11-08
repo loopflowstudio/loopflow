@@ -17,20 +17,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_rustls::{rustls, TlsAcceptor};
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct Owner {
     pub node: String,
     pub user: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct Configuration {
     pub enabled: bool,
     pub endpoint: String,
     pub owner: Owner,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct Status {
     pub configuration: Option<Configuration>,
     pub ready: bool,
@@ -418,9 +418,10 @@ mod tests {
     #[test]
     fn configuration_round_trips_the_approved_owner() {
         let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/server/mobile_configuration.json"
+            "../../../../tests/fixtures/dto/server/remote.json"
         ))
         .unwrap();
+        let value = value["result"]["configuration"].clone();
         let config: Configuration = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(config.port().unwrap(), 8443);
         assert_eq!(serde_json::to_value(config).unwrap(), value);

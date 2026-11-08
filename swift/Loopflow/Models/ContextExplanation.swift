@@ -139,7 +139,7 @@ public struct WorkLink: Codable, Equatable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case kind, task, wave, session, diff
-            case repositoryPath = "repository_path", repositoryId = "repository_id"
+            case repositoryPath = "repo_path", repositoryId = "repo_id"
             case taskId = "task_id", executionMachine = "execution_machine"
         }
     }

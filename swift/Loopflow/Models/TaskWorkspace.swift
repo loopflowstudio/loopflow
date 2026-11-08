@@ -67,6 +67,7 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
 
 public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     public let baseCommit: String
+    public let headCommit: String?
     public let issueIdentifier: String
     public let taskId: String
     public let path: String?
@@ -77,6 +78,7 @@ public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case path, patch, binary, truncated
         case baseCommit = "base_commit"
+        case headCommit = "head_commit"
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"
     }

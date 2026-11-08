@@ -5,7 +5,7 @@ Part of the [Architecture Reference](reference.md).
 ## The system grows outward from a direct Skill launch
 
 The direct Skill launch is the kernel of Loopflow. It remains useful with
-no Wave, Project, Task, or daemon. Agent admission requires its Machine's writable store. Higher layers
+no Wave, Task, or server process. Agent admission requires its Machine's writable store. Higher layers
 supply composition, durable context, delivery, ownership, and views around its
 discovery, prompt, provider, harness, and evidence components. Their
 boundary executors remain domain-specific because their settlement rules differ.
@@ -13,7 +13,7 @@ boundary executors remain domain-specific because their settlement rules differ.
 ```text
                         +--------------------------+
                         | UI and read projections  |
-                        | status / roadmap / app   |
+                        | status / planning / app  |
                         +-------------+------------+
                                       |
                         +-------------v------------+
@@ -49,7 +49,7 @@ boundary executors remain domain-specific because their settlement rules differ.
   harness and leave local evidence.
 - **Graph composition:** sequence Skill and mechanical Command nodes, route Xor
   branches and follow backward edges. Every step is autonomous.
-- **Durable planning:** preserve Wave, Project, and Task intent across crashes;
+- **Durable planning:** preserve Wave and Task intent across crashes;
   each Task Graph is a fresh Graph process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
 - **Task ownership:** a Task is owned by a person on a Machine, or unowned;
@@ -70,7 +70,7 @@ user / automation -> lf -------- domain APIs ----+
           |                      |
           v                      v
  tracked Work + delivery    execution evidence
- Wave -> Linear Project -> Task          LfProcess / LfSession
+ Wave -> Task                   LfProcess / LfSession
        stable Work           indexed history + payloads
           |
           v
@@ -119,7 +119,7 @@ These are the accepted product owners; see [cutover status](reference-cutover.md
 for the current implementation boundary.
 
 ```text
-Wave --< Linear Project --< Task --< Graph (LfProcess)
+Wave --< Task --< Graph (LfProcess)      a Wave's planning binds one Linear Project
 
 LfProcess --< LfProcess             causal ancestry, not control authority
 LfProcess --< AgentProcess          immutable launching parent
@@ -131,22 +131,22 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 
 | Concept | Owns |
 | --- | --- |
-| Repository | Wave membership and repository-wide Project rotation |
-| Chapter | No stored object: the shared name of each Wave's In Progress Project |
-| Wave | Enduring objective, memory, cadence, budget and metric instruments |
-| Project | Linear status, Tasks, KRs and targets |
+| Repository | Wave membership |
+| Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
 | Task | Worktree, optional PR and every associated Session, Graph and Process; no Graph is privileged |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
-| AgentProcess | The provider OS process Loopflow started: a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
+| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |
 | Task ownership | (person, Machine) or unowned, read from the Task's append-only ownership log; no authority over merely observed processes |
 | Steer publication | Immutable authored direction with independent Session delivery |
 
-The LOO-441 names are integrated. The common `LfProcess` wire projection
-still carries both lf and agent rows during the AgentProcess cutover.
+The LOO-441 names are integrated. Process inventory readers return
+`ProcessEntry`, tagged by `kind`: `lf` rows are `LfProcess`, `agent` rows are
+`AgentProcess`. Both IDs are UUID text in the one `processes.id` column; only
+the row's `kind` decides which type it reads as.
 
 ## Definition and execution projections
 
@@ -155,14 +155,14 @@ disclosure tree. Invalid sources remain visible with their error.
 
 `lf wave graph show [WAVE | --no-wave]` reads the graph a Wave's, or the
 repository's, new Tasks take up and which setting chose it, independently of
-Project history; `lf set graph` changes it.
+planning history; `lf set wave.graph` changes it.
 
-Task status and roadmap separate `graph_name` with its `graph_source`
+Task status and `plan list` separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
 `execution` and `run_control`. Task work and overview carry `graph`, a
 `TaskGraph` of name, interactive steps and position. The latest
 `GraphProcessDetail` is ordinary execution evidence, including completed graphs,
-not a second Task lifecycle. Task work and watch carry `graph_processes`. Session
+not a second Task lifecycle. Task work and subscription carry `graph_processes`. Session
 membership references the exact `graph_lf_process_id`; a Task graph's run names
 its Task-run `lf_process_id`. Persisted graphs and historical capture formats
 remain unchanged.
@@ -182,9 +182,9 @@ provider generation in caller provenance, turn origin and Program Status.
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
-| `tasks` | Project, issue, durable disposition and worktree/delivery facts |
+| `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
 | `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
-| `projects` | Wave, stable Linear Project identity, status, shared chapter name, Graph and planning facts |
+| `projects` | A Wave's planning: stable Linear Project identity, status, Graph and planning facts |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
 ### Conversation and attachment lifetime
@@ -342,9 +342,9 @@ completion are distinct: subsequent command work may fail after the agent succee
 
 ### Process lifetime and causality
 
-One actual lf process that changes Work (Tasks, Waves, Projects, Sessions,
+One actual lf process that changes Work (Tasks, Waves, Sessions,
 Graphs, PRs, planning) gets one LfProcess, including nested direct and
-agent-issued commands. A read (status, list, show, diff, file, every `--watch`
+agent-issued commands. A read (status, list, show, diff, file, every `--subscribe`
 reader), Desktop navigation and pane or Dashboard arrangement record none, so
 they never wake a Work reader or join a Task's work; arrangement saves still
 persist. Input to a Session or shell is Work. `Commands::changes_work` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
@@ -431,12 +431,12 @@ A conversation attachment handoff grants no Graph authority.
 A Graph is `current` while its Graph process has no recorded exit, `completed` when the
 Graph process succeeded and `stopped` when it exited before the last step. A killed
 Graph process leaves dead Processes as history. Nothing restarts or resumes it. The caller,
-normally the Task conversation, inspects `lf graph show ID --processes --json` or
+normally the Task conversation, inspects `lf process show ID --json` or
 `lf task status`, then launches fresh work. Unknown liveness stays unknown.
 
 ### Attribution, binding and ownership
 
-Task requires a repository and may have a Project; its Wave derives from that Project.
+Task requires a repository and may belong to a Wave through its planning row.
 Session constructors use the Task’s current membership and reject explicit disagreements.
 A Session links to its Graph through the Process that captured its input, whose
 parent is the Graph process, and shares that Graph's nullable Task. `work_source`
@@ -458,10 +458,10 @@ and conflicting permanent Task bindings remain intact.
 
 Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
-The history reader owns this single choice. `lf usage --binds` compares it with
+The history reader owns this single choice. `lf session usage --binds` compares it with
 post-hoc attribution from the same history. Preserve active-turn start/assignment
 evidence; unknown allocation remains unknown rather than inventing a token split.
-Project/Task moves preserve immutable historical attribution while
+Wave/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
 `lf task run` and `lf task checkout` claim an unowned Task when they allocate its
@@ -469,29 +469,27 @@ checkout; explicit adoption and binding also claim when selecting its work or
 primary conversation. General command observation never claims. Completion, abandonment and reopening write no ownership entries, so a
 Done Task shows its last owner as history. The migration recorded one `recorded`
 entry, person unknown, for each Task that had Started, a worktree or an admission.
-Chapter retirement also checks authored work, PRs and
-Graphs: a Task with any Graph has begun. Absent execution evidence alone cannot prove untouched backlog.
+A Task with any Graph has begun; absent execution evidence alone cannot prove untouched backlog.
 
 ### Readers and conversion
 
 One indexed reader per object selects and pages identity, ancestry, command,
 skill, title and status before opening payload files. No inventory scans manifests,
 sidecars or live PRs to reconstruct identity. Bound conversations remain bound even
-when absent from the visible roadmap. Desktop panes key on LfSession identity,
+when absent from the visible planning list. Desktop panes key on LfSession identity,
 so bind, rename and attachment replacement retain the surface and draft.
 
 Current-state conversion keeps resumable native identities and selected captures.
 Finished conversations, old command events and unresolved historical SQL are
 not imported. Runtime readers use only the final schema and current encodings.
 
-### Chapters
+### Planning
 
-Linear statuses are the owner: one In Progress Project per Wave, sharing a chapter
-name across the repository. Planned Projects express future plans; Completed
-Projects retain history. A Task without a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
-There is no Chapter row, packet or local switch. Rotation uses an explicit target
-and stable Project identities, converges after partial mutations, preserves active
-Task identity/worktree/PR/execution, and refuses unrelated competing plans.
+Linear statuses are the owner: one In Progress Linear Project per Wave. Planned
+Linear Projects express future plans; Completed ones retain history. A Task without
+a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
+There is no Chapter, packet or local switch. A plan is replaced in place, preserving
+active Task identity/worktree/PR/execution and refusing unrelated competing plans.
 A second Machine adopts the same state through ordinary synchronization.
 
 Adjacent APIs keep their own authority: Task PR operations own Git/GitHub;

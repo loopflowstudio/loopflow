@@ -90,6 +90,7 @@ impl Status {
     pub(super) fn connect(
         &mut self,
         owner: &LfProcessId,
+        session: &crate::id::LfSessionId,
         initial: bool,
     ) -> Result<Option<(UnixStream, bool)>> {
         self.generation += 1;
@@ -125,10 +126,10 @@ impl Status {
                         return Ok(None);
                     }
                 }
-                let owner = owner.clone();
+                let (owner, session) = (owner.clone(), session.clone());
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
-                    let result = crate::server::client::bridge_existing(&owner);
+                    let result = crate::server::client::bridge_existing(&session, &owner);
                     let _ = send.send(result);
                 });
                 loop {

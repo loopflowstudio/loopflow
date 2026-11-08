@@ -1,15 +1,1 @@
-{
-  "type": "request",
-  "id": "mobile-1",
-  "operation": {
-    "kind": "mobile.configure",
-    "configuration": {
-      "enabled": true,
-      "endpoint": "https://host.tail.ts.net:8443",
-      "owner": {
-        "node": "node-host",
-        "user": 1
-      }
-    }
-  }
-}
+{"type":"request","id":"mobile-1","operation":{"kind":"mobile.configure","configuration":{"enabled":true,"endpoint":"https://host.tail.ts.net:8443","owner":{"node":"node-host","user":1}}},"select":null}

@@ -78,7 +78,7 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 fn kill_recorded_graph(home: &Path, id: &str) {
     let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let pid = store
-        .process(&id.parse().unwrap())
+        .lf_process(&id.parse().unwrap())
         .unwrap()
         .unwrap()
         .pid
@@ -419,8 +419,11 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         format!(
             "{}:{}",
             binary_dir.display(),
-            path.map(str::to_owned)
-                .unwrap_or_else(|| std::env::var("PATH").unwrap())
+            loopflow_test_support::path_without_installed_harnesses(
+                &path
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| std::env::var("PATH").unwrap())
+            )
         ),
     );
     command

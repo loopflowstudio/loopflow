@@ -103,7 +103,7 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
 <plist version="1.0"><dict>
 <key>Label</key><string>{label}</string>
 <key>ProgramArguments</key><array><string>{executable}</string><string>server</string><string>run</string></array>
-<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string></dict>
+<key>EnvironmentVariables</key><dict><key>LF_HOME</key><string>{home}</string><key>LF_BIN</key><string>{executable}</string><key>LF_SUPERVISED</key><string>1</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>
@@ -112,14 +112,20 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
         home = escape(&home.display().to_string()),
         log = escape(&log.display().to_string())
     );
+    let unchanged = fs::read_to_string(&path).is_ok_and(|current| current == xml);
     fs::write(&path, xml)?;
     let target = format!("{domain}/{label}");
-    if Command::new("/bin/launchctl")
+    let mut loaded = Command::new("/bin/launchctl")
         .args(["print", &target])
         .output()?
         .status
-        .success()
-    {
+        .success();
+    if loaded && !unchanged {
+        // launchd keeps the definition it loaded: only a new load reads this file.
+        checked(Command::new("/bin/launchctl").args(["bootout", &target]))?;
+        loaded = false;
+    }
+    if loaded {
         // Do not kill an active service on another ensure call.
         let mut command = Command::new("/bin/launchctl");
         command.arg("kickstart");
@@ -203,7 +209,7 @@ fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
     let executable_argument = quote(&executable.display().to_string().replace('$', "$$"));
     let home_environment = quote(&format!("LF_HOME={}", home.display()));
     let binary_environment = quote(&format!("LF_BIN={}", executable.display()));
-    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nRestart=on-failure\nKillMode=control-group\n[Install]\nWantedBy=default.target\n"))?;
+    fs::write(directory.join(&unit), format!("[Unit]\nDescription=Loopflow server\n[Service]\nExecStart={executable_argument} server run\nEnvironment={home_environment}\nEnvironment={binary_environment}\nEnvironment=LF_SUPERVISED=1\nRestart=on-failure\nKillMode=process\n[Install]\nWantedBy=default.target\n"))?;
     checked(Command::new("systemctl").args(["--user", "daemon-reload"]))?;
     checked(Command::new("systemctl").args(["--user", "enable", "--now", &unit]))?;
     if replace {

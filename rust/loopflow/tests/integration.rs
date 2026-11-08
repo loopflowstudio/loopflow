@@ -32,7 +32,7 @@ mod release_lock_tests;
 mod repo_commands;
 mod scratch_tests;
 mod session_cli_tests;
-mod session_list_watch;
+mod session_list_subscribe;
 mod session_steers;
 mod settings_launch_tests;
 mod store_contention;

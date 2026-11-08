@@ -39,21 +39,21 @@ struct ServerPerformanceTests {
             _ = try await ServerClient.write(.sessionRename(directory: root.path, id: session, name: "Measured Session"), location: location)
             results["write_ms", default: []].append(start.elapsedMs)
             start = .now
-            let watch = ServerClient.watch(.allPlans, location: location)
-            var frames = watch.lines.makeAsyncIterator()
+            let subscription = ServerClient.subscribe(.allPlans, location: location)
+            var frames = subscription.lines.makeAsyncIterator()
             _ = try #require(try await frames.next())
-            results["subscribe_first_ms", default: []].append(start.elapsedMs)
+            results["watch_first_ms", default: []].append(start.elapsedMs)
             start = .now
-            watch.send(Data(#"{"id":7}"#.utf8))
+            subscription.send(Data(#"{"id":7}"#.utf8))
             let frame = try #require(try await frames.next())
             #expect(String(decoding: frame, as: UTF8.self).contains("\"answers\":7"))
             results["checkpoint_ms", default: []].append(start.elapsedMs)
-            await watch.cancel()
+            await subscription.cancel()
         }
         // Every read, write, subscription and checkpoint above shared one connection.
         results["workload_connections"] = [Double(try server.admittedConnections() - admittedBeforeWorkload)]
-        let watch = ServerClient.watch(.allPlans, location: location)
-        var frames = watch.lines.makeAsyncIterator()
+        let subscription = ServerClient.subscribe(.allPlans, location: location)
+        var frames = subscription.lines.makeAsyncIterator()
         _ = try #require(try await frames.next())
         let pid = try #require(await server.processID)
         func resourceSample() async throws -> (cpu: Double, rss: Double) {
@@ -68,7 +68,7 @@ struct ServerPerformanceTests {
         let after = try await resourceSample()
         results["idle_cpu_percent"] = [(after.cpu - before.cpu) / (idle.elapsedMs / 1000) * 100]
         results["idle_server_rss_kib"] = [after.rss]
-        await watch.cancel()
+        await subscription.cancel()
         // Reuse the same client after server replacement, without registration.
         await server.stop()
         let recovery = ContinuousClock.now

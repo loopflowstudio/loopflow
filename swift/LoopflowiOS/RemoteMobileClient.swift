@@ -53,13 +53,9 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
         let connection = try await connection()
-        let owner: String
-        switch try await connection.request(.sessionOwner(session: sessionID))["owner"] {
-        case .string(let running): owner = running
-        case .null: throw SessionNotRunning()
-        default: throw RegistryQueryError("The Machine did not resolve the Session owner")
-        }
-        let terminal = try await connection.attach(owner: owner)
+        let terminal: MachineSocket
+        do { terminal = try await connection.attach(session: sessionID) }
+        catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
         do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal) }
         catch { terminal.close(); throw error }
     }

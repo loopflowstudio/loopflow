@@ -184,7 +184,7 @@ fn two_people_share_one_repository() {
     pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
 
     // 1. Lee's comment, synced through Git, steers Maya's Task.
-    pair.ok(Lee, &["comment", &task, "keep CPU path"]);
+    pair.ok(Lee, &["task", "steer", &task, "keep CPU path"]);
     pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     assert!(
         pair.steers(Maya)

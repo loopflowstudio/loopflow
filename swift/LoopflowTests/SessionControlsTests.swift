@@ -134,7 +134,7 @@ import ViewInspector
         let record = try renameFixtureRecord("assigned", title: "Research", work: .task(id: task.runtime?.workId ?? task.id))
         let entries = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":\#(entries),"next":null}"# }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":\#(entries),"next":null}"# }
             throw RegistryQueryError("Reading actions must not change work")
         }, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
@@ -171,7 +171,7 @@ private actor ControlsSource {
     func releaseList() { pending?.resume(); pending = nil }
 
     func read(_ args: [String]) async throws -> String {
-        if args.prefix(2) == ["desktop", "sessions"] {
+        if args.prefix(2) == ["session", "list"] {
             let snapshot = try JSONSerialization.data(withJSONObject: ["entries": [record], "next": NSNull()])
             if hold {
                 hold = false

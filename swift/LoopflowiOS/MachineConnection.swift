@@ -167,7 +167,7 @@ final class MachineConnection {
             try await socket.send(try line(.hello(hello)))
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
             case .welcome(let welcome): return MachineConnection(endpoint: endpoint, socket: socket, welcome: welcome)
-            case .error(_, _, let message, _): throw RegistryQueryError(message)
+            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
             default: throw RegistryQueryError("The Machine did not welcome the connection")
             }
         } catch { socket.close(); throw error }
@@ -196,7 +196,7 @@ final class MachineConnection {
     /// releases the wait; a dispatched command still completes.
     func request(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
-        let line = try Self.line(.request(id: id, operation: operation))
+        let line = try Self.line(.request(id: id, operation: operation, select: nil))
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 if let failure { continuation.resume(throwing: failure); return }
@@ -222,7 +222,7 @@ final class MachineConnection {
         let subscription = MachineSubscription(connection: self)
         subscriptions[subscription.id] = subscription
         do {
-            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query)))
+            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query, select: nil)))
         } catch {
             subscriptions.removeValue(forKey: subscription.id)
             throw error
@@ -240,24 +240,25 @@ final class MachineConnection {
         Task { try? await socket.send(try Self.line(.cancel(id: id))) }
     }
 
-    /// A terminal connection bridged to `owner`, carrying its unchanged protocol.
-    func attach(owner: String) async throws -> MachineSocket {
-        guard case .string(let ticket) = try await request(.attach(owner: owner))["ticket"] else {
+    /// Resolve the Session’s current owner and open its unchanged terminal protocol.
+    func attach(session: String) async throws -> MachineSocket {
+        guard case .string(let ticket) = try await request(.attach(session: session, owner: nil))["ticket"] else {
             throw RegistryQueryError("The Machine did not attach the Session")
         }
-        return try await Self.redeem(endpoint: endpoint, ticket: ticket)
+        return try await Self.redeem(endpoint: endpoint, ticket: ticket, terminal: true)
     }
 
     /// A ticketed connection, admitted. The caller owns it from here.
-    private static func redeem(endpoint: URL, ticket: String) async throws -> MachineSocket {
+    private static func redeem(endpoint: URL, ticket: String, terminal: Bool = false) async throws -> MachineSocket {
         let socket = try MachineSocket(endpoint: endpoint, path: ServerProtocol.ticketPath, maximumMessage: ServerProtocol.maxBulk)
         do {
             let handshake = socket.deadline(seconds: 10)
             defer { handshake.cancel() }
-            try await socket.send(try line(.ticket(ticket)))
+            try await socket.send(try line(.attach(ticket: ticket)))
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
-            case .admitted: return socket
-            case .error(_, _, let message, _): throw RegistryQueryError(message)
+            case .admitted where !terminal: return socket
+            case .bridged where terminal: return socket
+            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
             default: throw RegistryQueryError("The Machine did not admit the ticket")
             }
         } catch { socket.close(); throw error }
@@ -303,11 +304,13 @@ final class MachineConnection {
             subscriptions[id]?.receive(frame)
         case .bulk(let id, let ticket, _):
             fetch(id, ticket: ticket)
-        case .error(let id?, _, let message, _):
-            forget(id, throwing: RegistryQueryError(message))
-        case .error(nil, _, let message, _):
-            throw RegistryQueryError(message)
-        case .welcome, .status, .admitted:
+        case .ended(let id):
+            subscriptions.removeValue(forKey: id)?.end()
+        case .error(let id?, let code, let message, let data):
+            forget(id, throwing: ServerError(code: code, message: message, data: data))
+        case .error(nil, let code, let message, let data):
+            throw ServerError(code: code, message: message, data: data)
+        case .welcome, .status, .admitted, .bridged:
             throw RegistryQueryError("The Machine repeated its greeting; update the app")
         }
     }
@@ -376,6 +379,11 @@ final class MachineSubscription {
 
     fileprivate func receive(_ frame: JSONValue) {
         continuation.yield(frame)
+    }
+
+    fileprivate func end() {
+        ended = true
+        continuation.finish()
     }
 
     fileprivate func finish(throwing error: any Error) {

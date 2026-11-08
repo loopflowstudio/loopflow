@@ -66,11 +66,11 @@ need an explicit add before they can receive a login.
 ## Local by default
 
 ```bash
-lf history list                                # Processes recorded on this Machine
-lf ps --json                           # OS-live processes on this Machine
+lf session history list                        # Processes recorded on this Machine
+lf process list --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf --machine build-home history list   # run the same reader on build-home
+lf --machine build-home session history list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
 ```
 
@@ -93,7 +93,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf).
 lf task claim LOO-123               # you, on this Machine
 lf task move LOO-123 --machine mini # same person, mini's Machine
 lf task unassign LOO-123             # unowned, history intact
-lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
+lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
@@ -165,8 +165,8 @@ metrics and Session history; no process needs to be running.
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
-use the same binding, and `lf repository` covers repositories without Work.
-`lf repository --bind ID` explicitly associates even an established checkout.
+use the same binding, and `lf repo` covers repositories without Work.
+`lf config repo --bind ID` explicitly associates even an established checkout.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no
@@ -183,7 +183,7 @@ invented SSH route.
 The journal does not carry RepositoryId: unbound import creates a local repository
 ID. Explicit association converges established roots on a selected ID without
 rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
-Task/Project IDs for one provider object; provider correspondence and uncertain
+Task/Wave IDs for one provider object; provider correspondence and uncertain
 effect ownership remain with the common planning writer.
 
 Read execution separately from planning:
@@ -294,14 +294,14 @@ the soft deadline (15 minutes before the hard one), or on `lf machine end`; any
 of them refuses while the sandbox holds uncommitted or unpushed work. Owned
 machines are never deleted.
 
-Before it deletes, the laptop pulls `lf history export --since <rental start>`:
+Before it deletes, the laptop pulls `lf session history export --since <rental start>`:
 the worker's Process, Session, session-event and Graph rows as JSON lines, origin
 first, plus capture files. They land in `machine_records` keyed by origin and
 row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
 own tables, so no reconciler, attachment or Task judgment acts on a copy. An
 export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
-after the sandbox is gone, and `lf history show <session>` opens one. The give-back
+after the sandbox is gone, and `lf session history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
 lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.
@@ -329,16 +329,16 @@ no signal authority.
 ## Observe processes
 
 ```bash
-lf ps --json
-lf top
-lf mon prune --dry-run
+lf process list --json
+lf process top
+lf process prune --dry-run
 ```
 
-The outer command journal records command receipts. `lf ps` and `lf top` join
+The outer command journal records command receipts. `lf process list` and `lf process top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf mon prune` removes dead command receipts only after their terminal outcome
+`lf process prune` removes dead command receipts only after their terminal outcome
 is recorded, and may reap only AgentProcesses whose recorded identity is live
 and whose attached LfProcess is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
 unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
@@ -365,7 +365,7 @@ A bare slug may be ambiguous across repositories and is not mutation authority.
 lf relocate <wave-id> --repo <target> --name <slug>
 ```
 
-Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM and Work
+Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps planning and Work
 joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
@@ -384,7 +384,7 @@ Machine selection and Session attribution stay intact. Installation quits and
 reopens a running Desktop. It does not restart other processes or wait for their
 exit; they may continue or fail naturally. A Session owner on a superseded lf
 keeps serving: `lf resume` moves one Session onto the installed lf, and `lf
-monitor rollover` moves every eligible owner at once. Clients and hooks launched before this
+process rollover` moves every eligible owner at once. Clients and hooks launched before this
 behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store

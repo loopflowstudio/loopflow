@@ -150,8 +150,11 @@ The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types
 contract; client-authored Task data passes through that codec and is not a
 recorded Machine reading. The live adapter keeps one control WebSocket to the
 Machine’s server while the app is in use (requests, the Task subscription,
-cancel) and opens a ticketed connection per terminal, which carries the owner’s
-binary protocol. Messages over 1 MiB travel by ticket too. The server’s private
+cancel). `session.attach` resolves the current owner and issues a ticket; a
+second connection redeems it with `attach`, reads `bridged`, and carries the
+owner’s binary protocol. Reconnect starts from the Session ID, so no owner ID
+is kept across attachments. A missing owner offers explicit Open Session;
+navigation and reconnect never start a provider. Messages over 1 MiB travel by ticket too. The server’s private
 Unix socket is never forwarded to remote callers. OwnerStream consumes Rust’s binary frames
 and nonce-qualified events; snapshots are assembled before rendering at the
 owner’s geometry. Every reconnect requests a fresh screen. The renderer requests

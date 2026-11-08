@@ -1,1 +1,1 @@
-{"type":"subscribe","id":"tasks-1","operation":{"kind":"view.select","expression":"kind:task state:open"}}
+{"type":"subscribe","id":"tasks-1","operation":{"kind":"view.select","expression":"kind:task state:open"},"select":null}

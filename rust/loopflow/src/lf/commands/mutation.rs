@@ -32,22 +32,15 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Complete { .. }
                 | TaskCommand::Save { .. }
                 | TaskCommand::Abandon { .. }
-                | TaskCommand::Edit { .. }
+                | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
+                | TaskCommand::Hold { .. }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
-            WaveCommand::Add { .. }
-                | WaveCommand::NewChapter { .. }
-                | WaveCommand::Status {
-                    sync: true,
-                    watch: false,
-                    json: true,
-                    ..
-                }
+            WaveCommand::Create { .. } | WaveCommand::Sync { json: true, .. }
         ),
         Some(Commands::Session { cmd }) => super::session::is_mutation(cmd),
-        Some(Commands::Ship { stop: true, .. } | Commands::Portfolio { .. }) => true,
         Some(Commands::Graph {
             cmd: crate::lf::GraphCommand::Customize { .. },
         }) => true,
@@ -72,11 +65,19 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping and arrangement select their own Work. Other commands
-    // retain the CLI's explicit Task placement without changing process cwd.
+    // Session, shipping, holding and arrangement select their own Work. Other
+    // commands retain the CLI's explicit Task placement without changing
+    // process cwd.
     let binding = if !matches!(
         cli.command,
-        Some(Commands::Session { .. } | Commands::Ship { .. } | Commands::Desktop { .. })
+        Some(
+            Commands::Session { .. }
+                | Commands::Ship { .. }
+                | Commands::Desktop { .. }
+                | Commands::Task {
+                    cmd: TaskCommand::Hold { .. }
+                }
+        )
     ) {
         cli.task
             .as_deref()
@@ -118,52 +119,51 @@ fn local(
     io: &mut CommandIo<'_>,
 ) -> Result<()> {
     match cli.command.as_ref().context("missing mutation")? {
+        Commands::Task {
+            cmd:
+                TaskCommand::Hold {
+                    issue,
+                    reason,
+                    json,
+                },
+        } => {
+            let issue = issue
+                .as_deref()
+                .or(cli.task.as_deref())
+                .context("No Task selected")?;
+            let held = crate::engine::task::hold(directory, issue, reason.as_deref())?;
+            if *json {
+                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
+            } else {
+                writeln!(io.output, "{}", held.render())?;
+            }
+            Ok(())
+        }
         Commands::Task { cmd } => {
             let repo = selected_task_repository(cli, directory, cmd.selector())?;
             task(&repo, cmd, io)
         }
         Commands::Wave {
-            cmd: WaveCommand::Status { wave, .. },
+            cmd: WaveCommand::Sync { wave, .. },
         } => {
             let wave = wave.as_deref().or(selected_wave);
             let refreshed = super::ops::refresh_status(directory, wave)?;
             writeln!(
                 io.output,
                 "{}",
-                super::waves::status_json(
-                    directory,
-                    refreshed.as_deref().or(wave),
-                    super::waves::Shape::Tasks
-                )?
+                super::waves::status_json(directory, refreshed.as_deref().or(wave), false)?
             )?;
             Ok(())
         }
         Commands::Wave { cmd } => wave(
             &crate::repo::require_repo_root(directory, "this command")?,
             cmd,
-            selected_wave,
-            directory,
             io,
         ),
         Commands::Session { cmd } => super::session::mutate(cli, directory, cmd, io),
-        Commands::Ship {
-            stop: true,
-            reason,
-            json,
-            ..
-        } => {
-            let issue = cli.task.as_deref().context("No Task selected")?;
-            let stopped = super::ship::stopped(issue, reason.as_deref())?;
-            if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&stopped)?)?;
-            } else {
-                write!(io.output, "{}", super::ship::render_stopped(&stopped))?;
-            }
-            Ok(())
-        }
-        Commands::Portfolio { cmd, json } => {
-            crate::portfolio::write(cmd.as_ref(), *json, directory, io)
-        }
+        Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Portfolio { cmd, json },
+        } => crate::portfolio::write(cmd.as_ref(), *json, directory, io),
         Commands::Graph {
             cmd: crate::lf::GraphCommand::Customize { name, json },
         } => {
@@ -190,12 +190,12 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io).map(drop),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use crate::ops::task_ownership::{change, render, OwnershipChange};
+            use crate::ops::task_ownership::{render, OwnershipChange};
             let requested = match command {
                 TaskCommand::Claim { .. } => OwnershipChange::Claim,
                 _ => OwnershipChange::Unassign,
             };
-            let ownership = change(repo, issue, requested)?;
+            let ownership = crate::engine::task::ownership(repo, issue, requested)?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             } else {
@@ -256,7 +256,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             }
             Ok(())
         }
-        TaskCommand::Edit {
+        TaskCommand::Update {
             issue,
             title,
             notes,
@@ -295,58 +295,9 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     }
 }
 
-fn wave(
-    repo: &Path,
-    command: &WaveCommand,
-    selected_wave: Option<&str>,
-    directory: &Path,
-    io: &mut CommandIo<'_>,
-) -> Result<()> {
+fn wave(repo: &Path, command: &WaveCommand, io: &mut CommandIo<'_>) -> Result<()> {
     match command {
-        WaveCommand::NewChapter {
-            wave,
-            name,
-            plan,
-            dry_run,
-            json,
-            ..
-        } => {
-            let rotation = crate::ops::chapter::new_chapter(
-                repo,
-                name,
-                &read_plan(&directory.join(plan), io.input)?,
-                wave.as_deref().or(selected_wave),
-                *dry_run,
-            )?;
-            if let Some(provider) = crate::config::load_config_or_default(Some(repo))
-                .planning_transport()
-                .remote_name()
-                .filter(|_| !dry_run)
-            {
-                writeln!(io.error, "Saved locally; pending {provider} sync.")?;
-            }
-            if *json {
-                writeln!(io.output, "{}", serde_json::to_string_pretty(&rotation)?)?;
-            } else {
-                writeln!(io.output, "Chapter {}", rotation.name)?;
-                for wave in rotation.waves {
-                    writeln!(
-                        io.output,
-                        "  {} → {} ({})",
-                        wave.wave, rotation.name, wave.successor_id
-                    )?;
-                    for task in wave.tasks {
-                        writeln!(
-                            io.output,
-                            "    {}  {:?}  {}",
-                            task.task.identifier, task.disposition, task.reason
-                        )?;
-                    }
-                }
-            }
-            Ok(())
-        }
-        WaveCommand::Add {
+        WaveCommand::Create {
             wave,
             objective,
             json,
@@ -425,14 +376,4 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
     input.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
     Ok(String::from_utf8(bytes)?)
-}
-
-fn read_plan(path: &Path, input: &mut dyn Read) -> Result<Vec<u8>> {
-    if path == Path::new("/dev/stdin") {
-        let mut bytes = Vec::new();
-        input.read_to_end(&mut bytes)?;
-        Ok(bytes)
-    } else {
-        Ok(std::fs::read(path)?)
-    }
 }

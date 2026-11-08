@@ -174,7 +174,7 @@
             "state": "available",
             "observed_at": null
           },
-          "repository_id": "repo_00000000000040008000000000000001",
+          "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
           "project_id": "proj_0123456789ab40008000000000000001",
           "wave_id": "wave-1"
@@ -439,7 +439,7 @@
           "abandoned_at": null
         },
         "graph_source": null,
-        "section": "waiting"
+        "section": "backlog"
       },
       {
         "task": {
@@ -514,7 +514,7 @@
             "state": "available",
             "observed_at": null
           },
-          "repository_id": "repo_00000000000040008000000000000001",
+          "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
           "project_id": "proj_0123456789ab40008000000000000001",
           "wave_id": "wave-1"
@@ -564,7 +564,7 @@
         "shipping": null,
         "pr": null,
         "graph_source": null,
-        "section": "not_started"
+        "section": "backlog"
       }
     ],
     "truncated": false

@@ -3,8 +3,11 @@
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
 //! socket carries one JSON object per line, the WebSocket one per text frame.
+use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, write::Write};
+use crate::lf::commands::{read::Read, subscribe::SubscriptionFrame, write::Write};
+use crate::server::schema::Untyped;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
@@ -17,31 +20,47 @@ pub const MAX_MESSAGE: usize = 1024 * 1024;
 /// The largest message a ticketed connection carries in either direction.
 pub const MAX_BULK: usize = 64 * 1024 * 1024;
 pub const MAX_CONNECTIONS: usize = 64;
+/// How long a `session.attach` ticket opens a bridge.
+pub const TICKET_LIFETIME: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// One message from the client.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
     /// The connection's first message; the server answers `welcome`.
     Hello(Hello),
     /// A pre-hello readiness probe; the server answers `status` and closes.
     Status,
+    /// A bridge's first and only message: the ticket `session.attach` issued.
+    /// The server answers `bridged`, and the connection then speaks the owner
+    /// protocol. A ticket opens one bridge, within [`TICKET_LIFETIME`], for the
+    /// user who requested it; otherwise the answer is `error` and the connection closes.
+    Attach { ticket: String },
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
-    Request { id: String, operation: Operation },
-    /// A read with a watch; answers `subscribed`, then `reading` messages
-    /// until cancelled. The id follows the same rules as a request's.
-    Subscribe { id: String, operation: Read },
+    /// `select` keeps only those dotted paths of a read's answer (`task.title`;
+    /// a path through an array applies to each element, a missing path is
+    /// absent); null keeps it whole, and a write refuses one.
+    Request {
+        id: String,
+        operation: Operation,
+        select: Option<Vec<String>>,
+    },
+    /// A read with a subscription; answers a null `response`, then `reading` messages
+    /// until cancelled. The id follows the same rules as a request's. `select`
+    /// is as for a request; a change outside it sends no reading.
+    Subscribe {
+        id: String,
+        operation: Read,
+        select: Option<Vec<String>>,
+    },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     Checkpoint { id: String, checkpoint: u64 },
     /// Forget a request's answer, or end a subscription.
     Cancel { id: String },
-    /// A ticketed connection's first and only protocol message. The server
-    /// answers `admitted`, then the connection carries what the ticket names.
-    Ticket { ticket: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Hello {
     pub revision: u32,
@@ -50,7 +69,7 @@ pub struct Hello {
 }
 
 /// Who connected, for diagnostics; it grants nothing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
     pub kind: String,
@@ -60,9 +79,9 @@ pub struct ClientIdentity {
 }
 
 /// What a request asks for, named by its `kind`: a dotted resource and verb
-/// (`task.complete`, `plan.get`). `desktop.*` kinds are Desktop's own
-/// arrangement state.
-#[derive(Debug, Serialize, Deserialize)]
+/// (`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own
+/// arrangement state, not part of what other clients are offered.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Operation {
     Server(ServerOperation),
@@ -71,53 +90,76 @@ pub enum Operation {
 }
 
 /// Operations the server owns rather than a shared read or write.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
-    /// The owner Process of a Session's terminal, if one is recorded.
-    #[serde(rename = "session.owner")]
-    SessionOwner { session: crate::id::LfSessionId },
-    /// Settings files: catalogue, declaration, explanation and theme.
-    #[serde(rename = "config.file")]
-    Configuration {
-        request: crate::config::api::Request,
+    /// A ticket for the Session's terminal: the server resolves the Session's
+    /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
+    /// expires_in_ms}`. A new connection presents the ticket as its first
+    /// message (`attach`) and becomes the bridge; this connection stays a
+    /// client. When the owner ends, the bridge closes; attaching again by the
+    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// Session must still be owned by exactly that LfProcess, for a client that
+    /// reconnects only to the owner it had.
+    #[serde(rename = "session.attach")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
+    SessionAttach {
+        session: crate::id::LfSessionId,
+        owner_lf_process_id: Option<LfProcessId>,
     },
     /// Mobile access readiness; same-user local socket only.
     #[serde(rename = "mobile.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::mobile::Status>()))]
     MobileStatus,
     /// Turn mobile access on with `configuration`, or off with null; same-user
     /// local socket only. Answers `{configuration}`.
     #[serde(rename = "mobile.configure")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"configuration": generator.subschema_for::<Option<super::mobile::Configuration>>()}, "required": ["configuration"], "additionalProperties": false}))) ]
     ConfigureRemote {
         configuration: Option<super::mobile::Configuration>,
     },
-    /// A ticket for a terminal connection to this owner's existing protocol;
-    /// answers `{ticket}`.
-    #[serde(rename = "terminal.attach")]
-    Attach { owner: LfProcessId },
     /// A ticket for a connection that carries one request of `bytes` bytes,
     /// larger than `limits.max_message`; answers `{ticket}`. The uploaded
     /// request is answered here under its own id.
     #[serde(rename = "request.upload")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"ticket": {"type": "string"}}, "required": ["ticket"], "additionalProperties": false}))) ]
     Upload { bytes: usize },
 }
 
+/// What `session.attach` answers: a ticket that opens one bridge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionAttached {
+    /// Opaque random ticket; single use.
+    pub ticket: String,
+    pub owner_lf_process_id: LfProcessId,
+    /// How long the ticket opens a bridge, from when it was issued.
+    pub expires_in_ms: u64,
+}
+
 /// One message from the server.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
-    /// What the request returned: a read's or write's value, `{owner}` for
-    /// `session.owner`, null once a subscription or attachment is confirmed.
-    /// `trace_id` correlates the server's diagnostics for it.
+    /// What the request returned: the value its operation's `x-result` names,
+    /// null once a subscription is confirmed. `trace_id` correlates the server's
+    /// diagnostics for it.
     Response {
         id: String,
         trace_id: crate::id::TraceId,
         result: serde_json::Value,
     },
+    /// The answer to `attach`: the connection now speaks the owner protocol
+    /// with this LfProcess, and nothing more arrives from the server.
+    Bridged {
+        owner_lf_process_id: LfProcessId,
+    },
+    /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
         id: String,
+        #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
     /// The answer for `id` is `bytes` long, more than `limits.max_message`:
@@ -129,6 +171,11 @@ pub enum ServerMessage {
     },
     /// A ticketed connection's answer; what follows is what the ticket names.
     Admitted,
+    /// The subscription's last reading was its answer (`task.wait` reached
+    /// its state); nothing follows for `id`.
+    Ended {
+        id: String,
+    },
     /// `id` is null before a request exists. An error for a subscription ends it.
     Error {
         id: Option<String>,
@@ -139,7 +186,7 @@ pub enum ServerMessage {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Welcome {
     /// The server's name for this connection, as `lf server status` lists it.
@@ -153,11 +200,12 @@ pub struct Welcome {
     pub build: String,
     pub executable_sha256: String,
     /// Null while the Machine registry is unavailable or uninitialized.
+    #[schemars(with = "Option<crate::durable::Machine>")]
     pub machine: Option<serde_json::Value>,
     pub limits: Limits,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Status {
     pub revision: u32,
@@ -169,7 +217,7 @@ pub struct Status {
 }
 
 /// One welcomed connection, from `welcome` until it closes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectedClient {
     pub id: String,
@@ -180,73 +228,22 @@ pub struct ConnectedClient {
     pub requests: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
     pub max_message: usize,
     pub max_connections: usize,
 }
 
-/// What a client can branch on. Nothing ran for any code but `outcome_unknown`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    /// No protocol revision in common; `data` names the side to update.
-    Incompatible,
-    /// The message or request is malformed or its arguments are refused.
-    Invalid,
-    /// The named Task, Session, owner or subscription does not exist; `data` names it.
-    NotFound,
-    /// The request contradicts current state: a reused id or a stale revision.
-    Conflict,
-    /// A dependency is missing or failed: the Machine registry, a watch, a provider.
-    Unavailable,
-    /// The operation may have taken effect; inspect state before retrying.
-    OutcomeUnknown,
-    /// The server is at capacity or the client fell behind; retry shortly.
-    Busy,
-}
-
-/// A refused request, as an `error` message carries it. Shared operations
-/// return it inside `anyhow::Error` to name their code; the server sends it as
-/// is, and the CLI prints its message.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("{message}")]
-pub struct ServerError {
-    pub code: ErrorCode,
-    pub message: String,
-    pub data: Option<serde_json::Value>,
-}
-
-impl ServerError {
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            data: None,
-        }
-    }
-
-    pub fn with(mut self, data: serde_json::Value) -> Self {
-        self.data = Some(data);
-        self
-    }
-
-    pub fn into_message(self, id: Option<String>) -> ServerMessage {
-        ServerMessage::Error {
+impl ServerMessage {
+    /// The `error` message that answers request `id` (null: the connection) with `error`.
+    pub fn error(id: Option<String>, error: Error) -> Self {
+        Self::Error {
             id,
-            code: self.code,
-            message: self.message,
-            data: self.data,
+            code: error.code,
+            message: error.message,
+            data: error.data,
         }
-    }
-}
-
-/// The wire name, so a message reads `outcome_unknown: …` on every client.
-impl std::fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = serde_json::to_value(self).expect("an error code serializes as a string");
-        f.write_str(name.as_str().expect("an error code serializes as a string"))
     }
 }
 
@@ -263,7 +260,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/checkpoint.json"),
             include_str!("../../../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),
-            include_str!("../../../../tests/fixtures/dto/server/session_owner.json"),
+            include_str!("../../../../tests/fixtures/dto/server/attach_ticket.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
@@ -275,6 +272,43 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/mobile_status_request.json"),
             include_str!("../../../../tests/fixtures/dto/server/upload.json"),
             include_str!("../../../../tests/fixtures/dto/server/ticket.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_run.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_ship.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_interrupt.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_bind.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_connect.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_ci.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_release.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_list.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_route.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_disconnect.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_connect.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_set.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_token.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_redeem_reset.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_use.json"),
+            include_str!("../../../../tests/fixtures/dto/server/graph_run.json"),
+            include_str!("../../../../tests/fixtures/dto/server/skill_run.json"),
+            include_str!("../../../../tests/fixtures/dto/server/skill_list.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_publish.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_open.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_submit.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_arm.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_land.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_abandon.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_reconcile.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_request_review.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_checks.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_reviews.json"),
         ] {
             let message: ClientMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(
@@ -286,7 +320,8 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/welcome.json"),
             include_str!("../../../../tests/fixtures/dto/server/status.json"),
             include_str!("../../../../tests/fixtures/dto/server/response.json"),
-            include_str!("../../../../tests/fixtures/dto/server/owner.json"),
+            include_str!("../../../../tests/fixtures/dto/server/attached.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bridged.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
@@ -295,6 +330,31 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/ticket_reply.json"),
             include_str!("../../../../tests/fixtures/dto/server/bulk.json"),
             include_str!("../../../../tests/fixtures/dto/server/admitted.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_running.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_shipping.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_held.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_steered.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_connected.json"),
+            include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/repo_ci_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/launched.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_committed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_sync_planned.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_syncing.json"),
+            include_str!("../../../../tests/fixtures/dto/server/checkout_created.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_routes.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_redeemed.json"),
+            include_str!("../../../../tests/fixtures/dto/server/skill_entries.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_published.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_prepared.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_abandoned.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_delivery_check.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_review_requested.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_checks_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/pr_reviews_report.json"),
+            include_str!("../../../../tests/fixtures/dto/server/ended.json"),
         ] {
             let message: ServerMessage = serde_json::from_str(raw).unwrap();
             assert_eq!(

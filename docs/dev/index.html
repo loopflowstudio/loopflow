@@ -1796,7 +1796,7 @@ lives in <a href="https://loopflow.studio/architecture/reference">Architecture R
 </code></pre>
 <p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
 records its Process, reserves an LfSession, captures the input, then launches the
-provider. It needs no Wave, Project, Task, or daemon. The conversation persists
+provider. It needs no Wave, Task, or server process. The conversation persists
 after that command exits; a later command can connect to the same LfSession.</p>
 <pre tabindex="0"><code class="language-text">request
   |
@@ -1933,7 +1933,6 @@ wave/{mod,config,context,
 project
 task
 
-ops/chapter.rs                deterministic chapter rotation
 ops/task.rs                   Task launch: a fresh Graph in the Task checkout
 lf/commands/graph.rs           Graph process: one process per Graph
 
@@ -1971,7 +1970,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Graphs /       Wave -&gt; Project -&gt; Task
+  Skills / Graphs /       Wave -&gt; Task
   goals / memory                  |
           |                       +---------&gt; Task delivery
           |                       |                ^
@@ -1987,7 +1986,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
                         Process / LfSession
                               |
                               v
-                  status / roadmap / usage / app
+                  status / planning / usage / app
 
 another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
@@ -2002,8 +2001,8 @@ ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">Repository
   `-- Wave                    enduring objective, memory and cadence
-        `-- Project           status + shared chapter name + Graph + KRs
-              `-- Task        identity, worktree, PR and every Graph process for it
+        |   planning          status + Graph + KRs (one Linear Project when connected)
+        `-- Task              identity, worktree, PR and every Graph process for it
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
@@ -2051,12 +2050,7 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 <td>Wave files, local Wave identity and, with Linear, Initiative membership</td>
 </tr>
 <tr>
-<td>Chapter</td>
-<td>Shared name of each Wave's In Progress Project</td>
-<td>Project statuses; no Chapter row or packet</td>
-</tr>
-<tr>
-<td>Project</td>
+<td>Planning</td>
 <td>A Wave's plan, KRs and targets</td>
 <td><code>projects</code> row, shared through the planning provider</td>
 </tr>
@@ -2108,8 +2102,8 @@ exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
 its Graph through the step Process that captured its input. A killed Graph process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
-<p>Task requires repository identity and may belong to a Project; its Wave is derived
-from that Project. Constructors fill omitted ancestors and reject mismatches.
+<p>Task requires repository identity and may belong to a Wave through its planning
+row. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
 or change Graph membership. Done and landed Tasks remain valid targets. Earlier
@@ -2117,11 +2111,8 @@ usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.</p>
 <p>Reserving actual Task work (<code>lf task run</code> or <code>lf task checkout</code> allocating a
 checkout) claims an unowned Task in its append-only ownership log. Recording an
-inspection command's Process does not claim a Task. Chapter retirement
-also checks authored work, PRs and Graphs; missing history alone cannot
-prove untouched backlog. Rotation converges from fresh provider facts using the
-explicit target name and stable Project identities. A partially rotated repository
-must be retryable; unrelated competing plans remain unresolved.</p>
+inspection command's Process does not claim a Task. Missing history alone cannot
+prove untouched backlog; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference-models#core-models-and-apis">reference</a> owns the field and
 write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.</p>
@@ -2138,7 +2129,7 @@ lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
 lf commit -m &quot;Reconcile Task research&quot;
 lf pr publish
-lf submit
+lf pr submit
 lf task status INF-123 --json
 </code></pre>
 <p><code>checkout</code> creates or reuses tracked Task Work and its checkout placement
@@ -2155,8 +2146,8 @@ lf wave status product
 </code></pre>
 <p><code>task run</code> places the Task, then runs a fresh Graph in its checkout exactly as
 <code>lf --task ISSUE graph GRAPH</code> does, returning when the Graph ends; it never
-continues an earlier one. Repository rotation converges every Wave on the
-requested Project name, preserving active Task identity and execution. Direct
+continues an earlier one. A plan is replaced in place, preserving active Task
+identity and execution. Direct
 questions and helpers use attributed LfSessions without gaining Graph
 authority. Graphs hold autonomous steps only; review happens in the Task
 conversation.</p>
@@ -2183,7 +2174,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
-<td>Graph semantics, Work state, Steer, questions, review GraphSteps, chapter rotation and Task advancement</td>
+<td>Graph semantics, Work state, Steer, questions, review GraphSteps and Task advancement</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>

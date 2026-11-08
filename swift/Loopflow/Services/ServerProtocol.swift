@@ -44,23 +44,55 @@ public struct ServerHello: Encodable, Sendable {
     private enum CodingKeys: String, CodingKey { case revision, client, minRevision = "min_revision" }
 }
 
+/// What a client branches on: the Rust `ErrorCode`'s wire names.
+public enum ServerErrorCode: String, Sendable, Equatable {
+    case incompatible, invalid, conflict, unavailable, busy
+    case notFound = "not_found"
+    case outcomeUnknown = "outcome_unknown"
+}
+
+/// A server `error`, typed so callers branch on `code` rather than its text.
+/// `code` is nil for a code this client does not know yet.
+public struct ServerError: LocalizedError, Sendable, Equatable {
+    public let code: ServerErrorCode?
+    public let message: String
+    public let data: JSONValue
+
+    public init(code: String, message: String, data: JSONValue) {
+        self.code = ServerErrorCode(rawValue: code)
+        self.message = message
+        self.data = data
+    }
+
+    /// Only `outcome_unknown` means the effect may have happened: read state
+    /// before retrying. Every other code means nothing changed.
+    public var mayHaveHappened: Bool { code == .outcomeUnknown }
+
+    public var errorDescription: String? {
+        mayHaveHappened ? "\(message). It may have happened; refresh before retrying." : message
+    }
+}
+
 /// One message from the client.
 public enum ServerClientMessage: Encodable, Sendable {
     case hello(ServerHello)
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
-    case request(id: String, operation: ServerOperation)
-    /// A read with a watch: `subscribed`, then readings until cancelled.
-    case subscribe(id: String, operation: ServedRead)
+    /// `select` keeps only those dotted paths of a read's answer; nil keeps it whole.
+    case request(id: String, operation: ServerOperation, select: [String]?)
+    /// A read with a subscription: a null `response`, then readings until cancelled.
+    /// `select` is as for a request; a change outside it sends no reading.
+    case subscribe(id: String, operation: ServedRead, select: [String]?)
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     case checkpoint(id: String, checkpoint: UInt64)
     /// Forget a request's answer, or end a subscription.
     case cancel(id: String)
-    /// A ticketed connection's first message; the server answers `admitted`.
-    case ticket(String)
+    /// A bridge's first and only message: the ticket `session.attach` issued.
+    /// The server answers `bridged`, and the connection then speaks the owner protocol.
+    case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, checkpoint, revision, client, ticket, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, select, checkpoint, ticket, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -70,14 +102,16 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode(hello.minRevision, forKey: .minRevision)
             try box.encode(hello.client, forKey: .client)
         case .status: try box.encode("status", forKey: .type)
-        case .request(let id, let operation):
+        case .request(let id, let operation, let select):
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
-        case .subscribe(let id, let operation):
+            try box.encode(select, forKey: .select)
+        case .subscribe(let id, let operation, let select):
             try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
+            try box.encode(select, forKey: .select)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)
@@ -85,8 +119,8 @@ public enum ServerClientMessage: Encodable, Sendable {
         case .cancel(let id):
             try box.encode("cancel", forKey: .type)
             try box.encode(id, forKey: .id)
-        case .ticket(let ticket):
-            try box.encode("ticket", forKey: .type)
+        case .attach(let ticket):
+            try box.encode("attach", forKey: .type)
             try box.encode(ticket, forKey: .ticket)
         }
     }
@@ -114,16 +148,15 @@ public struct MachineMobileStatus: Codable, Sendable {
 /// What a request asks for, named by its `kind`: a dotted resource and verb.
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
-    case sessionOwner(session: String)
     case read(ServedRead)
     case command(ServedWrite)
-    case configuration(JSONValue)
-    /// `{ticket}` for a terminal connection to this owner's existing protocol.
-    case attach(owner: String)
-    /// `{ticket}` for a connection carrying one request of `bytes` bytes.
+    case config(ConfigOperation)
+    /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
+    /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
+    case attach(session: String, owner: String?)
     case upload(bytes: Int)
 
-    private enum Keys: String, CodingKey { case kind, owner, session, request, bytes }
+    private enum Keys: String, CodingKey { case kind, bytes, session, ownerLfProcessID = "owner_lf_process_id" }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
@@ -132,18 +165,52 @@ public enum ServerOperation: Encodable, Sendable {
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)
             try box.encode(bytes, forKey: .bytes)
-        case .sessionOwner(let session):
+        case .config(let operation): try operation.encode(to: encoder)
+        case .attach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("session.owner", forKey: .kind)
+            try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
-        case .configuration(let request):
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("config.file", forKey: .kind)
-            try box.encode(request, forKey: .request)
-        case .attach(let owner):
-            var box = encoder.container(keyedBy: Keys.self)
-            try box.encode("terminal.attach", forKey: .kind)
-            try box.encode(owner, forKey: .owner)
+            try box.encode(owner, forKey: .ownerLfProcessID)
+        }
+    }
+}
+
+/// The `config.*` operations Desktop's Settings and Appearance panes use.
+/// A destination is the Rust `config::files::Destination` as JSON: an owner,
+/// never a file plus a scope. Mirrors `Read::Config*` and `Write::Config*`.
+public enum ConfigOperation: Encodable, Sendable {
+    case catalog
+    case get(destination: JSONValue, key: String)
+    case explain(destination: JSONValue, key: String)
+    /// `value` is YAML.
+    case set(destination: JSONValue, key: String, value: String)
+    case unset(destination: JSONValue, key: String)
+    /// Appearance's theme file: set to `value`, or read when nil.
+    case theme(path: String, value: String?)
+
+    private enum Keys: String, CodingKey { case kind, destination, key, value, path }
+    public func encode(to encoder: Encoder) throws {
+        var box = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .catalog: try box.encode("config.catalog", forKey: .kind)
+        case .get(let destination, let key), .explain(let destination, let key), .unset(let destination, let key):
+            let kind = switch self {
+            case .get: "config.get"
+            case .explain: "config.explain"
+            default: "config.unset"
+            }
+            try box.encode(kind, forKey: .kind)
+            try box.encode(destination, forKey: .destination)
+            try box.encode(key, forKey: .key)
+        case .set(let destination, let key, let value):
+            try box.encode("config.set", forKey: .kind)
+            try box.encode(destination, forKey: .destination)
+            try box.encode(key, forKey: .key)
+            try box.encode(value, forKey: .value)
+        case .theme(let path, let value):
+            try box.encode("config.theme", forKey: .kind)
+            try box.encode(path, forKey: .path)
+            try box.encode(value, forKey: .value)
         }
     }
 }
@@ -152,21 +219,28 @@ public enum ServerOperation: Encodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
-    /// What the request returned: a read's or write's value, `{owner}` for
-    /// `session.owner`, null once a subscription or attachment is confirmed.
+    /// What the request returned: a read's or write's value, or the ticket for
+    /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
+    /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
+    case bridged(ownerLfProcessID: String)
     case reading(id: String, frame: JSONValue)
     /// The answer for `id` is `bytes` long; a ticketed connection delivers it.
     case bulk(id: String, ticket: String, bytes: Int)
     /// A ticketed connection's answer; what follows is what the ticket names.
     case admitted
+    /// The subscription's last reading was its answer (`task.wait` reached
+    /// its state); nothing follows for `id`.
+    case ended(id: String)
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
     /// structured detail, `.null` when there is none.
     case error(id: String?, code: String, message: String, data: JSONValue)
 
-    private enum Keys: String, CodingKey { case type, id, result, frame, code, message, data, ticket, bytes, traceID = "trace_id" }
+    private enum Keys: String, CodingKey {
+        case type, ticket, bytes, id, result, frame, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+    }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
         switch try box.decode(String.self, forKey: .type) {
@@ -175,12 +249,14 @@ public enum ServerMessage: Decodable, Sendable {
         case "response":
             self = .response(id: try box.decode(String.self, forKey: .id), traceID: try box.decode(String.self, forKey: .traceID),
                              result: try box.decode(JSONValue.self, forKey: .result))
+        case "bridged": self = .bridged(ownerLfProcessID: try box.decode(String.self, forKey: .ownerLfProcessID))
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "bulk":
             self = .bulk(id: try box.decode(String.self, forKey: .id), ticket: try box.decode(String.self, forKey: .ticket),
                          bytes: try box.decode(Int.self, forKey: .bytes))
         case "admitted": self = .admitted
+        case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
                           message: try box.decode(String.self, forKey: .message), data: try box.decode(JSONValue.self, forKey: .data))

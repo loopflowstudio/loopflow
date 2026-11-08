@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::agent::check_cli_available;
 use crate::error::LoadError;
 
-pub mod api;
 pub mod catalog;
 mod definitions;
 pub mod files;
+pub mod keys;
 pub mod migrate;
 pub(crate) mod observation;
 pub(crate) mod placement;
@@ -165,7 +165,9 @@ pub(crate) fn select_agent(agent: Option<&str>) -> Result<&str, LoadError> {
 }
 
 /// Authority is independent of the declaration's scope and target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigSource {
     Builtin,
@@ -324,7 +326,7 @@ pub enum PlanningConfig {
         remote: String,
         plan: GitPlan,
     },
-    /// The Linear Team's ID; `lf wave connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
     Linear {
         team: Option<String>,
     },
@@ -375,7 +377,7 @@ enum RawPlanningConfig {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         personal: bool,
     },
-    /// The Linear Team's ID; `lf wave connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
     Linear {
         #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
         team: Option<String>,
@@ -520,32 +522,9 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
         LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
-    fold_linear_team(&mut value);
+    keys::fold(&mut value);
     normalize_context(&mut value);
     Ok(Some(value))
-}
-
-/// Released lf reads the Linear Team from `linear.team`, so a repository
-/// keeps that block while either build may run in it. Read it as Linear
-/// planning's team; an explicit `planning.team` wins. LOO-560 removes this
-/// once a release with `planning.team` is installed.
-fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
-    let Some(mapping) = value.as_mapping_mut() else {
-        return;
-    };
-    let Some(linear) = mapping.remove("linear") else {
-        return;
-    };
-    let Some(team) = linear.get("team").cloned() else {
-        return;
-    };
-    if let Some(planning) = mapping.get_mut("planning").and_then(|p| p.as_mapping_mut()) {
-        if planning.get("provider").and_then(|p| p.as_str()) == Some("linear")
-            && !planning.contains_key("team")
-        {
-            planning.insert("team".into(), team);
-        }
-    }
 }
 
 /// Temporary reader for preferences shared with the released flat format.

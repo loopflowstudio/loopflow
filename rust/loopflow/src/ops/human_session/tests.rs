@@ -896,7 +896,16 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .iter()
             .any(|a| a.kind == super::SessionActionKind::MoveHere));
 
+        // A launcher that may still be running; an ended one would make its
+        // unidentified agent dead instead of unknown.
         let launcher = store.sqlite.test_lf_process();
+        rusqlite::Connection::open(crate::store::default_db_path())
+            .unwrap()
+            .execute(
+                "UPDATE processes SET started_at=strftime('%s','now') WHERE id=?1",
+                [&launcher],
+            )
+            .unwrap();
         let holder = store
             .sqlite
             .claim_session_attachment(&record.id, None, &launcher, true)

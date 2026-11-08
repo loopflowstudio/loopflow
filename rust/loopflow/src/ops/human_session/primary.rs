@@ -158,6 +158,18 @@ async fn start_in_background(
         return Ok(None);
     }
     let worktree = task.worktree()?.clone();
+    // A Machine with no agent selected, or without its CLI, would only record
+    // a launch that fails.
+    let config = crate::config::load_wave_config(Some(&worktree), None)?.unwrap_or_default();
+    let Ok(agent) = config.agent() else {
+        tracing::info!(task = %task.identifier, "background Task conversation skipped: no agent selected");
+        return Ok(None);
+    };
+    let (harness, _) = crate::config::parse_agent(agent);
+    if !crate::agent::check_cli_available(&harness) {
+        tracing::info!(task = %task.identifier, %harness, "background Task conversation skipped: agent not installed");
+        return Ok(None);
+    }
     let (session, _) = ensure_task(store, &worktree, task.id.as_str(), None).await?;
     let id = session.id.to_string();
     if store.sqlite.session_transport(&id)?.is_some() {

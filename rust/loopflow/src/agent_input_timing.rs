@@ -34,6 +34,12 @@ pub(crate) fn record(phase: &str, subject: &str) {
         // Benchmarks redirect the log, unrotated.
         Some(path) => PathBuf::from(path),
         None => {
+            // Unit tests launch under the Machine's ambient home; their
+            // fixtures are not its launch history.
+            #[cfg(test)]
+            if std::env::var_os("LF_HOME").is_none() {
+                return;
+            }
             let path = crate::store::lf_home_dir().join("logs").join(FILE_NAME);
             // The log never creates a home that previews and reads leave untouched.
             if !path.parent().is_some_and(Path::is_dir) {

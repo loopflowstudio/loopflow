@@ -25,7 +25,7 @@ Keep the current contract. The same-connection workflow passed live QA below.
 Review page: `scratch/concept-review.html`. This review inspected code and prior
 check results; it did not rerun tests.
 
-Remaining: gate, review, CI repair if needed, merge and post-merge verification
+Remaining: delivery review, CI repair if needed, merge and post-merge verification
 before Task completion. Sync again before delivery as other follow-ups land.
 Gate coverage: `test(git::tests::) | test(journal::request::tests::) |
 test(lf::commands::subscribe::) | test(lf::commands::waves::) | binary(served_reads)`.
@@ -43,3 +43,5 @@ Two Task subscriptions stayed open while immediate reads saw edits, staging,
 `scratch/qa.html` contains the transcript and limits. No product repair needed.
 The isolated server was stopped, temporary state removed, and checkout probes
 restored. Desktop rendering and signed installation were not exercised headless.
+
+Publication check (2026-11-08): `lf sync` merged `da7e82310` cleanly; no code repair needed. `TMPDIR=/private/tmp uv run python scripts/test.py --reuse-passing --rust-filter 'test(git::tests::) | test(journal::request::tests::) | test(lf::commands::subscribe::) | test(lf::commands::waves::) | binary(served_reads)'` (inherited `LF_*` unset, rustup proxies first on PATH) passed: 66 tests, architecture, inventory, fmt and all-target Clippy; 278 seconds for two suites. Log: `/private/tmp/loo805-publish-gate.log`. Only scratch notes and PR copy changed afterward. Hosted CI remains for delivery after scratch cleanup.

@@ -34,6 +34,8 @@ pub struct HistoryFeed {
     /// Print a JSON line now and each time the history changes, until stdin closes
     #[arg(short = 's', long, requires = "json")]
     pub subscribe: bool,
+    #[command(flatten)]
+    pub selection: crate::lf::Selection,
 }
 
 /// `session.usage`: provider-authored usage from recorded Session inputs.

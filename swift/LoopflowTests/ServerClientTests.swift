@@ -87,7 +87,9 @@ struct ServerClientTests {
             _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
             Issue.record("A refused write succeeded")
         } catch {
-            #expect(error.localizedDescription == "conflict: Dashboard changed; read it again before editing")
+            #expect((error as? ServerError)?.code == .conflict)
+            #expect((error as? ServerError)?.mayHaveHappened == false)
+            #expect(error.localizedDescription == "Dashboard changed; read it again before editing")
         }
         let written = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
         #expect(try JSONDecoder().decode([String: String].self, from: Data(written.utf8)) == ["path": "/r/.lf/graphs/code.yaml"])
@@ -172,7 +174,8 @@ struct ServerClientTests {
             _ = try await frames.next()
             Issue.record("An ended subscription kept its stream open")
         } catch {
-            #expect(error.localizedDescription == "unavailable: gone")
+            #expect((error as? ServerError)?.code == .unavailable)
+            #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")

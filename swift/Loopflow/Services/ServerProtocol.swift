@@ -38,6 +38,35 @@ public struct ServerHello: Encodable, Sendable {
     private enum CodingKeys: String, CodingKey { case revision, client, minRevision = "min_revision" }
 }
 
+/// What a client branches on: the Rust `ErrorCode`'s wire names.
+public enum ServerErrorCode: String, Sendable, Equatable {
+    case incompatible, invalid, conflict, unavailable, busy
+    case notFound = "not_found"
+    case outcomeUnknown = "outcome_unknown"
+}
+
+/// A server `error`, typed so callers branch on `code` rather than its text.
+/// `code` is nil for a code this client does not know yet.
+public struct ServerError: LocalizedError, Sendable, Equatable {
+    public let code: ServerErrorCode?
+    public let message: String
+    public let data: JSONValue
+
+    public init(code: String, message: String, data: JSONValue) {
+        self.code = ServerErrorCode(rawValue: code)
+        self.message = message
+        self.data = data
+    }
+
+    /// Only `outcome_unknown` means the effect may have happened: read state
+    /// before retrying. Every other code means nothing changed.
+    public var mayHaveHappened: Bool { code == .outcomeUnknown }
+
+    public var errorDescription: String? {
+        mayHaveHappened ? "\(message). It may have happened; refresh before retrying." : message
+    }
+}
+
 /// One message from the client.
 public enum ServerClientMessage: Encodable, Sendable {
     case hello(ServerHello)

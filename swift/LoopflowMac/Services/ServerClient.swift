@@ -181,7 +181,7 @@ final class ServerLink: @unchecked Sendable {
             }
             switch try JSONDecoder().decode(ServerMessage.self, from: first) {
             case .welcome(let welcome): self.welcome = welcome
-            case .error(_, let code, let message, _): throw RegistryQueryError("\(code): \(message)")
+            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
             default: throw RegistryQueryError("Server did not welcome the connection")
             }
             Self.setReceiveTimeout(fd, seconds: 0)
@@ -302,12 +302,12 @@ final class ServerLink: @unchecked Sendable {
             state.withLock { subscriptions[id] }?.receive(frame)
         case .ended(let id):
             state.withLock { subscriptions.removeValue(forKey: id) }?.end()
-        case .error(let id?, let code, let message, _):
-            let refusal = RegistryQueryError("\(code): \(message)")
+        case .error(let id?, let code, let message, let data):
+            let refusal = ServerError(code: code, message: message, data: data)
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
             state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: refusal)
-        case .error(nil, let code, let message, _):
-            throw RegistryQueryError("\(code): \(message)")
+        case .error(nil, let code, let message, let data):
+            throw ServerError(code: code, message: message, data: data)
         case .welcome, .status, .bridged:
             // A client connection is never a bridge; `lf session resume` opens those.
             throw RegistryQueryError("Server repeated its greeting; update the client")

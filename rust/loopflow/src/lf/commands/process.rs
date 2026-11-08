@@ -10,6 +10,8 @@ pub enum ProcessCommand {
         /// Print a JSON line now and each time the call trees change, until stdin closes
         #[arg(long, requires = "json")]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Refresh live Loopflow call trees on a terminal; print once when redirected
     Top,

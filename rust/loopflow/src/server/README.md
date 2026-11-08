@@ -239,7 +239,11 @@ part of what a phone or bot client is offered.
   `select` is `invalid`. A subscription compares selected readings, so a
   change outside the selection sends nothing; `task.wait` always keeps
   `reached`, which ends it. `lf <read> --json --select task.identifier,pr.url`
-  prints the same projection for the reads that take `--subscribe`.
+  prints the same projection; only the reads that take `--subscribe` accept
+  the flag. `select` serves untyped clients (agents, scripts, the CLI). A
+  typed client such as the Swift app decodes every DTO strictly with no
+  defaults, so a selected answer would not decode: it sends `null`, and gets
+  a smaller payload only through a read with its own DTO.
 - `subscribe {id, operation, select}` takes a read with a subscription: `desktop.view.list`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers

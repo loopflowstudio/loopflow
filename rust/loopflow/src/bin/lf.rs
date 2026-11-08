@@ -778,6 +778,7 @@ fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyh
             cmd,
             json,
             subscribe,
+            ..
         } => in_directory_runtime(args, |_| {
             loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *subscribe)
         }),
@@ -988,6 +989,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             after,
             limit,
             subscribe,
+            ..
         } => {
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
@@ -1074,6 +1076,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             issue,
             json,
             subscribe,
+            ..
         } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
             if *subscribe {
@@ -1709,9 +1712,7 @@ fn run() -> anyhow::Result<()> {
     }
     loopflow::installation::canonicalize_selected_home()?;
     let _settings = loopflow::config::settings::select_invocation(cli.setting_values()?);
-    loopflow::lf::commands::subscribe::select_output(
-        (!cli.select.is_empty()).then(|| cli.select.clone()),
-    );
+    loopflow::lf::commands::subscribe::select_output(loopflow::lf::selected_paths(&args));
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {

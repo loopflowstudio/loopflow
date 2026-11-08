@@ -55,7 +55,7 @@ struct WorkObservationTransportTests {
             for try await _ in subscription.lines {}
             Issue.record("An unserved read finished successfully")
         } catch {
-            #expect(error is RegistryQueryError)
+            #expect((error as? ServerError)?.code == .invalid)
         }
         await subscription.cancel()
         await server.stop()

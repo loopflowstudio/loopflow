@@ -26,6 +26,29 @@ pub enum DiffContext {
     None,
 }
 
+/// `--select` on a read that takes `--subscribe`: the dotted paths its JSON
+/// answer and frames keep. Only those reads declare it, so no other command
+/// accepts a flag it would ignore.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct Selection {
+    /// Keep only these dotted paths of the JSON answer, comma-separated (`task.identifier,pr.url`)
+    #[arg(long = "select", value_delimiter = ',', value_name = "PATHS")]
+    pub select: Vec<String>,
+}
+
+/// The `--select` paths of the read `args` names, if it declares and sets them.
+pub fn selected_paths(args: &[String]) -> Option<Vec<String>> {
+    use clap::CommandFactory;
+    let matches = Cli::command().try_get_matches_from(args).ok()?;
+    let mut level = &matches;
+    loop {
+        if let Ok(Some(paths)) = level.try_get_many::<String>("select") {
+            return Some(paths.cloned().collect());
+        }
+        level = level.subcommand()?.1;
+    }
+}
+
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
@@ -61,16 +84,6 @@ pub struct Cli {
     /// Override a typed preference for this invocation (KEY=YAML); repeatable
     #[arg(long = "setting", global = true)]
     pub settings: Vec<String>,
-
-    /// Keep only these dotted paths of a read's JSON answer or subscription
-    /// frames, comma-separated (`task.identifier,pr.url`)
-    #[arg(
-        long = "select",
-        global = true,
-        value_delimiter = ',',
-        value_name = "PATHS"
-    )]
-    pub select: Vec<String>,
 
     /// Read the skill and its arguments from this captured invocation file, as a Graph step does
     #[arg(long, value_name = "PATH")]
@@ -434,8 +447,6 @@ impl Cli {
             clipboard: self.clipboard,
             agent: self.agent.clone(),
             settings: self.settings.clone(),
-            // A selection shapes this invocation's answer, never a step's.
-            select: Vec::new(),
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
@@ -702,6 +713,8 @@ pub enum RepoCommand {
         /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(short = 's', long, requires = "json")]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Print the selected repository's checkout on this Machine
     Path,
@@ -1019,6 +1032,8 @@ pub enum DesktopViewCommand {
         /// Print a JSON line now and each time the plans change, until stdin closes
         #[arg(short = 's', long)]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Print what a view shows as JSON, without opening Desktop or starting a provider
     Show {
@@ -1722,6 +1737,8 @@ pub struct SessionListArgs {
     /// Print a JSON line now and each time the list changes, until stdin closes
     #[arg(short = 's', long)]
     pub subscribe: bool,
+    #[command(flatten)]
+    pub selection: crate::lf::Selection,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1895,6 +1912,8 @@ pub enum WaveCommand {
         /// Print a JSON line now and each time the plan changes, until stdin closes
         #[arg(short = 's', long, requires = "json")]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Show the graph the Wave's Tasks take up by default
     Graph {
@@ -1976,6 +1995,8 @@ pub enum WaveCommand {
         /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(short = 's', long, requires = "json")]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
     /// chapters and Sessions keep their identity
@@ -2094,6 +2115,8 @@ pub enum TaskCommand {
         /// Print a JSON line now and each time the list changes, until stdin closes
         #[arg(short = 's', long, conflicts_with = "closed")]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Print one Task as Desktop's Task pane shows it, as JSON
     Show {
@@ -2103,6 +2126,8 @@ pub enum TaskCommand {
         /// Print a JSON line now and each time the Task changes, until stdin closes
         #[arg(short = 's', long)]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
 
     /// Synchronize a Task with its tracker; the change sent last wins
@@ -2270,6 +2295,8 @@ until `lf ship`."
         /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(short = 's', long)]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
     /// Browse the Task brief, workflow and recorded runs without starting work
     View {
@@ -2762,6 +2789,8 @@ pub enum PlanCommand {
         /// Print a JSON line now and each time the plan changes, until stdin closes
         #[arg(short = 's', long)]
         subscribe: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
     },
 }
 
@@ -3433,6 +3462,25 @@ mod tests {
             assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
             assert!(error.to_string().contains(flag));
         }
+    }
+
+    #[test]
+    fn select_belongs_to_the_reads_that_honour_it() {
+        let words = |w: &[&str]| w.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            selected_paths(&words(&[
+                "lf", "session", "list", "--json", "--select", "id,title"
+            ])),
+            Some(vec!["id".to_string(), "title".to_string()])
+        );
+        assert_eq!(
+            selected_paths(&words(&["lf", "session", "list", "--json"])),
+            None
+        );
+        assert!(
+            Cli::try_parse_from(["lf", "task", "changes", "A-1", "--json", "--select", "id"])
+                .is_err()
+        );
     }
 
     #[test]

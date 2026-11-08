@@ -78,6 +78,17 @@ struct ServerProtocolTests {
         #expect(status.clients.first?.requests == 12)
     }
 
+    @Test func errorsBranchOnTheirCode() {
+        let unknown = ServerError(code: "outcome_unknown", message: "launch ended without a result", data: .null)
+        #expect(unknown.code == .outcomeUnknown)
+        #expect(unknown.mayHaveHappened)
+        #expect(unknown.localizedDescription == "launch ended without a result. It may have happened; refresh before retrying.")
+        let busy = ServerError(code: "busy", message: "too many connections", data: .null)
+        #expect(busy.code == .busy && !busy.mayHaveHappened)
+        // A newer server's code is still an error this client can show.
+        #expect(ServerError(code: "throttled", message: "later", data: .null).code == nil)
+    }
+
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
             .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])

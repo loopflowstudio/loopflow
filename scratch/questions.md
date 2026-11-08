@@ -21,3 +21,6 @@ interactive review; implementation direction does not authorize Auto-Ship.
 Implementation choice: use 64 MiB per connection (two maximum-size producers)
 and 256 MiB process-wide initially; 32 MiB would refuse ordinary paired reads
 while either materializes. These count reservations and serialized output, not RSS.
+
+The grace-expiry test waits 61 seconds against the production deadline instead
+of adding a test-only transport deadline. Gate owns this slower acceptance case.

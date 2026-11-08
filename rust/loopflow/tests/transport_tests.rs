@@ -6033,7 +6033,7 @@ fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
         let fixture = Fixture::new();
         let owner = fixture.owner(fixture.serve(terminal, &[
             "/bin/sh", "-c",
-            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+            "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"; if [ -t 0 ]; then stty size > \"$HOME/size\"; fi",
         ]));
         let _cleanup = StopOwner(&fixture, owner.clone());
         let mut service = ServerProof::start(&fixture, false);
@@ -6053,6 +6053,7 @@ fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
                 "kind":"attach", "control":true, "replace":true, "own":"take", "rows":31, "cols":99,
             }),
         );
+        newer.request(json!({"kind":"resize","rows":45,"cols":115}));
         relay.input(b"uncertain typing");
         service.child = Some(service.launch());
         service.ready();
@@ -6070,6 +6071,10 @@ fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
         newer.finish();
         assert_eq!(fixture.wait_file("answer"), "newer viewer");
         assert!(relay.wait_exit().success());
+        if terminal {
+            assert_eq!(fixture.wait_file("size").trim(), "45 115");
+            assert!(String::from_utf8_lossy(&relay.screen.lock().unwrap()).contains("newer viewer"));
+        }
         if !terminal {
             let screen = relay.screen.lock().unwrap();
             assert_eq!(
@@ -6593,4 +6598,146 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         std::fs::read_to_string(fixture.home.path().join("answers")).unwrap(),
         "draft kept\ndone\n"
     );
+}
+
+#[test]
+fn exact_owner_refuses_a_replacement_while_session_attach_finds_it() {
+    let fixture = Fixture::new();
+    let old = fixture.start(&["/bin/cat"]);
+    let session = fixture.bound_session(&old);
+    fixture.stop(&old);
+    let current = fixture.start(&["/bin/cat"]);
+    let _cleanup = StopOwner(&fixture, current.clone());
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET agent_process_id=?2,transport_lf_process_id=?2 WHERE id=?1",
+            rusqlite::params![session, current],
+        )
+        .unwrap();
+    let service = ServerProof::start(&fixture, false);
+    let mut client = service.connect();
+    let before: i64 = fixture
+        .sql()
+        .query_row("SELECT count(*) FROM processes", [], |r| r.get(0))
+        .unwrap();
+    let refused = client
+        .request(
+            serde_json::from_value(json!({
+                "kind":"session.attach","session":session,"owner_lf_process_id":old
+            }))
+            .unwrap(),
+        )
+        .unwrap_err();
+    let error = refused.downcast_ref::<loopflow::engine::Error>().unwrap();
+    assert_eq!(error.code, loopflow::engine::ErrorCode::NotFound);
+    assert_eq!(error.data.as_ref().unwrap()["owner_lf_process_id"], old);
+    assert_eq!(
+        error.data.as_ref().unwrap()["current_lf_process_id"],
+        current
+    );
+    let attached = client
+        .request(
+            serde_json::from_value(json!({
+                "kind":"session.attach","session":session,"owner_lf_process_id":null
+            }))
+            .unwrap(),
+        )
+        .unwrap()
+        .result;
+    assert_eq!(attached["owner_lf_process_id"], current);
+    assert_eq!(
+        fixture
+            .sql()
+            .query_row("SELECT count(*) FROM processes", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c",
+        "i=0; while [ $i -lt 64 ]; do read -r line; dd if=/dev/zero bs=65536 count=1 2>/dev/null; i=$((i+1)); done"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let service = ServerProof::start(&fixture, false);
+    let _stalled = service.viewer(&owner);
+    let mut active = service.viewer(&owner);
+    let mut client = service.connect();
+    let subscription = client
+        .subscribe(loopflow::lf::commands::read::Read::MonitorPs)
+        .unwrap();
+    active.input("next\n");
+    let mut bytes = 0;
+    while bytes < 4 * 1024 * 1024 {
+        if let Item::Out(part) = active.next().unwrap() {
+            bytes += part.len();
+            if bytes % 65536 == 0 && bytes < 4 * 1024 * 1024 {
+                active.input("next\n");
+            }
+            if bytes == 2 * 1024 * 1024 {
+                assert!(client
+                    .request(serde_json::from_value(json!({"kind":"config.catalog"})).unwrap())
+                    .is_ok());
+                client.checkpoint(&subscription, 77).unwrap();
+                loop {
+                    if client.reading(&subscription).unwrap().unwrap()["answers"] == 77 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(bytes, 4 * 1024 * 1024);
+}
+
+#[test]
+fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    fixture.wait_file("drawn");
+    let service = ServerProof::start(&fixture, false);
+    let first = service.viewer(&owner);
+    let reconnect = first.reconnect.clone();
+    let received = first.received;
+    drop(first);
+    let mut newer = service.viewer(&owner);
+    newer.input("after outage\n");
+    until_out(&mut newer, "line after outage");
+    // Exercise the production grace without adding a runtime test setting.
+    let deadline = Instant::now() + Duration::from_secs(61);
+    while Instant::now() < deadline {
+        newer.request(json!({"kind":"controlled"}));
+        newer.until_reply();
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    let session = fixture.bound_session(&owner);
+    let socket = loopflow::server::client::attach(
+        &fixture.endpoint("machine"),
+        &session.as_str().into(),
+        None,
+    )
+    .unwrap();
+    let mut back = Viewer::new(socket);
+    back.request(json!({"kind":"resume","reconnect":reconnect,"received":received,"control":false,"own":null,"rows":24,"cols":80}));
+    match back.next().unwrap() {
+        Item::Reply(reply) => assert_eq!(reply["kind"], "reconnect_required"),
+        other => panic!("output arrived before refusal: {other:?}"),
+    }
+    back.request(
+        json!({"kind":"attach","control":false,"replace":false,"own":null,"rows":24,"cols":80}),
+    );
+    let reply = back.until_reply();
+    assert_eq!(reply["owner"], newer.id);
+    back.accept(&reply);
+    let Some(Item::Snapshot(bytes)) = back.next() else {
+        panic!("fresh attach needs a snapshot");
+    };
+    let mut screen = ghostty_vt::Terminal::new(80, 24).unwrap();
+    screen.write(&bytes);
+    assert!(screen.text().unwrap().contains("after outage"));
+    newer.input("done\n");
+    newer.finish();
 }

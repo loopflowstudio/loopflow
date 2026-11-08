@@ -1400,7 +1400,8 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let task: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task =
+        serde_json::from_slice::<serde_json::Value>(&created.stdout).unwrap()["task"].clone();
     let status = run(&["task", "status", task["id"].as_str().unwrap(), "--json"]);
     assert!(
         status.status.success(),

@@ -56,8 +56,8 @@ struct ServerProtocolTests {
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
         #expect(welcome.revision == 3)
-        #expect(welcome.serverRevision == 2)
-        #expect(welcome.minRevision == 2)
+        #expect(welcome.serverRevision == 3)
+        #expect(welcome.minRevision == 3)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 33554432)
@@ -70,7 +70,7 @@ struct ServerProtocolTests {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
         #expect(status.revision == 3)
-        #expect(status.minRevision == 2)
+        #expect(status.minRevision == 3)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
         #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])

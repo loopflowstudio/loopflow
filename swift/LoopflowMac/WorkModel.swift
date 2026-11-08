@@ -2343,7 +2343,6 @@ final class WorkModel {
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
             navigation.palette = nil
-            await CreationRecovery.shared.refresh()
         }
     }
 
@@ -2575,6 +2574,10 @@ final class WorkModel {
             supersedeSessions()
             await refreshSessions()
             if owner.selectedSessionId == draft.sessionId { owner.selection = .task(id: task.id) }
+            if owner.binding?.id == draft.id { owner.binding = nil }
+        } catch is SubmittedCreationError {
+            // The saved submission now owns recovery; another form submission
+            // would create a different request for the same conversation.
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
             guard owner.binding?.id == draft.id else { return }

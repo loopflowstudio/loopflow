@@ -788,7 +788,12 @@ public struct RegistryQuery: Sendable {
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
             if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
-            return try await run(query.argv, query.cwd)
+            let output = try await run(query.argv, query.cwd)
+            // This CLI spelling renders text; the shared read carries a JSON string.
+            if case .processHistory = query {
+                return String(decoding: try JSONEncoder().encode(output), as: UTF8.self)
+            }
+            return output
         }
         self.write = write ?? { change in
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
@@ -1107,7 +1112,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func processHistory(id: String) async throws -> String {
-        try await serve(.processHistory(id: id))
+        try Self.decode(String.self, from: await serve(.processHistory(id: id)))
     }
 
     /// One store-driven reading keeps position, readiness and run history together.

@@ -2779,3 +2779,89 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         1
     );
 }
+
+#[test]
+fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::{Operation, REVISION};
+    use std::io::Write as _;
+    use std::os::unix::net::UnixStream;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
+    let server = Server::start(repo.path(), home.path());
+    let session: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["session", "resume", "--prepare", "--json"],
+        None,
+    ))
+    .unwrap();
+    let id = session["id"].as_str().unwrap();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let captures = || {
+        conn.query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='captured'",
+            [id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    let before = captures();
+    let change = Write::SessionNew {
+        directory: repo.path().into(),
+        id: id.into(),
+        request_id: "lost-thread".into(),
+        agent: None,
+    };
+    let mut socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
+    writeln!(
+        socket,
+        "{}",
+        serde_json::json!({"type":"hello","revision":REVISION,"min_revision":REVISION,
+        "client":{"kind":"test","platform":"test","name":"lost","version":"0"}})
+    )
+    .unwrap();
+    let mut reader = BufReader::new(socket.try_clone().unwrap());
+    reader.read_line(&mut String::new()).unwrap();
+    writeln!(
+        socket,
+        "{}",
+        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+    )
+    .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while conn
+        .query_row(
+            "SELECT count(*) FROM creation_receipts WHERE request_id='lost-thread'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+        == 0
+    {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(reader);
+    drop(socket);
+    let result = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(Operation::Write(change.clone()))
+        .unwrap()
+        .result;
+    assert_eq!(result["id"], id);
+    assert_eq!(captures(), before + 1);
+    drop(server);
+    let _server = Server::start(repo.path(), home.path());
+    let again = loopflow::server::client::Connection::open()
+        .unwrap()
+        .request(Operation::Write(change))
+        .unwrap()
+        .result;
+    assert_eq!(again, result);
+    assert_eq!(captures(), before + 1, "recovery appended another input");
+}

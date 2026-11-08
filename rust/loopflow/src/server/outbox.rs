@@ -199,7 +199,14 @@ mod tests {
         let producer = outbox.clone();
         let delivering = tokio::spawn(async move {
             producer
-                .deliver(ServerMessage::Ended { id: "done".into() }, reservation)
+                .deliver(
+                    ServerMessage::Response {
+                        id: "large".into(),
+                        trace_id: crate::id::TraceId::default(),
+                        result: serde_json::Value::String("x".repeat(MAX_MESSAGE / 2)),
+                    },
+                    reservation,
+                )
                 .await
                 .unwrap();
         });

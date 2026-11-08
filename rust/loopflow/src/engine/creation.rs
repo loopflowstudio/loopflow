@@ -80,8 +80,9 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
 pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
     let identity = identity("task.create", id, &input)?;
     let _lock = lock(id)?;
-    let store =
-        tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?;
+    let store = Arc::new(
+        tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?,
+    );
     store
         .sqlite
         .check_creation(&identity)
@@ -166,7 +167,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
     let session_id = if input.approve {
         None
     } else {
-        let store = Arc::new(store);
         Some(
             tokio::runtime::Runtime::new()?
                 .block_on(crate::ops::human_session::primary::ensure_task(
@@ -182,8 +182,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
     receipt.graph = Some(graph);
     receipt.session_id = session_id;
     receipt.milestone = if input.approve { "started" } else { "admitted" }.into();
-    let store =
-        crate::store::read_existing_registry()?.context("Machine registry is unavailable")?;
     store.sqlite.advance_creation(
         id,
         &receipt.milestone,

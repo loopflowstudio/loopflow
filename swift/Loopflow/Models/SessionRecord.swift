@@ -179,8 +179,12 @@ public struct SessionPreview: Codable, Hashable, Sendable {
     }
 }
 
+public enum ProviderTransitionKind: String, Codable, Sendable, Hashable {
+    case retained, resumed, forked, started
+}
+
 public struct ProviderTransition: Codable, Sendable, Hashable {
-    public let kind: String
+    public let kind: ProviderTransitionKind
     public let fromProviderSession: String?
     public let toProviderSession: String
     public let fromAgentProcess: AgentProcessId?
@@ -191,10 +195,10 @@ public struct ProviderTransition: Codable, Sendable, Hashable {
 
     public var explanation: String {
         switch kind {
-        case "retained": "Same process"
-        case "resumed": "Resumed in a new process"
-        case "forked": "Forked from \(fromProviderSession ?? "earlier conversation")" + (originalRunning == true ? "; original was running at fork" : "")
-        default: fromProviderSession == nil ? "New conversation" : "New conversation; earlier one left behind"
+        case .retained: "Same process"
+        case .resumed: "Resumed in a new process"
+        case .forked: "Forked from \(fromProviderSession ?? "earlier conversation")" + (originalRunning == true ? "; original was running at fork" : "")
+        case .started: fromProviderSession == nil ? "New conversation" : "New conversation; earlier one left behind"
         }
     }
 

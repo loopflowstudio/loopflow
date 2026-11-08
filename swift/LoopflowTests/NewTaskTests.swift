@@ -33,7 +33,9 @@ struct NewTaskTests {
         #expect(shown.wave == nil)
         #expect(shown.default.name == "code")
         #expect(shown.default.source == "builtin")
-        #expect(calls.withLock { $0 } == [
+        let submitted = calls.withLock { $0 }
+        #expect(UUID(uuidString: submitted[0][3]) != nil)
+        #expect([Array(submitted[0].prefix(2)) + Array(submitted[0].dropFirst(4)), submitted[1]] == [
             ["task", "create", "--wave", "product", "--graph", "auto", "--run", "--json", "--", "-v is ignored"],
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])

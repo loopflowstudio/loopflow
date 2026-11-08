@@ -139,11 +139,19 @@ impl Status {
                         .ok()
                         .flatten()
                         .and_then(|store| {
+                            let current = store
+                                .sqlite
+                                .session_attachment(session.as_str())
+                                .ok()
+                                .flatten()?;
                             store
                                 .sqlite
                                 .provider_transition(session.as_str())
                                 .ok()
                                 .flatten()
+                                .filter(|transition| {
+                                    transition.to_agent_process == current.agent_process_id
+                                })
                         });
                     let _ = send.send((result, transition));
                 });

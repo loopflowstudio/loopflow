@@ -19,19 +19,18 @@ Checks recorded during this pass:
 - Relative-link/anchor scan found and repaired release and CI links, data's
   installation anchor, and the repo command anchor.
 - `git diff --check`: passed.
-- `website/dev.py sync-docs` with the installed CLI generates an OLD ops-nested
-  command tree, so canonical PR/Machine/account links cannot be checked from it.
-  The branch has flattened command families. Regenerate using the built branch
-  CLI and check command anchors before gate. No binary exists at target/debug/lf
-  yet; check/clippy alone do not produce it.
+- `LF_BIN=$PWD/target/debug/lf uv run python website/dev.py sync-docs`: 33 routes
+  regenerated from the merged candidate; every linked command-reference anchor
+  resolves. The installed CLI still generates the old ops-nested tree.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed
+  on the merged tree. Candidate path is recorded in `loo-810-sync.md`.
 
-Remaining verification for the implementation/gate build:
-- Run `documented_commands` and the changed served-operation/schema fixture checks
-  against the merged tree, using the same Cargo sequence as implementation.
-- Use the branch CLI for website command-reference generation, then check links.
-- Reconcile creation-recovery presentation with the user docs: the UI must expose
-  the recovered Task/Session for inspection, not merely a request ID. Preserve
-  unknown launches, original destinations and safe same-payload continuation.
+Recovery now offers Task title, state, request, Graph history and conversations,
+or Session history, through an Inspect action on the original Machine. Unknown
+launches remain unresolved and cannot be dismissed as a confirmed result.
+
+Gate retains the merged-tree served-operation/schema checks and native demo
+review. The implementation plan records focused checks and remaining acceptance.
 
 The docs audit edits are in the checkout; the first batch is checkpointed by the
 implementation agent before sync. Later prose edits remain alongside active code.

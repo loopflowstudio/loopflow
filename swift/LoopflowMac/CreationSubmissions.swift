@@ -140,6 +140,17 @@ final class CreationRecovery {
     }
     private(set) var items: [Item] = []
     private var refreshing = false
+    private var observation: Task<Void, Never>?
+
+    func start() {
+        guard observation == nil else { return }
+        observation = Task {
+            while !Task.isCancelled {
+                await refresh()
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
+    }
 
     func refresh() async {
         guard !refreshing else { return }
@@ -154,7 +165,10 @@ final class CreationRecovery {
                     let unknown = ["run_requested", "stopping"].contains(receipt.milestone)
                     let subject = receipt.taskId ?? receipt.sessionId ?? record.id
                     let payload = try JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
-                    let resource = Resource(destination: record.destination, directory: payload?["directory"] as? String ?? "/",
+                    guard let directory = payload?["directory"] as? String else {
+                        throw RegistryQueryError("The saved creation has no repository; its original request is retained.")
+                    }
+                    let resource = Resource(destination: record.destination, directory: directory,
                         task: receipt.taskId, session: receipt.sessionId)
                     current.append(Item(id: record.id,
                         text: unknown ? "\(subject): start unconfirmed. No second launch was requested." : "Recovered \(subject) · \(receipt.milestone)",
@@ -192,12 +206,7 @@ struct CreationRecoveryView: View {
         .sheet(item: $inspecting) { item in
             if let resource = item.resource { RecoveredCreationInspector(resource: resource) }
         }
-        .task {
-            while !Task.isCancelled {
-                await recovery.refresh()
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            }
-        }
+        .task { recovery.start() }
     }
 }
 
@@ -222,8 +231,19 @@ private struct RecoveredCreationInspector: View {
                 }
                 if let task = resource.task {
                     let value = try await ServerClient.read(.desktopTask(directory: resource.directory, issue: task))
-                    let object = try JSONSerialization.jsonObject(with: Data(value.utf8))
-                    detail = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self)
+                    let reading = try JSONDecoder().decode(WorkFrame.TaskStatusReading.self, from: Data(value.utf8))
+                    guard let row = reading.row else {
+                        throw RegistryQueryError("The recovered Task is no longer available on its original Machine.")
+                    }
+                    var lines = ["\(row.task.identifier) · \(row.task.name)", row.section.rawValue.capitalized, row.task.description]
+                    if let graph = reading.overview?.graph {
+                        lines.append("Graph \(graph.name): \(graph.position.step)")
+                    }
+                    if let overview = reading.overview {
+                        lines.append(contentsOf: overview.sessions.map { "Conversation: \($0.title) (\($0.id))" })
+                        lines.append(contentsOf: overview.graphProcesses.map { "Graph \($0.name): \($0.state.rawValue)" })
+                    }
+                    detail = lines.filter { !$0.isEmpty }.joined(separator: "\n\n")
                 } else if let session = resource.session {
                     detail = try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8))
                 }

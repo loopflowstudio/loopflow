@@ -82,6 +82,36 @@ struct CreationSubmissionTests {
         let fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         #expect(Set(fields.keys) == Set(["requestID", "destination", "payload", "version", "submittedAt"]))
     }
+
+    @Test func simultaneousWindowsShareOneRecoveryAndUnavailableLookupNeverSends() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        let (entered, began) = AsyncStream<Void>.makeStream()
+        let (release, finish) = AsyncStream<Void>.makeStream()
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { payload in
+                began.yield(())
+                for await _ in release { break }
+                return try await server.send(payload)
+            })
+        let record = SubmittedCreation(requestID: "same", destination: "machine",
+            payload: Data(#"{"kind":"task.create","request_id":"same","directory":"/repo"}"#.utf8),
+            version: ServerProtocol.revision, submittedAt: Date())
+        try await client.save(record)
+        let firstWindow = Task { try await client.reconcile(record) }
+        for await _ in entered { break }
+        #expect(try await client.reconcile(record) == nil)
+        finish.finish()
+        #expect(try await firstWindow.value?.taskId == "original")
+        #expect(await server.submissions == 1)
+
+        let unavailable = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { _ in throw RegistryQueryError("unavailable") }, send: { try await server.send($0) })
+        await #expect(throws: (any Error).self) { try await unavailable.reconcile(record) }
+        #expect(await server.submissions == 1)
+        #expect(try await unavailable.pending().count == 1)
+    }
 }
 
 

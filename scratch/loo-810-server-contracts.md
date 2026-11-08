@@ -170,23 +170,20 @@ Per connection, in `service.rs`:
   headroom before dispatch or subscription materialization, conservatively up to
   `MAX_MESSAGE` when the operation has no smaller bound. Serialize in the worker,
   shrink the reservation to actual bytes and carry it through queue and socket
-  delivery. Budget starts at 32 MiB per connection and 256 MiB across the process;
+  delivery. Budget starts at 64 MiB per connection and 256 MiB across the process;
   both include producer reservations, not only enqueued messages. Bound temporary
   value construction as well; serialized accounting does not measure RSS.
   Errors and subscription acknowledgments need bounded control headroom, with
   a send deadline when the peer drains nothing.
 - **When a reservation fails:**
-  - A read drops its value and answers `busy {id, data: {limit: "retained_bytes"}}`.
+  - A read is refused before dispatch with `busy {id, data: {limit: "retained_bytes"}}`.
     Reads have no effect, so "retry shortly" is honest.
   - A write is admitted only after its producer reservation. After admission its
     effect finishes; backpressure never turns it into an "unrun" refusal.
-  - A subscription reading drops its bytes, re-asks any checkpoint it carried
-    (`checkpoint(n)` again) and re-pulls when budget frees. A subscription
-    never holds more than one reading, and an old reading never waits behind
-    a newer one, so this is the "replace complete readings" coalescing. Order
-    stays: null response, readings, then the final reading before `ended`
-    (a re-pulled `task.wait` reading still reports `reached`), and error
-    frames last.
+  - A subscription waits for producer room before pulling. It retains its
+    checkpoints and cannot pull another reading until delivery acknowledges the
+    first. Notifications coalesce while waiting. Order stays: null response,
+    readings, the final reading before `ended`, and error frames last.
 - `welcome.limits` gains `max_open` and `max_retained_bytes`;
   `lf server status` clients gain `open` and `retained_bytes`. The 5 s send
   timeout stays: a client that takes nothing still loses its connection.
@@ -205,7 +202,7 @@ one fix, using the existing `transport_tests.rs` fixtures (proxy, observer,
 | Case | Existing | Add |
 | --- | --- | --- |
 | (a) phone asleep while Desktop resizes and types | `server_reconnect_preserves_newer_viewers_input_and_geometry` :5988 | newer viewer resizes during the outage; read the PTY size back after recovery; check the terminal-mode screen shows the newer output |
-| (b) return after retention expired | `a_resume_past_the_spool_is_refused…` :4715, `server_reconnect_refreshes_expired_output…` :6196 | expiry by the 60 s grace (shortened under `#[cfg(test)]`), no `Out` bytes before the refusal, snapshot content, terminal mode |
+| (b) return after retention expired | `a_resume_past_the_spool_is_refused…` :4715, `server_reconnect_refreshes_expired_output…` :6196 | expiry by the production 60 s grace, no `Out` bytes before the refusal, snapshot content, terminal mode |
 | (c) old owner ends, Session gets a new owner | none | exact-owner attach answers `not_found {owner_lf_process_id, current_lf_process_id}`; attach by Session reaches the new owner; no provider launched by either |
 | (d) one viewer stops draining | `slow_observer_does_not_block_output…` :1354 | through the server bridge: one stalled bridge, one healthy bridge receiving, and the same client connection answering a read and a subscription checkpoint meanwhile |
 | (e) old socket finishes after a replacement | `server_move_lost_ack` :6051 | replacement that asked for free claims (no takeover); old controller's socket closes after; replacement keeps input and geometry |
@@ -233,7 +230,7 @@ Every other write keeps "admitted mutations finish; a lost answer is
   both `run` values; the CLI prints the same. `milestone` is `filed`,
   `started` or `admitted`.
 - **Store:** one migration, `creation_receipts (request_id PRIMARY KEY, kind,
-  fingerprint, task_id, session_id, artifact_key, milestone, created_at,
+  fingerprint, task_id, session_id, artifact_key, milestone, result, launch, created_at,
   updated_at)`. `fingerprint` is SHA-256 of the canonical operation JSON
   without `request_id`. The row is written, with the Task ID or the new
   thread's artifact key reserved, in the same transaction as the first
@@ -400,16 +397,32 @@ Write-docs checks, 2026-11-08:
 - `lf open --host desktop --file docs/server.md --file docs/work.md --file docs/sessions.md --file rust/loopflow/src/server/README.md --file docs/dev/server.md` — failed: "task_7dede9dbe66d41ed98569d943ed63ccf has no workspace in this Desktop window; nothing changed." Docs remain in this checkout; demo can present them in its Task workspace.
 - Runtime tests skipped for this prose-only step; the implementation and gate run the checks below.
 
-### Implementation checks
+### Implementation checks · 2026-11-08
 
-- `cargo test -p loopflow --lib server::service::` — budget flood test (slice 1).
-- `cargo test -p loopflow --test integration transport_tests` filtered to the
-  five case names (slice 2).
-- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection` (slice 3).
-- `swift test --filter ServerProtocolTests` and the connection-row view test (slices 3–5).
-- Schema fixture regenerated: `cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json`.
-- Desktop submitted-request persistence and restart reconciliation tests (slice 4).
-- Mac sleep and app quit/reopen demos: demo/review, not gate.
+All commands run with inherited `LF_*` unset and stdin closed. The candidate CLI
+is recorded in `loo-810-sync.md`; fixture runs pin `LOOPFLOW_TEST_LF` to it.
+
+- `cargo test -p loopflow --lib ops::human_session::tests::creation_retry_reconciles_publication`: passed; an interrupted stop stays unknown, an admitted input publishes once, a later input is untouched.
+- `cargo test -p loopflow --lib ops::human_session::tests::new_thread_before_a_first_provider`: passed; original prompt and retry identity survive.
+- `cargo test -p loopflow --lib store::sqlite::provider_transitions::`: 2 passed.
+- `cargo test -p loopflow --lib server::outbox::`: 2 passed with a 16 MiB answer, shared process pressure and a worker surviving cancellation.
+- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection_and_server_restart`: passed, including concurrent duplicates, conflicting content and an unrelated launch.
+- `cargo test -p loopflow --lib task_graph_launch_tests::task_create_run_starts_the_graph_and_admits_the_request_as_first_turn`: passed after retaining the writable creation store and waiting for the registered Graph in the fixture.
+- `cargo test -p loopflow --test transport_tests resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims`: passed.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed after sync.
+- `cargo test -p loopflow --test served_reads served_session_new_recovers_its_input_after_a_lost_reply_and_restart`: passed; exactly one appended input across the lost reply and server restart.
+- `cargo test -p loopflow --lib server::service::tests::flooded_requests`: passed after retaining construction/pull capacity through cancellation; no runtime shutdown panic.
+- `scripts/test_desktop.sh --no-parallel --filter 'CreationSubmissionTests|ServerProtocolTests|ProviderTransitionTests|NewTaskTests|SessionControlsTests|WorkDestinationTests/newTask|RegistryQueryTests/contentRoutedStepHistory'`: 32 passed headlessly; the additional `WorkDestinationTests/submittedCreationHasNoSecondSubmitButton` check passed from that build.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.
+
+Gate owns affected suites and the complete terminal acceptance set:
+`server_reconnect_preserves_newer_viewers_input_and_geometry`,
+`grace_expiry_refuses_bytes_before_repainting_the_terminal_screen`,
+`exact_owner_refuses_a_replacement_while_session_attach_finds_it`,
+`a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live`, and
+the stale-socket case above. It also owns merged-frontier migration checks and
+CLI/server parity across the remaining Work operations. The grace test uses
+61 seconds of production time. Mac sleep and quit/reopen remain demo/review.
 
 ## Done when
 

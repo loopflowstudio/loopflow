@@ -184,7 +184,7 @@ private actor ControlsSource {
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
             record["task_primary"] = true
-            return #"{"id":"task-exact","identifier":"INF-123","title":"Conversation"}"#
+            return #"{"task":{"id":"task-exact","identifier":"INF-123","title":"Conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
         }
         if args.contains("--dry-run") {
             return #"{"session_id":"interactive","task_id":"task-exact","identifier":"INF-123","title":"Completed off-roadmap Task"}"#

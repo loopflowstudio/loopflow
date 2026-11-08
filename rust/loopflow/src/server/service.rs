@@ -23,7 +23,7 @@ use super::wire::{
 };
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, subscribe::Subscription};
+use crate::lf::commands::read::Read;
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -885,9 +885,11 @@ async fn subscribing(
     select: Option<Vec<String>>,
     outgoing: Outbox,
     checkpoints: mpsc::Receiver<u64>,
-    _slot: tokio::sync::OwnedSemaphorePermit,
+    slot: tokio::sync::OwnedSemaphorePermit,
 ) -> String {
-    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
+    let slot = Arc::new(slot);
+    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints, slot.clone()).await
+    {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
         let _ = deliver(
@@ -899,52 +901,35 @@ async fn subscribing(
     id
 }
 
-/// The shared subscription owns a blocking runtime, which cannot be dropped on an
-/// async worker. However its task ends, the subscription leaves through a blocking one.
-struct Held(Option<Arc<Subscription>>);
-
-impl std::ops::Deref for Held {
-    type Target = Arc<Subscription>;
-
-    fn deref(&self) -> &Arc<Subscription> {
-        self.0
-            .as_ref()
-            .expect("the subscription is held until drop")
-    }
-}
-
-impl Drop for Held {
-    fn drop(&mut self) {
-        let subscription = self.0.take();
-        tokio::task::spawn_blocking(move || drop(subscription));
-    }
-}
-
 async fn subscribe(
     id: &str,
     query: Read,
     select: Option<Vec<String>>,
     outgoing: &Outbox,
     mut checkpoints: mpsc::Receiver<u64>,
+    slot: Arc<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
-    let subscription = Held(Some(Arc::new(
-        tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
-        })
-        .await??,
-    )));
-    deliver(
-        outgoing,
-        ServerMessage::Response {
-            id: id.into(),
-            trace_id: crate::id::TraceId::default(),
-            result: serde_json::Value::Null,
-        },
-    )
-    .await?;
+    let reservation = outgoing.wait().await?;
+    let held = (reservation.clone(), slot.clone());
+    let subscription = tokio::task::spawn_blocking(move || {
+        let _held = held;
+        crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
+            .map(Arc::new)
+    })
+    .await??;
+    outgoing
+        .deliver(
+            ServerMessage::Response {
+                id: id.into(),
+                trace_id: crate::id::TraceId::default(),
+                result: serde_json::Value::Null,
+            },
+            reservation,
+        )
+        .await?;
     loop {
         tokio::select! {
             checkpoint = checkpoints.recv() => {
@@ -953,7 +938,7 @@ async fn subscribe(
             }
             () = notify.notified() => {
                 let reservation = outgoing.wait().await?;
-                let held = reservation.clone();
+                let held = (reservation.clone(), slot.clone());
                 let pull = Arc::clone(&subscription);
                 let frame = tokio::task::spawn_blocking(move || {
                     let _held = held;
@@ -1166,7 +1151,8 @@ mod tests {
     #[test]
     fn flooded_requests_and_subscriptions_refuse_by_id_and_recover_checkpoints() {
         with_empty_home(async {
-            let mut client = Client::connect();
+            let clients = Clients::default();
+            let mut client = Client::connect_to(&clients);
             assert!(matches!(
                 client.hello(REVISION, REVISION).await,
                 ServerMessage::Welcome(_)
@@ -1196,6 +1182,10 @@ mod tests {
             let mut subscription = None;
             let mut refused = 0;
             while answered.len() < 1300 {
+                for reading in super::connected(&clients) {
+                    assert!(reading.open <= super::MAX_OPEN);
+                    assert!(reading.retained_bytes <= super::MAX_RETAINED);
+                }
                 let mut line = String::new();
                 tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line))
                     .await

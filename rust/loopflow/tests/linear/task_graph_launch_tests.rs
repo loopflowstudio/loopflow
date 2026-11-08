@@ -1218,6 +1218,12 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
     assert_eq!(receipt["task"]["description"], request);
     assert_eq!(receipt["graph"], "feature");
+    // Creation returns when the Graph registers, before its first step finishes.
+    wait_for("the created Task to reach review", || {
+        let status = task.run(&["desktop", "task", issue, "--json"]);
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        status["execution"]["work"]["graph"]["position"] == at("review")
+    });
     let status = task.run(&["desktop", "task", issue, "--json"]);
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     let graph = &status["execution"]["work"]["graph"];
@@ -1264,7 +1270,8 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
     assert_eq!(receipt["task"]["title"], "fails");
-    assert!(receipt["graph"].is_null(), "{receipt}");
+    assert_eq!(receipt["graph"], "gate", "{receipt}");
+    assert_eq!(receipt["milestone"], "started", "{receipt}");
     assert!(receipt["session_id"].is_null(), "{receipt}");
     assert_eq!(tasks(), before + 1);
 }

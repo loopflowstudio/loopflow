@@ -58,7 +58,7 @@ pub fn create(
         Ok(receipt) => receipt,
         Err(error) => {
             if *json {
-                if let Some(result) = creation::lookup(&id)?.and_then(|r| r.result) {
+                if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
                     writeln!(io.output, "{}", serde_json::to_string_pretty(&result)?)?;
                 }
             }

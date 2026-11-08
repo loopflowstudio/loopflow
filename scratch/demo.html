@@ -33,7 +33,7 @@ ol.q li { margin-bottom:12px; }
 <main>
 <h1>Task conversations start at checkout</h1>
 <p class="meta">Task: the lf resume pair session · Step: demo · 2026-11-07<br>
-Built from <code>jack-heart/task-session-at-checkout</code> (uncommitted, base <code>9e11b2307</code>) and
+Built from <code>jack-heart/task-session-at-checkout</code> (now committed as <code>2c58604cd</code> on <code>5312c24ff</code>) and
 <code>scratch/task-session-at-checkout-demo.md</code><br>
 Page: <code>/Users/jack/src/loopflow.task-session-at-checkout/scratch/demo.html</code></p>
 
@@ -97,8 +97,7 @@ $DL resume</pre>
 </div>
 
 <h2>Known gaps</h2>
-<div class="proposed">
-<p><strong>Not fixed yet:</strong> <code>lf task move</code> refuses a conversation that is still starting, and one test fixture collides with the background launch. Those are the 2 of 534 integration failures. Clippy and the other test binaries have not run.</p>
+<p>Fixed since this page was written: <code>lf task move</code> now waits up to 20 s for a conversation that is still starting, and the colliding test fixture acts only for its own launch. Clippy is clean. Nothing automated yet exercises checkout starting a conversation; see <code>scratch/task-session-at-checkout.md</code>.</p>
 </div>
 
 <h2>Questions</h2>

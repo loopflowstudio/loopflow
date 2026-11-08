@@ -46,14 +46,13 @@ Default agent on this Machine: `claude:haiku` (set with
   was on the non-native harness path only, so compress removed it. The native
   path's phases (`prompt_*`, `provider_exec_begin`) bracket the same span.
 - `lf session list` shows the Task conversation under a "Repository" column label.
-  Unclear whether that is the scope column or a mislabel.
+  Cause: `work_path` is only set for Sessions with a Wave (see plan, Findings).
 
 ## Not yet proven
 
 - `lf resume` reattaching to a background conversation held by a running Graph.
 - Comment delivery into a live conversation.
-- `cargo clippy --all-targets -- -D warnings` and the non-`integration` test
-  binaries (not run before compress; see the compress record below).
+- The non-`integration` test binaries after the compress fixes (gate).
 
 ## Compress (2026-11-07)
 
@@ -81,7 +80,7 @@ fails when run alone (also with the journal edit reverted) and passes with its m
 
 ## Human observations
 
-(Filled in from the conversation.)
+Nobody has run steps 2–6 yet; the demo ran headless.
 
 ## Teardown
 

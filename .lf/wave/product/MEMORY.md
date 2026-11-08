@@ -179,6 +179,8 @@ LOO-416 retains lifecycle scope.
 
 Decisions and evidence:
 `996f16fabb5344d6545bf75d94393117694cd489:.lf/wave/product/MEMORY.md`, this heading.
+Those tests prove neither unsent provider input nor mounted between-Wave continuity.
+Broader native acceptance remains with LOO-489/416; no external-progress credit follows.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
@@ -675,38 +677,62 @@ Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 ## Task files beside the conversation (2026-09-28)
 
-LOO-327 implements the minimal native file browser. Jack Heart approved the
-updated demo and authorized queue preparation, publication and landing; that
-alone establishes neither merge nor individual scenario coverage. Approval,
-failed trials and superseded proposals remain at
-`611ed031a031e6798652a15b5d250ba0f132a4e8:scratch/{file-browser-demo-approval,file-browser,file-browser-demo-feedback}.md`.
-Current usage: [Mac README](../../../swift/README.md) and
-[CLI reference](../../../docs/lf.md).
+[Read and edit task files beside the conversation · LOO-327](https://linear.app/loopflow/issue/LOO-327/read-and-edit-task-files-beside-the-conversation)
+implements Jack Heart's minimal native browser. Jack approved the updated demo
+and authorized queue preparation, publication and landing in the
+[recorded approval](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-approval.md).
+That supersedes earlier publication holds; approval alone does not establish
+merge, Task completion or individual scenario coverage. The
+[design and evidence ledger](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser.md)
+and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-feedback.md)
+preserve the failed attempts and superseded proposals. Current usage lives in
+[the Mac README](../../../swift/README.md) and [CLI reference](../../../docs/lf.md).
 
-Task placement owns browsing and comparison; one Task/path document shares drafts
-and Undo across views. LOO-497 retains file drafts; mounted relaunch remains
-unproved. Current implementation detail is in source; the September 30 account is
-at `c07dff8983e49d4fb0b67338fa4eac2a5022f624:.lf/wave/product/MEMORY.md`, this heading.
-
-Jack chose autosave by default, explicit Save as an option, and disk winning
-conflicting edits without a dialog. Keep disjoint drafts and defer reconciliation
-during IME. Quiet writes do not prove another writer finished. Deletion or failed
-reads retain drafts; inspection never authorizes Save.
-
-Atomic exchange is recovery, not compare-and-swap: an old descriptor can still
-write the displaced inode. Keep displaced files and submitted drafts under Git
-metadata, never restore over another writer automatically. No arbitrary-writer
-exclusion, extended-attribute or power-loss guarantee follows.
-
-TextKit proved selection, Find, Undo and retained terminals; million-byte lines
-remained slow. CodeEditTextView failed endpoint visibility and wrapped-line
-responsiveness, so no dependency or smaller file bound was adopted. Filesystem
-and CLI/native checks covered reconciliation and Save, not physical IME/mouse,
-compositor performance or nested provider Home continuity. Successful initial
-launch does not prove nested commands retain Home. Historical file timings and
-unexplained failures: `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure
-first selection without pre-reading; AppKit endpoints do not prove click/compositor
-p95. Jack's overall demo approval establishes no individual missing scenario.
+- **Task placement owns both surfaces.** The September 30 internal cut expands
+  the original `scratch/` and `diff` navigator to paged immediate directories,
+  with optional Changes over the same documents. It sits beside retained
+  Ghostty, with the recorded PR link above only navigation
+  and aligned headers. Task context shows its recorded worktree without an
+  independent selector. One document per Task/path in the window's existing
+  workspace registry shares draft, selection and Undo across both sources,
+  File/Diff, sheets and Sessions. LOO-497 now persists tool intent and file drafts
+  by Work; recovered text stays read-only until base/disk reconciliation. Mounted
+  relaunch acceptance remains unproved. File browsing, read and save do not require a PR
+  or hydrated Project; comparisons still require their recorded base.
+- **Comparison authority stays in `lf`.** Parent means the active Task PR's
+  recorded base, HEAD its resolved worktree commit. The exact SHA pins list and
+  patch reads; membership is net difference, including staged/untracked changes
+  and rename source paths. Read-only Diff includes the unsaved File draft without
+  modifying disk or index. Local reads use recorded placement directly, without
+  planning sync, Task reconciliation or Run creation.
+- **The filesystem is the shared editing protocol.** Jack chose autosave by
+  default, an explicit-save option, and disk winning overlapping edits without
+  a conflict dialog. Preserve disjoint local edits. Incoming revisions rebase
+  Undo around the surviving local draft, coalescing earlier fine-grained history
+  so Undo cannot restore replaced LLM text. IME defers application and Save.
+  Observe files and parents across atomic replacement/recreation; a quiet period
+  coalesces writes but cannot prove an arbitrary writer has finished. Deletion,
+  invalid bytes and I/O failures retain drafts and truthful unavailable/error state.
+- **Atomic exchange provides recovery, not compare-and-swap.** A writer with an
+  old descriptor can mutate the displaced inode after a successful revision
+  check. Deleting that inode can lose the later bytes. Retain displaced files,
+  submitted drafts and receipts under Git metadata; never automatically restore
+  over another writer. Recovery is uncapped and inspected explicitly, outside
+  ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
+  within the 1 MB bound; previews never authorize Save. No arbitrary-writer
+  exclusion, extended-attribute or power-loss guarantee follows from this design.
+- Historical warm-cache file timings, unexplained failures and optimization limits:
+  `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure first selection
+  without pre-reading; these AppKit endpoints prove no physical-click/compositor p95.
+- **Native primitives and overall approval have separate evidence.** TextKit
+  proved useful selection, Find, Undo and retained-terminal behavior; pathological
+  million-byte lines remained slow. CodeEditTextView's comparison failed endpoint
+  visibility and wrapped-line responsiveness, so no dependency or smaller file
+  bound was adopted. Real filesystem and configured CLI/native checks covered
+  reconciliation and Save. Physical IME/mouse, compositor performance and nested
+  provider Home continuity were not individually established by those checks or
+  Jack's overall demo approval. A wrapper's returned launch argv must retain its
+  Home context; successful initial launch does not prove nested commands do.
 
 ## Accepted calmer workspace (2026-09-25)
 

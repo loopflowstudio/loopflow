@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-803 · Desktop recovery QA</title>
+<style>
+  :root { font-family: system-ui, sans-serif; color-scheme: light dark; line-height: 1.5; }
+  body { max-width: 58rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.7rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; vertical-align: top; padding: .6rem; border-bottom: 1px solid #8886; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #8881; padding: 1rem; }
+  code { overflow-wrap: anywhere; }
+</style>
+<main>
+<p>LOO-803 · QA · 2026-11-08 · branch code <code>659a9b83c</code></p>
+<h1>Desktop observation recovery</h1>
+<p><strong>App and CLI builds passed; 23 tests in three suites passed in 17.178 seconds.
+No in-scope failure was found.</strong></p>
+<p>This is a headless automated check, not a live-window walkthrough.
+The repository requires app builds and production-view tests without display access.
+The runner denies WindowServer connections. No screenshot or live outage was captured.</p>
+<h2>Scenarios exercised</h2>
+<table>
+<thead><tr><th>Scenario — all passed</th><th>Action and observation</th><th>Route</th></tr></thead>
+<tbody>
+<tr><td>First workspace and navigation</td><td>Inspect loading, unavailable and empty
+production views; tap the Wave navigation button and inspect the selected Product board.</td>
+<td><code>DesktopHeadlessTests/workStates</code>; fixture data, production view bodies and button action.</td></tr>
+<tr><td>Returning workspace during planning failure</td><td>Load saved rows, selection,
+pane layout and an unsent rename; deliver failed and truncated planning. Check all remain
+and the saved cache bytes do not change. Deliver recovery and check the error clears.</td>
+<td><code>WorkModelStreamTests/incompletePlanningRetainsSavedWork</code>; scripted stream and temporary cache.</td></tr>
+<tr><td>Repeated short-lived connections</td><td>Deliver successful readings before
+three ended streams. Check increasing real waits, retained Task content, and cancellation
+within one second without a fourth opening.</td><td><code>WorkModelStreamTests/observationRetryBackoff</code>;
+scripted stream, real sleep and cancellation.</td></tr>
+<tr><td>One unavailable part</td><td>Keep one part unavailable while another updates and
+a checkpoint arrives. Check backoff is retained. Recover the part or leave its scope;
+check a new healthy interval permits reset.</td><td><code>WorkObservationRetryTests</code>;
+clock-controlled policy checks.</td></tr>
+<tr><td>Quiet recovery and retry cap</td><td>Check 1, 2, 4, 8, 16, 30, 30 second delays;
+check no reset at 29 seconds and reset at 30, without an intervening frame.</td>
+<td><code>WorkObservationRetryTests</code>; elapsed time supplied directly, not a measured live outage.</td></tr>
+<tr><td>Independent recovery and stale content</td><td>End the reader while a Session
+shows output. Retain the reading but hide its stale preview. Planning recovery must not
+revive the old Session result; a fresh Session reading restores current output.</td>
+<td><code>WorkModelStreamTests/readerEndRecovers</code>; scripted stream.</td></tr>
+</tbody>
+</table>
+<h2>Transcript</h2>
+<pre>env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') scripts/test_desktop.sh --filter 'WorkObservationRetryTests|WorkModelStreamTests|DesktopHeadlessTests/workStates|DesktopHeadlessTests/taskSelection' &lt; /dev/null
+
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 47s
+Build complete! (23.44s)
+✔ Test "Loading, unavailable, empty and selected Work have distinct content" passed after 0.477 seconds.
+✔ Test "Failed or truncated planning retains saved rows, selection, panes and cache" passed after 0.067 seconds.
+✔ Test "Successful frames before repeated failures retain backoff, and cancellation stops retries" passed after 3.058 seconds.
+✔ Test "New turns clear previews and an ended reader recovers without reviving old output" passed after 1.058 seconds.
+✔ Suite "Work observation retry" passed after 0.002 seconds.
+✔ Test run with 23 tests in 3 suites passed after 17.178 seconds.
+Exit status: 0</pre>
+<p>The build retained two Ghostty missing-symbol warnings
+(<code>_ImFontConfig_ImFontConfig</code> and <code>_ImGuiStyle_ImGuiStyle</code>).
+uv ignored an inherited virtual environment from another checkout and selected this
+project's environment. Neither warning failed the run.</p>
+<p>The final filter alternative matches no separate test; the production selection
+button is covered inside <code>workStates</code>.</p>
+<h2>Changes from QA</h2>
+<p>No production repair identified. Added the repository's Desktop launch and headless
+check route to <code>.lf/skills/qa.md</code>, using <code>lf skill customize qa</code>.</p>
+<h2>Remaining limits</h2>
+<p>Live Desktop appearance, window closure during backoff, fresh installation and a
+returning installed app under an actual server or network failure remain unchecked.
+They require a display session; optional hosted checks are documented in
+<code>swift/README.md</code> and <code>release/UI_HOST_GATE.md</code>.
+No credentials or product decision were needed for these automated checks.</p>
+<p>The runner exited normally. No app, server or watcher was launched separately;
+there is no QA process left running. No in-scope defect remains from these checks.
+The broader affected suites and CI remain for gate and delivery.</p>
+</main>
+</html>

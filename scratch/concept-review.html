@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-803 · Observation recovery</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1.2rem; }
+  header { font-size: .85rem; opacity: .75; }
+  h1 { font-size: 1.7rem; line-height: 1.2; }
+  h2 { font-size: 1.1rem; margin-top: 1.6rem; }
+  code { overflow-wrap: anywhere; font-size: .9em; }
+  blockquote { margin: 1rem 0; padding: .2rem 1rem; border-left: 3px solid #888; }
+  li { margin: .5rem 0; }
+  .flow { padding: .8rem 0; border-block: 1px solid #8886; }
+</style>
+<header>LOO-803 · concept-review · 2026-11-08<br>
+Built from <code>scratch/loo-803.md</code>, <code>scratch/questions.md</code>,
+<code>swift/README.md</code>, <code>WorkModel.swift</code>,
+<code>WorkObservation.swift</code>, <code>WorkObservationRetry.swift</code>
+and <code>WorkObservationRetryTests.swift</code>.</header>
+<main>
+<h1>Keep automatic recovery; advance the existing design.</h1>
+<p>No product decision is open. The implemented branch matches the working design;
+no redesign is proposed.</p>
+<div class="flow"><strong>Actions → concepts → APIs</strong><br>
+Open a workspace → one observation of the visible parts → <code>keepWorkCurrent()</code><br>
+Continue through a failure → retained readings and retry delay → <code>failed(at:)</code><br>
+Receive recovered data → continuous health → <code>receive(_:scope:at:)</code><br>
+Close the window → end observation ownership → <code>cancel()</code></div>
+<h2>The mismatch this branch resolves</h2>
+<p><strong>Before:</strong> any frame reset the delay. A working part could keep a
+failing observation reopening every second.</p>
+<p><strong>Implemented:</strong> failures wait 1, 2, 4, 8, 16, then at most 30 seconds.
+A successful reading starts the healthy interval; known unavailable parts interrupt
+it until they recover. Checkpoints cannot establish health. Silence after a successful
+reading counts, so recovery needs no extra timer or traffic.</p>
+<blockquote>If one part keeps failing, automatic retries wait progressively longer,
+even while other parts send updates. The retry delay resets only after the observation
+stays healthy for about 30 seconds.</blockquote>
+<h2>One interaction, including recovery</h2>
+<p>The workspace opens and shows its readings. A subscription ends: the last readings
+remain marked unavailable while the window reopens its subscriptions. Short successful
+bursts do not erase repeated failures. Once readings recover and remain healthy for
+30 seconds, a later failure retries after one second. Closing the window cancels the
+observation and interrupts a pending retry.</p>
+<p>The delay, healthy start time and unavailable parts belong to this window's retry
+owner. Existing subscription APIs supply the events. No server, wire-format or storage
+change is needed; no new action or skill instruction is introduced.</p>
+<h2>Counterexamples checked against the design</h2>
+<ol>
+<li>Can Sessions updates hide unavailable planning? No: health tracks each part;
+another part cannot clear its failure.</li>
+<li>Must a quiet workspace emit a frame at 30 seconds? No: failure-time evaluation
+recognizes the completed healthy interval.</li>
+<li>Can a part no longer shown prevent recovery forever? No: the next in-scope reading
+removes unavailable parts that the scope no longer includes.</li>
+</ol>
+<p>Next: headless QA of retained readings, recovery and cancellation, then affected
+suites and delivery checks. This review did not rerun tests.</p>
+</main>
+</html>

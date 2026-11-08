@@ -228,11 +228,18 @@ pub struct SessionFilter {
     pub offset: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
+    /// Only Sessions whose next message would fail: their login cannot take
+    /// their model now.
+    pub blocked: bool,
+    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
+    pub on: Option<String>,
 }
 
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
+            blocked: false,
+            on: None,
             orphan: false,
             repo: None,
             task: None,
@@ -283,7 +290,7 @@ pub(crate) struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
-    /// The login its current conversation is pinned to.
+    /// The login its current conversation last ran on.
     pub account: Option<crate::store::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,

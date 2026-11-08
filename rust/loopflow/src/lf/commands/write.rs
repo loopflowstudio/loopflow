@@ -213,6 +213,18 @@ pub enum Write {
         wave: String,
         machine: String,
     },
+    /// `lf --agent <agent> session move --all [--blocked] [--on <on>]
+    /// --json`: the open Sessions the selector names continue on the agent;
+    /// the report says which moved, which move after their turn, and which
+    /// were skipped.
+    #[serde(rename = "session.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::moves_bulk::MoveReport>()))]
+    SessionMove {
+        directory: PathBuf,
+        blocked: bool,
+        on: Option<String>,
+        agent: String,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -300,7 +312,7 @@ pub enum Write {
         preview: bool,
         persistent: bool,
     },
-    /// `lf account disconnect <provider> [<email>]`: forget the provider's
+    /// `lf account disconnect <provider>[=<email>]`: forget the provider's
     /// local credentials, or one managed login's.
     #[serde(rename = "account.disconnect")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
@@ -308,7 +320,7 @@ pub enum Write {
         provider: String,
         email: Option<String>,
     },
-    /// `lf account connect <provider> [<email>] [--chrome-profile] [--import]
+    /// `lf account connect <provider>[=<email>] [--chrome-profile] [--import]
     /// [--api-key]`. Served, no profile is chosen interactively: a login with
     /// no remembered profile needs `chrome_profile`.
     #[serde(rename = "account.connect")]
@@ -320,7 +332,7 @@ pub enum Write {
         import: bool,
         api_key: bool,
     },
-    /// `lf account set <provider> [<email>] …`: a managed login's lifecycle,
+    /// `lf account set <provider>[=<email>] …`: a managed login's lifecycle,
     /// cooldown and browser choices, or the local credentials' browser choices.
     #[serde(rename = "account.set")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
@@ -328,7 +340,6 @@ pub enum Write {
         provider: String,
         email: Option<String>,
         login_email: Option<String>,
-        routing: Option<String>,
         plan: Option<String>,
         clear_plan: bool,
         paid_through: Option<String>,
@@ -337,18 +348,7 @@ pub enum Write {
         chrome_profiles: Vec<String>,
         clear_chrome_profiles: bool,
     },
-    /// `lf account token <provider> <email> [--file] [--chrome-profile]`: a
-    /// long-lived Claude token for a managed login. `file` is a path on this
-    /// Machine; the token itself never travels in the request.
-    #[serde(rename = "account.token")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
-    AccountToken {
-        provider: String,
-        email: String,
-        file: Option<PathBuf>,
-        chrome_profile: Option<String>,
-    },
-    /// `lf account redeem-reset <provider> <email> [--idempotency-key]
+    /// `lf account redeem-reset <provider>=<email> [--idempotency-key]
     /// [--credit-id] --json`: spend one banked Codex reset.
     #[serde(rename = "account.redeem_reset")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Redemption>()))]
@@ -358,11 +358,18 @@ pub enum Write {
         idempotency_key: Option<String>,
         credit_id: Option<String>,
     },
-    /// `lf account <provider> use <email>`: sign the provider's ordinary home
-    /// in as a stored login.
+    /// Hold one login on this Machine, or release holds with `auto`.
     #[serde(rename = "account.use")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
-    AccountUse { provider: String, email: String },
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountUse { login: String },
+    /// Pause a login's automatic rotation.
+    #[serde(rename = "account.pause")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountPause { login: String },
+    /// Return a login to automatic rotation.
+    #[serde(rename = "account.unpause")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountUnpause { login: String },
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
     #[serde(rename = "graph.run")]
@@ -719,6 +726,9 @@ impl Write {
             Self::SessionBind {
                 id, task, preview, ..
             } => super::session::bound(id, task, *preview),
+            Self::SessionMove {
+                blocked, on, agent, ..
+            } => value(&super::session::moved(*blocked, on.as_deref(), agent)?),
             Self::SessionResume { .. } | Self::SessionNew { .. } => {
                 let (cli, _) = self
                     .cli()
@@ -847,7 +857,6 @@ impl Write {
                 provider,
                 email,
                 login_email,
-                routing,
                 plan,
                 clear_plan,
                 paid_through,
@@ -860,7 +869,6 @@ impl Write {
                 email.as_deref(),
                 &crate::engine::account::Settings {
                     login_email: login_email.clone(),
-                    routing: routing.clone(),
                     plan: plan.clone(),
                     clear_plan: *clear_plan,
                     paid_through: paid_through.clone(),
@@ -869,17 +877,6 @@ impl Write {
                     chrome_profiles: chrome_profiles.clone(),
                     clear_chrome_profiles: *clear_chrome_profiles,
                 },
-            )?),
-            Self::AccountToken {
-                provider,
-                email,
-                file,
-                chrome_profile,
-            } => value(&crate::engine::account::token(
-                provider,
-                email,
-                file.as_deref(),
-                chrome_profile.as_deref(),
             )?),
             Self::AccountRedeemReset {
                 provider,
@@ -892,9 +889,9 @@ impl Write {
                 idempotency_key.as_deref(),
                 credit_id.as_deref(),
             )?),
-            Self::AccountUse { provider, email } => {
-                value(&crate::engine::account::activate(provider, email)?)
-            }
+            Self::AccountUse { login } => value(&crate::engine::account::activate(login)?),
+            Self::AccountPause { login } => value(&crate::engine::account::pause(login, true)?),
+            Self::AccountUnpause { login } => value(&crate::engine::account::pause(login, false)?),
             Self::GraphRun {
                 name,
                 message,
@@ -1254,6 +1251,7 @@ impl Write {
             | Self::SessionBind { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
+            | Self::SessionMove { directory, .. }
             | Self::WaveAdd { directory, .. }
             | Self::WaveRename { directory, .. }
             | Self::WaveRemove { directory, .. }
@@ -1290,8 +1288,9 @@ impl Write {
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }
             | Self::AccountSet { .. }
-            | Self::AccountToken { .. }
             | Self::AccountRedeemReset { .. }
+            | Self::AccountPause { .. }
+            | Self::AccountUnpause { .. }
             | Self::AccountUse { .. }
             | Self::ConfigSet { .. }
             | Self::ConfigUnset { .. }
@@ -1335,10 +1334,9 @@ mod tests {
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
             r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
             r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
-            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"routing":"active","plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
-            r#"{"kind":"account.token","provider":"claude","email":"maya@example.com","file":"/tmp/token","chrome_profile":null}"#,
+            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
             r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
-            r#"{"kind":"account.use","provider":"claude","email":"maya@example.com"}"#,
+            r#"{"kind":"account.use","login":"claude=maya@example.com"}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
             r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
             r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,

@@ -110,6 +110,8 @@ mod tests {
         "rentals",
         "schema_migrations",
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
+        // A busy Session's pending move; its Stop hook reads it, no view does.
+        "session_moves",
         "session_steers",
         "steer_adapters",
         "steer_batches",

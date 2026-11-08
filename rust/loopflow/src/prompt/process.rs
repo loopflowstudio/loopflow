@@ -197,7 +197,6 @@ fn prepare_prompt(
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
         chrome: config.chrome,
-        isolate: Some(config.isolate),
         session_attachment: None,
         system_prompt,
         conversation_context,
@@ -205,6 +204,7 @@ fn prepare_prompt(
         skill_invocation,
         output_schema: None,
         agent: Some(agent),
+        fallback_agents: config.fallback_agents(),
         max_turns: None,
         resume_token: None,
         provider_account_id: None,

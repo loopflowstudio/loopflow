@@ -197,13 +197,13 @@ def _await(check, message: str, seconds: int = 45) -> None:
     raise AssertionError(message)
 
 
-class Watch:
-    """One `lf <args> --json --watch`, a reader as an open Desktop window is.
+class Subscription:
+    """One `lf <args> --json --subscribe`, a reader as an open Desktop window is.
     Readers show stored planning; they exchange nothing."""
 
     def __init__(self, fixture: dict, env: dict, *args: str):
         self.process = subprocess.Popen(
-            [fixture["lf"], *args, "--json", "--watch"],
+            [fixture["lf"], *args, "--json", "--subscribe"],
             cwd=fixture["repo"],
             env=env,
             stdin=subprocess.PIPE,
@@ -406,10 +406,10 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert len([c for c in server.state["comments"] if c["id"] == comment_id]) == 1
             assert not server.state["unexpected"], server.state["unexpected"]
         if not graph:
-            planning = Watch(fixture, env, "wave", "show", "--all")
+            planning = Subscription(fixture, env, "wave", "show", "--all")
             planning.frame(lambda f: "INF-126" in json.dumps(f["body"]))
             planning.close()
-            task = Watch(fixture, env, "task", "status", "INF-125")
+            task = Subscription(fixture, env, "task", "status", "INF-125")
             task.frame(lambda f: incoming["id"] in json.dumps(f["body"]))
             task.close()
             # A short command attempts delivery itself. An outage leaves the save
@@ -428,7 +428,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                     "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (gap,)
                 ).fetchone() == (1,)
 
-            watch = Watch(fixture, env, "planning", "status")
+            watch = Subscription(fixture, env, "planning", "status")
             watch.frame(lambda f: True)
             time.sleep(2)
             assert not delivered(), "a planning reader delivered a pending save"

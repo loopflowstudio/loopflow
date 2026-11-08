@@ -68,6 +68,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             provider,
             email,
             chrome_profile,
+            owned,
         } => {
             let machine = super::ssh::resolve_target(target, false).await?;
             return super::machine_credentials::connect(
@@ -75,6 +76,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 *provider,
                 email.as_deref(),
                 chrome_profile.as_deref(),
+                *owned,
                 batch,
             )
             .await;

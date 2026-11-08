@@ -167,15 +167,15 @@ struct ServerProtocolTests {
             ("account_connect", "connect-1", .accountConnect(provider: "codex", email: "maya@example.com",
                                                              chromeProfile: "Profile 1", import: false, apiKey: false)),
             ("account_set", "set-1", .accountSet(provider: "codex", email: "maya@example.com", loginEmail: nil,
-                                                 routing: "active", plan: nil, clearPlan: false, paidThrough: nil,
+                                                 plan: nil, clearPlan: false, paidThrough: nil,
                                                  clearPaidThrough: false, clearCooldown: true, chromeProfiles: [],
                                                  clearChromeProfiles: false)),
-            ("account_token", "token-1", .accountToken(provider: "claude", email: "maya@example.com",
-                                                       file: "/Users/maya/.lf/tmp/token", chromeProfile: nil)),
             ("account_redeem_reset", "redeem-1", .accountRedeemReset(provider: "codex", email: "maya@example.com",
                                                                      idempotencyKey: "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
                                                                      creditId: nil)),
-            ("account_use", "use-1", .accountUse(provider: "claude", email: "maya@example.com")),
+            ("account_use", "use-1", .accountUse(login: "claude=maya@example.com")),
+            ("account_pause", "pause-1", .accountPause(login: "claude=maya@example.com")),
+            ("account_unpause", "unpause-1", .accountUnpause(login: "claude=maya@example.com")),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",
                                                agent: "claude")),
             ("skill_run", "skill-1", .skillRun(directory: "/repo", name: "debug", message: nil, agent: nil)),
@@ -261,15 +261,14 @@ struct ServerProtocolTests {
             Issue.record("Missing skill.list result"); return
         }
         #expect(entries.count == 2)
-        #expect(ServedWrite.accountUse(provider: "claude", email: "maya@example.com").cwd == "/")
+        #expect(ServedWrite.accountUse(login: "claude=maya@example.com").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
-                                                   operation: .read(.accountList(provider: "claude", cached: true,
-                                                                                 details: false)), select: nil)
+                                                   operation: .read(.accountList(target: "claude", cached: true)), select: nil)
         #expect(try encoded(accounts) == value("account_list"))
         let route = ServerClientMessage.request(id: "route-1",
-                                                operation: .read(.accountRoute(directory: "/repo", repo: nil,
+                                                operation: .read(.accountNext(directory: "/repo", repo: nil,
                                                                                default: false)), select: nil)
-        #expect(try encoded(route) == value("account_route"))
+        #expect(try encoded(route) == value("account_next_request"))
         guard case .response(_, _, .object(let report)) = try message("account_report") else {
             Issue.record("Missing account.list result"); return
         }

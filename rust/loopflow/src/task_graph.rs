@@ -167,7 +167,9 @@ impl CapturedGraph {
         }
         let mut found = None;
         walk(&self.steps, &[], &mut |place, step| {
-            if found.is_none() && names(step).contains(&name) {
+            // A Graph records an operation under its display name.
+            let recorded = matches!(step, ConcreteStep::Command(command) if command.item.display_name() == name);
+            if found.is_none() && (recorded || names(step).contains(&name)) {
                 found = Some(place);
             }
         });

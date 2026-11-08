@@ -196,7 +196,6 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     .to_string();
 
     let launch = AgentConfig {
-        isolate: None,
         chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),

@@ -19,17 +19,25 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> std::process::Output {
 }
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
+    // A routed launch signs the shared provider home in, which is the Keychain
+    // for Claude on macOS; keep it out of the real one.
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("security"), crate::support::FAKE_SECURITY).unwrap();
+    std::fs::set_permissions(
+        bin.join("security"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("USER", "fixture")
         .env("NO_COLOR", "1")
-        // Routed launches stay in the account's own home; a shared one signs in
-        // the native home, which is the Keychain on macOS.
-        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .current_dir(repo)
         .args(args);
     command

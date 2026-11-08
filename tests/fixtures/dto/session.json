@@ -9,6 +9,8 @@
   "detail": "review-design",
   "provider": "codex",
   "account": "work",
+  "model": null,
+  "blocked": false,
   "cwd": "/src/loopflow.task",
   "state": "unknown",
   "ready_summary": "The design now reflects Jack's requested changes.",

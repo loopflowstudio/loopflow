@@ -6,7 +6,6 @@ mod auth_input;
 use std::fs;
 use std::future::Future;
 use std::io::IsTerminal;
-use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -36,8 +35,8 @@ use crate::provider_auth::{
     start_provider_account_auth, AuthCompletion, AuthFlowResponse, Provider, ProviderAuthService,
 };
 use crate::store::{
-    open_store, CredentialState, CredentialType, LongLivedToken, ProviderAccount,
-    ProviderAccountId, ProviderToken, RoutingState, SharedStore, StoreError,
+    open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
+    RoutingState, SharedStore, StoreError,
 };
 use crate::subscription::SubscriptionUsage;
 
@@ -53,13 +52,71 @@ static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
 static TEST_ACCESS_PROFILE_FAILURES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 #[derive(Debug)]
-pub(crate) struct AccountLifecycleUpdate<'a> {
-    pub(crate) login_email: Option<&'a str>,
-    pub(crate) routing: Option<&'a str>,
-    pub(crate) plan: Option<&'a str>,
-    pub(crate) clear_plan: bool,
-    pub(crate) paid_through: Option<&'a str>,
-    pub(crate) clear_paid_through: bool,
+struct AccountLifecycleUpdate<'a> {
+    login_email: Option<&'a str>,
+    plan: Option<&'a str>,
+    clear_plan: bool,
+    paid_through: Option<&'a str>,
+    clear_paid_through: bool,
+}
+
+/// What an `lf account` argument names: a provider (`claude`, `linear`) or a
+/// login, with its provider when written `claude=work@`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Target {
+    Provider(Provider),
+    Login {
+        provider: Option<Provider>,
+        login: String,
+    },
+}
+
+impl Target {
+    pub(crate) fn parse(raw: &str) -> Result<Self> {
+        let raw = raw.trim();
+        if let Some((provider, login)) = raw.split_once('=') {
+            let provider = parse_managed_provider(provider.trim())?;
+            let login = login.trim();
+            if login.is_empty() {
+                bail!("{provider}= needs a login email or prefix");
+            }
+            return Ok(Self::Login {
+                provider: Some(provider),
+                login: login.to_string(),
+            });
+        }
+        if raw.is_empty() {
+            bail!("name a login or a provider");
+        }
+        Ok(match raw.parse::<Provider>() {
+            Ok(provider) => Self::Provider(provider),
+            Err(_) => Self::Login {
+                provider: None,
+                login: raw.to_string(),
+            },
+        })
+    }
+
+    /// For a verb that acts on one login: its provider, when written, and
+    /// the login.
+    fn parse_login(raw: &str, verb: &str) -> Result<(Option<Provider>, String)> {
+        match Self::parse(raw)? {
+            Self::Login { provider, login } => Ok((provider, login)),
+            Self::Provider(provider) => {
+                bail!("name the login: lf account {verb} {provider}=<login>")
+            }
+        }
+    }
+}
+
+/// The stored login `--on` names. Harnesses are already read as agents, so a
+/// provider's name here can only start a login.
+pub(crate) async fn resolve_on(store: &SharedStore, raw: &str) -> Result<ProviderAccount> {
+    let (provider, login) = match Target::parse(raw)? {
+        Target::Provider(_) => (None, raw.trim().to_string()),
+        Target::Login { provider, login } => (provider, login),
+    };
+    super::profile::resolve_login(store, provider, &login, "--on").await
 }
 
 tokio::task_local! {
@@ -88,173 +145,341 @@ macro_rules! narrate {
     };
 }
 
+macro_rules! diagnose {
+    ($($line:tt)*) => {
+        if is_served() { tracing::info!($($line)*); } else { eprintln!($($line)*); }
+    };
+}
+
 pub fn run(
     cmd: Option<&AccountCommand>,
-    provider: Option<Provider>,
+    target: Option<&str>,
     cached: bool,
-    details: bool,
     json: bool,
 ) -> Result<()> {
-    use crate::engine::account as engine;
-    if let Some(misuse) = AccountCommand::misuse(cmd, provider, cached || details || json) {
-        bail!(misuse);
+    let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    match cmd {
+        Some(cmd) => rt.block_on(run_async(cmd)),
+        None => {
+            let target = target.map(Target::parse).transpose()?;
+            rt.block_on(account_status::run(target, cached, json))
+        }
     }
-    match (cmd, provider) {
-        (Some(AccountCommand::Use { email }), Some(provider)) => {
-            engine::activate(provider.as_str(), email)?;
-            Ok(())
+}
+
+pub(crate) async fn run_async(cmd: &AccountCommand) -> Result<()> {
+    match cmd {
+        AccountCommand::Next { repo, default, json } => {
+            super::profile::show_next(repo.as_deref(), *default, *json).await
         }
-        (None, provider) => account_status::run(provider, !cached, details, json),
-        (Some(AccountCommand::Use { .. }), None) => unreachable!("misuse names a missing provider"),
-        (Some(AccountCommand::Disconnect { provider, email }), _) => {
-            engine::disconnect(provider, email.as_deref())?;
-            Ok(())
-        }
-        (
-            Some(AccountCommand::Connect {
-                provider,
-                email,
-                chrome_profile,
-                import,
-                api_key,
-            }),
-            _,
-        ) => {
-            engine::connect(
-                provider,
-                email.as_deref(),
-                chrome_profile.as_deref(),
-                *import,
-                *api_key,
-            )?;
-            Ok(())
-        }
-        (
-            Some(AccountCommand::RedeemReset {
-                provider,
-                email,
-                idempotency_key,
-                credit_id,
-                json,
-            }),
-            _,
-        ) => {
-            let redemption = engine::redeem_reset(
-                provider,
-                email,
-                idempotency_key.as_deref(),
-                credit_id.as_deref(),
-            )?;
+        AccountCommand::Use { login } => use_login(login).await,
+        AccountCommand::Pause { login } => set_rotation(login, RoutingState::ExplicitOnly).await,
+        AccountCommand::Unpause { login } => set_rotation(login, RoutingState::Automatic).await,
+        AccountCommand::Disconnect { target } => match Target::parse(target)? {
+            Target::Provider(provider) => disconnect(provider.as_str()).await,
+            Target::Login { provider, login } => {
+                let store = open_account_store().await?;
+                let account = super::profile::resolve_login(&store, provider, &login, "lf account disconnect").await?;
+                disconnect_account(&store, account).await
+            }
+        },
+        AccountCommand::Connect {
+            target,
+            chrome_profile,
+            import,
+            api_key,
+        } => match Target::parse(target)? {
+            Target::Provider(provider) if *api_key => configure(provider.as_str()).await,
+            Target::Provider(provider) if *import => bail!(
+                "--import adopts the ambient login as a stored one: lf account connect {provider}=<email> --import"
+            ),
+            Target::Provider(provider) => connect(provider.as_str(), chrome_profile.as_deref()).await,
+            Target::Login { .. } if *api_key => {
+                bail!("an API key belongs to the provider, not a login: lf account connect <provider> --api-key")
+            }
+            Target::Login { provider, login } => {
+                let provider = match provider {
+                    Some(provider) => provider,
+                    None => {
+                        let store = open_account_store().await?;
+                        let account = super::profile::resolve_login(&store, None, &login, "lf account connect")
+                            .await
+                            .map_err(|_| {
+                                anyhow!("name the provider for a new login: lf account connect claude={login}")
+                            })?;
+                        account.provider.parse()?
+                    }
+                };
+                if *import {
+                    return import_account(provider.as_str(), &login).await;
+                }
+                connect_account(provider.as_str(), &login, chrome_profile.as_deref()).await
+            }
+        },
+        AccountCommand::RedeemReset {
+            login,
+            idempotency_key,
+            credit_id,
+            json,
+        } => {
+            let (provider, login) = Target::parse_login(login, "redeem-reset")?;
+            let redemption = redeem_reset(
+                provider.unwrap_or(Provider::Codex).as_str(), &login,
+                idempotency_key.as_deref(), credit_id.as_deref(),
+            ).await?;
             if *json {
-                println!("{}", serde_json::to_string_pretty(&redemption)?);
+                narrate!("{}", serde_json::to_string_pretty(&redemption)?);
             } else {
-                println!(
-                    "{}: {} (attempt {})",
-                    redemption.login, redemption.outcome, redemption.idempotency_key
-                );
-                println!("Before:");
+                narrate!("{}: {} (attempt {})", redemption.login, redemption.outcome, redemption.idempotency_key);
+                narrate!("Before:");
                 print_reset_usage(&redemption.before);
-                println!("After:");
+                narrate!("After:");
                 match (&redemption.after, &redemption.refresh_error) {
                     (Some(usage), _) => print_reset_usage(usage),
-                    (None, error) => println!("  unknown; {}", error.as_deref().unwrap_or("")),
+                    (None, error) => narrate!("  unknown; {}", error.as_deref().unwrap_or("")),
                 }
             }
             Ok(())
         }
-        (
-            Some(AccountCommand::Token {
-                provider,
-                email,
-                file,
-                chrome_profile,
-            }),
-            _,
-        ) => {
-            engine::token(provider, email, file.as_deref(), chrome_profile.as_deref())?;
-            Ok(())
-        }
-        (
-            Some(AccountCommand::Route {
-                repo,
-                default,
-                json,
-            }),
-            _,
-        ) => super::profile::show_route(repo.as_deref(), *default, *json),
-        (
-            Some(AccountCommand::Set {
-                provider,
-                email,
-                login_email,
-                routing,
-                plan,
-                clear_plan,
-                paid_through,
-                clear_paid_through,
-                clear_cooldown,
-                chrome_profile,
-                clear_chrome_profiles,
-            }),
-            _,
-        ) => {
-            engine::set(
-                provider,
-                email.as_deref(),
-                &engine::Settings {
-                    login_email: login_email.clone(),
-                    routing: routing.clone(),
-                    plan: plan.clone(),
-                    clear_plan: *clear_plan,
-                    paid_through: paid_through.clone(),
-                    clear_paid_through: *clear_paid_through,
-                    clear_cooldown: *clear_cooldown,
-                    chrome_profiles: chrome_profile.clone(),
-                    clear_chrome_profiles: *clear_chrome_profiles,
-                },
-            )?;
+        AccountCommand::Set {
+            target,
+            login_email,
+            plan,
+            clear_plan,
+            paid_through,
+            clear_paid_through,
+            clear_cooldown,
+            chrome_profile,
+            clear_chrome_profiles,
+        } => {
+            let lifecycle = login_email.is_some()
+                || plan.is_some()
+                || *clear_plan
+                || paid_through.is_some()
+                || *clear_paid_through;
+            if !lifecycle && !clear_cooldown && chrome_profile.is_empty() && !clear_chrome_profiles
+            {
+                bail!("account set needs a login setting or --chrome-profile / --clear-chrome-profiles");
+            }
+            let store = open_account_store().await?;
+            let (provider, account) = match Target::parse(target)? {
+                Target::Provider(provider) if lifecycle || *clear_cooldown => bail!(
+                    "name the login: lf account set {provider}=<login> …"
+                ),
+                Target::Provider(provider) => (provider, None),
+                Target::Login { provider, login } => {
+                    let account = super::profile::resolve_login(&store, provider, &login, "lf account set").await?;
+                    (account.provider.parse()?, Some(account))
+                }
+            };
+            if lifecycle {
+                set_account_lifecycle(
+                    &store,
+                    account.as_ref().expect("lifecycle settings name a login"),
+                    AccountLifecycleUpdate {
+                        login_email: login_email.as_deref(),
+                        plan: plan.as_deref(),
+                        clear_plan: *clear_plan,
+                        paid_through: paid_through.as_deref(),
+                        clear_paid_through: *clear_paid_through,
+                    },
+                )
+                .await?;
+            }
+            if *clear_cooldown {
+                clear_account_cooldown(&store, account.as_ref().expect("cooldown names a login"))
+                    .await?;
+            }
+            if !chrome_profile.is_empty() || *clear_chrome_profiles {
+                set_browser_profiles(&store, provider, account.as_ref(), chrome_profile).await?;
+            }
             Ok(())
         }
     }
 }
 
+/// A script reads why `next` or `use` could not proceed from its exit code.
+/// 2 is also Clap's usage exit, so a login that names nothing shares it.
+pub(super) const EXIT_BLOCKED: u8 = 2;
+pub(super) const EXIT_LOGIN_NEEDED: u8 = 3;
+
+/// `lf account use <login>`: switch the shared home there and hold launches
+/// on it; `auto` releases the hold.
+async fn use_login(raw: &str) -> Result<()> {
+    let (provider, login) = Target::parse_login(raw, "use")?;
+    if login.eq_ignore_ascii_case("auto") {
+        let providers = match provider {
+            Some(provider) => vec![provider],
+            None => vec![Provider::Claude, Provider::Codex],
+        };
+        for provider in providers {
+            if crate::provider_account::hold::release(provider)? {
+                narrate!("{provider} launches go to the login with the most to spend again");
+            }
+        }
+        return Ok(());
+    }
+    let store = open_account_store().await?;
+    // A login that names nothing stored is a usage error, like a misspelt flag.
+    let account =
+        match super::profile::resolve_login(&store, provider, &login, "lf account use").await {
+            Ok(account) => account,
+            Err(error) => {
+                diagnose!("{error}");
+                return Err(crate::process::CommandExit(EXIT_BLOCKED).into());
+            }
+        };
+    let provider: Provider = account.provider.parse()?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if account.credential_state != CredentialState::Connected {
+        diagnose!(
+            "{provider} {} needs a login: lf account connect {provider}={}",
+            account_login(&account),
+            account_login(&account)
+        );
+        return Err(crate::process::CommandExit(EXIT_LOGIN_NEEDED).into());
+    }
+    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
+        diagnose!(
+            "{provider} {} is out until {}; lf account next shows what can launch",
+            account_login(&account),
+            account_status::local_time(until)
+        );
+        return Err(crate::process::CommandExit(EXIT_BLOCKED).into());
+    }
+    match switch_login(&store, provider, &account).await {
+        Err(error)
+            if matches!(
+                error.downcast_ref::<crate::provider_account::ProviderAccountError>(),
+                Some(crate::provider_account::ProviderAccountError::NoAuthenticatedAccount { .. })
+            ) =>
+        {
+            diagnose!("{error}");
+            return Err(crate::process::CommandExit(EXIT_LOGIN_NEEDED).into());
+        }
+        result => result?,
+    }
+    crate::provider_account::hold::hold(provider, &account.account_id)?;
+    narrate!(
+        "{provider} stays on {} until it fills up, or lf account use auto",
+        account_login(&account)
+    );
+    Ok(())
+}
+
+/// `pause` and `unpause`: take a login out of rotation or put it back.
+async fn set_rotation(raw: &str, routing: RoutingState) -> Result<()> {
+    let verb = if routing == RoutingState::Automatic {
+        "unpause"
+    } else {
+        "pause"
+    };
+    let (provider, login) = Target::parse_login(raw, verb)?;
+    let store = open_account_store().await?;
+    let mut account =
+        super::profile::resolve_login(&store, provider, &login, &format!("lf account {verb}"))
+            .await?;
+    let provider: Provider = account.provider.parse()?;
+    account.routing_state = routing;
+    account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .update_provider_account_lifecycle(&account)
+        .await
+        .map_err(|error| account_store_error(provider, account_login(&account), error))?;
+    if routing == RoutingState::Automatic {
+        narrate!("{provider} {} is back in rotation", account_login(&account));
+        return Ok(());
+    }
+    if crate::provider_account::hold::held(provider).as_ref() == Some(&account.account_id) {
+        crate::provider_account::hold::release(provider)?;
+    }
+    narrate!(
+        "{provider} {} is out of rotation; --account {provider}={} still launches it",
+        account_login(&account),
+        account_login(&account)
+    );
+    switch_away(&store, provider, &account).await
+}
+
+/// `lf --account claude=b@ resume` on a running Claude: the client reads the
+/// Machine's login, so the login moves and the client stays. Nothing is held.
+/// The line goes to stderr, beside what a resume reports on stdout.
+pub(crate) async fn switch_to_named_login(store: &SharedStore, provider: Provider) -> Result<()> {
+    // Reading the active login can save it back, which a plain resume never asked for.
+    if crate::provider_account::selection::AccountSelection::from_env()?.is_default() {
+        return Ok(());
+    }
+    let native = crate::provider_account::activation::native_home(provider, None);
+    let active =
+        crate::provider_account::activation::observe_active_account(store, provider, &native)
+            .await?;
+    let Some(named) =
+        crate::provider_account::names_another_account(store, provider, active).await?
+    else {
+        return Ok(());
+    };
+    let account = store
+        .get_provider_account(provider.as_str(), &named)
+        .await?
+        .ok_or_else(|| anyhow!("{provider} login {named} disappeared"))?;
+    diagnose!(
+        "{}",
+        install_login(store, provider, &account, &native).await?
+    );
+    Ok(())
+}
+
 /// Sign a provider's shared home in as a stored account.
 /// Codex agents Loopflow launched keep their login until they
 /// restart; Codex's own background app-server is restarted to adopt it.
-pub(crate) async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
-    let store = open_account_store().await?;
-    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+async fn switch_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<()> {
     let native = crate::provider_account::activation::native_home(provider, None);
-    let switched = crate::provider_account::activation::activate(
-        &store,
-        provider,
-        &account.account_id,
-        &native,
-        crate::provider_account::activation::SwitchCause::Person,
-    )
-    .await?;
-    let login = account_login(&account);
-    if switched.is_some() {
-        narrate!(
-            "{} is now signed in as {login} in {}",
-            provider.display_name(),
-            native.display()
-        );
-    } else {
-        narrate!(
-            "{} is already signed in as {login}",
-            provider.display_name()
-        );
-    }
+    narrate!(
+        "{}",
+        install_login(store, provider, account, &native).await?
+    );
+    let login = account_login(account);
     // The login is installed; launches must not wait on the daemon's turns.
-    drop(switched);
     if provider == Provider::Codex {
         restart_stale_codex_daemon(&native, login).await.with_context(|| {
-            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account codex use {login}`", native.display())
+            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account use codex={login}`", native.display())
         })?;
     }
     Ok(())
+}
+
+/// Sign `native` in as `account`, releasing the credential lock. What happened,
+/// in a line for the person.
+async fn install_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    native: &Path,
+) -> Result<String> {
+    let switched = crate::provider_account::activation::activate(
+        store,
+        provider,
+        &account.account_id,
+        native,
+        crate::provider_account::activation::SwitchCause::Person,
+    )
+    .await?;
+    let login = account_login(account);
+    let follow =
+        if crate::provider_account::activation::running_agents_follow_native_login(provider) {
+            "open Sessions follow at their next request"
+        } else {
+            "open Sessions follow when resumed"
+        };
+    Ok(if switched.is_some() {
+        format!("{provider} is now signed in as {login}; {follow}")
+    } else {
+        format!("{provider} is already signed in as {login}")
+    })
 }
 
 /// A bare `codex` attaches to the home's background app-server, which keeps
@@ -302,7 +527,7 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
+async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let store = open_account_store().await?;
     let (profiles, remember) = browser_profiles(&store, provider, None, selection).await?;
@@ -391,7 +616,7 @@ async fn browser_profiles(
         return Ok((profiles, false));
     }
     let login = account
-        .map(|a| format!(" {}", account_login(a)))
+        .map(|a| format!("={}", account_login(a)))
         .unwrap_or_default();
     if is_served() || !std::io::stdin().is_terminal() {
         return Err(anyhow!("No saved Chrome profile. Run lf account connect {provider}{login} --chrome-profile <profile>"));
@@ -469,7 +694,7 @@ pub(crate) async fn redeem_reset(
     if is_served() {
         tracing::info!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
     } else {
-        eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+        diagnose!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
     }
     let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
         .await
@@ -477,8 +702,7 @@ pub(crate) async fn redeem_reset(
             format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
         })?;
     for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
-        store
-            .upsert_provider_account_limits("codex", &account.account_id, &usage.windows, "poll")
+        crate::provider_account::save_polled_usage(&store, account, &usage.windows)
             .await
             .with_context(|| {
                 format!(
@@ -507,9 +731,9 @@ fn print_reset_usage(usage: &crate::engine::account::UsageSnapshot) {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     for window in &usage.windows {
         if window.resets_at.is_some_and(|reset| reset <= now) {
-            println!("  {}: usage unknown; reset passed", window.window);
+            narrate!("  {}: usage unknown; reset passed", window.window);
         } else {
-            println!(
+            narrate!(
                 "  {}: {}% used, {}% left",
                 window.window,
                 window.used_percent,
@@ -517,7 +741,7 @@ fn print_reset_usage(usage: &crate::engine::account::UsageSnapshot) {
             );
         }
     }
-    println!(
+    narrate!(
         "  banked resets: {}",
         usage
             .reset_credits
@@ -527,7 +751,7 @@ fn print_reset_usage(usage: &crate::engine::account::UsageSnapshot) {
     );
 }
 
-pub(crate) async fn connect_account(
+async fn connect_account(
     raw_provider: &str,
     raw_email: &str,
     raw_chrome_profile: Option<&str>,
@@ -557,7 +781,7 @@ pub(crate) async fn connect_account(
     };
     if account.login_email.is_none() {
         return Err(anyhow!(
-            "account '{}' needs an expected email first: lf account set {} {} --login-email <email>",
+            "account '{}' needs an expected email first: lf account set {}={} --login-email <email>",
             account.account_id,
             provider,
             account.account_id
@@ -640,6 +864,26 @@ async fn connect_managed_account(
         account_login(account),
         profile.id
     );
+    read_first_usage(store, provider, account_id).await
+}
+
+/// Poll a just-connected login once, so routing ranks it on its real quota
+/// from the first launch instead of waiting for a status read.
+async fn read_first_usage(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+) -> Result<()> {
+    let account = store
+        .get_provider_account(provider.as_str(), account_id)
+        .await?
+        .context("connected account disappeared")?;
+    match crate::subscription::poll_account(&account).await {
+        Ok(usage) => {
+            crate::provider_account::save_polled_usage(store, &account, &usage.windows).await?;
+        }
+        Err(error) => narrate!("Usage not read yet ({error}); `lf account` reads it"),
+    }
     Ok(())
 }
 
@@ -749,113 +993,6 @@ pub(super) async fn fresh_machine_login(
         bail!("fresh login belongs to a different provider identity; credential discarded");
     }
     Ok((login_home, identity))
-}
-
-/// Mint a Claude account's long-lived token with `claude setup-token` in its
-/// verified Chrome profile, and store it on the account.
-pub(super) async fn mint_long_lived_token(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    chrome_profile: Option<&str>,
-) -> Result<LongLivedToken> {
-    let (profiles, _) =
-        browser_profiles(store, Provider::Claude, Some(account), chrome_profile).await?;
-    let profile = profiles
-        .first()
-        .ok_or_else(|| anyhow!("no browser profile available"))?;
-    let chrome = verified_chrome_profile(profile)?;
-    // setup-token prints a token and stores nothing; the home only isolates it.
-    let home = tempfile::Builder::new()
-        .prefix("lf-setup-token-")
-        .tempdir()?;
-    let (handle, minted) =
-        crate::provider_auth::start_claude_setup_token(home.path().to_path_buf()).await?;
-    approve_in_chrome(handle, Provider::Claude, account, profile, &chrome).await?;
-    let token = minted.take().ok_or_else(|| {
-        anyhow!("claude setup-token finished without printing a subscription token")
-    })?;
-    store_long_lived_token(store, account, token).await
-}
-
-/// Refuse anything but a subscription token: an API key bills per token.
-pub(super) fn require_subscription_token(token: &str) -> Result<()> {
-    let prefix = crate::provider_auth::SUBSCRIPTION_TOKEN_PREFIX;
-    if !token.starts_with(prefix) || token.chars().any(char::is_whitespace) {
-        bail!("not a Claude subscription token ({prefix}…); refused, since an API key bills per token. Mint one with `claude setup-token`");
-    }
-    Ok(())
-}
-
-async fn store_long_lived_token(
-    store: &SharedStore,
-    account: &ProviderAccount,
-    token: SecretString,
-) -> Result<LongLivedToken> {
-    require_subscription_token(token.expose_secret())?;
-    let minted_at = OffsetDateTime::now_utc().unix_timestamp();
-    if !store
-        .set_long_lived_token(
-            Provider::Claude.as_str(),
-            &account.account_id,
-            &token,
-            minted_at,
-        )
-        .await?
-    {
-        bail!(
-            "no Claude account {} on this laptop; `lf account connect claude {}` first",
-            account_login(account),
-            account_login(account)
-        );
-    }
-    Ok(LongLivedToken { token, minted_at })
-}
-
-/// `lf account token claude <email> [--file F]`
-pub(crate) async fn token_account(
-    raw_provider: &str,
-    selector: &str,
-    file: Option<&Path>,
-    chrome_profile: Option<&str>,
-) -> Result<()> {
-    if parse_managed_provider(raw_provider)? != Provider::Claude {
-        bail!("long-lived tokens are Claude's (`claude setup-token`); codex machines use `lf machine connect`");
-    }
-    let store = open_account_store().await?;
-    let accounts = store
-        .list_provider_accounts(Some(Provider::Claude.as_str()))
-        .await?;
-    let account = match match_account(&accounts.iter().collect::<Vec<_>>(), selector) {
-        AccountMatch::One(account) => account.clone(),
-        AccountMatch::Ambiguous(_) => bail!("ambiguous login; use its full email"),
-        AccountMatch::None => {
-            bail!("no Claude account {selector} on this laptop; `lf account connect claude {selector}` first")
-        }
-    };
-    match file {
-        Some(path) => {
-            let raw = if path == Path::new("-") {
-                if is_served() {
-                    bail!("the server has no stdin to read a token from; name a file");
-                }
-                let mut raw = String::new();
-                std::io::stdin().take(4096).read_to_string(&mut raw)?;
-                raw
-            } else {
-                fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?
-            };
-            store_long_lived_token(&store, &account, SecretString::new(raw.trim().to_string()))
-                .await?;
-        }
-        None => {
-            mint_long_lived_token(&store, &account, chrome_profile).await?;
-        }
-    }
-    narrate!(
-        "Stored a long-lived Claude token for {}; rented machines install it without a browser approval. Renew within a year.",
-        account_login(&account)
-    );
-    Ok(())
 }
 
 /// Run OpenCode's device login in a private `home`, approved in the verified Chrome
@@ -1033,7 +1170,7 @@ fn exhausted_access_profiles_error(
     failures: &[String],
 ) -> anyhow::Error {
     anyhow!(
-        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf account connect {provider} {} --chrome-profile <profile>",
+        "Chrome profiles unavailable for {provider}/{}. {} Choose a profile: lf account connect {provider}={} --chrome-profile <profile>",
         account_login(account), failures.join("; "), account_login(account)
     )
 }
@@ -1070,7 +1207,10 @@ pub(super) async fn verify_managed_identity(
 )> {
     let (identity, plan) = match provider {
         Provider::Codex => crate::provider_auth::verify_codex_identity(home).await?,
-        Provider::Claude => (crate::subscription::claude_identity(home).await?, None),
+        Provider::Claude => (
+            crate::subscription::claude_identity(home, None).await?,
+            None,
+        ),
         _ => return Err(anyhow!("unsupported managed provider")),
     };
     // A different browser login can try the next saved profile; other failures stop connect.
@@ -1124,7 +1264,7 @@ pub(super) async fn register_managed_account(
     Ok(())
 }
 
-pub(crate) async fn import_account(raw_provider: &str, raw_email: &str) -> Result<()> {
+async fn import_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let expected_login = EmailAddress::parse(raw_email).map_err(anyhow::Error::msg)?;
     let store = open_account_store().await?;
@@ -1194,7 +1334,7 @@ pub(crate) async fn import_account(raw_provider: &str, raw_email: &str) -> Resul
         provider.display_name(),
         expected_login
     );
-    Ok(())
+    read_first_usage(&store, provider, &account_id).await
 }
 
 async fn require_managed_access_token(
@@ -1281,7 +1421,7 @@ fn open_chrome_profile(profile: &LocalChromeProfile, _url: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn disconnect(raw_provider: &str) -> Result<()> {
+async fn disconnect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
@@ -1289,10 +1429,8 @@ pub(crate) async fn disconnect(raw_provider: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn disconnect_account(raw_provider: &str, raw_email: &str) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
-    let store = open_account_store().await?;
-    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+async fn disconnect_account(store: &SharedStore, mut account: ProviderAccount) -> Result<()> {
+    let provider: Provider = account.provider.parse()?;
     let account_id = account.account_id.clone();
     let _login_lock = account
         .home
@@ -1326,23 +1464,15 @@ pub(crate) async fn disconnect_account(raw_provider: &str, raw_email: &str) -> R
     Ok(())
 }
 
-pub(crate) async fn set_browser_profiles(
-    provider: &str,
-    email: Option<&str>,
+async fn set_browser_profiles(
+    store: &SharedStore,
+    provider: Provider,
+    account: Option<&ProviderAccount>,
     selections: &[String],
 ) -> Result<()> {
-    let provider = parse_provider(provider)?;
-    let store = open_account_store().await?;
-    let account = match email {
-        Some(email) => {
-            parse_managed_provider(provider.as_str())?;
-            Some(super::profile::find_provider_account(&store, provider, email).await?)
-        }
-        None => None,
-    };
     let mut selected = Vec::new();
     for selection in selections {
-        let profile = bootstrap_access_profile(&store, selection).await?;
+        let profile = bootstrap_access_profile(store, selection).await?;
         if !selected.iter().any(|p: &AccessProfile| p.id == profile.id) {
             selected.push(profile);
         }
@@ -1355,45 +1485,29 @@ pub(crate) async fn set_browser_profiles(
         .map(|profile| profile.id)
         .collect::<Vec<_>>();
     store
-        .set_auth_browser_profiles(provider, account.as_ref().map(|a| &a.account_id), &profiles)
+        .set_auth_browser_profiles(provider, account.map(|a| &a.account_id), &profiles)
         .await?;
     narrate!(
         "Updated {provider} browser choices for {}",
-        account
-            .as_ref()
-            .map(account_login)
-            .unwrap_or("local credentials")
+        account.map(account_login).unwrap_or("local credentials")
     );
     Ok(())
 }
 
-pub(crate) async fn set_account_lifecycle(
-    raw_provider: &str,
-    raw_email: &str,
+async fn set_account_lifecycle(
+    store: &SharedStore,
+    account: &ProviderAccount,
     update: AccountLifecycleUpdate<'_>,
 ) -> Result<()> {
-    if update.login_email.is_none()
-        && update.routing.is_none()
-        && update.plan.is_none()
-        && !update.clear_plan
-        && update.paid_through.is_none()
-        && !update.clear_paid_through
-    {
-        return Err(anyhow!(
-            "lf account set needs --login-email, --routing, --plan, or --paid-through"
-        ));
-    }
-    let provider = parse_managed_provider(raw_provider)?;
+    let provider: Provider = account.provider.parse()?;
     let login_email = update
         .login_email
         .map(EmailAddress::parse)
         .transpose()
         .map_err(anyhow::Error::msg)?;
-    let routing_state = update.routing.map(parse_routing_state).transpose()?;
     let plan = update.plan.map(parse_plan).transpose()?;
     let paid_through = update.paid_through.map(parse_paid_through).transpose()?;
-    let store = open_account_store().await?;
-    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let mut account = account.clone();
     if let Some(login_email) = login_email {
         if let Some(home) = &account.home {
             let observed = match provider {
@@ -1402,20 +1516,17 @@ pub(crate) async fn set_account_lifecycle(
                         .ok_or_else(|| anyhow!("cannot read credential identity; reconnect before changing the login email"))?.email)
                 }
                 Provider::Claude if home.join(".credentials.json").exists() => {
-                    Some(crate::subscription::claude_identity(home).await?.email)
+                    Some(crate::subscription::claude_identity(home, None).await?.email)
                 }
                 _ => None,
             };
             if let Some(observed) = observed {
                 if !observed.eq_ignore_ascii_case(login_email.as_str()) {
-                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf account connect {provider} {login_email}"));
+                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf account connect {provider}={login_email}"));
                 }
             }
         }
         account.login_email = Some(login_email);
-    }
-    if let Some(routing_state) = routing_state {
-        account.routing_state = routing_state;
     }
     if update.clear_plan {
         account.plan = None;
@@ -1436,14 +1547,30 @@ pub(crate) async fn set_account_lifecycle(
     Ok(())
 }
 
-fn parse_routing_state(value: &str) -> Result<RoutingState> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "automatic" => Ok(RoutingState::Automatic),
-        "explicit-only" | "explicit_only" => Ok(RoutingState::ExplicitOnly),
-        "disabled" => Ok(RoutingState::Disabled),
-        _ => Err(anyhow!(
-            "invalid routing state '{value}': expected automatic, explicit-only, or disabled"
-        )),
+/// A login taken out of automatic routing stops taking work at once: when it
+/// is the active login, the Machine switches to the route's next one, and
+/// every open Claude follows.
+async fn switch_away(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<()> {
+    if !crate::provider_account::is_active_login(store, provider, account).await? {
+        return Ok(());
+    }
+    let repo = crate::repository::CanonicalRepo::containing(&std::env::current_dir()?)?;
+    match crate::provider_account::replacement_login(store, provider, account, repo.as_ref())
+        .await?
+    {
+        Some(next) => switch_login(store, provider, &next).await,
+        None => {
+            narrate!(
+                "{} stays signed in as {}: no other login can take its work; `lf account use <login>` switches by hand",
+                provider.display_name(),
+                account_login(account)
+            );
+            Ok(())
+        }
     }
 }
 
@@ -1461,18 +1588,16 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
         .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
 }
 
-pub(crate) async fn clear_account_cooldown(raw_provider: &str, raw_email: &str) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
-    let store = open_account_store().await?;
-    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) -> Result<()> {
+    let provider: Provider = account.provider.parse()?;
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
-        .map_err(|error| account_store_error(provider, account_login(&account), error))?;
+        .map_err(|error| account_store_error(provider, account_login(account), error))?;
     narrate!(
         "Cleared {} login '{}' cooldown",
         provider.display_name(),
-        account_login(&account)
+        account_login(account)
     );
     Ok(())
 }
@@ -1498,8 +1623,10 @@ fn parse_managed_provider(raw: &str) -> Result<Provider> {
 fn format_account(account: &ProviderAccount) -> String {
     let mut details = Vec::new();
     let routing_state = account.effective_routing_state(OffsetDateTime::now_utc().date());
-    if routing_state != RoutingState::Automatic {
-        details.push(routing_state.as_str().replace('_', "-"));
+    match routing_state {
+        RoutingState::Automatic => {}
+        RoutingState::ExplicitOnly => details.push("paused".to_string()),
+        RoutingState::Disabled => details.push("disabled".to_string()),
     }
     if account.credential_state != CredentialState::Connected {
         details.push(account.credential_state.as_str().to_string());
@@ -1531,7 +1658,7 @@ fn format_account(account: &ProviderAccount) -> String {
     )
 }
 
-pub(crate) async fn configure(raw_provider: &str) -> Result<()> {
+async fn configure(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     if let Some(message) = provider.api_key_configure_error() {
         return Err(anyhow!(message));
@@ -1584,7 +1711,7 @@ async fn local_store() -> Result<SharedStore> {
     Ok(Arc::new(store))
 }
 
-pub(crate) fn parse_provider(raw: &str) -> Result<Provider> {
+fn parse_provider(raw: &str) -> Result<Provider> {
     raw.parse::<Provider>()
         .map_err(|_| anyhow!("unknown provider: {raw}"))
 }
@@ -1616,7 +1743,7 @@ mod tests {
 
     use super::{
         acquire_managed_login_lock, format_account, format_relative_delta, import_account,
-        install_claude_login, install_codex_login, parse_paid_through, parse_routing_state,
+        install_claude_login, install_codex_login, parse_paid_through,
         wait_for_browser_confirmation,
     };
 
@@ -1674,18 +1801,6 @@ mod tests {
     }
 
     #[test]
-    fn a_served_operation_stays_served_across_its_runtime() {
-        assert!(!super::is_served());
-        let served = super::served(|| {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(async { super::is_served() })
-        });
-        assert!(served);
-        assert!(!super::is_served());
-    }
-
-    #[test]
     fn format_account_shows_routing_state() {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let rendered = format_account(&ProviderAccount {
@@ -1720,11 +1835,6 @@ mod tests {
 
     #[test]
     fn lifecycle_values_are_strict_and_expired_plans_become_explicit_only() {
-        assert_eq!(
-            parse_routing_state("explicit-only").unwrap(),
-            RoutingState::ExplicitOnly
-        );
-        assert!(parse_routing_state("fallback").is_err());
         assert!(parse_paid_through("08/14/2026").is_err());
 
         let today = OffsetDateTime::now_utc().date();
@@ -1749,7 +1859,7 @@ mod tests {
             updated_at: 1,
         };
 
-        assert!(format_account(&account).contains("explicit-only"));
+        assert!(format_account(&account).contains("paused"));
         assert!(!account.eligible_for_automatic_routing(today));
     }
 
@@ -2050,6 +2160,8 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                     used_percent: 17,
                     resets_at: Some(4102444800),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )
@@ -2078,9 +2190,13 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                 fs::write(&replace_path, &replace_bytes).unwrap();
             })
             .await;
-        super::account_status::report(Some(Provider::Claude), true, false)
-            .await
-            .unwrap();
+        super::account_status::run(
+            Some(super::Target::Provider(Provider::Claude)),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         server.await.unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), replacement);
         assert_eq!(
@@ -2351,13 +2467,14 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
         let account = account(None, "operator@example.com");
         store.upsert_provider_account(&account).await.unwrap();
-        super::set_browser_profiles("linear", None, &["Work".into()])
+        super::set_browser_profiles(&store, Provider::Linear, None, &["Work".into()])
             .await
             .unwrap();
         let original = store.list_access_profiles().await.unwrap();
         super::set_browser_profiles(
-            "codex",
-            Some("operator@"),
+            &store,
+            Provider::Codex,
+            Some(&account),
             &["Work".into(), "Personal".into()],
         )
         .await
@@ -2375,7 +2492,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             .await
             .unwrap();
         assert_eq!(managed.len(), 2);
-        super::set_browser_profiles("linear", None, &[])
+        super::set_browser_profiles(&store, Provider::Linear, None, &[])
             .await
             .unwrap();
         assert!(store
@@ -2391,11 +2508,14 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             managed
         );
         assert_eq!(store.list_access_profiles().await.unwrap().len(), 2);
-        assert!(
-            super::set_browser_profiles("linear", None, &["nonexistent".into()])
-                .await
-                .is_err()
-        );
+        assert!(super::set_browser_profiles(
+            &store,
+            Provider::Linear,
+            None,
+            &["nonexistent".into()]
+        )
+        .await
+        .is_err());
         assert_eq!(
             store
                 .list_auth_browser_profiles(Some(Provider::Codex), Some(&account.account_id))
@@ -2680,7 +2800,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
 
         assert_eq!(
             error.to_string(),
-            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf account connect claude jackstah@gmail.com --chrome-profile <profile>"
+            "Chrome profiles unavailable for claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Choose a profile: lf account connect claude=jackstah@gmail.com --chrome-profile <profile>"
         );
     }
 }

@@ -28,7 +28,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8, 21:43 UTC implementation recheck reconfirmed the dependency:
+The November 8, 22:19 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -72,10 +72,6 @@ Visual review remains for demo or QA; Desktop opening results are in
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
-
-Compression fixes the shared attach example to include the ticket value,
-matching the wire fixture and the remote example. The UID-only store remains a
-deletion target until the transport lands.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose-only
 edits need no build or tests.

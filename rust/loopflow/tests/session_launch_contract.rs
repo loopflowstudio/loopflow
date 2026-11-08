@@ -45,8 +45,9 @@ if stream:
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
     record['input'] = sys.stdin.read()
-with open(os.environ['HOME']+'/received.json', 'w') as out:
+with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
     json.dump(record, out)
+os.replace(os.environ['HOME']+'/received.json.tmp', os.environ['HOME']+'/received.json')
 if stream:
     token = args[args.index('--resume')+1] if '--resume' in args else 'stream-fixture'
     print(json.dumps({'type':'system','subtype':'init','session_id':token}), flush=True)

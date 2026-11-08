@@ -412,7 +412,8 @@ read -r answer < /dev/tty
     }
     fn ends(&self, owner: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
-        while self.running(owner) {
+        // The completion receipt can precede the owner's socket cleanup.
+        while self.running(owner) || self.endpoint(owner).exists() {
             assert!(
                 Instant::now() < deadline,
                 "{owner} kept running; logs: {:?}",

@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+After syncing, rerun affected tests when main changed APIs they call, even if
+Git merged cleanly. A passing check from before the sync does not cover that
+combination; renamed enum variants can leave new branch tests uncompilable.
+
 CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
 aliases are covered separately by the `cli_discovery::` integration suite.

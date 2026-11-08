@@ -557,6 +557,64 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 }
 
 #[test]
+fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::server::wire::Operation;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file("edit.txt", "before\n");
+    repo.stage_all();
+    repo.commit("Comparison base");
+    register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let _server = Server::start(repo.path(), home.path());
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let pane = || Read::TaskGet {
+        directory: repo.path().to_owned(),
+        issue: "INF-123".into(),
+    };
+    let id = connection.subscribe(pane()).unwrap();
+    let frame = connection.reading(&id).unwrap().unwrap();
+    assert!(frame["unavailable"].is_null(), "{frame}");
+    assert_eq!(
+        frame["body"]["row"]["condition"]["local_progress"]["dirty"], false,
+        "{frame}"
+    );
+    let changes = || {
+        Operation::Read(Read::TaskChanges {
+            issue: "INF-123".into(),
+            base: "parent".into(),
+            head: None,
+        })
+    };
+    let before = connection.request(changes()).unwrap().result;
+    assert!(before["files"].as_array().unwrap().is_empty(), "{before}");
+    repo.create_file("edit.txt", "after\n");
+    repo.create_file("new.txt", "new\n");
+    let detail = connection.request(Operation::Read(pane())).unwrap().result;
+    assert_eq!(
+        detail["row"]["condition"]["local_progress"]["dirty"], true,
+        "{detail}"
+    );
+    let after = connection.request(changes()).unwrap().result;
+    let files = after["files"].as_array().unwrap();
+    assert!(
+        files
+            .iter()
+            .any(|file| file["path"] == "edit.txt" && file["unstaged"] == true),
+        "{after}"
+    );
+    assert!(
+        files
+            .iter()
+            .any(|file| file["path"] == "new.txt" && file["untracked"] == true),
+        "{after}"
+    );
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;

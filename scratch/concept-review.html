@@ -1,67 +1,76 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-811 · Recovery concepts</title>
+<title>LOO-811 · Finish a partial switch</title>
 <style>
   :root { color-scheme: light dark; --ink: #202b31; --paper: #faf9f5; --line: #9badae; --accent: #735322; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
-  main { max-width: 850px; margin: auto; padding: 28px 24px 40px; }
+  main { max-width: 850px; margin: auto; padding: 24px 24px 36px; }
   header { font-size: 12px; overflow-wrap: anywhere; }
-  h1 { font-size: clamp(25px, 4vw, 34px); line-height: 1.15; margin: 22px 0 12px; }
-  h2 { font-size: 18px; margin: 23px 0 8px; }
+  h1 { font-size: clamp(25px, 4vw, 34px); line-height: 1.15; margin: 20px 0 12px; }
+  h2 { font-size: 18px; margin: 20px 0 8px; }
   p { margin: 9px 0; }
   .decision { border-left: 3px solid var(--accent); padding-left: 15px; }
   code { font-size: .88em; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; vertical-align: top; padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); }
+  th, td { text-align: left; vertical-align: top; padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); }
   th { font-weight: 600; }
   ol { padding-left: 22px; }
-  li p { margin: 6px 0; }
+  li { margin: 7px 0; }
   @media (prefers-color-scheme: dark) { :root { --ink: #e7e9e5; --paper: #182126; --line: #617276; --accent: #e6bd7c; } }
   @media (max-width: 560px) { main { padding: 20px 16px; } table, tbody, tr, td { display: block; } thead { display: none; } tr { margin-bottom: 12px; } td { border: 0; padding: 2px 0; } td:first-child { font-weight: 600; } }
 </style>
+</head>
+<body>
 <main>
   <header>LOO-811 · concept-review · November 8, 2026<br>
-    Sources: scratch/live-recovery.md; docs/subscriptions.md; tests/e2e/claude_shared_home.py;
-    provider_auth/mod.rs; provider_account.rs; provider_account/activation.rs; engine/account.rs</header>
-  <h1>What must follow a login switch?</h1>
+    Built from scratch/live-recovery.md; scratch/questions.md; docs/subscriptions.md;<br>
+    rust/loopflow/src/{provider_auth/mod.rs, provider_account/activation.rs,
+    provider_account/identity.rs, lf/commands/account.rs}; tests/e2e/claude_shared_home.py</header>
+  <h1>Repeat the switch to finish it</h1>
   <div class="decision">
-    <p><strong>Historical review · superseded by two-item repair direction.</strong> Fresh Claude follows the selected login.
-      A legacy Keychain item can retain the previous one. The current iteration retains USER plus one legacy item after every switch; see live-recovery.md.</p>
+    <p><strong>Implemented; review remains.</strong> The two-item requirement is settled for this iteration.
+    A retry must finish installing the login before reporting success. No new product choice is needed.</p>
   </div>
-  <h2>Existing interaction → concepts → APIs</h2>
+  <h2>Action → concept → API</h2>
   <table>
-    <thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
+    <thead><tr><th>Action</th><th>Concept</th><th>API / effect</th></tr></thead>
     <tbody>
-      <tr><td><code>lf account use claude=work@</code></td><td>Machine login + hold</td><td><code>engine::account::activate</code> → <code>activation::activate</code> + <code>hold::hold</code></td></tr>
-      <tr><td><code>lf account use auto</code></td><td>Release hold; route on launch</td><td>Account command → <code>hold::release</code></td></tr>
-      <tr><td><code>lf --account codex=work@ resume &lt;session&gt;</code></td><td>Same conversation, another login</td><td>Resume restarts Codex; Claude switches and attaches</td></tr>
-      <tr><td>A step reaches its limit</td><td>Account/model capacity; retry or wait</td><td><code>record_stated_limit</code> → <code>save_polled_usage</code> → routing</td></tr>
+      <tr><td><code>lf account use claude=work@</code></td><td>One Machine login + hold</td><td><code>activation::activate</code> → install login → <code>hold::hold</code></td></tr>
+      <tr><td>Fix storage failure; repeat the command</td><td>Same login, incomplete installation</td><td>Reconcile the two items from the current native credential; update reload marker</td></tr>
+      <tr><td><code>lf account use auto</code></td><td>Release hold</td><td><code>hold::release</code>; normal routing resumes</td></tr>
     </tbody>
   </table>
-  <h2>Before / proposed after</h2>
-  <p><strong>Observed:</strong> A → B updates both items. B → A updates USER; legacy stays B.
-    Plain Claude sends A. The third item can also remain stale.</p>
-  <p><strong>Proposed, pending choice:</strong> keep the same switch command and define its compatibility promise.
-    No new account concept, table or lifecycle. A Keychain item is a storage address, not another provider login.</p>
-  <p><strong>Draft usage:</strong> “Switch once with <code>lf account use claude=work@</code>.
-    Plain Claude uses that login; running Claude picks it up on its next request.”
-    Running-client behavior remains unverified here.</p>
-  <h2>Recovery must keep the conversation</h2>
-  <p>Save rotated credentials before switching. Keep Session identity, history and input working.
-    A limit may change the login; explicit models stay fixed and completed Graph steps stay done.</p>
-  <p>Still unobserved: old Codex refresh overwriting the new login; a no-model spent line contradicted by a usage poll;
-    live resume/move/reload; and Claude refresh invalidating a rental token.
-    Native fixtures do not settle these. Disposable or idle real logins are still needed.</p>
-  <h2>Decision for the next step</h2>
+  <h2>The mismatch: active does not mean fully installed</h2>
+  <pre>Before switch             USER=A  legacy=A
+Write B; legacy rejects    USER=B  legacy=A  → error
+Retry B, before repair     USER=B  legacy=A  → “already signed in”
+Retry B, repaired          USER=B  legacy=B  → success</pre>
+  <p><strong>Built:</strong> changing A → B → A updates and verifies both selected items.
+    Two candidate native runs passed before the retry repair. <strong>Retry repair:</strong> same-login
+    activation now reaches the writer and reload marker under the existing locks. Command-path
+    stand-ins cover partial writes, rotation and marker recovery; native retry remains unobserved.</p>
+  <p><strong>Recovery:</strong> “Fix the reported storage problem and repeat
+    <code>lf account use claude=work@</code>. It finishes installing that login before reporting success.”</p>
+  <h2>Keep the model small</h2>
+  <p>Keychain items are storage addresses. Use the existing locks and one item-selection path;
+    derive completeness from the items. Keep the newest native credential, outgoing save-back,
+    Session history and input. No new record or API. USER plus one eligible legacy item remains
+    the scope; lexical selection among several is the recorded headless assumption.</p>
+  <h2>Verification and remaining observations</h2>
   <ol>
-    <li>Which items must agree after <strong>every A → B → A switch</strong>?
-      <p><strong>1a.</strong> Current Claude’s native item. Older items may differ; narrows the original expectation.</p>
-      <p><strong>1b.</strong> USER and the supported legacy item. Keeps the two-item expectation; identify that legacy item when several exist.</p>
-      <p><strong>1c.</strong> Every existing item in the service. Expands scope; needs enumeration and update behavior.</p>
-    </li>
+    <li>Does failure → same-command retry repair both items and reach the reload marker?
+      <strong>Covered through command installation and activation with a Keychain stand-in.</strong></li>
+    <li>Does retry retain a newer native credential for the same login, with normal switches and
+      complete repeats still working? <strong>Covered for access-only and both-token rotation. Retry, repeats and normal switches cover scoped and unsuffixed services.</strong></li>
+    <li>Does installed recovery keep live conversations working?
+      <strong>Still unobserved:</strong> unsuffixed service, resume/move/reload, Codex refresh overwrite,
+      contradictory usage reports and rental token invalidation. Demo/review retains these checks.</li>
   </ol>
 </main>
+</body>
 </html>

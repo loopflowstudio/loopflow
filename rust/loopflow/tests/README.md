@@ -301,6 +301,11 @@ synthetic logins and local endpoints. Ordinary retry, usage,
 binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
 `ops::linear::adoption_tests`.
 
+`cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain::`
+checks partial-write retries through command installation on macOS, including
+rotated credentials and reload-marker recovery. It registers disposable homes
+with the Keychain stand-in; other unit tests continue to use credential files.
+
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.

@@ -135,7 +135,8 @@ pub(crate) fn claude_credential_home(profile: &Path) -> PathBuf {
 
 /// Sign `native` in as `account_id`. Returns the provider credential lock
 /// through divergent-copy verification or installation and the following spawn.
-/// `None` means the active credential needed no verification or replacement.
+/// `None` means the selected login was already active; Claude's native items
+/// and reload marker are reconciled before returning it.
 pub(crate) async fn activate(
     store: &SharedStore,
     provider: Provider,
@@ -166,16 +167,16 @@ pub(crate) async fn activate(
             ),
         });
     };
-    let is_active = || {
-        same_login(provider, native, profile)
-            && (provider != Provider::Codex
-                || read_login(provider, native) == read_login(provider, profile))
+    let codex_is_active = || {
+        provider == Provider::Codex
+            && same_login(provider, native, profile)
+            && read_login(provider, native) == read_login(provider, profile)
     };
-    if is_active() {
+    if codex_is_active() {
         return Ok(None);
     }
     let lock = lock_native_credential(provider)?;
-    if is_active() {
+    if codex_is_active() {
         return Ok(None);
     }
     // Claude must not refresh the outgoing login between its save-back and
@@ -192,7 +193,17 @@ pub(crate) async fn activate(
     }
     match save_back(store, provider, native, &accounts, refresh.as_ref()).await? {
         // The native login was this account's all along, rotated since it was stored.
-        Kept::Profile(owner) if owner == *account_id => return Ok(None),
+        Kept::Profile(owner) if owner == *account_id => {
+            if provider == Provider::Claude {
+                // Save-back may have refreshed this login. Reconcile from the
+                // native copy under both locks, never from an older profile.
+                let credential = read_login(provider, native).ok_or_else(|| {
+                    ProviderAccountError::Filesystem("read native Claude credential".into())
+                })?;
+                write_login(provider, native, &credential)?;
+            }
+            return Ok(None);
+        }
         Kept::Profile(_) | Kept::Nothing => {}
         Kept::Unplaced(credential) => keep_aside(provider, &credential)?,
     }
@@ -259,8 +270,15 @@ fn write_login(
 /// switch makes every open Claude pick the new login up on its next request.
 fn touch_claude_credentials_marker(home: &Path) -> Result<(), ProviderAccountError> {
     let marker = home.join(".credentials.json");
-    let Ok(file) = fs::OpenOptions::new().append(true).open(&marker) else {
-        return Ok(());
+    let file = match fs::OpenOptions::new().append(true).open(&marker) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ProviderAccountError::Filesystem(format!(
+                "open {}: {error}",
+                marker.display()
+            )));
+        }
     };
     file.set_modified(std::time::SystemTime::now())
         .map_err(|error| {

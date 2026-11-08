@@ -42,16 +42,18 @@ own cooldown; live occurrence/retry remains unobserved. November 7 direction
 kept overage cooling and unbounded waits. Prompt-cache switch cost and LOO-435
 remain open. Earlier detail: `d4941f045600750beffbbfc73934bd4bbf9abfbb:.lf/wave/infrastructure/MEMORY.md`.
 
-November 8 native check: installed lf 0.15.2+dad2621c1 / Claude 2.1.319,
-synthetic logins, local endpoint and temporary Keychain service. Fresh Claude
-followed USER through switches; hold/order/release passed. Both items changed
-on the first switch, but three stronger reruns left the legacy item stale on
-return. Service-only lookup can find USER itself; no all-items guarantee follows.
-The third item stayed stale while Claude selected USER. No production unsuffixed
-service, running-client reload or provider token rotation was exercised.
-Release's installation lesson applies: client/fixture success cannot establish
-those live claims. Shared production conversations prevent nondisruptive refresh
-probes; LOO-811 retains its full acceptance and the two-item compatibility question.
+November 8: installed lf 0.15.2+dad2621c1 / Claude 2.1.319 switched fresh clients
+and respected holds, but three A → B → A checks left legacy stale. Service-only
+lookup could select USER twice. Two repaired candidate runs passed both-item
+checks after every switch with synthetic logins and a temporary Keychain service;
+the third item stayed unchanged. Retain USER plus one distinct eligible account,
+selected by name, without service-wide synchronization. First-switch success and
+fixed lookup order had hidden the return-switch failure.
+
+Candidate success proves no installed repair. Production unsuffixed service,
+running-client continuity, Codex refresh overwrite and rental-token invalidation
+remain unobserved. Shared production
+conversations preclude disruptive probes; full acceptance remains with demo/review.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

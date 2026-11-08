@@ -427,6 +427,10 @@ when it needs a login, changing nothing. It first saves the current login back t
 so a token the provider refreshed while active is kept; a login Loopflow has
 never seen is kept as a new paused account.
 
+If a Claude login installation fails, fix the reported storage problem and repeat
+`lf account use claude=work@`. It finishes installing that login before reporting
+success.
+
 When Codex's native and stored copies name the same login but disagree, live
 status checks the native copy first. Only a definite authentication rejection
 allows checking the stored copy. Launches repair rejected credentials in the

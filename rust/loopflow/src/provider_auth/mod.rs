@@ -2425,10 +2425,21 @@ fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderTok
 }
 
 /// Claude's native homes keep their login in the Keychain on macOS; a stored
-/// account's own home keeps it in a file everywhere. Tests stay on files.
+/// account's own home keeps it in a file everywhere. Tests use files unless
+/// their home is registered with the Keychain stand-in.
 #[cfg(all(target_os = "macos", not(test)))]
 fn claude_login_in_keychain(config_dir: &Path) -> bool {
     !crate::provider_account::activation::is_account_home(config_dir)
+}
+
+#[cfg(all(target_os = "macos", test))]
+fn claude_login_in_keychain(config_dir: &Path) -> bool {
+    tests::KEYCHAIN_ACCOUNTS.with(|accounts| {
+        let accounts = accounts.borrow();
+        accounts.contains_key(&claude_keychain_service(config_dir))
+            || (config_dir == home_dir_or_cwd().join(".claude")
+                && accounts.contains_key(LEGACY_CLAUDE_KEYCHAIN_SERVICE))
+    })
 }
 
 /// The login a Claude started in `config_dir` would read: the Keychain item
@@ -2438,7 +2449,7 @@ fn claude_login_in_keychain(config_dir: &Path) -> bool {
 ///
 /// Returns an error when a store exists but cannot be read.
 pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString>, AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(target_os = "macos")]
     if claude_login_in_keychain(config_dir) {
         if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
             return Ok(Some(credential));
@@ -2463,7 +2474,7 @@ pub(crate) fn write_claude_login(
     config_dir: &Path,
     credential: &SecretString,
 ) -> Result<(), AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(target_os = "macos")]
     if claude_login_in_keychain(config_dir) {
         return write_claude_keychain_credential(config_dir, credential);
     }
@@ -3829,7 +3840,7 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
@@ -4501,7 +4512,7 @@ echo
 "#;
 
     #[cfg(target_os = "macos")]
-    fn with_keychain_fixture(check: impl FnOnce(&Path, &Path, &str)) {
+    pub(crate) fn with_keychain_fixture(check: impl FnOnce(&Path, &Path, &str)) {
         use std::os::unix::fs::PermissionsExt;
 
         let _lock = crate::journal::test_env_lock();
@@ -4525,7 +4536,7 @@ echo
     }
 
     #[cfg(target_os = "macos")]
-    fn set_keychain_accounts(service: &str, names: &[&str]) {
+    pub(crate) fn set_keychain_accounts(service: &str, names: &[&str]) {
         KEYCHAIN_ACCOUNTS.with(|accounts| {
             accounts.borrow_mut().insert(
                 service.to_string(),

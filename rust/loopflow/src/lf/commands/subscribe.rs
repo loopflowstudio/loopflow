@@ -651,7 +651,7 @@ where
             };
             drop(snapshot);
             self.cost = began.elapsed();
-            let identity = identity(&unavailable, &body)?;
+            let identity = identity(unavailable.as_deref(), body.as_ref())?;
             if self.force || self.sent != Some(identity) {
                 frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
@@ -742,12 +742,15 @@ fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity(unavailable: &Option<String>, body: &Option<serde_json::Value>) -> Result<[u8; 32]> {
-    let mut value = body.clone().unwrap_or(serde_json::Value::Null);
+pub(crate) fn identity(
+    unavailable: Option<&str>,
+    body: Option<&serde_json::Value>,
+) -> Result<[u8; 32]> {
+    let mut value = body.cloned().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
     // Streamed: a large reading is never held a third time as bytes.
     let mut hash = Sha256::new();
-    serde_json::to_writer(&mut hash, unavailable)?;
+    serde_json::to_writer(&mut hash, &unavailable)?;
     serde_json::to_writer(&mut hash, &value)?;
     Ok(hash.finalize().into())
 }
@@ -1123,11 +1126,11 @@ mod tests {
     #[test]
     fn the_time_of_a_reading_is_not_a_change() {
         let rows = |at| serde_json::json!([{"id": 1, "condition": {"observed_at": at}}]);
-        let read = |body| identity(&None, &Some(body)).unwrap();
+        let read = |body| identity(None, Some(&body)).unwrap();
         assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(
             read(rows(1)),
-            identity(&Some("gone".into()), &Some(rows(1))).unwrap()
+            identity(Some("gone"), Some(&rows(1))).unwrap()
         );
     }
 }

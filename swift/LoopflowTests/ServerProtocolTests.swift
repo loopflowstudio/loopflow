@@ -50,14 +50,14 @@ struct ServerProtocolTests {
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
-        let hello = ServerClientMessage.hello(ServerHello(revision: 2, minRevision: 2, client: ServerClientIdentity(
+        let hello = ServerClientMessage.hello(ServerHello(revision: 3, minRevision: 3, client: ServerClientIdentity(
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
-        #expect(welcome.revision == 2)
-        #expect(welcome.serverRevision == 2)
-        #expect(welcome.minRevision == 2)
+        #expect(welcome.revision == 3)
+        #expect(welcome.serverRevision == 3)
+        #expect(welcome.minRevision == 3)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 33554432)
@@ -69,8 +69,8 @@ struct ServerProtocolTests {
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
-        #expect(status.revision == 2)
-        #expect(status.minRevision == 2)
+        #expect(status.revision == 3)
+        #expect(status.minRevision == 3)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
         #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])
@@ -91,10 +91,11 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let checkpoint, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
+        #expect(checkpoint == "fixture-checkpoint")
         guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
@@ -281,7 +282,7 @@ struct ServerProtocolTests {
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil)
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil, resume: nil)
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")
@@ -353,7 +354,7 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":3}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

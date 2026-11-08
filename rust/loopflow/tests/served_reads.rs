@@ -493,7 +493,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null}),
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null}),
         true,
     );
     let mut subscribed = false;

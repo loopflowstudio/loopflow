@@ -31,7 +31,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 2
+## Local protocol, revision 3
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Messages are
@@ -71,20 +71,20 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64}}
+→ {"type":"hello","revision":3,"min_revision":3,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":3,"server_revision":3,"min_revision":3,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"]}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
-← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
+← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
-← {"type":"reading","id":"b","frame":{"answers":3,…}}
+← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
-→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
-← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
+← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
 ```
 
@@ -95,7 +95,7 @@ executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized) and limits. What the server can do is its
 revision and `lf server describe`, not a list in the welcome. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 2 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 3 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -247,18 +247,19 @@ part of what a phone or bot client is offered.
   typed client such as the Swift app decodes every DTO strictly with no
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
-- `subscribe {id, operation, select}` takes a read with a subscription: `desktop.view.list`,
+- `subscribe` takes a read with a subscription: `desktop.view.list`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
-  a null `response`, then `reading {id,frame}` messages wrapping
+  a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/unavailable/body` subscription frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that number, changed or not. A subscription's arguments are fixed: new
   arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
-  `invalid`. Reconnect opens a fresh subscription
-  and receives a complete reading; no replay cursor exists. `task.wait {issue,
+  `invalid`. On reconnect, supply the last received checkpoint to resume the
+  same read without receiving an unchanged complete reading; see
+  [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
   changes; after the reading whose `reached` is true the server sends `ended
   {id}` and nothing more for it. Requested once, it is that reading now, as
@@ -328,11 +329,38 @@ part of what a phone or bot client is offered.
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
 
-Desktop holds one connection per server location for the app's lifetime,
-opened on first use and reopened on the next request after a loss with bounded
-backoff (100 ms doubling to 3.2 s). Its subscriptions share that connection; losing it
-fails every pending request as outcome unknown and every subscription, which the
-window reopens for a complete reading.
+## Reconnect a watch
+
+Keep the reading and its opaque `reading.checkpoint` together. After reconnecting
+and completing `hello`/`welcome`, subscribe to the same operation, arguments and
+`select`, setting `resume` to that checkpoint. A new request ID is fine. For
+example, an unchanged `session.list` resumes without sending the complete list
+again: the server answers a null `response` and waits for a change or confirmation.
+
+Changed or unknown checkpoints, including those from a restarted server, get a
+complete current reading as the new baseline. Start with `resume: null` if the
+client discarded its reading or changed its query. Resume covers current state;
+intermediate changes are not replayed and readings are never patches. Read
+timestamps alone do not count as changes. Tokens fingerprint the operation,
+arguments, selection and reading within one server incarnation, requiring no
+retained payload or disconnected watch.
+
+The numeric `checkpoint` request and `frame.answers` confirm a live read; they
+are separate from the opaque resume token. Confirmations always get a reading,
+even when unchanged. Unavailable readings are always sent, and a terminal
+`task.wait` still sends `ended`.
+
+Desktop holds one connection per server location for the app's lifetime, opened
+on first use and reopened on the next request after a loss with bounded backoff
+(100 ms doubling to 3.2 s). Its subscriptions share that connection. Losing it
+fails every pending request as outcome unknown. A watch with a received reading
+keeps its stream and queued frames, reconnects, and resumes from that reading's
+token. A complete reading replaces it when the token is unknown. The newest
+unanswered confirmation retries and covers earlier requests; writes never retry.
+Cancelling the watch cancels recovery. A watch without a baseline, a server refusal, or a slow
+consumer that overflows its frame queue ends the stream; the window then opens a
+fresh watch. If reopening the connection fails, the stream also ends with that
+error so the window reports unavailability and retries.
 
 Every client gives the server ten seconds to answer `status`, `hello`,
 `session.attach` or `attach`; a server that accepts and stalls fails the open

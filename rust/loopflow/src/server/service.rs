@@ -752,6 +752,8 @@ async fn request(
     outgoing: Outbox,
     reservation: Arc<Reservation>,
 ) {
+    #[cfg(test)]
+    let completion = tests::take_request_completion(&id);
     let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
@@ -789,6 +791,10 @@ async fn request(
             ),
         )
         .await;
+    }
+    #[cfg(test)]
+    if let Some(completion) = completion {
+        let _ = completion.await;
     }
 }
 
@@ -980,7 +986,8 @@ async fn send(lines: &mut Lines, message: &ServerMessage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::collections::HashMap;
+    use std::sync::{Arc, LazyLock, Mutex};
     use std::time::{Duration, Instant};
 
     use super::{Clients, Connection, Tickets};
@@ -994,6 +1001,15 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::sync::Semaphore;
+
+    // Hold a worker after it queues its response, before the JoinSet can reap it.
+    static REQUEST_COMPLETIONS: LazyLock<
+        Mutex<HashMap<String, tokio::sync::oneshot::Receiver<()>>>,
+    > = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    pub(super) fn take_request_completion(id: &str) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        REQUEST_COMPLETIONS.lock().unwrap().remove(id)
+    }
 
     struct Client {
         reader: BufReader<tokio::net::unix::OwnedReadHalf>,
@@ -1122,10 +1138,46 @@ mod tests {
                     select: None,
                 })
                 .await;
+            let response = client.receive().await.unwrap();
+            assert!(
+                matches!(&response, ServerMessage::Response { id, .. } if id == "a"),
+                "{response:?}"
+            );
+            drop(client.writer);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn answered_request_id_can_be_reused_before_its_worker_returns() {
+        with_empty_home(async {
+            let mut client = Client::connect();
             assert!(matches!(
-                client.receive().await.unwrap(),
-                ServerMessage::Response { id, .. } if id == "a"
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
             ));
+            let (release, completion) = tokio::sync::oneshot::channel();
+            REQUEST_COMPLETIONS
+                .lock()
+                .unwrap()
+                .insert("held-completion".into(), completion);
+            for _ in 0..2 {
+                client
+                    .send(&ClientMessage::Request {
+                        id: "held-completion".into(),
+                        operation: catalog(),
+                        select: None,
+                    })
+                    .await;
+                let response = client.receive().await.unwrap();
+                assert!(
+                    matches!(&response, ServerMessage::Response {
+                        id, result: serde_json::Value::Array(_), ..
+                    } if id == "held-completion"),
+                    "{response:?}"
+                );
+            }
+            drop(release);
             drop(client.writer);
             client.server.await.unwrap().unwrap();
         });
@@ -1361,6 +1413,18 @@ mod tests {
             };
             assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
+            // Its acknowledgement does not release a subscription's ID.
+            client
+                .send(&ClientMessage::Request {
+                    id: "ps".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error { id: Some(id), code: ErrorCode::Conflict, .. } if id == "ps"
+            ));
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
@@ -1396,6 +1460,17 @@ mod tests {
             assert!(matches!(
                 client.receive().await.unwrap(),
                 ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "ps"
+            ));
+            client
+                .send(&ClientMessage::Request {
+                    id: "ps".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "ps"
             ));
             drop(client.writer);
             client.server.await.unwrap().unwrap();

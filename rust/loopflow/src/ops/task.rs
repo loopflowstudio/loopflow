@@ -1177,7 +1177,6 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
             )
             .await
             .map_err(task_error)?;
-        crate::ops::human_session::primary::start_task_conversation(store, task).await;
     }
     Ok(())
 }
@@ -1994,6 +1993,19 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
         super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
         Ok(task)
     })
+}
+
+/// Start the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
+pub fn start_conversation_beside(task: &Task) {
+    let started = block_on_task(async {
+        let store = task_store().await?;
+        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        Ok(())
+    });
+    if let Err(error) = started {
+        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    }
 }
 
 /// One Task's tracker sync beside a conversation that just started: pending

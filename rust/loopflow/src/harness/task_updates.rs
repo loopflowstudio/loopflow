@@ -299,19 +299,7 @@ pub(crate) fn watch(
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-    // The launch made no tracker request; bring this conversation's Tasks
-    // current beside it. New comments then arrive through the loop below.
-    for task in store.session_task_ids(&adapter.session)? {
-        if let Some(task) = store.task(&task)? {
-            std::thread::spawn(move || {
-                crate::agent_input_timing::record("task_sync_begin", &task.identifier);
-                if let Err(error) = crate::ops::task::sync_for_conversation(&task.identifier) {
-                    tracing::info!(task = %task.identifier, %error, "Task sync after launch pending");
-                }
-                crate::agent_input_timing::record("task_sync_end", &task.identifier);
-            });
-        }
-    }
+    let mut sync_started = false;
     let mut updates = TaskUpdates::default();
     let mut gap = RecordingGap::default();
     loop {
@@ -326,6 +314,30 @@ pub(crate) fn watch(
         let pending = match pending {
             Ok(pending) => {
                 gap.recovered();
+                // Baseline local comments before syncing, so a quick tracker
+                // response cannot swallow newly fetched comments as old history.
+                if !sync_started {
+                    for task in store.session_task_ids(&adapter.session)? {
+                        if let Some(task) = store.task(&task)? {
+                            std::thread::spawn(move || {
+                                crate::agent_input_timing::record(
+                                    "task_sync_begin",
+                                    &task.identifier,
+                                );
+                                if let Err(error) =
+                                    crate::ops::task::sync_for_conversation(&task.identifier)
+                                {
+                                    tracing::info!(task = %task.identifier, %error, "Task sync after launch pending");
+                                }
+                                crate::agent_input_timing::record(
+                                    "task_sync_end",
+                                    &task.identifier,
+                                );
+                            });
+                        }
+                    }
+                    sync_started = true;
+                }
                 pending
             }
             Err(StoreError::InvalidAuthority(_)) => return Ok(()),

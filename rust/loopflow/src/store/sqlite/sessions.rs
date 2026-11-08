@@ -691,6 +691,17 @@ impl SqliteStore {
         Ok(task_graph.then_some(OwnerRetention::RunningGraph))
     }
 
+    pub(crate) fn owner_task_abandoned(&self, owner: &crate::id::LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
+                 WHERE s.transport_lf_process_id=?1 AND s.interactive=1
+                     AND s.completed_at IS NULL AND t.abandoned_at IS NOT NULL)",
+            [owner.as_str()],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Open Task conversations whose execution owner is still running.
     pub(crate) fn running_task_conversations(&self) -> StoreResult<usize> {
         let conn = self.conn.lock().expect("store mutex poisoned");

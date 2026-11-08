@@ -1242,7 +1242,7 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
         .unwrap();
     assert_eq!(primary, session);
 
-    // `-b` runs to the end headless and admits no conversation.
+    // `-b` runs to the end headless and returns no conversation to open.
     let output = task.run(&[
         "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
     ]);

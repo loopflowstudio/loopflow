@@ -763,12 +763,28 @@ fn open_task_conversations(db: &Path, task: &str) -> i64 {
 
 #[test]
 fn a_task_checkout_starts_its_conversation_in_the_background() {
+    assert_background_conversation(false);
+}
+
+#[test]
+fn a_task_run_starts_its_conversation_and_abandon_stops_it() {
+    assert_background_conversation(true);
+}
+
+fn assert_background_conversation(run_graph: bool) {
     let repo = TestRepo::new();
+    repo.create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+    repo.stage_all();
+    repo.commit("Add a graph that waits for review");
+    repo.push();
     let home = tempfile::tempdir().unwrap();
     let stop = home.path().join("stop");
     let _release = Release(stop.clone());
     // The provider holds until released, so the conversation can be seen.
-    let script = format!("while [ ! -e '{}' ]; do sleep 0.1; done", stop.display());
+    let script = format!(
+        "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        stop.display()
+    );
     succeed(
         claude_launch(home.path(), &script)
             .current_dir(repo.path())
@@ -787,14 +803,29 @@ fn a_task_checkout_starts_its_conversation_in_the_background() {
     ))
     .unwrap();
     let id = created["id"].as_str().unwrap();
-    let placed: serde_json::Value = serde_json::from_str(&succeed(
-        claude_launch(home.path(), &script)
-            .current_dir(repo.path())
-            .args(["checkout", id, "--json"]),
-    ))
-    .unwrap();
-    let worktree = PathBuf::from(placed["worktree"].as_str().unwrap());
     let db = home.path().join("machine/loopflow.db");
+    let worktree = if run_graph {
+        succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["task", "run", id, "pause"]),
+        );
+        let path: String = rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        PathBuf::from(path)
+    } else {
+        let placed: serde_json::Value = serde_json::from_str(&succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["checkout", id, "--json"]),
+        ))
+        .unwrap();
+        PathBuf::from(placed["worktree"].as_str().unwrap())
+    };
 
     // The conversation shows up in the worktree once its provider is running.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -809,7 +840,7 @@ fn a_task_checkout_starts_its_conversation_in_the_background() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|row| row["task"] == id)
+            .filter(|row| row["workspace"]["task_id"] == id)
             .collect();
         assert!(conversations.len() <= 1, "{listed}");
         if conversations
@@ -835,6 +866,39 @@ fn a_task_checkout_starts_its_conversation_in_the_background() {
     assert_eq!(open_task_conversations(&db, id), 1);
     let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
     assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
+
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let owner: String = conn
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE task_id=?1 AND interactive=1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["task", "abandon", id]),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let ended: bool = conn
+            .query_row(
+                "SELECT completed_at IS NOT NULL FROM processes WHERE id=?1",
+                [&owner],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if ended {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "abandon left the conversation running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(open_task_conversations(&db, id), 0);
 }
 
 #[test]

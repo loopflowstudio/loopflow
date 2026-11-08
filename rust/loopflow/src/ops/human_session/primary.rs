@@ -171,11 +171,19 @@ async fn start_in_background(
         return Ok(None);
     }
     let (session, _) = ensure_task(store, &worktree, task.id.as_str(), None).await?;
-    let id = session.id.to_string();
-    if store.sqlite.session_transport(&id)?.is_some() {
-        // A person or Desktop opened it first.
+    // Promotion can keep a repository or Wave conversation in its original
+    // checkout. Allocating the Task's own checkout does not open that conversation.
+    if Path::new(&session.cwd) != worktree.as_path()
+        || session.agent_process_id.is_some()
+        || store
+            .sqlite
+            .session_transport(session.id.as_str())?
+            .is_some()
+    {
+        // Prepared conversations can start; previously opened ones stay as they are.
         return Ok(None);
     }
+    let id = session.id.to_string();
     let argv = [
         std::env::current_exe()?.to_string_lossy().into_owned(),
         "session".into(),

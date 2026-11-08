@@ -84,10 +84,17 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 - The runner runs tests from the checkout with this Machine's PATH. Account
   routing fixtures then read repository-scoped routes ("has no resident login"),
-  Graph fixtures see every installed harness ("No agent selected"), and claims
-  find no Git identity. Rerun such failures from the built binary in an empty
-  directory with a temp `HOME`, `GIT_CONFIG_GLOBAL` naming a file with
-  `user.email`, and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  and Graph fixtures see every installed harness ("No agent selected"). Rerun
+  such failures from the built binary in an empty directory with a temp `HOME`
+  and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  The test constructor supplies its private home with a fixture Git identity;
+  repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
+  repair a test: it hides missing setup in that private home.
+- Changes to the test environment constructor reach the library suites too.
+  Run `store::tests::` and `transport::viewer_tests::` from an empty cwd: they
+  exercise claims for absent repositories and children with cleared environments.
+  Such children set both `HOME` and `PATH` before the constructor adds its
+  Keychain stand-in; an absent PATH would otherwise contain only the stand-in.
 
 ## Builds
 

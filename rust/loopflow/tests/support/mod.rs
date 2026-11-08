@@ -44,6 +44,13 @@ fn isolate_from_the_developers_machine() {
     let root = env::temp_dir().join(format!("lf-test-{}", std::process::id()));
     let home = root.join("home");
     fs::create_dir_all(&home).expect("create the test binary's home");
+    // Store fixtures also name repositories that are absent on this Machine.
+    // Give those claims an identity without borrowing the developer's Git config.
+    fs::write(
+        home.join(".gitconfig"),
+        "[user]\n\tname = Loopflow Test\n\temail = test@loopflow.invalid\n",
+    )
+    .expect("write the test binary's Git identity");
     if let Some(developer) = env::var_os("HOME").map(std::path::PathBuf::from) {
         for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
             if env::var_os(name).is_none() {

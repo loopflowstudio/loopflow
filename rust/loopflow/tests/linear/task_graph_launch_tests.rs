@@ -665,6 +665,8 @@ stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json')
 login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
     launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+if '--input-format' not in sys.argv:
+    sys.exit(0)
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -728,27 +730,41 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    wait_for("the Task conversation and Graph launches", || {
+        fs::read_to_string(home.path().join("launches.jsonl"))
+            .is_ok_and(|launches| launches.lines().count() == 2)
+    });
     let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
-    let launch: serde_json::Value = serde_json::from_str(launches.lines().next().unwrap()).unwrap();
-    let args = launch["args"].as_array().unwrap();
-    assert!(
-        args.windows(2).any(|pair| pair == ["--model", "opus"]),
-        "{launch}"
-    );
-    // The shared home ran signed in as the Wave's account.
+    let launches: Vec<serde_json::Value> = launches
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect();
     assert_eq!(
-        launch["claude_home"].as_str().map(Path::new),
-        std::env::var_os("CLAUDE_CONFIG_DIR")
-            .as_deref()
-            .map(Path::new)
+        launches.len(),
+        2,
+        "the Task conversation and Graph both launch"
     );
-    assert!(
-        launch["claude_login"]
-            .as_str()
-            .unwrap()
-            .contains("fixture-work"),
-        "{launch}"
-    );
+    for launch in launches {
+        let args = launch["args"].as_array().unwrap();
+        assert!(
+            args.windows(2).any(|pair| pair == ["--model", "opus"]),
+            "{launch}"
+        );
+        // The shared home ran signed in as the Wave's account.
+        assert_eq!(
+            launch["claude_home"].as_str().map(Path::new),
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .as_deref()
+                .map(Path::new)
+        );
+        assert!(
+            launch["claude_login"]
+                .as_str()
+                .unwrap()
+                .contains("fixture-work"),
+            "{launch}"
+        );
+    }
 }
 
 /// A registered Task whose repository defines the Graphs below.

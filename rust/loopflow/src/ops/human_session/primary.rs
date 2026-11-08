@@ -158,9 +158,15 @@ async fn start_in_background(
         return Ok(None);
     }
     let worktree = task.worktree()?.clone();
+    let wave = match &task.wave_id {
+        Some(id) => store.get_wave(id).await?,
+        None => None,
+    };
     // A Machine with no agent selected, or without its CLI, would only record
     // a launch that fails.
-    let config = crate::config::load_wave_config(Some(&worktree), None)?.unwrap_or_default();
+    let config =
+        crate::config::load_wave_config(Some(&worktree), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
     let Ok(agent) = config.agent() else {
         tracing::info!(task = %task.identifier, "background Task conversation skipped: no agent selected");
         return Ok(None);
@@ -190,8 +196,16 @@ async fn start_in_background(
         "resume".into(),
         id.clone(),
     ];
-    tokio::task::spawn_blocking(move || crate::transport::start(&argv, true, &worktree, &|_| {}))
-        .await??;
+    tokio::task::spawn_blocking(move || {
+        crate::transport::start(&argv, true, &worktree, &|command| {
+            let key = crate::work::wave::context::WAVE_ID_ENV;
+            match &wave {
+                Some(wave) => command.env(key, wave.id().as_str()),
+                None => command.env_remove(key),
+            };
+        })
+    })
+    .await??;
     Ok(Some(id))
 }
 

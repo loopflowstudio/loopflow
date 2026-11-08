@@ -354,6 +354,7 @@ fn read_summary(
             .transpose()?
             .flatten();
         Ok(crate::session::SessionSummary {
+            transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
             has_provider_history: row.get(40)?,
             preview: row
                 .get::<_, Option<String>>(36)?
@@ -1490,7 +1491,11 @@ impl SqliteStore {
         if let Some(id) = creation {
             let changed = tx.execute("UPDATE creation_receipts SET milestone='admitted',updated_at=?3 WHERE request_id=?1 AND artifact_key=?2 AND milestone='stopping'",
                 params![id,session.artifact_key,crate::store::rows::now_unix()])?;
-            if changed != 1 { return Err(StoreError::InvalidData("new thread receipt does not match its reserved input".into())); }
+            if changed != 1 {
+                return Err(StoreError::InvalidData(
+                    "new thread receipt does not match its reserved input".into(),
+                ));
+            }
         }
         tx.commit()?;
         Ok(session)
@@ -1798,6 +1803,11 @@ pub(super) fn retain_history_in(
         let (captured, owner) = captured.ok_or(StoreError::NotFound)?;
         if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
+        }
+        if Some(captured) == session.captured {
+            if let Some(thread) = observation.payload["evidence"]["provider_session_id"].as_str() {
+                super::provider_transitions::observe_in(conn, &session.id, thread, "observed")?;
+            }
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
@@ -2140,7 +2150,9 @@ mod metadata_tests {
             1,
             "input replacement removed Task work while its source checkout was excluded"
         );
-        let replacement = store.replace_session_input(session.captured, next, None).unwrap();
+        let replacement = store
+            .replace_session_input(session.captured, next, None)
+            .unwrap();
         assert_eq!(replacement.cwd, session.cwd);
         assert_eq!(replacement.task_id, None);
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
@@ -2210,7 +2222,9 @@ mod metadata_tests {
         assert_eq!(store.session_history("retired", 0, 100).unwrap(), before);
 
         next.completed_at = Some(10);
-        let next = store.replace_session_input(first.captured, next, None).unwrap();
+        let next = store
+            .replace_session_input(first.captured, next, None)
+            .unwrap();
         store.publish_capture(&next.id, next.captured).unwrap();
         let retained = store.session("retired").unwrap().unwrap();
         assert_eq!(retained.completed_at, Some(10));
@@ -2234,7 +2248,9 @@ mod metadata_tests {
         let mut next = first.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
-        let next = store.replace_session_input(first.captured, next, None).unwrap();
+        let next = store
+            .replace_session_input(first.captured, next, None)
+            .unwrap();
         assert_ne!(next.captured, first.captured);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();

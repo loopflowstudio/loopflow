@@ -336,9 +336,9 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": 2, "server_revision": 2, "min_revision": 2, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": 3, "server_revision": 3, "min_revision": 3, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
-                    "limits": ["max_message": 33_554_432, "max_connections": 64],
+                    "limits": ["max_message": 33_554_432, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])
                 while let message = try connection.read() {
                     lock.withLock { messages.append(message) }

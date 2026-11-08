@@ -20,8 +20,8 @@ use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
 mod children;
-pub mod creation;
 pub(crate) mod ci_incidents;
+pub mod creation;
 mod durable;
 mod github_people;
 mod graph_inventory;
@@ -44,6 +44,7 @@ mod processes;
 mod program_status;
 pub(crate) mod project_content;
 pub(crate) mod project_selection;
+pub mod provider_transitions;
 mod rentals;
 mod repositories;
 pub(crate) mod retention;

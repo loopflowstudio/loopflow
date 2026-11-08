@@ -1426,7 +1426,11 @@ impl WtCommand {
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
-    Receipt { request_id: String, #[arg(long)] json: bool },
+    Receipt {
+        request_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
     /// Report local readiness without registering or starting anything.

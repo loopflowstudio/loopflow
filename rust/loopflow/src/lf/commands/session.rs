@@ -175,8 +175,18 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::New { id, connection, request_id } => {
-            new_thread(cli, connection, connection.target(cli, id.as_deref())?, request_id.as_deref()).await
+        SessionCommand::New {
+            id,
+            connection,
+            request_id,
+        } => {
+            new_thread(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                request_id.as_deref(),
+            )
+            .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send { id, task, to } => {
@@ -645,9 +655,22 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 let target = connection.target(cli, id.as_deref())?;
                 reopen(&store, directory, target, connection, *fork, false).await
             }
-            SessionCommand::New { id, connection, request_id } if connection.prepare => {
+            SessionCommand::New {
+                id,
+                connection,
+                request_id,
+            } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                restarted(&store, directory, target, false, false, request_id.as_deref()).await
+                restarted(
+                    &store,
+                    directory,
+                    target,
+                    false,
+                    false,
+                    request_id.as_deref(),
+                    cli.agent.as_deref(),
+                )
+                .await
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -674,6 +697,7 @@ async fn new_thread(
         true,
         connection.json || cli.json,
         request_id,
+        cli.agent.as_deref(),
     )
     .await?;
     print_opened(connection.json || cli.json, &record)
@@ -688,6 +712,7 @@ async fn restarted(
     launch: bool,
     json: bool,
     request_id: Option<&str>,
+    agent: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
     let selected = crate::ops::human_session::select_connection(
         store,
@@ -696,11 +721,18 @@ async fn restarted(
         SessionOpenIntent::Resume,
     )
     .await?;
-    let agent = crate::config::agent_override();
-    let request_id = request_id.map(str::to_owned).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let next =
-        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json, &request_id)
-            .await?;
+    let request_id = request_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let next = crate::ops::human_session::new_thread(
+        store,
+        &selected.id,
+        agent,
+        launch,
+        json,
+        &request_id,
+    )
+    .await?;
     crate::ops::human_session::surface(store, &next).await
 }
 

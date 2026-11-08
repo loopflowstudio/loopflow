@@ -57,6 +57,13 @@ pub enum SessionView {
 }
 
 pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
+    print!("{}", render(selector, view, json)?);
+    Ok(())
+}
+
+pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<String> {
+    use std::fmt::Write;
+    let mut output = String::new();
     let home = crate::store::lf_home_dir();
     let database = crate::store::database_path_from_env()?;
     let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
@@ -66,11 +73,15 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
     if view == SessionView::Transcript {
         let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
         if json {
-            println!("{}", serde_json::to_string(&conversation)?);
+            writeln!(&mut output, "{}", serde_json::to_string(&conversation)?)?;
         } else {
-            print!("{}", super::history_transcript::render(&conversation));
+            write!(
+                &mut output,
+                "{}",
+                super::history_transcript::render(&conversation)
+            )?;
         }
-        return Ok(());
+        return Ok(output);
     }
     let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
     let dir = crate::session_record::record_dir(&home, &input)
@@ -81,8 +92,8 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
             .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {
-                println!("{answer}");
-                Ok(())
+                writeln!(&mut output, "{answer}")?;
+                Ok(output)
             }
             None if snapshot.recorded_outcome.is_none() => Err(anyhow!(
                 "Capture {} is not settled and has no final answer",
@@ -99,48 +110,56 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
         let decisions = crate::context_usage::read_instructions(&dir)
             .map_err(|error| anyhow!("Instruction evidence unavailable: {error}"))?;
         if json {
-            println!("{}", serde_json::to_string(&decisions)?);
+            writeln!(&mut output, "{}", serde_json::to_string(&decisions)?)?;
         } else {
-            println!("{}", crate::context_usage::render_instructions(&decisions));
+            writeln!(
+                &mut output,
+                "{}",
+                crate::context_usage::render_instructions(&decisions)
+            )?;
         }
-        return Ok(());
+        return Ok(output);
     }
     if view == SessionView::Context {
         let step = crate::context_usage::step_context(&home, &store, &snapshot);
         if json {
-            println!("{}", serde_json::to_string(&step)?);
+            writeln!(&mut output, "{}", serde_json::to_string(&step)?)?;
         } else {
-            println!("{}", crate::context_usage::render_step(&step));
+            writeln!(&mut output, "{}", crate::context_usage::render_step(&step))?;
         }
-        return Ok(());
+        return Ok(output);
     }
     if json {
-        println!("{}", serde_json::to_string(&snapshot)?);
-        return Ok(());
+        writeln!(&mut output, "{}", serde_json::to_string(&snapshot)?)?;
+        return Ok(output);
     }
-    println!(
+    writeln!(
+        &mut output,
         "Session {} · input {}",
         snapshot.session_id,
         snapshot.selector()
-    );
+    )?;
     if let Some(parent) = &snapshot.caller_artifact_key {
-        println!("Parent: {parent}");
+        writeln!(&mut output, "Parent: {parent}")?;
     }
-    println!("Status: {}", snapshot.status());
-    println!(
+    writeln!(&mut output, "Status: {}", snapshot.status())?;
+    writeln!(
+        &mut output,
         "Agent: {}",
         snapshot
             .model
             .as_ref()
             .map(|model| format!("{}:{model}", snapshot.harness))
             .unwrap_or_else(|| snapshot.harness.clone())
-    );
-    println!(
+    )?;
+    writeln!(
+        &mut output,
         "Working directory: {}",
         snapshot.worktree.as_deref().unwrap_or("unknown")
-    );
+    )?;
     let manifest = crate::session_record::read_manifest(&dir).ok();
-    println!(
+    writeln!(
+        &mut output,
         "Replay: {}",
         match manifest
             .as_ref()
@@ -149,17 +168,22 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
             Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
             Some(_) | None => "unavailable",
         }
-    );
-    println!("Evidence gaps: {}", snapshot.evidence_gaps);
-    println!(
+    )?;
+    writeln!(&mut output, "Evidence gaps: {}", snapshot.evidence_gaps)?;
+    writeln!(
+        &mut output,
         "{}",
         crate::context_usage::render_step(&crate::context_usage::step_context(
             &home, &store, &snapshot
         ))
-    );
+    )?;
     let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
-    print!("\n{}", super::history_transcript::render(&conversation));
-    Ok(())
+    write!(
+        &mut output,
+        "\n{}",
+        super::history_transcript::render(&conversation)
+    )?;
+    Ok(output)
 }
 
 pub(crate) fn format_tokens(value: i64) -> String {

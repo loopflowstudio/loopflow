@@ -109,11 +109,14 @@ pub fn report<T: Serialize>(result: std::result::Result<&T, &anyhow::Error>) {
     if let Some(id) = CREATION.lock().expect("creation request poisoned").take() {
         if let Ok(value) = &result {
             let saved = (|| -> anyhow::Result<()> {
-                let store = crate::store::read_existing_registry()?.context("Machine registry is unavailable")?;
+                let store = crate::store::read_existing_registry()?
+                    .context("Machine registry is unavailable")?;
                 store.sqlite.record_creation_launch(&id, value)?;
                 Ok(())
             })();
-            if let Err(error) = saved { tracing::warn!(%error, request_id = %id, "Could not record creation launch"); }
+            if let Err(error) = saved {
+                tracing::warn!(%error, request_id = %id, "Could not record creation launch");
+            }
         }
     }
     if let Err(error) = write(&path, &result) {
@@ -137,11 +140,19 @@ pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> R
     start_reported(directory, args, None)
 }
 
-pub(crate) fn start_creation<T: DeserializeOwned>(directory: &Path, args: &[String], request: &str) -> Result<T> {
+pub(crate) fn start_creation<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    request: &str,
+) -> Result<T> {
     start_reported(directory, args, Some(request))
 }
 
-fn start_reported<T: DeserializeOwned>(directory: &Path, args: &[String], creation: Option<&str>) -> Result<T> {
+fn start_reported<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    creation: Option<&str>,
+) -> Result<T> {
     let launched = (|| -> anyhow::Result<_> {
         let path = crate::transport::private_directory()?
             .join(format!("report-{}.json", uuid::Uuid::new_v4()));
@@ -152,13 +163,10 @@ fn start_reported<T: DeserializeOwned>(directory: &Path, args: &[String], creati
         argv.extend(args.iter().cloned());
         let report = path.to_string_lossy().into_owned();
         let mut environment = vec![(REPORT_ENV, report.as_str())];
-        if let Some(id) = creation { environment.push((CREATION_ENV, id)); }
-        let owner = crate::os_process::start_lf_session(
-            directory,
-            &argv,
-            &environment,
-            &|_| {},
-        )?;
+        if let Some(id) = creation {
+            environment.push((CREATION_ENV, id));
+        }
+        let owner = crate::os_process::start_lf_session(directory, &argv, &environment, &|_| {})?;
         Ok((path, owner))
     })();
     let (path, owner) = launched.map_err(|error| Error::outcome_unknown(&error))?;

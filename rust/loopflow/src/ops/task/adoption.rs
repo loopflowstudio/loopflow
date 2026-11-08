@@ -133,6 +133,7 @@ async fn resolve_checkout(
     })
 }
 
+#[allow(clippy::too_many_arguments)] // One adoption commits the Task, checkout, conversation and receipt.
 pub(super) async fn save(
     store: &SharedStore,
     main: &Path,

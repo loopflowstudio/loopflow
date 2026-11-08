@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
+    #[allow(clippy::too_many_arguments)] // These effects share the promotion transaction.
     pub(crate) async fn promote_task(
         &self,
         task_id: &TaskId,

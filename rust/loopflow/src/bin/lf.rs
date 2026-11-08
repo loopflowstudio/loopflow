@@ -1038,11 +1038,21 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Create { .. } => {
             let mut stdin = std::io::stdin();
             let mut empty = std::io::empty();
-            loopflow::lf::commands::task_create::create(repo, command,
+            loopflow::lf::commands::task_create::create(
+                repo,
+                command,
                 &mut loopflow::lf::commands::mutation::CommandIo {
-                    input: if stdin.is_terminal() { &mut empty } else { &mut stdin },
-                    output: &mut std::io::stdout(), error: &mut std::io::stderr(),
-                }, cli.batch, cli.agent.as_deref())?;
+                    input: if stdin.is_terminal() {
+                        &mut empty
+                    } else {
+                        &mut stdin
+                    },
+                    output: &mut std::io::stdout(),
+                    error: &mut std::io::stderr(),
+                },
+                cli.batch,
+                cli.agent.as_deref(),
+            )?;
             Ok(())
         }
         TaskCommand::View { issue, once } => {

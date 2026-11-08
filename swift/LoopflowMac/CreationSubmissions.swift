@@ -30,8 +30,19 @@ actor CreationSubmissions {
     static let shared = CreationSubmissions(directory: WorkCache.homeDirectory.appendingPathComponent("submissions"))
     private let directory: URL
     private var active: Set<String> = []
+    private let currentMachine: @Sendable () async throws -> String
+    private let lookup: @Sendable (String) async throws -> String
+    private let send: @Sendable (Data) async throws -> String
 
-    init(directory: URL) { self.directory = directory }
+    init(directory: URL,
+         machine: @escaping @Sendable () async throws -> String = CreationSubmissions.machine,
+         lookup: @escaping @Sendable (String) async throws -> String = { try await ServerClient.read(.creationReceipt(requestID: $0)) },
+         send: @escaping @Sendable (Data) async throws -> String = { try await ServerClient.submittedCreation($0) }) {
+        self.directory = directory
+        self.currentMachine = machine
+        self.lookup = lookup
+        self.send = send
+    }
 
     private func url(_ id: String) -> URL {
         let name = Data(id.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
@@ -67,13 +78,13 @@ actor CreationSubmissions {
     }
 
     func submit(_ change: ServedWrite, requestID: String) async throws -> String {
-        let record = SubmittedCreation(requestID: requestID, destination: try await Self.machine(),
+        let record = SubmittedCreation(requestID: requestID, destination: try await currentMachine(),
             payload: try JSONEncoder().encode(change), version: ServerProtocol.revision, submittedAt: Date())
         try save(record)
         active.insert(requestID)
         defer { active.remove(requestID) }
         // Saving precedes the first send. A lost answer leaves this exact record.
-        return try await ServerClient.submittedCreation(record.payload)
+        return try await send(record.payload)
     }
 
     func reconcile(_ record: SubmittedCreation) async throws -> CreationLookup? {
@@ -81,19 +92,19 @@ actor CreationSubmissions {
         guard record.version == ServerProtocol.revision else {
             throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
         }
-        guard try await Self.machine() == record.destination else {
+        guard try await currentMachine() == record.destination else {
             throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
         }
         active.insert(record.id)
         defer { active.remove(record.id) }
-        let data = Data(try await ServerClient.read(.creationReceipt(requestID: record.id)).utf8)
+        let data = Data(try await lookup(record.id).utf8)
         let receipt = try JSONDecoder().decode(CreationLookup?.self, from: data)
         // Only absence or local milestones preceding/after an external effect
         // permit continuation. run_requested/stopping are never resubmitted.
         if receipt == nil || receipt?.milestone == "filed" || receipt?.milestone == "started" {
-            _ = try await ServerClient.submittedCreation(record.payload)
+            _ = try await send(record.payload)
             return try JSONDecoder().decode(CreationLookup.self,
-                from: Data(try await ServerClient.read(.creationReceipt(requestID: record.id)).utf8))
+                from: Data(try await lookup(record.id).utf8))
         }
         return receipt
     }

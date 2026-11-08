@@ -79,6 +79,10 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
+    /// The CLI's retained process or Session history, as display text.
+    #[serde(rename = "process.history")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
+    ProcessHistory { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
@@ -356,7 +360,10 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
-            Self::CreationReceipt { request_id } => words(&["server", "receipt", request_id, "--json"]),
+            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::CreationReceipt { request_id } => {
+                words(&["server", "receipt", request_id, "--json"])
+            }
             Self::MonitorPs => words(&["process", "list", "--json"]),
             Self::DesktopPlans { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -611,7 +618,15 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Self::CreationReceipt { request_id } => value(&crate::engine::creation::lookup(request_id)?),
+            Self::ProcessHistory { id } => value(&super::history::render(
+                id,
+                false,
+                None,
+                super::session_history::SessionView::Summary,
+            )?),
+            Self::CreationReceipt { request_id } => {
+                value(&crate::engine::creation::lookup(request_id)?)
+            }
             Self::MonitorPs => value(&super::top::load_snapshot()?),
             Self::DesktopPlans { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)

@@ -4,7 +4,10 @@ use crate::lf::ServerCommand;
 pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
     match command {
         ServerCommand::Receipt { request_id, .. } => {
-            println!("{}", serde_json::to_string_pretty(&crate::engine::creation::lookup(request_id)?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&crate::engine::creation::lookup(request_id)?)?
+            );
             Ok(())
         }
         ServerCommand::Run => crate::server::run(),

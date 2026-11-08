@@ -1532,8 +1532,17 @@ pub fn task_create(
                     )));
                 }
             }
-            let task =
-                adoption::save(&store, &main, task.id.clone(), None, source, None, false, receipt.clone()).await?;
+            let task = adoption::save(
+                &store,
+                &main,
+                task.id.clone(),
+                None,
+                source,
+                None,
+                false,
+                receipt.clone(),
+            )
+            .await?;
             super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)

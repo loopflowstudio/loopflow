@@ -61,7 +61,8 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK.repo"
     },
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   "reopened": {
     "actions": [
@@ -116,7 +117,8 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK.repo"
     },
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -335,7 +337,8 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.repo"
       },
-      "preview": null
+      "preview": null,
+      "transition": null
     },
     {
       "actions": [
@@ -395,7 +398,8 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK"
       },
-      "preview": null
+      "preview": null,
+      "transition": null
     },
     {
       "actions": [
@@ -449,7 +453,8 @@
         "unavailable": null,
         "worktree": "/private/tmp/.tmpRKKNhK.unscoped"
       },
-      "preview": null
+      "preview": null,
+      "transition": null
     }
   ],
   "task_primary": {
@@ -510,6 +515,7 @@
       "unavailable": null,
       "worktree": "/private/tmp/.tmpRKKNhK"
     },
-    "preview": null
+    "preview": null,
+    "transition": null
   }
 }

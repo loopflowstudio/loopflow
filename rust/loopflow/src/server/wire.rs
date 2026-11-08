@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 2: one connection per client,
+//! Carrier-independent server protocol, revision 3: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only. Each carrier delimits messages its own way; the Unix socket
 //! carries one JSON object per line.
@@ -10,9 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 2;
+pub const REVISION: u32 = 3;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 2;
+pub const MIN_REVISION: u32 = 3;
 pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;

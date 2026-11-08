@@ -430,7 +430,8 @@ fn notion_task_create_mirrors_task_as_a_database_page() {
             Some("Ship the Notion provider".into()),
             Some("Mirror **Tasks** into Notion\n\n- pages\n- comments".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved
             .linear_id
@@ -488,7 +489,8 @@ fn notion_team_page_without_databases_gains_tasks_and_projects() {
             Some("First Task".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let page = mirrored(runtime, &state, saved.linear_id.as_ref().unwrap().as_str());
         let notion = runtime.block_on(state.lock());
@@ -512,7 +514,8 @@ fn notion_status_title_body_and_comments_write_back_to_the_page() {
             Some("Write back".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap();
         let id = id.as_str();
@@ -589,7 +592,8 @@ fn notion_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             Some("Saved offline".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         assert!(saved.linear_id.is_none());
 
@@ -616,7 +620,8 @@ fn notion_comments_and_edits_by_people_become_task_direction() {
             Some("Take direction".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let task = runtime
@@ -685,7 +690,8 @@ fn notion_renames_and_completion_reach_the_task() {
             Some("Original".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let page = mirrored(runtime, &state, &id)["id"]
@@ -807,7 +813,8 @@ fn notion_pages_coworkers_archive_leave_the_plan() {
             Some("Archived in Notion".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let page = mirrored(runtime, &state, &id)["id"]
@@ -839,7 +846,8 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
             Some("Start here".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         // Checkout claims the Task; the fixture has no fetchable origin.
@@ -865,7 +873,8 @@ fn notion_pages_show_the_pr() {
             Some("Ship it".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let task = runtime
@@ -938,7 +947,8 @@ fn notion_wave_projects_become_project_pages_related_to_their_tasks() {
             Some("Planned work".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
-         None,)
+            None,
+        )
         .unwrap();
         let page = mirrored(
             runtime,

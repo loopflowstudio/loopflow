@@ -50,6 +50,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
+    case processHistory(id: String)
     case creationReceipt(requestID: String)
     case monitorPs
     case desktopPlans(directory: String)
@@ -109,6 +110,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
+        case .processHistory(let id): return ["session", "history", "show", id]
         case .creationReceipt(let requestID): return ["server", "receipt", requestID, "--json"]
         case .monitorPs:
             return ["process", "list", "--json"]
@@ -215,6 +217,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .processHistory(let id): TaggedFields("process.history", ["id": id])
         case .creationReceipt(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .monitorPs: TaggedFields("process.list")
         case .desktopPlans(let directory): TaggedFields("desktop.view.list", ["directory": directory])
@@ -1088,7 +1091,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func processHistory(id: String) async throws -> String {
-        try await run(["session", "history", "show", id], nil)
+        try await serve(.processHistory(id: id))
     }
 
     /// One store-driven reading keeps position, readiness and run history together.

@@ -188,7 +188,9 @@ fn local(
 
 fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()> {
     match command {
-        TaskCommand::Create { .. } => super::task_create::create(repo, command, io, false, None).map(drop),
+        TaskCommand::Create { .. } => {
+            super::task_create::create(repo, command, io, false, None).map(drop)
+        }
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
             use crate::ops::task_ownership::{render, OwnershipChange};
             let requested = match command {

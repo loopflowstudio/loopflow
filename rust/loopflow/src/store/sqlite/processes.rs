@@ -880,6 +880,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
+        super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, thread],
@@ -931,6 +932,7 @@ impl SqliteStore {
             "UPDATE processes SET endpoint=?2 WHERE id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
+        super::provider_transitions::observe_in(&tx, session, thread.as_str(), "observed")?;
         tx.execute(
             "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
             params![session, thread],

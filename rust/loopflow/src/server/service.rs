@@ -99,21 +99,30 @@ struct Admitted {
 }
 
 impl Admitted {
-    fn new(clients: &Clients, client: ClientIdentity, outbox: Outbox, open: Arc<Semaphore>) -> Self {
+    fn new(
+        clients: &Clients,
+        client: ClientIdentity,
+        outbox: Outbox,
+        open: Arc<Semaphore>,
+    ) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let connected_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .expect("the current time formats as RFC 3339");
         lock(clients).insert(
             id.clone(),
-            ClientState { row: ConnectedClient {
-                id: id.clone(),
-                client,
-                connected_at,
-                requests: 0,
-                open: 0,
-                retained_bytes: 0,
-            }, outbox, open },
+            ClientState {
+                row: ConnectedClient {
+                    id: id.clone(),
+                    client,
+                    connected_at,
+                    requests: 0,
+                    open: 0,
+                    retained_bytes: 0,
+                },
+                outbox,
+                open,
+            },
         );
         Self {
             clients: clients.clone(),
@@ -140,12 +149,15 @@ fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Oldest connection first.
 fn connected(clients: &Clients) -> Vec<ConnectedClient> {
-    let mut rows: Vec<_> = lock(clients).values().map(|state| {
-        let mut row = state.row.clone();
-        row.open = MAX_OPEN - state.open.available_permits();
-        row.retained_bytes = state.outbox.retained();
-        row
-    }).collect();
+    let mut rows: Vec<_> = lock(clients)
+        .values()
+        .map(|state| {
+            let mut row = state.row.clone();
+            row.open = MAX_OPEN - state.open.available_permits();
+            row.retained_bytes = state.outbox.retained();
+            row
+        })
+        .collect();
     rows.sort_by(|a, b| (&a.connected_at, &a.id).cmp(&(&b.connected_at, &b.id)));
     rows
 }
@@ -409,7 +421,17 @@ impl Connection<'_> {
             }),
         )
         .await?;
-        session(lines, instance.into(), &admitted, self.tickets, self.uid, outgoing, queue, open).await
+        session(
+            lines,
+            instance.into(),
+            &admitted,
+            self.tickets,
+            self.uid,
+            outgoing,
+            queue,
+            open,
+        )
+        .await
     }
 }
 
@@ -523,6 +545,10 @@ async fn session(
                     send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::Conflict, "request ID is still unanswered").with(serde_json::json!({ "id": id })))).await?;
                     continue;
                 }
+                if inflight.len() >= MAX_OPEN {
+                    send(&mut lines, &busy(&id, "open", MAX_OPEN)).await?;
+                    continue;
+                }
                 let Ok(slot) = open.clone().try_acquire_owned() else {
                     send(&mut lines, &busy(&id, "open", MAX_OPEN)).await?;
                     continue;
@@ -581,16 +607,18 @@ async fn session(
                 inflight.insert(id, entry);
             }
             Some(frame) = queue.recv() => {
+                let Some(entry) = inflight.get(&frame.id).filter(|entry| Some(entry.task.id()) == frame.task) else { continue; };
+                let complete = frame.complete || (frame.response && entry.checkpoints.is_none());
                 tokio::time::timeout(SEND, lines.send(frame.line)).await.context("client did not take a message within five seconds")??;
                 drop(frame.reservation);
+                if complete { inflight.remove(&frame.id); }
             },
             Some(finished) = tasks.join_next_with_id() => {
                 match finished {
                     // A cancelled ID may already name a newer request.
                     Ok((task, id)) => {
-                        if inflight.get(&id).is_some_and(|entry| entry.task.id() == task) {
-                            inflight.remove(&id);
-                        }
+                        // Its queued final frame releases the ID after delivery.
+                        let _ = (task, id);
                     }
                     Err(join) if join.is_cancelled() => {}
                     Err(join) => tracing::warn!(%instance, %join, "Server request task failed"),
@@ -726,11 +754,21 @@ async fn request(
     instance: Arc<str>,
     outgoing: Outbox,
     reservation: Arc<Reservation>,
-    slots: Arc<(tokio::sync::OwnedSemaphorePermit, Option<tokio::sync::OwnedSemaphorePermit>)>,
+    slots: super::outbox::RequestSlots,
 ) -> String {
+    reservation.hold(slots.clone());
+    let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
-    let result = operate(operation, &id, &instance, &trace_id, reservation.clone(), slots.clone()).await;
+    let result = operate(
+        operation,
+        &id,
+        &instance,
+        &trace_id,
+        reservation.clone(),
+        slots.clone(),
+    )
+    .await;
     tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
@@ -748,7 +786,22 @@ async fn request(
     };
     // A closed connection drops the answer; the effect stands.
     if let Err(failure) = outgoing.deliver(message, reservation).await {
-        let _ = deliver(&outgoing, ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::OutcomeUnknown, failure.to_string()))).await;
+        let _ = deliver(
+            &outgoing,
+            ServerMessage::error(
+                Some(id.clone()),
+                Error::new(
+                    if write {
+                        ErrorCode::OutcomeUnknown
+                    } else {
+                        ErrorCode::Busy
+                    },
+                    failure.to_string(),
+                )
+                .with(serde_json::json!({"limit":"retained_bytes"})),
+            ),
+        )
+        .await;
     }
     id
 }
@@ -759,24 +812,24 @@ async fn operate(
     instance: &str,
     trace_id: &crate::id::TraceId,
     reservation: Arc<Reservation>,
-    slots: Arc<(tokio::sync::OwnedSemaphorePermit, Option<tokio::sync::OwnedSemaphorePermit>)>,
+    slots: super::outbox::RequestSlots,
 ) -> Result<serde_json::Value, Error> {
     match operation {
-        Operation::Read(query) => {
-            tokio::task::spawn_blocking(move || {
-                let _held = (reservation, slots);
-                crate::journal::request::isolate(|| query.read())
-            })
-                .await
-                .map_err(unavailable)?
-                .map_err(unavailable)
-        }
+        Operation::Read(query) => tokio::task::spawn_blocking(move || {
+            let _held = (reservation, slots);
+            crate::journal::request::isolate(|| query.read())
+        })
+        .await
+        .map_err(unavailable)?
+        .map_err(unavailable),
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
                 // Setting values and authored text stay out of request telemetry.
                 for field in [
                     "content",
+                    "request",
+                    "title",
                     "notes",
                     "plan",
                     "layout",
@@ -836,7 +889,11 @@ async fn subscribing(
     if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
-        let _ = deliver(&outgoing, ServerMessage::error(Some(id.clone()), unavailable(failure))).await;
+        let _ = deliver(
+            &outgoing,
+            ServerMessage::error(Some(id.clone()), unavailable(failure)),
+        )
+        .await;
     }
     id
 }
@@ -920,8 +977,11 @@ async fn subscribe(
 }
 
 fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
-    ServerMessage::error(Some(id.into()), Error::new(ErrorCode::Busy, "server capacity reached; retry shortly")
-        .with(serde_json::json!({ "limit": limit, "max": max })))
+    ServerMessage::error(
+        Some(id.into()),
+        Error::new(ErrorCode::Busy, "server capacity reached; retry shortly")
+            .with(serde_json::json!({ "limit": limit, "max": max })),
+    )
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
@@ -1106,13 +1166,24 @@ mod tests {
     fn flooded_requests_and_subscriptions_refuse_by_id_and_recover_checkpoints() {
         with_empty_home(async {
             let mut client = Client::connect();
-            assert!(matches!(client.hello(REVISION, REVISION).await, ServerMessage::Welcome(_)));
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
             let writer = tokio::spawn(async move {
                 for n in 0..1300 {
                     let message = if n < 1000 {
-                        ClientMessage::Request { id: n.to_string(), operation: catalog(), select: None }
+                        ClientMessage::Request {
+                            id: n.to_string(),
+                            operation: catalog(),
+                            select: None,
+                        }
                     } else {
-                        ClientMessage::Subscribe { id: n.to_string(), operation: Read::MonitorPs, select: None }
+                        ClientMessage::Subscribe {
+                            id: n.to_string(),
+                            operation: Read::MonitorPs,
+                            select: None,
+                        }
                     };
                     let mut line = serde_json::to_vec(&message).unwrap();
                     line.push(b'\n');
@@ -1125,15 +1196,28 @@ mod tests {
             let mut refused = 0;
             while answered.len() < 1300 {
                 let mut line = String::new();
-                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line)).await.unwrap().unwrap();
+                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line))
+                    .await
+                    .unwrap()
+                    .unwrap();
                 match serde_json::from_str::<ServerMessage>(&line).unwrap() {
                     ServerMessage::Response { id, result, .. } => {
-                        if result.is_null() { subscription = Some(id.clone()); }
+                        if result.is_null() {
+                            subscription = Some(id.clone());
+                        }
                         assert!(answered.insert(id));
                     }
-                    ServerMessage::Error { id: Some(id), code, data, .. } => {
+                    ServerMessage::Error {
+                        id: Some(id),
+                        code,
+                        data,
+                        ..
+                    } => {
                         assert_eq!(code, ErrorCode::Busy);
-                        assert!(matches!(data.unwrap()["limit"].as_str(), Some("open" | "retained_bytes")));
+                        assert!(matches!(
+                            data.unwrap()["limit"].as_str(),
+                            Some("open" | "retained_bytes")
+                        ));
                         refused += 1;
                         assert!(answered.insert(id));
                     }
@@ -1144,13 +1228,25 @@ mod tests {
             assert!(refused > 0);
             let mut writer = writer.await.unwrap();
             let id = subscription.expect("at least one subscription was admitted");
-            let line = serde_json::to_string(&ClientMessage::Checkpoint { id: id.clone(), checkpoint: 42 }).unwrap() + "\n";
+            let line = serde_json::to_string(&ClientMessage::Checkpoint {
+                id: id.clone(),
+                checkpoint: 42,
+            })
+            .unwrap()
+                + "\n";
             writer.write_all(line.as_bytes()).await.unwrap();
             loop {
                 let mut line = String::new();
-                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line)).await.unwrap().unwrap();
-                if let ServerMessage::Reading { id: actual, frame } = serde_json::from_str(&line).unwrap() {
-                    if actual == id && frame["answers"] == 42 { break; }
+                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if let ServerMessage::Reading { id: actual, frame } =
+                    serde_json::from_str(&line).unwrap()
+                {
+                    if actual == id && frame["answers"] == 42 {
+                        break;
+                    }
                 }
             }
             drop(writer);

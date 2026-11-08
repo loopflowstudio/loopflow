@@ -1109,10 +1109,16 @@ mod tests {
         let history = store.session_history("conversation", 0, 0).unwrap();
         let selection = history
             .iter()
-            .find(|event| event.payload["type"] == "agent_session_selected")
+            .find(|event| event.payload["type"] == "provider_transition")
             .expect("the change is in selection history");
-        assert_eq!(selection.payload["provider_thread"], "native-thread");
-        assert_eq!(selection.payload["next_provider_thread"], "fresh");
+        assert_eq!(
+            selection.payload["transition"]["from_provider_session"],
+            "native-thread"
+        );
+        assert_eq!(
+            selection.payload["transition"]["to_provider_session"],
+            "fresh"
+        );
         assert_eq!(selection.payload["source"], "new");
         assert_eq!(selected(), "fresh");
         drop(listener);

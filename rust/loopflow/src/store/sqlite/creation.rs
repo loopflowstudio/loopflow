@@ -3,7 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::SqliteStore;
-use crate::store::{StoreResult, StoreError};
+use crate::store::{StoreError, StoreResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreationReceipt {
@@ -45,9 +45,22 @@ pub(crate) fn insert_in(
 }
 
 impl SqliteStore {
-    pub(crate) fn begin_thread_creation(&self, identity: &CreationIdentity, session: &str, artifact: &str) -> StoreResult<()> {
+    pub(crate) fn begin_thread_creation(
+        &self,
+        identity: &CreationIdentity,
+        session: &str,
+        artifact: &str,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        insert_in(&conn, identity, None, Some(session), Some(artifact), "stopping", None)
+        insert_in(
+            &conn,
+            identity,
+            None,
+            Some(session),
+            Some(artifact),
+            "stopping",
+            None,
+        )
     }
 
     pub fn creation_receipt(&self, id: &str) -> StoreResult<Option<CreationReceipt>> {
@@ -60,25 +73,40 @@ impl SqliteStore {
                 result: None, launch: None, created_at: row.get(8)?, updated_at: row.get(9)?,
             }, row.get::<_,Option<String>>(6)?, row.get::<_,Option<String>>(7)?))
         }).optional()?;
-        row.map(|(mut receipt,result,launch)| {
+        row.map(|(mut receipt, result, launch)| {
             receipt.result = result.map(|text| serde_json::from_str(&text)).transpose()?;
             receipt.launch = launch.map(|text| serde_json::from_str(&text)).transpose()?;
             Ok(receipt)
-        }).transpose()
+        })
+        .transpose()
     }
 
     pub(crate) fn check_creation(&self, identity: &CreationIdentity) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let fingerprint: Option<(String,String)> = conn.query_row(
-            "SELECT kind,fingerprint FROM creation_receipts WHERE request_id=?1", [&identity.request_id],
-            |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        if fingerprint.is_some_and(|(kind, fingerprint)| kind != identity.kind || fingerprint != identity.fingerprint) {
-            return Err(StoreError::Stale(format!("creation request {} has different content", identity.request_id)));
+        let fingerprint: Option<(String, String)> = conn
+            .query_row(
+                "SELECT kind,fingerprint FROM creation_receipts WHERE request_id=?1",
+                [&identity.request_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if fingerprint.is_some_and(|(kind, fingerprint)| {
+            kind != identity.kind || fingerprint != identity.fingerprint
+        }) {
+            return Err(StoreError::Stale(format!(
+                "creation request {} has different content",
+                identity.request_id
+            )));
         }
         Ok(())
     }
 
-    pub(crate) fn advance_creation(&self, id: &str, milestone: &str, result: Option<&serde_json::Value>) -> StoreResult<()> {
+    pub(crate) fn advance_creation(
+        &self,
+        id: &str,
+        milestone: &str,
+        result: Option<&serde_json::Value>,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute("UPDATE creation_receipts SET milestone=?2,result=COALESCE(?3,result),updated_at=?4 WHERE request_id=?1",
             params![id,milestone,result.map(serde_json::to_string).transpose()?,crate::store::rows::now_unix()])? != 1 {
@@ -87,7 +115,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn record_creation_launch(&self, id: &str, result: &serde_json::Value) -> StoreResult<()> {
+    pub(crate) fn record_creation_launch(
+        &self,
+        id: &str,
+        result: &serde_json::Value,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("UPDATE creation_receipts SET milestone='started',launch=?2,updated_at=?3 WHERE request_id=?1 AND milestone='run_requested'",
             params![id,serde_json::to_string(result)?,crate::store::rows::now_unix()])?;

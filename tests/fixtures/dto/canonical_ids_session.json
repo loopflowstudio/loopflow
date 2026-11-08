@@ -66,5 +66,6 @@
     "observed_at": 1,
     "source": "codex",
     "text": "Case-Sensitive text"
-  }
+  },
+  "transition": null
 }

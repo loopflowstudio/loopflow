@@ -194,13 +194,25 @@ pub enum Write {
     },
     #[serde(rename = "wave.rename")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveRenamed>()))]
-    WaveRename { directory: PathBuf, wave: String, name: String },
+    WaveRename {
+        directory: PathBuf,
+        wave: String,
+        name: String,
+    },
     #[serde(rename = "wave.remove")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveRemoval>()))]
-    WaveRemove { directory: PathBuf, wave: String, preview: bool },
+    WaveRemove {
+        directory: PathBuf,
+        wave: String,
+        preview: bool,
+    },
     #[serde(rename = "wave.machine")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
-    WaveMachine { directory: PathBuf, wave: String, machine: String },
+    WaveMachine {
+        directory: PathBuf,
+        wave: String,
+        machine: String,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -582,9 +594,30 @@ impl Write {
         let directory = self.directory();
         let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
         match self {
-            Self::TaskCreate { request_id, title, request, wave, graph, session, run, .. } => value(&crate::engine::creation::create(request_id,
-                crate::engine::creation::TaskCreation { directory: directory.to_path_buf(), title: title.clone(), request: request.clone(), wave: wave.clone(),
-                graph: graph.clone(), session: session.clone(), worktree: None, run: *run, agent: None, approve: false })?),
+            Self::TaskCreate {
+                request_id,
+                title,
+                request,
+                wave,
+                graph,
+                session,
+                run,
+                ..
+            } => value(&crate::engine::creation::create(
+                request_id,
+                crate::engine::creation::TaskCreation {
+                    directory: directory.to_path_buf(),
+                    title: title.clone(),
+                    request: request.clone(),
+                    wave: wave.clone(),
+                    graph: graph.clone(),
+                    session: session.clone(),
+                    worktree: None,
+                    run: *run,
+                    agent: None,
+                    approve: false,
+                },
+            )?),
             Self::TaskComplete { issue, .. } => value(&crate::ops::task::task_complete(
                 &task_repo(issue)?,
                 issue,
@@ -636,8 +669,17 @@ impl Write {
                 value(&task::report(directory, issue, None, message)?)
             }
             Self::TaskInterrupt { issue, .. } => value(&task::interrupt(issue)?),
-            Self::TaskMove { issue, machine: Some(machine), .. } => value(&super::session_move::move_task(issue, machine)?),
-            Self::TaskMove { issue, wave, machine: None, .. } => value(&crate::ops::task::task_move_membership(
+            Self::TaskMove {
+                issue,
+                machine: Some(machine),
+                ..
+            } => value(&super::session_move::move_task(issue, machine)?),
+            Self::TaskMove {
+                issue,
+                wave,
+                machine: None,
+                ..
+            } => value(&crate::ops::task::task_move_membership(
                 &task_repo(issue)?,
                 issue,
                 wave.as_deref(),
@@ -683,10 +725,22 @@ impl Write {
                     .expect("a Session preparation has a CLI spelling")?;
                 value(&super::session::prepared(&cli, directory)?)
             }
-            Self::WaveRename { wave, name, .. } => value(&tokio::runtime::Runtime::new()?.block_on(crate::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None))?),
-            Self::WaveRemove { wave, preview, .. } => value(&crate::ops::wave_lifecycle::remove(directory, wave, *preview, false)?),
-            Self::WaveMachine { wave, machine, .. } => value(&crate::engine::config::set(&crate::config::files::Destination::PersonalWave {
-                repository: directory.to_path_buf(), wave: wave.clone() }, "machine", machine)?),
+            Self::WaveRename { wave, name, .. } => {
+                value(&tokio::runtime::Runtime::new()?.block_on(
+                    crate::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None),
+                )?)
+            }
+            Self::WaveRemove { wave, preview, .. } => value(&crate::ops::wave_lifecycle::remove(
+                directory, wave, *preview, false,
+            )?),
+            Self::WaveMachine { wave, machine, .. } => value(&crate::engine::config::set(
+                &crate::config::files::Destination::PersonalWave {
+                    repository: directory.to_path_buf(),
+                    wave: wave.clone(),
+                },
+                "machine",
+                machine,
+            )?),
             Self::WaveAdd {
                 wave, objective, ..
             } => {
@@ -1103,12 +1157,25 @@ impl Write {
                 words.extend(["--prepare", "--json"]);
                 words
             }
-            Self::SessionNew { id, agent, request_id, .. } => {
+            Self::SessionNew {
+                id,
+                agent,
+                request_id,
+                ..
+            } => {
                 let mut words = Vec::new();
                 if let Some(agent) = agent {
                     words.extend(["--agent", agent]);
                 }
-                words.extend(["session", "new", id, "--prepare", "--json", "--request-id", request_id]);
+                words.extend([
+                    "session",
+                    "new",
+                    id,
+                    "--prepare",
+                    "--json",
+                    "--request-id",
+                    request_id,
+                ]);
                 words
             }
             _ => return None,

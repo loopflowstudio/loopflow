@@ -1390,7 +1390,9 @@ mod durable_store_tests {
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         drop(exclusion);
-        let replaced = store.replace_session_input(session.captured, next, None).unwrap();
+        let replaced = store
+            .replace_session_input(session.captured, next, None)
+            .unwrap();
         assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
         assert_eq!(replaced.cwd, session.cwd);
         assert_ne!(replaced.captured, session.captured);
@@ -1698,7 +1700,8 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..first.clone()
                 },
-            None)
+                None,
+            )
             .unwrap();
         assert!(
             store
@@ -1709,8 +1712,9 @@ mod durable_store_tests {
                         provider: Some("changed".into()),
                         model: Some("changed".into()),
                         ..first.clone()
-                    }
-                , None)
+                    },
+                    None
+                )
                 .is_err(),
             "an earlier input cannot become a fresh replacement"
         );
@@ -1803,7 +1807,8 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..bound.clone()
                 },
-            None)
+                None,
+            )
             .unwrap();
         assert_eq!(future.task_id, Some(task_id.clone()));
         assert_eq!(future.work_source, Some(WorkSource::Bound));

@@ -1,1 +1,16 @@
-{"type":"request","id":"adopt-1","operation":{"kind":"task.create","directory":"/repo","id":"session_5e55105e000040008000000000000001","title":"Keep the conversation"},"select":null}
+{
+  "type": "request",
+  "id": "adopt-1",
+  "operation": {
+    "kind": "task.create",
+    "directory": "/repo",
+    "title": "Keep the conversation",
+    "request_id": "fixture-creation",
+    "session": "session_5e55105e000040008000000000000001",
+    "request": null,
+    "wave": null,
+    "graph": null,
+    "run": false
+  },
+  "select": null
+}

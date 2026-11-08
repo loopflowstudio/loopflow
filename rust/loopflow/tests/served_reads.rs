@@ -239,10 +239,15 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         ))
         .unwrap();
         let id = session["id"].as_str().unwrap();
-        let change = Write::TaskFromSession {
+        let change = Write::TaskCreate {
             directory: repo.path().to_owned(),
-            id: id.into(),
-            title: "Keep the conversation".into(),
+            session: Some(id.into()),
+            title: Some("Keep the conversation".into()),
+            request_id: format!("adoption-{served_first}"),
+            request: None,
+            wave: None,
+            graph: None,
+            run: false,
         };
         let cli = || {
             let args = spelled(&change);
@@ -274,6 +279,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         let first = if served_first { adopt() } else { cli() };
         let second = if served_first { cli() } else { adopt() };
         assert_eq!(without_revision(first.clone()), without_revision(second));
+        let first = &first["task"];
         assert_eq!(first["title"], "Keep the conversation");
         assert!(first["project_id"].is_null());
         assert!(
@@ -309,10 +315,15 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap();
         // A failed request has its own trace, changes no Task and launches nothing.
-        let refused = served(Write::TaskFromSession {
+        let refused = served(Write::TaskCreate {
             directory: repo.path().to_owned(),
-            id: id.into(),
-            title: " ".into(),
+            session: Some(id.into()),
+            title: Some(" ".into()),
+            request_id: "bad-adoption".into(),
+            request: None,
+            wave: None,
+            graph: None,
+            run: false,
         })
         .unwrap_err()
         .downcast::<loopflow::engine::Error>()
@@ -602,7 +613,9 @@ fn server_operations_match_their_lf_commands() {
     };
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
-        Read::MonitorPs
+        Read::ProcessHistory { .. }
+        | Read::CreationReceipt { .. }
+        | Read::MonitorPs
         | Read::DesktopPlans { .. }
         | Read::SessionList { .. }
         | Read::DesktopTask { .. }
@@ -705,6 +718,10 @@ fn server_operations_match_their_lf_commands() {
                     directory: repo.path().to_owned(),
                     task: "INF-123".into(),
                     after: None,
+                },
+                Read::ProcessHistory { id: graph.clone() },
+                Read::CreationReceipt {
+                    request_id: "absent-creation".into(),
                 },
                 Read::GraphProcess { id: graph },
                 Read::Usage {
@@ -909,7 +926,7 @@ fn server_operations_match_their_lf_commands() {
         issue: "INF-123".into(),
     }) {
         // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution.
-        Write::TaskFromSession { .. }
+        Write::TaskCreate { .. }
         | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
@@ -932,6 +949,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::WaveAdd { .. }
+        | Write::WaveRename { .. }
+        | Write::WaveRemove { .. }
+        | Write::WaveMachine { .. }
         | Write::PlanningRefresh { .. }
         // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
         // compares their spelling.
@@ -982,6 +1002,7 @@ fn server_operations_match_their_lf_commands() {
                     notes: "Served from the app".into(),
                 },
                 Write::TaskMove {
+                    machine: None,
                     directory: directory.clone(),
                     issue: "INF-123".into(),
                     wave: None,
@@ -1016,6 +1037,7 @@ fn server_operations_match_their_lf_commands() {
                     intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
+                    request_id: "new-thread-parity".into(),
                     directory: directory.clone(),
                     id: session.clone(),
                     agent: None,
@@ -1477,6 +1499,7 @@ fn server_operations_match_their_lf_commands() {
     // This fixture's Task has no launchable planning, so the run it started
     // reports the refusal `lf task run` prints, and nothing ran.
     let run = Write::TaskRun {
+        graph: None,
         directory: directory.clone(),
         issue: "INF-123".into(),
         from: Some("demo".into()),
@@ -1659,22 +1682,33 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
     use loopflow::portfolio::PortfolioCommand;
     let path = |path: &Path| path.display().to_string();
     let (directory, words): (String, Vec<String>) = match write {
-        Write::TaskFromSession {
+        Write::TaskCreate {
             directory,
-            id,
+            request_id,
             title,
-        } => (
-            path(directory),
-            words(&[
-                "task",
-                "create",
-                "--session",
-                id,
-                "--title",
-                title,
-                "--json",
-            ]),
-        ),
+            request,
+            wave,
+            graph,
+            session,
+            run,
+        } => {
+            let mut args = words(&["task", "create", "--request-id", request_id, "--json"]);
+            for (flag, value) in [
+                ("--title", title),
+                ("--notes", request),
+                ("--wave", wave),
+                ("--graph", graph),
+                ("--session", session),
+            ] {
+                if let Some(value) = value {
+                    args.extend([flag.into(), value.clone()]);
+                }
+            }
+            if *run {
+                args.push("--run".into());
+            }
+            (path(directory), args)
+        }
         Write::TaskComplete { directory, issue } => (
             path(directory),
             words(&["task", "complete", issue, "--json"]),
@@ -1710,6 +1744,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             from,
             agent,
             approve,
+            graph,
         } => {
             let mut spelled = Vec::new();
             if *approve {
@@ -1719,6 +1754,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["task", "run", issue]));
+            spelled.extend(graph.iter().cloned());
             if let Some(from) = from {
                 spelled.extend(words(&["--from", from]));
             }
@@ -1752,11 +1788,13 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             wave,
+            machine,
         } => {
             let mut spelled = words(&["task", "move", issue]);
-            match wave {
-                Some(wave) => spelled.extend(words(&["--wave", wave])),
-                None => spelled.push("--no-wave".into()),
+            match (wave, machine) {
+                (_, Some(machine)) => spelled.extend(words(&["--machine", machine])),
+                (Some(wave), _) => spelled.extend(words(&["--wave", wave])),
+                (None, _) => spelled.push("--no-wave".into()),
             }
             spelled.push("--json".into());
             (path(directory), spelled)
@@ -1846,14 +1884,50 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             id,
             agent,
+            request_id,
         } => {
             let mut spelled = Vec::new();
             if let Some(agent) = agent {
                 spelled.extend(words(&["--agent", agent]));
             }
-            spelled.extend(words(&["session", "new", id, "--prepare", "--json"]));
+            spelled.extend(words(&[
+                "session",
+                "new",
+                id,
+                "--prepare",
+                "--json",
+                "--request-id",
+                request_id,
+            ]));
             (path(directory), spelled)
         }
+        Write::WaveRename {
+            directory,
+            wave,
+            name,
+        } => (
+            path(directory),
+            words(&["wave", "rename", wave, name, "--json"]),
+        ),
+        Write::WaveRemove {
+            directory,
+            wave,
+            preview,
+        } => {
+            let mut args = words(&["wave", "remove", wave, "--json"]);
+            if *preview {
+                args.push("--preview".into());
+            }
+            (path(directory), args)
+        }
+        Write::WaveMachine {
+            directory,
+            wave,
+            machine,
+        } => (
+            path(directory),
+            words(&["--wave", wave, "set", "machine", machine, "--json"]),
+        ),
         Write::WaveAdd {
             directory,
             wave,
@@ -2450,4 +2524,104 @@ fn without_times(mut value: Value) -> Value {
         _ => {}
     }
     value
+}
+
+#[test]
+fn served_task_create_survives_a_dropped_connection_and_server_restart() {
+    use loopflow::lf::commands::{read::Read, write::Write};
+    use loopflow::server::wire::{Operation, REVISION};
+    use std::io::Write as _;
+    use std::os::unix::net::UnixStream;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let server = Server::start(repo.path(), home.path());
+    let change = Write::TaskCreate {
+        directory: repo.path().to_path_buf(),
+        request_id: "lost-answer".into(),
+        title: Some("One Task".into()),
+        request: None,
+        wave: None,
+        graph: None,
+        session: None,
+        run: false,
+    };
+    let mut socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();
+    writeln!(
+        socket,
+        "{}",
+        serde_json::json!({"type":"hello","revision":REVISION,"min_revision":REVISION,
+        "client":{"kind":"test","platform":"test","name":"lost","version":"0"}})
+    )
+    .unwrap();
+    let mut reader = BufReader::new(socket.try_clone().unwrap());
+    let mut welcome = String::new();
+    reader.read_line(&mut welcome).unwrap();
+    writeln!(
+        socket,
+        "{}",
+        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+    )
+    .unwrap();
+    // Deliberately do not read the answer. Admission is observed in the receipt.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Ok(conn) = rusqlite::Connection::open(home.path().join("loopflow.db")) {
+            if conn
+                .query_row(
+                    "SELECT count(*) FROM creation_receipts WHERE request_id='lost-answer'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                == 1
+            {
+                break;
+            }
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(reader);
+    drop(socket);
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let first = connection
+        .request(Operation::Write(change.clone()))
+        .unwrap()
+        .result;
+    assert_eq!(first["milestone"], "filed");
+    drop(connection);
+    drop(server);
+    let _server = Server::start(repo.path(), home.path());
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let second = connection
+        .request(Operation::Write(change.clone()))
+        .unwrap()
+        .result;
+    assert_eq!(first, second);
+    let found = connection
+        .request(Operation::Read(Read::CreationReceipt {
+            request_id: "lost-answer".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(found["result"], first);
+    let mut changed = change;
+    if let Write::TaskCreate { title, .. } = &mut changed {
+        *title = Some("Different".into());
+    }
+    let error = connection
+        .request(Operation::Write(changed))
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
+    assert_eq!(error.code, loopflow::engine::ErrorCode::Conflict);
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

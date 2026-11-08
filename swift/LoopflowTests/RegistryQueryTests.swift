@@ -116,7 +116,7 @@ struct RegistryQueryTests {
         func object(_ json: String) throws -> NSDictionary {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
-        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil)
+        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil, machine: nil)
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
@@ -147,7 +147,7 @@ struct RegistryQueryTests {
         #expect(try object(start) == object(
             #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null,"intent":"start"}"#))
         #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
-        let restart = ServedWrite.sessionNew(directory: "/r", id: "session_1", agent: "codex")
+        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(
             #"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#))
         #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--prepare", "--json"])

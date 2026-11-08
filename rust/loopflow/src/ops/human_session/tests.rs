@@ -135,6 +135,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let task = TaskId::new();
     let wave = crate::id::WaveId::new();
     let mut summary = crate::session::SessionSummary {
+        transition: None,
         preview: None,
         has_provider_history: true,
         program_status: None,

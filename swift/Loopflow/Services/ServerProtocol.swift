@@ -1,11 +1,11 @@
 import Foundation
 
-/// Revision 2 of the server protocol: one connection per client, a negotiated
+/// Revision 3 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 2
-    public static let minRevision = 2
+    public static let revision = 3
+    public static let minRevision = 3
     public static let maxMessage = 32 * 1024 * 1024
 }
 

@@ -26,7 +26,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8, 22:55 UTC implementation recheck reconfirmed the dependency:
+The November 8, 23:32 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -35,9 +35,9 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-Implementation remains blocked on that external dependency. The Graph's next
-decision is stop until LOO-718 lands; the attach implementation and authenticated
-acceptance checks remain unfinished.
+The authenticated transport is still absent from this checkout and origin/main.
+Remote attach implementation and authenticated acceptance checks remain
+unfinished; the existing local UID tests cannot exercise that transport.
 
 ## Delete — do not maintain
 
@@ -70,8 +70,5 @@ satisfy these checks.
 Visual review remains for demo or QA; Desktop opening results are in
 `questions.md`.
 
-Keep the plan focused on the transport findings and remaining work; the current
-local implementation is recoverable from code.
-
-`git diff --check` — clean; `lf context` — within both scratch limits. Prose-only
-compression; no build or tests needed.
+`git diff --check` — clean; `lf context` — within both scratch limits. Dependency
+recheck only; no code changed and no build or tests needed.

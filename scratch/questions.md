@@ -12,3 +12,7 @@ replaced; inspect Desktop again."
 A later November 8 write-docs run returned success for the same command,
 reporting both paths opening in Loopflow Desktop. Visual review remains for
 demo or QA; no open product question resulted from these failures.
+
+The credential-recovery write-docs retry reported: "Error: No Desktop window
+shows repo_30115cfb3a8ecb51494082029703a1fa. Open one with `lf open`; nothing
+changed." The docs remain at their recorded paths; no alternate editor opened.

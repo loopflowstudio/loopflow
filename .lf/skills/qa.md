@@ -57,8 +57,17 @@ publish, land or choose the next Graph step from here.
 
 ## Loopflow Desktop
 
-Build and launch with `uv run python scripts/loopflow-dev.py run`; drive the
-app through `lf desktop state`, `capture`, and the actions in `docs/surfaces.md`.
+For Desktop in a headless run, follow `swift/README.md`'s Testing section:
+`scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
+then runs model and production-view checks with WindowServer access denied.
+Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
+`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
+Work and taps the production navigation button. Report these as automated
+checks, not a live-window walkthrough. Hosted window checks remain optional;
+record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
+run-debug` builds and launches the development app; use `lf desktop state --json`
+and the commands in `docs/surfaces.md` to inspect and drive it.
+
 Use a private `LF_HOME` and an explicit branch `LF_BIN` for experiments. Clear
 inherited `LF_*` first; isolate `HOME` and the repository too. Never attach the
 Session running this QA step.

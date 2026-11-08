@@ -76,7 +76,8 @@ def _launch(cmd: list[str], env: dict[str, str], sample_path: Path) -> None:
         os.killpg(process.pid, signal.SIGKILL)
         output, _ = process.communicate()
     sample = sample_path.read_text(errors="replace") if sample_path.is_file() else ""
-    call_graph = sample.partition("Call graph:")[2]
+    # Thread stacks only; the summary and binary-image table follow them.
+    call_graph = sample.partition("Call graph:")[2].partition("Total number in stack")[0]
     stacks = "\n".join(call_graph.splitlines()[:120]) or "(no stack sample)"
     raise RuntimeError(
         f"App did not exit within {LAUNCH_TIMEOUT}s of "

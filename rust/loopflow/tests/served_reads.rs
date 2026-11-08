@@ -571,7 +571,7 @@ fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
     register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let _server = Server::start(repo.path(), home.path());
     let mut connection = loopflow::server::client::Connection::open().unwrap();
-    let pane = || Read::DesktopTask {
+    let pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
     };

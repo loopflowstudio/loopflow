@@ -301,9 +301,9 @@ part of what a phone or bot client is offered.
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
   binary owner protocol in `transport/README.md` and `transport/wire.rs`. A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
-  60 seconds and works only for the user who requested it; an unknown, spent,
-  expired or foreign ticket is `not_found` with a null `id` and the connection
-  closes. This is Rex's `data.connect` shape: a connection is a client or a
+  60 seconds and works only for the Unix peer UID that requested it. An unknown,
+  spent, expired or foreign ticket is `not_found` with a null `id` and closes
+  the connection. This is Rex's `data.connect` shape: a connection is a client or a
   bridge from its first line, never one that turns into the other, so bridges
   are bounded by their Sessions and never crowd a client out of the 64 slots.
   The owner is the LfProcess holding the Session's terminal (`lf session
@@ -352,3 +352,19 @@ arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+## Remote attach contract
+
+This planned contract depends on LOO-718's remote admission; this build only
+admits local clients. Remote attachment uses the `session.attach` and separate
+bridge flow above, including Session owner resolution and control claims.
+
+Both connections must authenticate as the same remote identity. A `hello`
+name, `client_id`, or proxy's Unix UID cannot supply that identity. Local and
+remote admission cannot redeem each other's tickets. Each ticket opens one
+bridge and expires 60 seconds after issue, including time the host spends asleep.
+
+An unknown, spent, expired or foreign ticket returns `not_found` with a null
+`id` and closes the bridge connection. Presenting a ticket consumes it even
+when the identity does not match. Before reconnecting, request a fresh ticket
+on the authenticated client connection; never replay a ticket or terminal input.

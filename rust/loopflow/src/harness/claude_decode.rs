@@ -463,6 +463,9 @@ fn rate_limit_signal(value: &Value) -> Option<RateLimitSignal> {
         reason,
         windows,
         model,
+        // `seven_day_overage_included`: the launched model needs usage
+        // credits, and they ran out.
+        credits: rate_type.is_some_and(|rate_type| rate_type.contains("overage")),
     })
 }
 
@@ -1208,14 +1211,18 @@ mod tests {
 
     /// The event that started the November 2 failures.
     #[test]
-    fn a_rejected_weekly_overage_is_a_hard_limit_on_the_weekly_window() {
+    fn a_rejected_overage_is_a_credits_limit_naming_no_model() {
         let signal = rate_limit(
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day_overage_included","utilization":1.0,"resets_at":1900000000}}"#,
         );
         assert!(signal.limited);
-        assert_eq!(signal.reason, "rejected: seven_day_overage_included");
-        assert_eq!(signal.windows[0].window, "seven_day_overage_included");
+        assert!(signal.credits);
         assert_eq!(signal.model, None);
+        assert_eq!(signal.windows[0].window, "seven_day_overage_included");
+        assert!(!rate_limit(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"seven_day","utilization":1.0}}"#,
+        )
+        .credits);
     }
 
     /// A limit on one model leaves the account's other models usable.

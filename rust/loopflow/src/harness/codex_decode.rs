@@ -164,6 +164,7 @@ fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
         reason: reached.unwrap_or("rate limit update").to_string(),
         windows,
         model: None,
+        credits: false,
     })
 }
 

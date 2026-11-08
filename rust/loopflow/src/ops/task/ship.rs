@@ -574,6 +574,12 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
                     continue;
                 }
             }
+            // A run waiting out a limit starts again when it resets, not into the wait.
+            let wait =
+                super::limit_recovery::waiting_on_limit(&store.sqlite, &id).map_err(task_error)?;
+            if wait.as_ref().is_some_and(|wait| wait.retry_at > now) {
+                continue;
+            }
             let Some(task) = store.get_task(&id).await.map_err(task_error)? else {
                 continue;
             };
@@ -583,8 +589,6 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             if failure.is_some() {
                 store.sqlite.count_ship_restart(&id).map_err(task_error)?;
             }
-            let wait =
-                super::limit_recovery::waiting_on_limit(&store.sqlite, &id).map_err(task_error)?;
             restart_lf_in(
                 worktree,
                 wait.as_ref().and_then(|wait| wait.agent.as_deref()),

@@ -1419,6 +1419,7 @@ pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
     .then(|| SpentLimit {
         reason: line.to_string(),
         model: _limited_model(&text),
+        credits: text.contains("out of usage credits"),
     })
 }
 
@@ -1427,8 +1428,12 @@ pub(crate) fn subscription_limit_text(line: &str) -> Option<SpentLimit> {
 pub(crate) struct SpentLimit {
     pub reason: String,
     /// The model family the line names ("You've reached your Fable limit"),
-    /// as limit scopes spell it; `None` when the whole account is spent.
+    /// as limit scopes spell it; `None` when the whole account is spent,
+    /// unless `credits`.
     pub model: Option<String>,
+    /// "You're out of usage credits": the credits pay for the model the
+    /// launch ran, so only that model is spent.
+    pub credits: bool,
 }
 
 /// The model family named between "your" and "limit" in a lowercased line.
@@ -2556,6 +2561,54 @@ trust_level = "trusted"
         assert!(attempts[1].skill_invocation.is_none());
     }
 
+    /// November 7, as it ran: bare `claude` (Fable) ran out of usage credits;
+    /// the account still had room for Opus. The step goes on there, on the
+    /// same account, in the same thread.
+    #[test]
+    fn a_credits_limit_goes_on_with_another_model_in_the_same_thread() {
+        let launch = AgentConfig {
+            agent: Some("claude".to_string()),
+            task_prompt: "compress the branch".to_string(),
+            ..Default::default()
+        };
+        let retry_at = crate::store::rows::now_unix() + 3 * 24 * 3600;
+        let mut scripted = vec![
+            managed_attempt(AgentProcessResult {
+                exit_code: 1,
+                agent_session: Some("thread".into()),
+                failure: Some(AgentFailure::AccountSubscriptionLimit),
+                ..failed_result("You're out of usage credits. Switch to another model to continue.")
+            }),
+            // Bare `claude` is Fable, held on every account until its reset.
+            cooling(Some(retry_at)),
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let mut waits = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
+                attempts.push(config.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |delay| waits.push(delay),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        let opus = &attempts[2];
+        assert_eq!(opus.agent.as_deref(), Some("claude:opus"));
+        assert_eq!(opus.resume_token, Some("thread".into()));
+        assert_eq!(opus.task_prompt, LIMIT_FAILOVER_PROMPT);
+        assert_eq!(waits, vec![Duration::ZERO]);
+    }
+
     #[test]
     fn with_every_account_cooling_the_step_waits_and_goes_on_in_the_same_thread() {
         // An explicit model has nowhere to fall through to.
@@ -2890,6 +2943,13 @@ trust_level = "trusted"
             model("You're out of usage credits. /model to switch models."),
             None
         );
+        let credits = |line: &str| subscription_limit_text(line).unwrap().credits;
+        assert!(credits(
+            "You're out of usage credits. /model to switch models."
+        ));
+        assert!(!credits(
+            "You've hit your weekly limit \u{b7} resets Wed 12:00"
+        ));
     }
 
     #[test]

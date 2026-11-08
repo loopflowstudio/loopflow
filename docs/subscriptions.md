@@ -200,9 +200,11 @@ credentials remain visible with older usage and the `lf account connect` recover
 command. Unreadable credentials are distinguished from missing files. Verification
 records provider rejection as missing; locally detected identity mismatches are
 reported without changing cached state. Unavailable usage leaves credential state
-unchanged. Neither success nor rejection clears a routing cooldown or changes
-account configuration. Provider routes skip missing, disabled, cooling and
-limited accounts and continue to the next candidate.
+unchanged. Neither changes account configuration. A cooldown comes only from a
+provider's rejection; a fresh read that finds no account-wide window spent
+clears it, so `lf account <login>` mends a wrong one. Provider routes skip
+missing, disabled, cooling and limited accounts and continue to the next
+candidate.
 
 A credential replacement detected during verification makes that result
 unavailable and retains prior account evidence. A switch holds Claude's own
@@ -349,7 +351,7 @@ lf task status LOO-1
 | Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
 | Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
 | No account will free up | Fails with the limit, like any other failure |
-| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given |
+| Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
 Only accounts in the resolved route take a step on. An explicit `harness:model`
 stays on its model and changes only accounts; a bare harness may change model;
@@ -364,6 +366,11 @@ A limit Claude only states in words ("You've reached your Fable limit") is
 scoped the same way. Loopflow then reads that account's usage once, and when
 the read fails the account rests for 15 minutes. Any usage read that finds a
 window spent holds that window's launches back until it resets.
+
+Running out of usage credits ("You're out of usage credits", Claude's
+`seven_day_overage_included`) holds back only the model the launch ran, until
+the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
+and the step goes on with Opus on the same account, in the same conversation.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

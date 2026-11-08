@@ -355,6 +355,7 @@ async fn managed_rows(
             .as_ref()
             .map(|identity| identity.email.clone());
         let mut live_usage = None;
+        let mut cooldown_until = account.cooldown_until;
         let identity_error = (presence == crate::provider_auth::CredentialPresence::Present
             && (provider == Provider::Codex || (!verify && cached_identity.is_some())))
         .then(|| {
@@ -408,6 +409,15 @@ async fn managed_rows(
                             "poll",
                         )
                         .await?;
+                    if crate::provider_account::clear_refuted_cooldown(
+                        store,
+                        account,
+                        &usage.windows,
+                    )
+                    .await?
+                    {
+                        cooldown_until = None;
+                    }
                     store
                         .update_provider_account_credential_state(
                             &account.provider,
@@ -509,7 +519,7 @@ async fn managed_rows(
                     .as_str()
                     .into(),
             ),
-            cooldown_until: account.cooldown_until,
+            cooldown_until,
             expires_at: access_expires_at,
             windows,
             reset_credits: live_usage

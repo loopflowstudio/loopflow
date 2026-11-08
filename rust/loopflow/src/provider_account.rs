@@ -325,8 +325,11 @@ pub(crate) struct RateLimitSignal {
     /// so cached auth inspection can show capacity without a fresh poll.
     pub windows: Vec<crate::store::AccountLimitWindow>,
     /// The one model the limit applies to, as the provider scopes it; `None`
-    /// limits the whole account.
+    /// limits the whole account, unless `credits`.
     pub model: Option<String>,
+    /// Usage credits ran out. They pay for one model, so the limit holds the
+    /// model the launch ran, never the account.
+    pub credits: bool,
 }
 
 impl RateLimitSignal {
@@ -339,6 +342,7 @@ impl RateLimitSignal {
             reason: limit.reason,
             windows: Vec::new(),
             model: limit.model,
+            credits: limit.credits,
         }
     }
 }
@@ -353,6 +357,8 @@ enum AccountLogin {
         profile: PathBuf,
         cause: activation::SwitchCause,
         launched_at: i64,
+        /// The model the launch named, if any; a credits limit holds it.
+        model: Option<String>,
     },
     /// A profile in a recorded capture's catalog. Replay runs in that profile,
     /// names the account it requires and records nothing, so this Machine's
@@ -415,8 +421,17 @@ impl ProviderAccountRoute {
                     activation::SwitchCause::Exhaustion
                 },
                 launched_at: now_unix(),
+                model: None,
             },
         }
+    }
+
+    /// This route as a launch of `model` takes it.
+    fn launching(mut self, launched: Option<&str>) -> Self {
+        if let AccountLogin::Stored { model, .. } = &mut self.login {
+            *model = launched.map(str::to_owned);
+        }
+        self
     }
 
     /// The account's stored profile: its login, and replay's launch home.
@@ -646,9 +661,16 @@ impl ProviderAccountRoute {
         signal: &RateLimitSignal,
     ) -> Result<(), ProviderAccountError> {
         match &self.login {
-            AccountLogin::Stored { store, .. } => {
+            AccountLogin::Stored { store, model, .. } => {
                 let account_id = self.used_account().await?;
-                record_rate_limit_signal(store, self.provider, &account_id, signal).await?;
+                record_rate_limit_signal(
+                    store,
+                    self.provider,
+                    &account_id,
+                    signal,
+                    model.as_deref(),
+                )
+                .await?;
             }
             AccountLogin::Replayed { .. } => {}
         }
@@ -663,9 +685,16 @@ impl ProviderAccountRoute {
         _run_blocking_account(self.provider, "record", move |runtime| {
             runtime.block_on(async {
                 match &self.login {
-                    AccountLogin::Stored { store, .. } => {
+                    AccountLogin::Stored { store, model, .. } => {
                         let account_id = self.used_account().await?;
-                        record_stated_limit(store, self.provider, &account_id, limit).await
+                        record_stated_limit(
+                            store,
+                            self.provider,
+                            &account_id,
+                            limit,
+                            model.as_deref(),
+                        )
+                        .await
                     }
                     AccountLogin::Replayed { .. } => Ok(()),
                 }
@@ -726,12 +755,14 @@ pub(crate) fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsSt
 }
 
 /// Record a provider rate-limit signal against a store: health row plus any
-/// observed limit windows.
+/// observed limit windows. `launched` is the model the launch named; a
+/// credits limit holds it, or the harness default when it named none.
 async fn record_rate_limit_signal(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
     signal: &RateLimitSignal,
+    launched: Option<&str>,
 ) -> Result<(), ProviderAccountError> {
     let cooldown_until = signal.limited.then(|| {
         let now = now_unix();
@@ -741,9 +772,13 @@ async fn record_rate_limit_signal(
             .max(now)
             + RESET_GRACE_SECS
     });
+    let scope = signal
+        .model
+        .clone()
+        .or_else(|| signal.credits.then(|| launched_model_family(launched)));
     // A limit on one model holds back only that model's window; the account
     // itself cools only when every model is limited.
-    let scoped = signal.model.is_some();
+    let scoped = scope.is_some();
     store
         .record_provider_account_health(
             provider.as_str(),
@@ -760,12 +795,15 @@ async fn record_rate_limit_signal(
             used_percent: 100,
             resets_at: signal.resets_at,
             plan: None,
-            model: signal.model.clone(),
+            model: scope.clone(),
             limited_until: None,
         });
     }
     for window in &mut windows {
-        if signal.limited && window.model == signal.model {
+        if signal.credits && window.model.is_none() {
+            window.model = scope.clone();
+        }
+        if signal.limited && window.model == scope {
             window.limited_until = cooldown_until;
         }
     }
@@ -777,6 +815,17 @@ async fn record_rate_limit_signal(
     Ok(())
 }
 
+/// The model family a launch of `model` runs, as limit scopes spell it.
+fn launched_model_family(model: Option<&str>) -> String {
+    let Some(model) = model.map(str::to_ascii_lowercase) else {
+        return crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_string();
+    };
+    crate::config::CLAUDE_MODEL_FAMILIES
+        .into_iter()
+        .find(|family| model.contains(family))
+        .map_or(model.clone(), str::to_owned)
+}
+
 /// Record a limit the provider stated in words, which carries no reset time.
 /// A Claude account's windows are then read once, so a spent one holds the
 /// account back until it resets instead of for the default cooldown. A poll
@@ -786,8 +835,10 @@ async fn record_stated_limit(
     provider: Provider,
     account_id: &ProviderAccountId,
     limit: crate::agent::SpentLimit,
+    launched: Option<&str>,
 ) -> Result<(), ProviderAccountError> {
-    record_rate_limit_signal(store, provider, account_id, &RateLimitSignal::stated(limit)).await?;
+    let signal = RateLimitSignal::stated(limit);
+    record_rate_limit_signal(store, provider, account_id, &signal, launched).await?;
     // Codex reports its windows on the stream; its poll is a whole app-server
     // exchange.
     if provider != Provider::Claude {
@@ -805,6 +856,30 @@ async fn record_stated_limit(
             .await?;
     }
     Ok(())
+}
+
+/// Clear `account`'s cooldown when a fresh usage reading leaves no
+/// account-wide window spent. Only a rejection sets that cooldown, and a
+/// rejection can be about something the account still has room for; a spent
+/// model's window holds that model by itself. Returns whether it cleared.
+pub(crate) async fn clear_refuted_cooldown(
+    store: &SharedStore,
+    account: &ProviderAccount,
+    polled: &[crate::store::AccountLimitWindow],
+) -> Result<bool, ProviderAccountError> {
+    let cooling = account
+        .cooldown_until
+        .is_some_and(|until| until > now_unix());
+    let spent = polled
+        .iter()
+        .any(|window| window.model.is_none() && window.used_percent >= 100);
+    if !cooling || spent {
+        return Ok(false);
+    }
+    store
+        .clear_provider_account_cooldown(&account.provider, &account.account_id)
+        .await?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -1062,7 +1137,8 @@ async fn record_native_limit(
         return Ok(());
     };
     // Read before the switch, while the spent login is still the active home.
-    record_stated_limit(&store, provider, &active, limit).await?;
+    // A terminal's model is its own to change; credits land on the default.
+    record_stated_limit(&store, provider, &active, limit, None).await?;
     // A Session a person pinned to accounts keeps to them.
     if !selection::AccountSelection::from_env()?.is_default() {
         return Ok(());
@@ -1118,7 +1194,9 @@ pub(crate) async fn resolve_provider_account_exact(
     wave_id: Option<&WaveId>,
     model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id, model).await?;
+    let route = select_route(provider, agent_session, exact_account_id, wave_id, model)
+        .await?
+        .map(|route| route.launching(model));
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
@@ -2267,6 +2345,7 @@ mod tests {
                     limited_until: None,
                 }],
                 model: None,
+                credits: false,
             })
             .await
             .unwrap();
@@ -2281,6 +2360,139 @@ mod tests {
             .cooldown_until
             .is_some_and(|until| until > now_unix()));
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
+    }
+
+    /// November 7: a bare `claude` step ran Fable, which needs usage credits,
+    /// and the rejection cooled the whole account for three days.
+    #[tokio::test]
+    async fn a_credits_rejection_holds_the_launched_model_and_never_the_account() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let account_id = parse_account_id("primary").unwrap();
+        let account = new_account(
+            Provider::Claude,
+            account_id.clone(),
+            temp.path().join("primary"),
+            None,
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+        let reset = now_unix() + 3 * 24 * 3600;
+        let rejection = RateLimitSignal {
+            utilization_percent: Some(100),
+            resets_at: Some(reset),
+            limited: true,
+            reason: "rejected: seven_day_overage_included".to_string(),
+            windows: vec![crate::store::AccountLimitWindow {
+                window: "seven_day_overage_included".to_string(),
+                used_percent: 100,
+                resets_at: Some(reset),
+                plan: None,
+                model: None,
+                limited_until: None,
+            }],
+            model: None,
+            credits: true,
+        };
+        let launch = |model: Option<&str>| {
+            ProviderAccountRoute::shared(
+                Provider::Claude,
+                account_id.clone(),
+                store.clone(),
+                temp.path().join("primary"),
+                false,
+            )
+            .launching(model)
+        };
+        launch(None).record_rate_limit(&rejection).await.unwrap();
+
+        let held = |model: &'static str| {
+            let store = store.clone();
+            let account_id = account_id.clone();
+            async move {
+                let account = store
+                    .get_provider_account("claude", &account_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+                account_held_until(&account, &limits, Some(model), now_unix())
+            }
+        };
+        let account = store
+            .get_provider_account("claude", &account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.cooldown_until, None);
+        assert_eq!(
+            held("claude-fable-5-1").await,
+            Some(reset + RESET_GRACE_SECS)
+        );
+        assert_eq!(held("opus").await, None);
+
+        // A launch that named its model holds that one.
+        launch(Some("sonnet"))
+            .record_rate_limit(&rejection)
+            .await
+            .unwrap();
+        assert!(held("sonnet").await.is_some());
+        assert_eq!(held("opus").await, None);
+    }
+
+    /// The November 7 store: weekly 93% and weekly Fable 88%, yet a cooldown
+    /// until the weekly reset. A refresh that reads room clears it.
+    #[tokio::test]
+    async fn a_fresh_reading_with_room_clears_a_cooldown_a_rejection_set() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let mut account = new_account(
+            Provider::Claude,
+            parse_account_id("loopflow").unwrap(),
+            temp.path().join("loopflow"),
+            None,
+        );
+        account.cooldown_until = Some(now_unix() + 3 * 24 * 3600);
+        account.cooldown_reason = Some("rejected: seven_day_overage_included".into());
+        store.upsert_provider_account(&account).await.unwrap();
+        let window =
+            |name: &str, used_percent, model: Option<&str>| crate::store::AccountLimitWindow {
+                window: name.into(),
+                used_percent,
+                resets_at: Some(now_unix() + 3 * 24 * 3600),
+                plan: None,
+                model: model.map(str::to_owned),
+                limited_until: None,
+            };
+
+        let spent = [window("weekly", 100, None)];
+        assert!(!clear_refuted_cooldown(&store, &account, &spent)
+            .await
+            .unwrap());
+        let room = [
+            window("weekly", 93, None),
+            window("weekly:fable", 100, Some("fable")),
+        ];
+        assert!(clear_refuted_cooldown(&store, &account, &room)
+            .await
+            .unwrap());
+        let stored = store
+            .get_provider_account("claude", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.cooldown_until, None);
     }
 }
 
@@ -2774,6 +2986,7 @@ mod account_first_tests {
                 reason: "subscription usage limit".to_string(),
                 windows: Vec::new(),
                 model: None,
+                credits: false,
             })
             .await
             .unwrap();
@@ -4126,6 +4339,7 @@ mod account_first_tests {
             Provider::Claude,
             &parse_account_id("first").unwrap(),
             stated(SPENT_LINE),
+            None,
         )
         .await
         .unwrap();
@@ -4151,6 +4365,7 @@ mod account_first_tests {
             Provider::Claude,
             &parse_account_id("first").unwrap(),
             stated("You've reached your Fable limit. Switch to another model to continue."),
+            None,
         )
         .await
         .unwrap();

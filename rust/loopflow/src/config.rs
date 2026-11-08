@@ -115,6 +115,9 @@ const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
 /// scoped Claude limit can name in its `rate_limit_type` suffix.
 pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
 
+/// The family Claude Code runs when a launch names no model.
+pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
+
 /// The models a bare `claude` step falls through to when the one it runs
 /// hits a scoped limit, best first.
 pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];

@@ -35,7 +35,7 @@ Make the scenario as real as you can reach:
 
 ## Launching Loopflow Desktop
 
-- Build its Rust library first: `cargo build -p loopflow-ffi --lib`.
+- Build the CLI and local server: `cargo build -p loopflow --bin lf`.
 - Build the debug app: `swift build --package-path swift -Xswiftc -gnone`
   (a few seconds when the build cache is warm). Binary: `swift/.build/debug/LoopflowMac`.
 - `uv run python scripts/check_desktop_launch.py` launches it with

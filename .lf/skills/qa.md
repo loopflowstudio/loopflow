@@ -83,6 +83,21 @@ fixing.
 Run tests only where they tell you something the real path cannot reach, and
 keep any you add about what a person would notice.
 
+## Loopflow server
+
+Build the branch with `cargo build -p loopflow --bin lf`. Start that binary's
+`server run` with an isolated `LF_HOME`, after removing inherited `LF_*` from
+its environment. `server status` reports its socket. This leaves the installed
+service alone; stop and reap the foreground server when finished.
+
+Drive newline-delimited JSON over that socket, using the hello, subscription,
+request and checkpoint shapes in `rust/loopflow/src/server/README.md`.
+For returning-state checks, a consistent SQLite backup of the existing store
+keeps real Task records without writing the original database. Never seed rows
+through internal APIs. Use only reads against that backup, keep probe files in
+the current checkout, and restore its prior file bytes and index entries.
+Comparison bases accept `parent`, `head` or a resolved commit SHA, not `HEAD`.
+
 ## Loopflow served launches
 
 Build with `cargo build -p loopflow --bin lf`. Use a disposable Git repository

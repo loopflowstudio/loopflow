@@ -36,6 +36,7 @@ const CHECKPOINTS: usize = 64;
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 type Lines = Framed<UnixStream, LinesCodec>;
+type Outgoing = mpsc::Sender<(tokio::task::Id, ServerMessage)>;
 
 /// Welcomed connections by client ID, as `lf server status` lists them.
 type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
@@ -439,10 +440,10 @@ async fn session(
     tickets: &Tickets,
     uid: u32,
 ) -> Result<()> {
-    let (outgoing, mut queue) = mpsc::channel::<ServerMessage>(QUEUE);
+    let (outgoing, mut queue) = mpsc::channel(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
-    // work finishes on its worker. A task returns its request ID.
-    let mut tasks: JoinSet<String> = JoinSet::new();
+    // work finishes on its worker. IDs stay reserved until final delivery.
+    let mut tasks: JoinSet<()> = JoinSet::new();
     let mut inflight: HashMap<String, Inflight> = HashMap::new();
     loop {
         tokio::select! {
@@ -545,17 +546,31 @@ async fn session(
                 };
                 inflight.insert(id, entry);
             }
-            Some(message) = queue.recv() => send(&mut lines, &message).await?,
-            Some(finished) = tasks.join_next_with_id() => {
-                match finished {
-                    // A cancelled ID may already name a newer request.
-                    Ok((task, id)) => {
-                        if inflight.get(&id).is_some_and(|entry| entry.task.id() == task) {
-                            inflight.remove(&id);
-                        }
+            Some((task, message)) = queue.recv() => {
+                let id = match &message {
+                    ServerMessage::Response { id, .. }
+                    | ServerMessage::Reading { id, .. }
+                    | ServerMessage::Ended { id }
+                    | ServerMessage::Error { id: Some(id), .. } => id,
+                    _ => unreachable!("workers send only request or subscription messages"),
+                };
+                // Cancellation may have discarded this answer or reused its ID.
+                let Some(entry) = inflight.get(id).filter(|entry| entry.task.id() == task) else {
+                    continue;
+                };
+                let ends = matches!(message, ServerMessage::Error { .. } | ServerMessage::Ended { .. })
+                    || (matches!(message, ServerMessage::Response { .. }) && entry.checkpoints.is_none());
+                if ends {
+                    // The client may reuse this ID as soon as it sees the answer.
+                    inflight.remove(id);
+                }
+                send(&mut lines, &message).await?;
+            }
+            Some(finished) = tasks.join_next() => {
+                if let Err(join) = finished {
+                    if !join.is_cancelled() {
+                        tracing::warn!(%instance, %join, "Server request task failed");
                     }
-                    Err(join) if join.is_cancelled() => {}
-                    Err(join) => tracing::warn!(%instance, %join, "Server request task failed"),
                 }
             }
         }
@@ -685,8 +700,10 @@ async fn request(
     operation: Operation,
     select: Option<Vec<String>>,
     instance: Arc<str>,
-    outgoing: mpsc::Sender<ServerMessage>,
-) -> String {
+    outgoing: Outgoing,
+) {
+    #[cfg(test)]
+    let completion = tests::take_request_completion(&id);
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
     let result = operate(operation, &id, &instance, &trace_id).await;
@@ -706,8 +723,11 @@ async fn request(
         }
     };
     // A closed connection drops the answer; the effect stands.
-    let _ = outgoing.send(message).await;
-    id
+    let _ = deliver(&outgoing, message).await;
+    #[cfg(test)]
+    if let Some(completion) = completion {
+        let _ = completion.await;
+    }
 }
 
 async fn operate(
@@ -780,17 +800,18 @@ async fn subscribing(
     id: String,
     query: Read,
     select: Option<Vec<String>>,
-    outgoing: mpsc::Sender<ServerMessage>,
+    outgoing: Outgoing,
     checkpoints: mpsc::Receiver<u64>,
-) -> String {
+) {
     if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
-        let _ = outgoing
-            .send(ServerMessage::error(Some(id.clone()), unavailable(failure)))
-            .await;
+        let _ = deliver(
+            &outgoing,
+            ServerMessage::error(Some(id), unavailable(failure)),
+        )
+        .await;
     }
-    id
 }
 
 /// The shared subscription owns a blocking runtime, which cannot be dropped on an
@@ -818,7 +839,7 @@ async fn subscribe(
     id: &str,
     query: Read,
     select: Option<Vec<String>>,
-    outgoing: &mpsc::Sender<ServerMessage>,
+    outgoing: &Outgoing,
     mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
@@ -875,9 +896,9 @@ fn line(message: &ServerMessage) -> String {
     serde_json::to_string(message).expect("server messages serialize")
 }
 
-async fn deliver(outgoing: &mpsc::Sender<ServerMessage>, message: ServerMessage) -> Result<()> {
+async fn deliver(outgoing: &Outgoing, message: ServerMessage) -> Result<()> {
     outgoing
-        .send(message)
+        .send((tokio::task::id(), message))
         .await
         .map_err(|_| anyhow::anyhow!("connection closed"))
 }
@@ -896,7 +917,8 @@ async fn send(lines: &mut Lines, message: &ServerMessage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::collections::HashMap;
+    use std::sync::{Arc, LazyLock, Mutex};
     use std::time::{Duration, Instant};
 
     use super::{Clients, Connection, Tickets};
@@ -910,6 +932,15 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::sync::Semaphore;
+
+    // Hold a worker after it queues its response, before the JoinSet can reap it.
+    static REQUEST_COMPLETIONS: LazyLock<
+        Mutex<HashMap<String, tokio::sync::oneshot::Receiver<()>>>,
+    > = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    pub(super) fn take_request_completion(id: &str) -> Option<tokio::sync::oneshot::Receiver<()>> {
+        REQUEST_COMPLETIONS.lock().unwrap().remove(id)
+    }
 
     struct Client {
         reader: BufReader<tokio::net::unix::OwnedReadHalf>,
@@ -1038,10 +1069,46 @@ mod tests {
                     select: None,
                 })
                 .await;
+            let response = client.receive().await.unwrap();
+            assert!(
+                matches!(&response, ServerMessage::Response { id, .. } if id == "a"),
+                "{response:?}"
+            );
+            drop(client.writer);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn answered_request_id_can_be_reused_before_its_worker_returns() {
+        with_empty_home(async {
+            let mut client = Client::connect();
             assert!(matches!(
-                client.receive().await.unwrap(),
-                ServerMessage::Response { id, .. } if id == "a"
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
             ));
+            let (release, completion) = tokio::sync::oneshot::channel();
+            REQUEST_COMPLETIONS
+                .lock()
+                .unwrap()
+                .insert("held-completion".into(), completion);
+            for _ in 0..2 {
+                client
+                    .send(&ClientMessage::Request {
+                        id: "held-completion".into(),
+                        operation: catalog(),
+                        select: None,
+                    })
+                    .await;
+                let response = client.receive().await.unwrap();
+                assert!(
+                    matches!(&response, ServerMessage::Response {
+                        id, result: serde_json::Value::Array(_), ..
+                    } if id == "held-completion"),
+                    "{response:?}"
+                );
+            }
+            drop(release);
             drop(client.writer);
             client.server.await.unwrap().unwrap();
         });
@@ -1180,6 +1247,18 @@ mod tests {
             };
             assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
+            // Its acknowledgement does not release a subscription's ID.
+            client
+                .send(&ClientMessage::Request {
+                    id: "ps".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error { id: Some(id), code: ErrorCode::Conflict, .. } if id == "ps"
+            ));
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
@@ -1215,6 +1294,17 @@ mod tests {
             assert!(matches!(
                 client.receive().await.unwrap(),
                 ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "ps"
+            ));
+            client
+                .send(&ClientMessage::Request {
+                    id: "ps".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "ps"
             ));
             drop(client.writer);
             client.server.await.unwrap().unwrap();

@@ -374,32 +374,29 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 Planned for the authenticated endpoint in [Phone access](../../../../docs/server.md#phone-access);
 this build supports local attachment only.
 
-To attach a phone to a running Session, request `session.attach` on its
-authenticated client connection after `welcome`:
+After `welcome`, request `session.attach` on the authenticated client connection:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-Open a separate authenticated bridge connection and send the returned ticket as
-its first message:
+Open a separate authenticated bridge connection and send the ticket first:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
-After `bridged`, use the [binary owner protocol](../transport/README.md).
-The ticket itself does not take input or geometry control from another viewer;
-request control through the owner protocol.
+After `bridged`, use the [binary owner protocol](../transport/README.md) for
+terminal data and input/geometry control. Attaching does not take another viewer's
+control.
 
-Both connections must authenticate as the same Tailscale node and user, using
-the transport's node stable ID and user ID. The same account on a different
-device does not match. A `hello` name, `client_id`, login text or proxy's Unix UID
-cannot supply that identity. Local and remote connections cannot redeem each
-other's tickets. Each ticket opens one bridge and expires after 60 seconds,
-including host sleep.
+Both connections must authenticate with the same Tailscale node stable ID and
+user ID. The same account on a different device does not match. A `hello` name,
+`client_id`, login text or proxy's Unix UID cannot supply that identity. Local
+and remote connections cannot redeem each other's tickets. Each ticket opens
+one bridge and expires after 60 seconds, including host sleep.
 
 An unknown, spent, expired or foreign ticket returns `not_found` with a null
 `id` and closes the bridge connection. Presenting a ticket consumes it even

@@ -28,7 +28,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8, 20:29 UTC implement recheck reconfirmed the dependency:
+The November 8, 21:06 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -36,6 +36,11 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
+
+The local implementation still consumes tickets on every redemption attempt,
+checks only the Unix peer UID and measures its 60 seconds with `Instant`.
+It supplies neither remote identity nor the planned expiry across host sleep;
+the planned wording in both docs remains accurate.
 
 ## Delete — do not maintain
 
@@ -64,6 +69,9 @@ Visual review remains for demo or QA; Desktop opening results are in
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
+
+Compression keeps the wire examples and tightens their explanation; the
+UID-only predecessor stays untouched until its replacement is available.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Plan-only
 edits need no build or tests.

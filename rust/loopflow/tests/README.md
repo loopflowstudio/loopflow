@@ -294,14 +294,10 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins and provider
 conversation IDs in `lf session`.
-`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
-target/debug/lf --output <dir>` proves the same for Claude with synthetic
-logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, and a launch gets no account home or credential variable.
-On macOS it writes and removes one Keychain item scoped to its temporary config
-directory. The fixture copies the candidate, uses private Machines and stops
-only its identified provider process children. Native execution uses synthetic
-Responses, not configured accounts or installed data. Ordinary retry, usage,
+The [native Claude fixture](../../../tests/e2e/README.md#native-claude-account-switching)
+checks shared-home switching, multiple Keychain items and holds overriding
+repository order. Both fixtures copy the candidate and use private Machines,
+synthetic logins and local endpoints. Ordinary retry, usage,
 binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
 `ops::linear::adoption_tests`.
 

@@ -82,6 +82,25 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+## Native Claude account switching
+
+```bash
+uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py \
+  --lf "$(command -v lf)" --claude "$(command -v claude)" \
+  --output .lf/tmp/claude-shared-home
+```
+
+Uses the selected binaries, synthetic logins, private Loopflow/provider homes and
+a loopback endpoint; no paid model request reaches a provider. On macOS, the login
+Keychain must be available: the fixture creates items under a service unique to
+its temporary directory and deletes those exact items afterwards.
+
+Checks plain Claude after switches, shared-home launches, a held login overriding
+a repository order, and two Keychain items receiving the first switch. With a third
+item, it records whether that item changed and checks which login Claude sends.
+This does not exercise OAuth rotation, an already-running Claude reloading its
+login, or `resume --account` and `session move` on live conversations.
+
 ## Native Codex terminal capture
 
 ```bash

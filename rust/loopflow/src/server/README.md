@@ -81,7 +81,7 @@ by a test and every server fixture must decode.
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
 ← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
@@ -215,7 +215,7 @@ its kind fixes the name a served version keeps.
 
 The nouns are Loopflow's primitives (Wave, Task, Graph, Session, Process,
 Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
-settings, `desktop` for the app and `planning` for every Wave's plan at once;
+settings, `desktop` for the app and `plan` for every Wave's plan at once;
 nothing gets a namespace of its own for a client.
 
 `desktop.*` is Desktop's own arrangement state: which repositories its windows

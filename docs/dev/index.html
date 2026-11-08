@@ -1991,7 +1991,8 @@ user / agent --&gt; lf CLI --------+----------+-----------+
 another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
 <p>Each host can expose a <a href="https://loopflow.studio/architecture/server">client API server</a> to Desktop and
-mobile; it does not centralize execution across Machines. Machine routing selects
+future mobile clients; remote admission is separate work. It does not centralize
+execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -2000,9 +2001,10 @@ keep shared planning and delivery truth. Readers join those sources; they do not
 ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">Repository
-  `-- Wave                    enduring objective, memory and cadence
-        |   planning          status + Graph + KRs (one Linear Project when connected)
-        `-- Task              identity, worktree, PR and every Graph process for it
+  |-- Task                    repository work, optionally outside a Wave
+  `-- Wave                    enduring objective, memory, cadence and default graph
+        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+              `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
@@ -2050,8 +2052,8 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 <td>Wave files, local Wave identity and, with Linear, Initiative membership</td>
 </tr>
 <tr>
-<td>Planning</td>
-<td>A Wave's plan, KRs and targets</td>
+<td>Project</td>
+<td>A Wave's plan, Tasks, KRs and targets</td>
 <td><code>projects</code> row, shared through the planning provider</td>
 </tr>
 <tr>
@@ -2092,8 +2094,10 @@ Process; an agent-issued child also records <code>via_agent</code> and LfSession
 The provider's AgentProcess resolves to its attached LfProcess at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.</p>
-<p>Every Graph naming a Task, or run in its checkout, is equally its work;
-none is privileged. <code>task run</code> always runs a fresh one.
+<p>Every Graph naming a Task, or run in its checkout, is part of its work.
+Only <code>lf task run</code> and <code>lf ship</code> advance the Task's captured graph position;
+independent Graphs leave that position unchanged. Each launch starts a fresh
+Graph process.
 Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
@@ -2144,13 +2148,13 @@ lf task run INF-123
 lf --wave &lt;wave&gt; wave-operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
-<p><code>task run</code> places the Task, then runs a fresh Graph in its checkout exactly as
-<code>lf --task ISSUE graph GRAPH</code> does, returning when the Graph ends; it never
-continues an earlier one. A plan is replaced in place, preserving active Task
-identity and execution. Direct
-questions and helpers use attributed LfSessions without gaining Graph
-authority. Graphs hold autonomous steps only; review happens in the Task
-conversation.</p>
+<p><code>task run</code> places the Task and starts a fresh Graph process from its saved
+position, returning once the process registers. It stops at the next interactive
+step for review in the Task conversation. <code>-b</code> waits and runs those steps headless;
+<code>lf ship</code> approves continuation through delivery. A stopped process stays history.
+A direct <code>lf --task ISSUE graph GRAPH</code> uses the same runner without moving the
+Task's graph position. Replanning keeps existing Task identity and execution.
+See <a href="https://loopflow.studio/docs/orchestration#where-a-person-takes-part">Task workflows</a>.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf --machine build-home session list --json
 lf --machine build-home --wave product wave-operate

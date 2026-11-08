@@ -185,7 +185,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
 | `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
-| `projects` | A Wave's planning: stable Linear Project identity, status, Graph and planning facts |
+| `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
 ### Conversation and attachment lifetime
@@ -251,10 +251,11 @@ the Wave's goal and memory reach it as ordinary Wave context.
 
 A Task's primary is one of its own conversations, named by
 `tasks.primary_session_id`; its row carries no scope mark and it stays a Task
-member. `lf resume --task ISSUE` keeps the chosen primary, else selects the
-sole unfinished interactive conversation, else the most recently used by
-native human input, then last opening. It creates one when the Task has none.
-Opening an exact Session leaves the Task's primary unchanged.
+member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
+selects an unfinished interactive member by latest native human input, falling
+back to interactive opening and creation time; it creates one when none exists.
+`lf session bind` selects the primary explicitly. Opening an exact Session leaves
+an already selected Task primary unchanged.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs

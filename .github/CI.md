@@ -8,7 +8,7 @@ clear committed scratch additions before pushing a landing candidate. Scratch-fr
 small changes and Dependabot updates, run the full test matrix in parallel.
 Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
-[AGENTS.md](../AGENTS.md#verification-cadence). Scratch keeps one check-result line.
+[AGENTS.md](../AGENTS.md#when-to-run-what). Scratch keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 

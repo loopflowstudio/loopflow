@@ -196,7 +196,10 @@ A connection that ends without a `leave` request keeps its stream for 60 s.
 `{"kind":"resume","reconnect":…,"received":N,…}` continues from byte `N` with no
 snapshot; a byte the spool no longer holds answers `reconnect_required`, and the
 viewer attaches afresh. Input control and ownership release when the connection
-ends; a resume asks for them again.
+ends; a resume asks for them again. If the viewer's previous socket is still
+connected, resume replaces that socket and takes only its own prior claims.
+Another viewer's input or geometry claim survives. Closing the stale socket
+later cannot revoke the replacement connection's claims.
 
 Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
 who receives `owner` with `held: false` and stays attached; `own: "request"`

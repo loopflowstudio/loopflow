@@ -176,7 +176,8 @@ another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
 Each host can expose a [client API server](server.md) to Desktop and
-mobile; it does not centralize execution across Machines. Machine routing selects
+future mobile clients; remote admission is separate work. It does not centralize
+execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -188,9 +189,10 @@ ledger.
 
 ```text
 Repository
-  `-- Wave                    enduring objective, memory and cadence
-        |   planning          status + Graph + KRs (one Linear Project when connected)
-        `-- Task              identity, worktree, PR and every Graph process for it
+  |-- Task                    repository work, optionally outside a Wave
+  `-- Wave                    enduring objective, memory, cadence and default graph
+        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+              `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
@@ -207,7 +209,7 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Planning | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
+| Project | A Wave's plan, Tasks, KRs and targets | `projects` row, shared through the planning provider |
 | Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |

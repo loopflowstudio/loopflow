@@ -21,7 +21,8 @@ client credential, not another execution destination or another Machine record.
 ## One concrete path
 
 Install Loopflow, open Desktop, and keep editing a Session. Installation prepares
-the local server; Desktop connects without a separate setup command. Remote client access and phone pairing are planned in LOO-718.
+the local server; Desktop connects without a separate setup command. Remote
+client access and phone pairing are planned in LOO-718.
 Connecting a client does not rent a worker, move a Task, or select another provider.
 
 If the server is replaced during an unfinished draft and a running Graph,

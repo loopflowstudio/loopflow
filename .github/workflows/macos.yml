@@ -96,6 +96,11 @@ jobs:
           path: ${{ runner.temp }}/swift-tests
           if-no-files-found: ignore
           retention-days: 7
+      - name: Launch Desktop and wait for it to quit
+        # The release package runs this launch after merge; a hang at launch
+        # or quit fails here instead, printing the sampled stacks.
+        run: uv run python scripts/check_desktop_launch.py
+        timeout-minutes: 3
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
       - name: Record Swift source timestamps

@@ -24,6 +24,7 @@ try:
     spec.loader.exec_module(release_loopflow)
 finally:
     sys.path.pop(0)
+check_desktop_launch = sys.modules["check_desktop_launch"]
 
 
 def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -114,7 +115,7 @@ def test_resource_check_rejects_a_build_dependent_app(tmp_path: Path, unsigned_c
         f'test -e {quoted_bundle}\nprintf snapshot > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n',
     )
 
-    with pytest.raises(RuntimeError, match="failed without SwiftPM build resources"):
+    with pytest.raises(RuntimeError, match="App exited 1 from -ui-test-mode"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
@@ -127,7 +128,7 @@ def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path, unsigned_ch
     app_path = tmp_path / "Loopflow.app"
     _write_test_app(app_path, "exit 0\n")
 
-    with pytest.raises(RuntimeError, match="produced no resource-check snapshot"):
+    with pytest.raises(RuntimeError, match="without writing its -ui-test-mode snapshot"):
         _check(app_path, build_dir)
 
     assert build_bundle.is_dir()
@@ -140,7 +141,7 @@ def test_resource_check_reports_a_hung_app(
     (build_dir / "LoopflowSwift_Loopflow.bundle").mkdir(parents=True)
     app_path = tmp_path / "Loopflow.app"
     _write_test_app(app_path, "echo window opened\nsleep 60 &\nwait\n")
-    monkeypatch.setattr(release_loopflow, "RESOURCE_CHECK_TIMEOUT", 1)
+    monkeypatch.setattr(check_desktop_launch, "LAUNCH_TIMEOUT", 1)
 
     with pytest.raises(RuntimeError, match="did not exit within 1s") as failure:
         _check(app_path, build_dir)

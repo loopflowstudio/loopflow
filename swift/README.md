@@ -1050,6 +1050,21 @@ On a pull request the Swift tests get 5 minutes after the build (161 s on
 the suite slower fails on its own PR: make the slow test fast or share its setup,
 and raise the budget only with a measured reason.
 
+After the tests, `swift-test` launches the debug app it built and waits for it
+to quit, the same check the release package runs:
+
+```bash
+uv run python scripts/check_desktop_launch.py   # launch, snapshot, quit within 30 s
+```
+
+It runs `LoopflowMac -ui-test-mode empty-workspaces` with the snapshot
+environment, unattended like the rest of the job. Passing means the app wrote a
+non-empty snapshot and exited 0. If the app is still running after 30 s, the check
+samples it, kills its process group and fails with the app's output and the
+sampled stacks, so a hang at launch or quit fails on its own PR
+instead of in `Packages (main)` after merge. Read the stack first: it names the
+frame the app is waiting in (for #1811's hang, `uiTestSnapshot`).
+
 Failed Swift CI runs write the unfinished and slowest tests to the job summary
 (`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`
 artifact for seven days with the toolchain, output log, and Swift Testing event

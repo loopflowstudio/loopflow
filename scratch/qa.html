@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-805 · Live QA</title>
+<style>
+:root {color-scheme:light dark;font:16px/1.55 system-ui,sans-serif}
+body {max-width:880px;margin:3rem auto;padding:0 1.3rem 3rem}
+h1 {line-height:1.2;font-size:2rem} h2 {font-size:1.12rem;margin-top:2rem}
+pre {white-space:pre-wrap;overflow-wrap:anywhere;border-left:3px solid #578b80;padding:.8rem 1rem;background:#80808014;font:14px/1.5 ui-monospace,monospace}
+header,footer {font-size:.9rem} code {overflow-wrap:anywhere} a {color:inherit}
+</style>
+<header>LOO-805 · 2026-11-08 · branch a491656bf</header>
+<h1>Fresh Git reads while subscriptions stay open</h1>
+<p>Passed against the branch's built CLI and foreground server through the public
+Unix-socket API. No mocks, test endpoints or fixture setters. An isolated home
+first exercised empty state, then used a SQLite backup of the existing Machine
+store. Both Task subscriptions and one-shot requests shared one connection.</p>
+<p>Launch: <code>cargo build -p loopflow --bin lf</code>, then
+<code>uv run python scratch/qa-live.py</code>. The driver starts
+<code>target/debug/lf server run</code>, sends revision-2 hello/subscribe/request
+messages, edits this Task's checkout and restores it in a finally block.</p>
+<section><h2>Fresh state</h2><pre>Branch server welcomed protocol revision 2 with no initialized Machine; status ready=True</pre></section>
+<section><h2>Returning state</h2><pre>Restarted with a consistent backup of the existing Machine database; original store untouched.</pre></section>
+<section><h2>Open Task</h2><pre>Subscribed to LOO-805 and read 11 existing changed files on the same connection (0.114s).</pre></section>
+<section><h2>Empty comparison</h2><pre>HEAD against HEAD returned files=[].</pre></section>
+<section><h2>Edit while subscribed</h2><pre>Immediate task.changes returned the new untracked file and the unstaged README edit (0.111s).</pre></section>
+<section><h2>Read patch</h2><pre>task.diff included +LOO-805 live QA marker on the existing connection.</pre></section>
+<section><h2>Two subscriptions and stage</h2><pre>Both Task subscriptions active; task.changes changed the file from untracked to staged immediately (0.119s).</pre></section>
+<section><h2>Edit staged file</h2><pre>Returned staged=true and unstaged=true; task.file returned second content.</pre></section>
+<section><h2>Bad input then retry</h2><pre>Unknown base returned unavailable: Comparison must be parent, head, or a resolved commit SHA; the next valid request succeeded on the same connection.</pre></section>
+<section><h2>Larger change set</h2><pre>All 200 new files appeared in one request while both subscriptions remained active (0.141s).</pre></section>
+<section><h2>Subscription refresh</h2><pre>Checkpoint 805 returned an available Task reading with dirty=true: True</pre></section>
+<section><h2>Disconnect and reconnect</h2><pre>Closed a connection with two subscriptions; a new connection received a complete Task reading and all 200 files.</pre></section>
+<section><h2>Undo edits</h2><pre>Same-connection task.changes removed all QA files and cleared README&#x27;s unstaged flag; original README bytes restored.</pre></section>
+<section><h2>Connection cleanup</h2><pre>Server status reports clients=[] after disconnect.</pre></section>
+<section><h2>Server cleanup</h2><pre>QA server stopped and reaped.</pre></section>
+<h2>Corrections during QA</h2>
+<p>The first driver attempt used uppercase HEAD as a comparison token and received
+“Comparison must be parent, head, or a resolved commit SHA”. The driver switched
+to a resolved SHA and repeated the entire workflow successfully. No product
+repair was needed. The customized QA skill now documents the working launch and
+protocol route.</p>
+<h2>What works now</h2>
+<p>Empty comparisons, unstaged and untracked edits, staging, edits after staging,
+file content and patch reads, two subscriptions, 200-file changes, invalid-input
+recovery, checkpoints, disconnect/reconnect, and undoing edits all completed.
+Measured changed-file reads took 0.111–0.141 seconds in this run; these are
+observations, not a performance benchmark.</p>
+<h2>Limits and remaining work</h2>
+<p>No in-scope defect found. Desktop rendering and a signed fresh installation
+were not exercised in this headless run; the API used by Desktop was. This local
+Unix-socket scenario does not assess a remote network outage. It also cannot
+show internal cache hits, worker panic unwinding, or an atomic Git snapshot;
+the first two remain covered by focused tests from implementation, and atomic
+snapshots are outside the contract. CI, delivery and post-merge verification
+remain outside this QA step.</p>
+<footer>The probe files and temporary index entry were removed, original README
+bytes restored, connections closed, QA server stopped and reaped, and temporary
+store and socket directory deleted. Existing checkout changes remain.</footer>
+</html>

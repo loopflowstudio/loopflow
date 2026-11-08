@@ -1,0 +1,62 @@
+[
+  [
+    "Fresh state",
+    "Branch server welcomed protocol revision 2 with no initialized Machine; status ready=True"
+  ],
+  [
+    "Returning state",
+    "Restarted with a consistent backup of the existing Machine database; original store untouched."
+  ],
+  [
+    "Open Task",
+    "Subscribed to LOO-805 and read 11 existing changed files on the same connection (0.114s)."
+  ],
+  [
+    "Empty comparison",
+    "HEAD against HEAD returned files=[]."
+  ],
+  [
+    "Edit while subscribed",
+    "Immediate task.changes returned the new untracked file and the unstaged README edit (0.111s)."
+  ],
+  [
+    "Read patch",
+    "task.diff included +LOO-805 live QA marker on the existing connection."
+  ],
+  [
+    "Two subscriptions and stage",
+    "Both Task subscriptions active; task.changes changed the file from untracked to staged immediately (0.119s)."
+  ],
+  [
+    "Edit staged file",
+    "Returned staged=true and unstaged=true; task.file returned second content."
+  ],
+  [
+    "Bad input then retry",
+    "Unknown base returned unavailable: Comparison must be parent, head, or a resolved commit SHA; the next valid request succeeded on the same connection."
+  ],
+  [
+    "Larger change set",
+    "All 200 new files appeared in one request while both subscriptions remained active (0.141s)."
+  ],
+  [
+    "Subscription refresh",
+    "Checkpoint 805 returned an available Task reading with dirty=true: True"
+  ],
+  [
+    "Disconnect and reconnect",
+    "Closed a connection with two subscriptions; a new connection received a complete Task reading and all 200 files."
+  ],
+  [
+    "Undo edits",
+    "Same-connection task.changes removed all QA files and cleared README's unstaged flag; original README bytes restored."
+  ],
+  [
+    "Connection cleanup",
+    "Server status reports clients=[] after disconnect."
+  ],
+  [
+    "Server cleanup",
+    "QA server stopped and reaped."
+  ]
+]

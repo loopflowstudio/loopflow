@@ -772,13 +772,10 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
     match cmd {
         OpsCommand::Account {
             cmd,
-            provider,
+            target,
             cached,
-            details,
             json,
-        } => {
-            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
-        }
+        } => loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *cached, *json),
         OpsCommand::Release { cmd } => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
         }
@@ -2890,6 +2887,24 @@ fn execute_command(
                 .expect("clap requires --lifeline for tool-group"),
             provider_pid.expect("clap requires --provider-pid with --lifeline"),
         ),
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::Limit,
+            ..
+        }) => {
+            loopflow::provider_account::observe_native_limit();
+            Ok(())
+        }
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::RecordLimit,
+            ..
+        }) => {
+            loopflow::provider_account::record_limit();
+            Ok(())
+        }
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::Move,
+            ..
+        }) => loopflow::lf::commands::context::apply_session_move(),
         Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),

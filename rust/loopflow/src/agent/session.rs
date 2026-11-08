@@ -23,7 +23,6 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
-    pub(crate) isolate: Option<bool>,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -53,7 +52,6 @@ pub(crate) fn native_connection_command(
     ];
     SessionCommand {
         launch: None,
-        isolate: None,
         input,
         program: "codex".into(),
         args,
@@ -160,7 +158,6 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
-        isolate: config.isolate,
         input,
         program: harness,
         args,
@@ -303,7 +300,6 @@ pub(crate) fn resolve_session_config(
             crate::config::Resume::Import { agent } => (agent, true),
         };
     let mut config = AgentConfig {
-        isolate: Some(current.isolate),
         agent: Some(agent),
         cwd: Some(session.cwd.clone()),
         skip_permissions: current.yolo,
@@ -478,7 +474,6 @@ mod tests {
     fn claude_stream_retains_chrome_turn_limit_schema_and_resume() {
         let cwd = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            isolate: None,
             agent: Some("claude:sonnet".into()),
             cwd: Some(cwd.path().into()),
             chrome: Some(true),

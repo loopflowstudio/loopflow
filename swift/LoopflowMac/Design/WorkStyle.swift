@@ -72,6 +72,7 @@ extension TaskExecutionState {
         case .running, .starting: ("Running", .running)
         case .blocked: ("Blocked", .warning)
         case .stalled: ("Stalled", .warning)
+        case .waiting: ("Waiting", .stopped)
         case .idle, .unknown: (nil, .stopped)
         }
     }

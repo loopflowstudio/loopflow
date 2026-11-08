@@ -38,6 +38,14 @@ fn open_test_store() {
 }
 
 #[test]
+fn an_lf_child_inherits_no_way_to_the_developers_provider_homes() {
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").expect("test binary home"));
+    assert!(home.starts_with(std::env::temp_dir()), "{}", home.display());
+    assert_eq!(std::env::var_os("CODEX_HOME"), None);
+    assert_eq!(std::env::var_os("CLAUDE_CONFIG_DIR"), None);
+}
+
+#[test]
 fn test_guards_keep_store_writes_out_of_ambient_paths() {
     let ambient_home = tempfile::tempdir().expect("ambient home");
     let _ambient = AmbientStorage::seed(ambient_home.path());

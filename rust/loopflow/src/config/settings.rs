@@ -170,7 +170,15 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        validate_agent_policy(agent)?;
+        // A fallback may list the agents a step falls through to; a choice
+        // names one.
+        if path[0] == "default_agent" {
+            for entry in super::agent_list(agent) {
+                validate_agent_policy(entry)?;
+            }
+        } else {
+            validate_agent_policy(agent)?;
+        }
     }
     let mut check = super::catalog::defaults();
     insert(&mut check, path, value.clone());
@@ -864,9 +872,6 @@ fn environment() -> Result<Value, LoadError> {
             )))
         }
     }
-    if let Some(isolate) = crate::provider_account::activation::isolation_from_env() {
-        insert(&mut values, &["isolate"], isolate.into());
-    }
     if let Ok(agent) = std::env::var(super::AGENT_OVERRIDE_ENV) {
         if !agent.is_empty() {
             insert(&mut values, &["agent"], agent.into());
@@ -1321,7 +1326,7 @@ mod tests {
             ".lf/graphs/outer.yaml",
             "- graph: release\n- graph: release\n",
         );
-        std::fs::write(home.path().join("config.yaml"), "skills: {probe: {agent: codex, chrome: true}}\ngraphs: {release: {steps: {write-code: {agent: claude:sonnet, chrome: false, isolate: true}}}}\n").unwrap();
+        std::fs::write(home.path().join("config.yaml"), "skills: {probe: {agent: codex, chrome: true}}\ngraphs: {release: {steps: {write-code: {agent: claude:sonnet, chrome: false}}}}\n").unwrap();
         let config = crate::config::load_config(Some(repo.path()))
             .unwrap()
             .unwrap();
@@ -1350,7 +1355,6 @@ mod tests {
             .unwrap();
             assert_eq!(prepared.config.agent().unwrap(), expected);
             assert_eq!(prepared.config.chrome, Some(index % 2 != 0));
-            assert_eq!(prepared.config.isolate, Some(index % 2 == 0));
         }
         repo.create_file(
             ".lf/graphs/invalid.yaml",

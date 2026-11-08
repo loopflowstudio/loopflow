@@ -15,10 +15,11 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::provider_account::activation::claude_credential_home;
+use crate::provider_account::activation::{claude_credential_home, ClaudeRefreshLock};
 use crate::provider_account::identity::{credential_digest, AccountIdentity};
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
+#[cfg(not(test))]
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 #[cfg(not(test))]
 const CLAUDE_TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
@@ -53,28 +54,41 @@ pub async fn poll_account(
     let home = account.home.as_deref().ok_or_else(|| {
         SubscriptionError::Unavailable("account has no managed credential home".to_string())
     })?;
-    match account.provider.as_str() {
-        "claude" => poll_claude(&claude_credential_home(home)).await,
-        "codex" => Ok(
+    let mut usage = match account.provider.as_str() {
+        "claude" => poll_claude(&claude_credential_home(home)).await?,
+        "codex" => {
             crate::provider_account::codex_access::resolve(account, None)
                 .await?
-                .usage,
-        ),
-        other => Err(SubscriptionError::Unavailable(format!(
-            "no subscription poll for provider '{other}'"
-        ))),
+                .usage
+        }
+        other => {
+            return Err(SubscriptionError::Unavailable(format!(
+                "no subscription poll for provider '{other}'"
+            )))
+        }
+    };
+    // A spent window holds its account back until it resets, whichever read
+    // saw it; a hold the stream set survives a later poll.
+    for window in &mut usage.windows {
+        if window.used_percent >= 100 {
+            window.limited_until = window
+                .resets_at
+                .map(|reset| reset + crate::provider_account::RESET_GRACE_SECS);
+        }
     }
+    Ok(usage)
 }
 
 // -- Claude ------------------------------------------------------------------
 
 async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError> {
     let client = reqwest::Client::new();
-    let (mut token, mut credential, refreshed) = fresh_claude_token(&client, home, false).await?;
+    let (mut token, mut credential, refreshed) =
+        fresh_claude_token(&client, home, false, None).await?;
     let mut response = request_claude_usage(&client, token.expose_secret()).await?;
     ensure_claude_credential_unchanged(home, credential.expose_secret())?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED && !refreshed {
-        (token, credential, _) = fresh_claude_token(&client, home, true).await?;
+        (token, credential, _) = fresh_claude_token(&client, home, true, None).await?;
         response = request_claude_usage(&client, token.expose_secret()).await?;
     }
     let observation = async {
@@ -103,9 +117,13 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
     observation
 }
 
-pub(crate) async fn claude_identity(home: &Path) -> Result<AccountIdentity, SubscriptionError> {
+/// `held` is Claude's refresh lock on `home` when the caller already holds it.
+pub(crate) async fn claude_identity(
+    home: &Path,
+    held: Option<&ClaudeRefreshLock>,
+) -> Result<AccountIdentity, SubscriptionError> {
     let client = reqwest::Client::new();
-    let (token, credential, _) = fresh_claude_token(&client, home, false).await?;
+    let (token, credential, _) = fresh_claude_token(&client, home, false, held).await?;
     let identity =
         request_claude_identity(&client, token.expose_secret(), credential.expose_secret()).await?;
     ensure_claude_credential_unchanged(home, credential.expose_secret())?;
@@ -166,7 +184,7 @@ async fn request_claude_usage(
             #[cfg(test)]
             {
                 std::env::var("LF_TEST_CLAUDE_USAGE_URL")
-                    .unwrap_or_else(|_| CLAUDE_USAGE_URL.to_string())
+                    .unwrap_or_else(|_| "http://127.0.0.1:1/usage".into())
             }
             #[cfg(not(test))]
             {
@@ -211,10 +229,13 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
             let scope = limit
                 .pointer("/scope/model/display_name")
                 .and_then(Value::as_str);
-            let window = match (group, scope) {
-                ("session", _) => "session".to_string(),
-                ("weekly", None) => "weekly".to_string(),
-                ("weekly", Some(model)) => format!("weekly:{}", model.to_lowercase()),
+            // Named as Claude's stream names its `rate_limit_type`, so a poll
+            // and a running Claude update the same window.
+            let model = scope.map(str::to_lowercase);
+            let window = match (group, &model) {
+                ("session", _) => "five_hour".to_string(),
+                ("weekly", None) => "seven_day".to_string(),
+                ("weekly", Some(model)) => format!("seven_day_{model}"),
                 (other, _) => other.to_string(),
             };
             Some(AccountLimitWindow {
@@ -226,43 +247,109 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
                     .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
                     .map(|value| value.unix_timestamp()),
                 plan: None,
+                model,
+                limited_until: None,
             })
         })
         .collect()
 }
 
-/// The caller holds the managed login lock through polling and persistence.
-/// Comparisons detect completed replacements; they do not serialize native
-/// provider writes or competing server-side refreshes.
+/// A Claude access token, its expiry (unix seconds) and whether it was just
+/// refreshed.
+pub(crate) struct ClaudeAccess {
+    pub token: SecretString,
+    pub expires_at: Option<i64>,
+    pub refreshed: bool,
+}
+
+/// The access token of the Claude login in `home`, refreshed first when it
+/// expires within `margin` seconds. The refreshed login is written back to
+/// `home`; the caller holds its lock.
+pub(crate) async fn claude_access_token(
+    home: &Path,
+    margin: i64,
+) -> Result<ClaudeAccess, SubscriptionError> {
+    let expiry = |credential: &str| claude_access(credential).ok()?.1.map(|ms| ms / 1000);
+    let stored = crate::provider_auth::read_claude_login(home)
+        .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
+        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let due = expiry(stored.expose_secret()).is_none_or(|expires| expires <= now + margin);
+    let client = reqwest::Client::new();
+    let (token, credential, refreshed) = fresh_claude_token(&client, home, due, None).await?;
+    Ok(ClaudeAccess {
+        token,
+        expires_at: expiry(credential.expose_secret()),
+        refreshed,
+    })
+}
+
+/// Whether the Claude login in `home` has an access token past its expiry.
+/// With no recorded expiry the server judges it, so nothing is due.
+pub(crate) fn claude_token_due(home: &Path) -> bool {
+    let expiry = crate::provider_auth::read_claude_login(home)
+        .ok()
+        .flatten()
+        .and_then(|login| claude_access(login.expose_secret()).ok())
+        .and_then(|(_, expiry)| expiry);
+    expiry.is_some_and(claude_token_expired)
+}
+
+fn claude_token_expired(expires_at_ms: i64) -> bool {
+    expires_at_ms <= now_ms() + 60_000
+}
+
+fn now_ms() -> i64 {
+    OffsetDateTime::now_utc().unix_timestamp() * 1000
+}
+
+pub(crate) async fn acquire_claude_refresh_lock(
+    home: &Path,
+) -> Result<ClaudeRefreshLock, SubscriptionError> {
+    let home = home.to_path_buf();
+    tokio::task::spawn_blocking(move || ClaudeRefreshLock::acquire(&home))
+        .await
+        .expect("refresh lock wait does not panic")
+        .map_err(|error| SubscriptionError::Unavailable(error.to_string()))
+}
+
+/// A refresh and its write-back hold Claude's own refresh lock on `home`
+/// (`held` when the caller already does), so neither lf nor a running Claude
+/// rotates the refresh token while the other is mid-refresh. Comparisons
+/// detect completed replacements by writers that skip the lock.
 /// Returns the access token, its serialized credential, and whether refreshed.
 async fn fresh_claude_token(
     client: &reqwest::Client,
     home: &Path,
     force_refresh: bool,
+    held: Option<&ClaudeRefreshLock>,
 ) -> Result<(SecretString, SecretString, bool), SubscriptionError> {
-    let raw = crate::provider_auth::read_claude_login(home)
-        .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
-        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?
-        .expose_secret()
-        .to_string();
+    let read = || -> Result<String, SubscriptionError> {
+        Ok(crate::provider_auth::read_claude_login(home)
+            .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
+            .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?
+            .expose_secret()
+            .to_string())
+    };
+    let raw = read()?;
+    let (access_token, expires_at_ms) = claude_access(&raw)?;
+    // Missing expiry is unknown; let the server judge the token.
+    if !force_refresh && !expires_at_ms.is_some_and(claude_token_expired) {
+        return Ok((access_token, SecretString::new(raw), false));
+    }
+    let _lock = match held {
+        Some(_) => None,
+        None => Some(acquire_claude_refresh_lock(home).await?),
+    };
+    // Another holder may have refreshed while this one waited.
+    let current = read()?;
+    if current != raw {
+        let (access_token, _) = claude_access(&current)?;
+        return Ok((access_token, SecretString::new(current), true));
+    }
     let mut credentials: Value = serde_json::from_str(&raw)
         .map_err(|_| SubscriptionError::Unavailable("unreadable credential format".into()))?;
     let oauth = credentials.get("claudeAiOauth").unwrap_or(&credentials);
-    let access_token = oauth
-        .get("accessToken")
-        .and_then(Value::as_str)
-        .filter(|token| !token.is_empty())
-        .ok_or_else(|| SubscriptionError::NeedsLogin("no access token".into()))?;
-    let expires_at_ms = oauth.get("expiresAt").and_then(Value::as_i64);
-    let now_ms = OffsetDateTime::now_utc().unix_timestamp() * 1000;
-    // Missing expiry is unknown; let the server judge the token.
-    if !force_refresh && expires_at_ms.is_none_or(|expiry| expiry > now_ms + 60_000) {
-        return Ok((
-            SecretString::new(access_token.to_string()),
-            SecretString::new(raw),
-            false,
-        ));
-    }
     let refresh_token = oauth
         .get("refreshToken")
         .and_then(Value::as_str)
@@ -324,7 +411,7 @@ async fn fresh_claude_token(
         .and_then(Value::as_i64)
         .filter(|seconds| *seconds > 0)
         .and_then(|seconds| seconds.checked_mul(1000))
-        .and_then(|duration| now_ms.checked_add(duration))
+        .and_then(|duration| now_ms().checked_add(duration))
     {
         oauth["expiresAt"] = json!(expiry);
     }
@@ -333,6 +420,22 @@ async fn fresh_claude_token(
         SecretString::new(new_access),
         SecretString::new(credentials.to_string()),
         true,
+    ))
+}
+
+/// The access token and expiry (ms) in a serialized Claude login.
+fn claude_access(raw: &str) -> Result<(SecretString, Option<i64>), SubscriptionError> {
+    let credentials: Value = serde_json::from_str(raw)
+        .map_err(|_| SubscriptionError::Unavailable("unreadable credential format".into()))?;
+    let oauth = credentials.get("claudeAiOauth").unwrap_or(&credentials);
+    let access_token = oauth
+        .get("accessToken")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| SubscriptionError::NeedsLogin("no access token".into()))?;
+    Ok((
+        SecretString::new(access_token.to_string()),
+        oauth.get("expiresAt").and_then(Value::as_i64),
     ))
 }
 
@@ -569,6 +672,8 @@ fn codex_windows(
                 used_percent,
                 resets_at: value.get("resetsAt").and_then(Value::as_i64),
                 plan: plan.map(str::to_string),
+                model: None,
+                limited_until: None,
             })
         })
         .collect()
@@ -594,12 +699,14 @@ mod tests {
         });
         let windows = claude_windows(&body);
         assert_eq!(windows.len(), 3);
-        assert_eq!(windows[0].window, "session");
+        assert_eq!(windows[0].window, "five_hour");
         assert_eq!(windows[0].used_percent, 22);
         assert!(windows[0].resets_at.is_some());
         assert_eq!(windows[0].plan, None);
-        assert_eq!(windows[1].window, "weekly");
-        assert_eq!(windows[2].window, "weekly:fable");
+        assert_eq!(windows[0].model, None);
+        assert_eq!(windows[1].window, "seven_day");
+        assert_eq!(windows[2].window, "seven_day_fable");
+        assert_eq!(windows[2].model.as_deref(), Some("fable"));
         assert_eq!(windows[2].used_percent, 11);
     }
 
@@ -652,6 +759,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod observation_tests {
     use super::{claude_windows, percentage, poll_claude, SubscriptionError};
+    use secrecy::ExposeSecret;
     use serde_json::{json, Value};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -713,10 +821,79 @@ pub(crate) mod observation_tests {
         credentials(home.path());
         std::fs::write(home.path().join(".claude.json"), json!({"oauthAccount":{"emailAddress":"stale@example.com", "accountUuid":"stale-user"}}).to_string()).unwrap();
         let (_endpoints, server) = serve(vec![(200, json!({"account":{"email":"actual@example.com", "uuid":"actual-user"}, "organization":{"uuid":"shared-team"}}).to_string())], |_| {}).await;
-        let identity = super::claude_identity(home.path()).await.unwrap();
+        let identity = super::claude_identity(home.path(), None).await.unwrap();
         server.await.unwrap();
         assert_eq!(identity.email, "actual@example.com");
         assert_eq!(identity.subject, "actual-user");
+    }
+
+    fn expired_credentials(home: &std::path::Path) {
+        let raw = json!({"claudeAiOauth": {
+            "accessToken": "expired-access", "refreshToken": "fixture-refresh", "expiresAt": 1000
+        }});
+        std::fs::write(home.join(".credentials.json"), raw.to_string()).unwrap();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn a_refresh_waits_for_claudes_lock_and_takes_the_login_claude_refreshed() {
+        let _env = crate::journal::test_env_lock();
+        std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+        let home = tempfile::tempdir().unwrap();
+        expired_credentials(home.path());
+        let lock = home.path().join(".oauth_refresh.lock");
+        std::fs::create_dir(&lock).unwrap();
+        let claude = {
+            let home = home.path().to_path_buf();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                let refreshed = json!({"claudeAiOauth": {
+                    "accessToken": "claude-access", "refreshToken": "claude-refresh",
+                    "expiresAt": 4102444800000i64
+                }});
+                std::fs::write(home.join(".credentials.json"), refreshed.to_string()).unwrap();
+                std::fs::remove_dir(home.join(".oauth_refresh.lock")).unwrap();
+            })
+        };
+        // Refreshing without the lock would reach the unroutable token URL.
+        let access = super::claude_access_token(home.path(), 60).await.unwrap();
+        claude.join().unwrap();
+        assert_eq!(access.token.expose_secret(), "claude-access");
+        assert!(!lock.exists());
+        let stored = std::fs::read_to_string(home.path().join(".credentials.json")).unwrap();
+        assert!(stored.contains("claude-refresh"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn a_caller_holding_the_refresh_lock_refreshes_without_waiting_on_itself() {
+        let _env = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        expired_credentials(home.path());
+        let held =
+            crate::provider_account::activation::ClaudeRefreshLock::acquire(home.path()).unwrap();
+        let (_endpoints, server) = serve(
+            vec![
+                (
+                    200,
+                    json!({"access_token":"replacement", "expires_in":3600}).to_string(),
+                ),
+                (
+                    200,
+                    json!({"account":{"email":"actual@example.com", "uuid":"actual-user"}})
+                        .to_string(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+        let identity = super::claude_identity(home.path(), Some(&held))
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(identity.email, "actual@example.com");
+        let stored = std::fs::read_to_string(home.path().join(".credentials.json")).unwrap();
+        assert!(stored.contains("replacement"));
     }
 
     #[test]

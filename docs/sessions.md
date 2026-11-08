@@ -160,9 +160,28 @@ lf --only-account claude=personal@ -b task run LOO-12 # this login only, for eve
 ```
 
 A new launch tries the repository's account route, then your default route,
-then any eligible login with room. A resumed Session stays on the login it
-started with. A Graph carries its selection to every step; run a fresh Graph to
-choose again. Connecting logins and setting routes: [Ops](ops.md).
+then any eligible login with room. A resumed Session runs on the active login.
+A Graph carries its selection to every step; run a fresh Graph to choose
+again. Connecting logins and setting routes: [Ops](ops.md).
+
+## Move what a limit blocks
+
+```bash
+lf session list --blocked                    # whose next message would fail
+lf session move --blocked -a claude:opus     # continue them on Opus
+lf account use claude=work@                  # switch the Machine's login and stay there; every open Claude follows
+```
+
+`--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
+previews what an `-a` move moves. An idle Session continues on the new agent at
+its next open, seeded with its conversation; a busy one moves after its turn.
+Logins belong to the Machine, not to a Session: every open Claude runs on the
+active one. A running Codex keeps its login until you restart it on another:
+`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
+login each Session uses. `use` holds launches there until the login fills up
+or `lf account use auto`.
+
+Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 
 ## Reference
 

@@ -2253,7 +2253,9 @@ fn derive_task_condition(
         execution.filter(|execution| execution.state != TaskExecutionState::Idle)
     {
         let state = match execution.state {
-            TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
+            TaskExecutionState::Starting
+            | TaskExecutionState::Running
+            | TaskExecutionState::Waiting => TaskConditionState::Clear,
             TaskExecutionState::Blocked | TaskExecutionState::Stalled => {
                 TaskConditionState::Blocked
             }

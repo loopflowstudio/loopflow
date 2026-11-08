@@ -2,6 +2,7 @@
 
 pub mod activation;
 pub(crate) mod codex_access;
+pub(crate) mod hold;
 pub(crate) mod identity;
 pub mod selection;
 
@@ -20,12 +21,17 @@ use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::store::{
-    open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, SharedStore, StoreError,
+    open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, RecordingGap, SharedStore,
+    StoreError,
 };
 use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
-const RESET_GRACE_SECS: i64 = 5;
+pub(crate) const RESET_GRACE_SECS: i64 = 5;
+/// A limit reported this soon after a switch belongs to the account before it.
+/// Running Claude picks a switched login up within seconds (its credentials
+/// file's mtime), and launches switch often, so the window stays short.
+const SWITCH_SETTLE_SECS: i64 = 15;
 const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -35,50 +41,236 @@ const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CODEX_HOME",
 ];
 
-/// The account's least room: its most-used window that has not yet reset.
-/// Ties break on window name so the reported evidence is stable however the
-/// rows arrive.
-pub(crate) fn tightest_window<'a>(
-    provider: &str,
-    account_id: &ProviderAccountId,
-    limits: &'a [AccountLimitRow],
-    now: i64,
-) -> Option<&'a AccountLimitRow> {
-    limits
-        .iter()
-        .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
-        .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
-        .max_by(|left, right| {
-            left.used_percent
-                .cmp(&right.used_percent)
-                .then_with(|| right.window.cmp(&left.window))
-        })
+/// Whether a limit the provider scoped to `scope` holds back a launch of
+/// `model`. A limit on every model holds everything back; a scoped one holds
+/// back that model and any launch whose model the provider would pick itself.
+pub(crate) fn limit_affects(scope: Option<&str>, model: Option<&str>) -> bool {
+    match (scope, model) {
+        (None, _) | (Some(_), None) => true,
+        (Some(scope), Some(model)) => model
+            .to_ascii_lowercase()
+            .contains(&scope.to_ascii_lowercase()),
+    }
 }
 
-pub(crate) fn account_route_eligible(account: &ProviderAccount, now: i64) -> bool {
+/// When the account can next take a launch of `model`: the end of its
+/// cooldown or of a scoped window still holding that model back. `None`: now.
+pub(crate) fn account_held_until(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Option<i64> {
+    let scoped = limits
+        .iter()
+        .filter(|limit| {
+            limit.provider == account.provider && limit.account_id == account.account_id
+        })
+        .filter(|limit| limit_affects(limit.model.as_deref(), model))
+        .filter_map(|limit| limit.limited_until);
+    account
+        .cooldown_until
+        .into_iter()
+        .chain(scoped)
+        .filter(|until| *until > now)
+        .max()
+}
+
+pub(crate) fn account_route_eligible(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> bool {
     let today = time::OffsetDateTime::from_unix_timestamp(now)
         .expect("current timestamp is valid")
         .date();
     account.eligible_for_automatic_routing(today)
-        && account.cooldown_until.is_none_or(|until| until <= now)
+        && account_held_until(account, limits, model, now).is_none()
 }
 
-/// Stable sort: larger plans lead, then the account with the most room;
+/// When the first of `accounts` held back at `now` can take `model` again.
+fn earliest_release<'a>(
+    accounts: impl Iterator<Item = &'a ProviderAccount>,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> Option<i64> {
+    accounts
+        .filter_map(|account| account_held_until(account, limits, model, now))
+        .min()
+}
+
+/// What open conversations' next messages could launch on, read once: the
+/// stored logins and their limits. A Session is blocked when the login it
+/// uses cannot take its model now.
+#[derive(Debug, Default)]
+pub(crate) struct LaunchCapacity {
+    accounts: Vec<ProviderAccount>,
+    limits: Vec<AccountLimitRow>,
+    /// Which stored login each managed provider's ordinary home is signed in
+    /// as, read once: finding it compares credential files.
+    active: Vec<(Provider, Option<ProviderAccountId>)>,
+    now: i64,
+}
+
+impl LaunchCapacity {
+    pub(crate) fn read(
+        store: &crate::store::sqlite::SqliteStore,
+    ) -> crate::store::StoreResult<Self> {
+        let accounts = store.list_provider_accounts(None)?;
+        let active = [Provider::Claude, Provider::Codex]
+            .into_iter()
+            .map(|provider| {
+                let login = activation::active_account(
+                    provider,
+                    &activation::native_home(provider, None),
+                    &accounts,
+                )
+                .map(|account| account.account_id.clone());
+                (provider, login)
+            })
+            .collect();
+        Ok(Self {
+            accounts,
+            limits: store.provider_account_limits(None)?,
+            active,
+            now: now_unix(),
+        })
+    }
+
+    /// The login a `provider` conversation uses next. A running agent that
+    /// keeps the login it started with reads `recorded`; every other
+    /// conversation reads the provider's shared home. None for unmanaged
+    /// providers.
+    pub(crate) fn login(
+        &self,
+        provider: &str,
+        recorded: Option<&ProviderAccountId>,
+        running: bool,
+    ) -> Option<&ProviderAccount> {
+        let managed: Provider = provider.parse().ok()?;
+        let kept = recorded
+            .filter(|_| running && !activation::running_agents_follow_native_login(managed));
+        let account_id = match kept {
+            Some(account_id) => account_id,
+            None => self
+                .active
+                .iter()
+                .find(|(active, _)| *active == managed)?
+                .1
+                .as_ref()?,
+        };
+        self.accounts
+            .iter()
+            .find(|account| account.provider == provider && account.account_id == *account_id)
+    }
+
+    pub(crate) fn blocks(&self, account: &ProviderAccount, model: Option<&str>) -> bool {
+        account_held_until(account, &self.limits, model, self.now).is_some()
+    }
+}
+
+/// Stable sort: larger plans lead, then the account that must burn its quota
+/// fastest to use it before it resets, so no account resets with quota unused;
 /// declared route order breaks ties.
-pub(crate) fn order_accounts_by_room(
+pub(crate) fn order_accounts_by_urgency(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
+    model: Option<&str>,
     now: i64,
 ) {
-    accounts.sort_by_key(|account| room_rank(account, limits, now));
+    accounts.sort_by_key(|account| route_rank(account, limits, model, now));
 }
 
-/// Plan preference, then the tightest window's use. A window that has reset
-/// leaves its account full room.
-fn room_rank(account: &ProviderAccount, limits: &[AccountLimitRow], now: i64) -> (u8, u8) {
-    let used_percent = tightest_window(&account.provider, &account.account_id, limits, now)
-        .map_or(0, |limit| limit.used_percent);
-    (plan_preference(account), used_percent)
+/// How an account ranks for routing, lowest first: plan preference, then its
+/// urgency negated.
+type RouteRank = (u8, i64);
+
+fn route_rank(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> RouteRank {
+    (
+        plan_preference(account),
+        -urgency(account, limits, model, now),
+    )
+}
+
+/// A whole week's quota still to spend: 100% over 168 hours.
+const FULL_WEEK_URGENCY: i64 = 100 * 3_600_000 / (168 * 3_600);
+
+/// Remaining percent of the launch's weekly window per hour until it resets,
+/// in thousandths: the rate the account must be used at to spend its quota
+/// before the reset. 70% left in 3 hours scores 23 333; 40% left in 5 days,
+/// 333. Only weekly windows score, model-scoped ones included when they
+/// affect `model`, and the tightest of them counts; the short window decides
+/// room alone, because percentages of different windows do not compare. A
+/// window past its reset, or with no reset time, and an account with no
+/// weekly reading score a full week: its quota is all still there to spend.
+fn urgency(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> i64 {
+    limits
+        .iter()
+        .filter(|limit| {
+            limit.provider == account.provider && limit.account_id == account.account_id
+        })
+        .filter(|limit| is_weekly_window(&limit.window))
+        .filter(|limit| limit_affects(limit.model.as_deref(), model))
+        .map(|limit| match limit.resets_at.map(|reset| reset - now) {
+            Some(until_reset) if until_reset > 0 => {
+                let remaining = i64::from(100u8.saturating_sub(limit.used_percent));
+                remaining * 3_600_000 / until_reset
+            }
+            _ => FULL_WEEK_URGENCY,
+        })
+        .min()
+        .unwrap_or(FULL_WEEK_URGENCY)
+}
+
+/// The most-used weekly window on every model among `windows` that has not
+/// reset: the room `lf account` shows.
+pub(crate) fn tightest_weekly<'a>(
+    windows: impl IntoIterator<Item = &'a AccountLimitRow>,
+    now: i64,
+) -> Option<&'a AccountLimitRow> {
+    windows
+        .into_iter()
+        .filter(|limit| is_weekly_window(&limit.window) && limit.model.is_none())
+        .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
+        .max_by_key(|limit| limit.used_percent)
+}
+
+/// Percent left in an account's tightest weekly window, and when it resets.
+pub(crate) fn weekly_room(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    now: i64,
+) -> Option<(u8, i64)> {
+    let window = tightest_weekly(
+        limits.iter().filter(|limit| {
+            limit.provider == account.provider && limit.account_id == account.account_id
+        }),
+        now,
+    )?;
+    Some((
+        100u8.saturating_sub(window.used_percent),
+        window
+            .resets_at
+            .expect("tightest_weekly keeps windows with a reset"),
+    ))
+}
+
+/// Claude's `seven_day*` windows and Codex's `weekly`; everything else
+/// (`five_hour`, `session`) is a short window.
+fn is_weekly_window(window: &str) -> bool {
+    window == "weekly" || window.starts_with("seven_day")
 }
 
 fn plan_preference(account: &ProviderAccount) -> u8 {
@@ -114,10 +306,12 @@ pub enum ProviderAccountError {
         provider: Provider,
         accounts: String,
     },
+    /// Nothing can launch now; a candidate frees up at `retry_at`, if one will.
     #[error("no eligible managed {provider} account: {accounts}")]
     NoEligibleAccount {
         provider: Provider,
         accounts: String,
+        retry_at: Option<i64>,
     },
 }
 
@@ -130,31 +324,45 @@ pub(crate) struct RateLimitSignal {
     /// Per-window subscription state carried by the provider event, persisted
     /// so cached auth inspection can show capacity without a fresh poll.
     pub windows: Vec<crate::store::AccountLimitWindow>,
+    /// The one model the limit applies to, as the provider scopes it; `None`
+    /// limits the whole account, unless `credits`.
+    pub model: Option<String>,
+    /// Usage credits ran out. They pay for one model, so the limit holds the
+    /// model the launch ran, never the account.
+    pub credits: bool,
 }
 
-/// Where a conversation runs.
-#[derive(Clone)]
-enum RouteHome {
-    /// In a home of the account's own.
-    Isolated,
-    /// In the provider's native home.
-    Shared {
-        cause: activation::SwitchCause,
-        launched_at: i64,
-    },
+impl RateLimitSignal {
+    /// A limit reached with nothing more said: no reset time, no windows.
+    fn stated(limit: crate::agent::SpentLimit) -> Self {
+        Self {
+            utilization_percent: None,
+            resets_at: None,
+            limited: true,
+            reason: limit.reason,
+            windows: Vec::new(),
+            model: limit.model,
+            credits: limit.credits,
+        }
+    }
 }
 
-/// The catalog holding an account's login, independent of its launch home.
+/// The catalog holding an account's login.
 #[derive(Clone)]
 enum AccountLogin {
-    /// A profile in this Machine's catalog. A shared launch signs the native
-    /// home in from it.
+    /// A profile in this Machine's catalog. A launch signs the provider's
+    /// shared home in from it; every conversation runs there.
     Stored {
         store: SharedStore,
         profile: PathBuf,
+        cause: activation::SwitchCause,
+        launched_at: i64,
+        /// The model the launch named, if any; a credits limit holds it.
+        model: Option<String>,
     },
-    /// A profile in a recorded capture's catalog, read to check identity. Replay
-    /// names the account it requires and records nothing.
+    /// A profile in a recorded capture's catalog. Replay runs in that profile,
+    /// names the account it requires and records nothing, so this Machine's
+    /// shared login is never switched to another catalog's account.
     Replayed {
         catalog: SharedStore,
         profile: PathBuf,
@@ -165,7 +373,7 @@ enum AccountLogin {
 struct AccountCandidate {
     account: ProviderAccount,
     credential_available: bool,
-    rank: (u8, u8),
+    rank: RouteRank,
     home: PathBuf,
 }
 
@@ -173,15 +381,14 @@ struct AccountCandidate {
 pub(crate) struct ProviderAccountRoute {
     provider: Provider,
     account_id: ProviderAccountId,
-    home: RouteHome,
     login: AccountLogin,
 }
 
 impl std::fmt::Debug for ProviderAccountRoute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let home = match self.home {
-            RouteHome::Isolated => "account_home",
-            RouteHome::Shared { .. } => "native_home",
+        let home = match self.login {
+            AccountLogin::Stored { .. } => "native_home",
+            AccountLogin::Replayed { .. } => "recorded_profile",
         };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
@@ -192,20 +399,7 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
-    fn shared_home(named: bool) -> RouteHome {
-        RouteHome::Shared {
-            // A launch that named its account switches on a person's behalf;
-            // one that was routed switches because the active account ran out.
-            cause: if named {
-                activation::SwitchCause::Person
-            } else {
-                activation::SwitchCause::Exhaustion
-            },
-            launched_at: now_unix(),
-        }
-    }
-
-    fn shared(
+    pub(crate) fn shared(
         provider: Provider,
         account_id: ProviderAccountId,
         store: SharedStore,
@@ -215,12 +409,32 @@ impl ProviderAccountRoute {
         Self {
             provider,
             account_id,
-            home: Self::shared_home(named),
-            login: AccountLogin::Stored { store, profile },
+            login: AccountLogin::Stored {
+                store,
+                profile,
+                // A launch that named its account switches on a person's
+                // behalf; one that was routed switches because the active
+                // account ran out.
+                cause: if named {
+                    activation::SwitchCause::Person
+                } else {
+                    activation::SwitchCause::Exhaustion
+                },
+                launched_at: now_unix(),
+                model: None,
+            },
         }
     }
 
-    /// The home an isolated conversation on this account runs in.
+    /// This route as a launch of `model` takes it.
+    fn launching(mut self, launched: Option<&str>) -> Self {
+        if let AccountLogin::Stored { model, .. } = &mut self.login {
+            *model = launched.map(str::to_owned);
+        }
+        self
+    }
+
+    /// The account's stored profile: its login, and replay's launch home.
     fn account_home(&self) -> &Path {
         match &self.login {
             AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
@@ -237,8 +451,9 @@ impl ProviderAccountRoute {
     /// where a shared agent began; the switch log says where a provider that
     /// follows its native login has moved it since.
     async fn used_account(&self) -> Result<ProviderAccountId, ProviderAccountError> {
-        if let (RouteHome::Shared { launched_at, .. }, AccountLogin::Stored { store, .. }) =
-            (&self.home, &self.login)
+        if let AccountLogin::Stored {
+            store, launched_at, ..
+        } = &self.login
         {
             if activation::running_agents_follow_native_login(self.provider) {
                 let moved = store
@@ -252,34 +467,21 @@ impl ProviderAccountRoute {
         Ok(self.account_id.clone())
     }
 
-    /// The home this route's conversations live in: the account's own when
-    /// isolated, else the provider's native one.
-    fn conversation_home(&self) -> PathBuf {
-        match self.home {
-            RouteHome::Isolated => self.account_home().to_path_buf(),
-            RouteHome::Shared { .. } => activation::native_home(self.provider, None),
-        }
-    }
-
-    /// Bring conversation `agent_session` into this route's home and pin it
-    /// here, so the provider resumes the same conversation under this account.
-    /// Fails, rather than starting an empty conversation, when its transcript
-    /// is nowhere to be found. A conversation no route has run and whose
-    /// transcript is nowhere, such as one whose id lf assigns before its
-    /// first launch, is new: there is nothing to adopt.
+    /// Bring conversation `agent_session` into the shared home, so the
+    /// provider resumes it under this account. Only a conversation that ran
+    /// in an account's own home, before every launch shared one, lives
+    /// elsewhere; its pin moves to the shared home once the provider reports
+    /// the thread under this launch. Fails, rather than starting an empty
+    /// conversation, when that transcript is nowhere to be found.
     async fn adopt(&self, agent_session: &AgentSessionId) -> Result<(), ProviderAccountError> {
         let AccountLogin::Stored { store, .. } = &self.login else {
             return Ok(());
         };
-        let recorded = store
-            .provider_session_isolated(self.provider, agent_session)
-            .await?
-            .is_some();
         let harness = crate::harness::HarnessKind::parse(self.provider.as_str())
             .expect("account routes exist only for agent providers");
-        let to = self.conversation_home();
+        let to = activation::native_home(self.provider, None);
         let from =
-            crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session, None)
+            crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session)
                 .map_err(|error| ProviderAccountError::Runtime(format!("{error:#}")))?;
         if from.as_deref() != Some(to.as_path()) {
             let copied = match &from {
@@ -292,9 +494,6 @@ impl ProviderAccountRoute {
             if copied.is_none()
                 && crate::transcript::transcript(harness, &to, agent_session.as_str()).is_none()
             {
-                if !recorded {
-                    return Ok(());
-                }
                 let place = match &from {
                     Some(from) => format!("missing from {}", from.display()),
                     None => "its account home was removed".to_string(),
@@ -305,30 +504,25 @@ impl ProviderAccountRoute {
                 )));
             }
         }
-        self.pin_session(agent_session).await
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_shared(&self) -> bool {
-        matches!(self.home, RouteHome::Shared { .. })
+        Ok(())
     }
 
     /// Home used for identity checks. Codex access is resolved separately;
     /// Claude's matching native credential carries its current refresh.
     fn credential_home(&self) -> PathBuf {
-        match (self.provider, &self.home) {
-            (Provider::Claude, RouteHome::Shared { .. }) => {
+        match (self.provider, &self.login) {
+            (Provider::Claude, AccountLogin::Stored { .. }) => {
                 activation::claude_credential_home(self.account_home())
             }
             _ => self.account_home().to_path_buf(),
         }
     }
 
-    /// Provider arguments that must precede the subcommand. An isolated Codex
-    /// home keeps its login in a file whatever the mirrored config selects.
+    /// Provider arguments that must precede the subcommand. A replayed Codex
+    /// profile keeps its login in a file whatever the mirrored config selects.
     pub(crate) fn provider_args(&self) -> &'static [&'static str] {
-        match (self.provider, &self.home) {
-            (Provider::Codex, RouteHome::Isolated) => {
+        match (self.provider, &self.login) {
+            (Provider::Codex, AccountLogin::Replayed { .. }) => {
                 &["-c", "cli_auth_credentials_store=\"file\""]
             }
             _ => &[],
@@ -348,7 +542,8 @@ impl ProviderAccountRoute {
             reason,
         };
         if self.provider == Provider::Codex {
-            let preferred = matches!(self.home, RouteHome::Isolated).then(|| self.account_home());
+            let preferred =
+                matches!(self.login, AccountLogin::Replayed { .. }).then(|| self.account_home());
             let access = codex_access::resolve(&account, preferred)
                 .await
                 .map_err(|error| unavailable(error.to_string()))?;
@@ -401,11 +596,12 @@ impl ProviderAccountRoute {
     }
 
     fn apply(&self, command: &mut Command) {
+        let replayed = matches!(self.login, AccountLogin::Replayed { .. });
         for name in PROVIDER_CREDENTIAL_ENV_VARS {
-            // A shared launch keeps the home its caller chose. A home inherited
-            // from an isolated parent is cleared, so the provider falls back to
-            // its native one.
-            let kept_home = matches!(self.home, RouteHome::Shared { .. })
+            // A launch keeps the home its caller chose. A stored profile
+            // inherited from a parent is cleared, so the provider falls back
+            // to its shared home.
+            let kept_home = !replayed
                 && matches!(name, "CODEX_HOME" | "CLAUDE_CONFIG_DIR")
                 && !launch_env(command, name)
                     .is_some_and(|home| activation::is_account_home(Path::new(&home)));
@@ -413,36 +609,27 @@ impl ProviderAccountRoute {
                 command.env_remove(name);
             }
         }
-        if let (RouteHome::Isolated, Some(name)) = (&self.home, activation::home_env(self.provider))
-        {
+        if let (true, Some(name)) = (replayed, activation::home_env(self.provider)) {
             command.env(name, self.account_home());
         }
     }
 
     /// The one place a launch takes on an account. Every route configures
-    /// `command`; a shared route on a stored login first signs the native home
-    /// in as its account, doing nothing when that account is already active.
-    /// Hold the returned lock until the child has spawned.
+    /// `command`; a stored login first signs the shared home in as its
+    /// account, doing nothing when that account is already active. Hold the
+    /// returned lock until the child has spawned.
     pub(crate) async fn launch_as(
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
         self.apply(command);
-        let AccountLogin::Stored { store, .. } = &self.login else {
+        let AccountLogin::Stored { store, cause, .. } = &self.login else {
             return Ok(None);
         };
-        match &self.home {
-            RouteHome::Isolated if self.provider == Provider::Codex => {
-                activation::prepare_isolated_codex(store, &self.account_id).await
-            }
-            RouteHome::Isolated => Ok(None),
-            RouteHome::Shared { cause, .. } => {
-                let launch_home =
-                    activation::home_env(self.provider).and_then(|name| launch_env(command, name));
-                let native = activation::native_home(self.provider, launch_home.as_deref());
-                activation::activate(store, self.provider, &self.account_id, &native, *cause).await
-            }
-        }
+        let launch_home =
+            activation::home_env(self.provider).and_then(|name| launch_env(command, name));
+        let native = activation::native_home(self.provider, launch_home.as_deref());
+        activation::activate(store, self.provider, &self.account_id, &native, *cause).await
     }
 
     pub(crate) fn launch_as_blocking(
@@ -461,12 +648,7 @@ impl ProviderAccountRoute {
         match &self.login {
             AccountLogin::Stored { store, .. } => {
                 store
-                    .pin_provider_session_route(
-                        self.provider,
-                        agent_session,
-                        &self.account_id,
-                        matches!(self.home, RouteHome::Isolated),
-                    )
+                    .pin_provider_session_route(self.provider, agent_session, &self.account_id)
                     .await?;
             }
             AccountLogin::Replayed { .. } => {}
@@ -479,13 +661,45 @@ impl ProviderAccountRoute {
         signal: &RateLimitSignal,
     ) -> Result<(), ProviderAccountError> {
         match &self.login {
-            AccountLogin::Stored { store, .. } => {
+            AccountLogin::Stored { store, model, .. } => {
                 let account_id = self.used_account().await?;
-                record_rate_limit_signal(store, self.provider, &account_id, signal).await?;
+                record_rate_limit_signal(
+                    store,
+                    self.provider,
+                    &account_id,
+                    signal,
+                    model.as_deref(),
+                )
+                .await?;
             }
             AccountLogin::Replayed { .. } => {}
         }
         Ok(())
+    }
+
+    /// Hold this route's account back on a limit the provider stated in words.
+    pub(crate) fn record_limit_blocking(
+        &self,
+        limit: crate::agent::SpentLimit,
+    ) -> Result<(), ProviderAccountError> {
+        _run_blocking_account(self.provider, "record", move |runtime| {
+            runtime.block_on(async {
+                match &self.login {
+                    AccountLogin::Stored { store, model, .. } => {
+                        let account_id = self.used_account().await?;
+                        record_stated_limit(
+                            store,
+                            self.provider,
+                            &account_id,
+                            limit,
+                            model.as_deref(),
+                        )
+                        .await
+                    }
+                    AccountLogin::Replayed { .. } => Ok(()),
+                }
+            })
+        })
     }
 
     pub(crate) fn pin_session_blocking(
@@ -541,12 +755,14 @@ pub(crate) fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsSt
 }
 
 /// Record a provider rate-limit signal against a store: health row plus any
-/// observed limit windows.
+/// observed limit windows. `launched` is the model the launch named; a
+/// credits limit holds it, or the harness default when it named none.
 async fn record_rate_limit_signal(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
     signal: &RateLimitSignal,
+    launched: Option<&str>,
 ) -> Result<(), ProviderAccountError> {
     let cooldown_until = signal.limited.then(|| {
         let now = now_unix();
@@ -556,26 +772,117 @@ async fn record_rate_limit_signal(
             .max(now)
             + RESET_GRACE_SECS
     });
+    let scope = signal
+        .model
+        .clone()
+        .or_else(|| signal.credits.then(|| launched_model_family(launched)));
+    // A limit on one model holds back only that model's window; the account
+    // itself cools only when every model is limited.
+    let scoped = scope.is_some();
     store
         .record_provider_account_health(
             provider.as_str(),
             account_id,
             signal.utilization_percent,
-            cooldown_until,
+            cooldown_until.filter(|_| !scoped),
             signal.limited.then_some(signal.reason.as_str()),
         )
         .await?;
-    if !signal.windows.is_empty() {
+    let mut windows = signal.windows.clone();
+    if scoped && signal.limited && windows.is_empty() {
+        windows.push(crate::store::AccountLimitWindow {
+            window: signal.reason.clone(),
+            used_percent: 100,
+            resets_at: signal.resets_at,
+            plan: None,
+            model: scope.clone(),
+            limited_until: None,
+        });
+    }
+    for window in &mut windows {
+        if signal.credits && window.model.is_none() {
+            window.model = scope.clone();
+        }
+        if signal.limited && window.model == scope {
+            window.limited_until = cooldown_until;
+        }
+    }
+    if !windows.is_empty() {
         store
-            .upsert_provider_account_limits(
-                provider.as_str(),
-                account_id,
-                &signal.windows,
-                "stream",
-            )
+            .upsert_provider_account_limits(provider.as_str(), account_id, &windows, "stream")
             .await?;
     }
     Ok(())
+}
+
+/// The model family a launch of `model` runs, as limit scopes spell it.
+fn launched_model_family(model: Option<&str>) -> String {
+    let Some(model) = model.map(str::to_ascii_lowercase) else {
+        return crate::config::CLAUDE_DEFAULT_MODEL_FAMILY.to_string();
+    };
+    crate::config::CLAUDE_MODEL_FAMILIES
+        .into_iter()
+        .find(|family| model.contains(family))
+        .map_or(model, str::to_owned)
+}
+
+/// Record a limit the provider stated in words, which carries no reset time.
+/// A Claude account's windows are then read once, so a spent one holds the
+/// account back until it resets instead of for the default cooldown. A poll
+/// that fails leaves the default.
+async fn record_stated_limit(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+    limit: crate::agent::SpentLimit,
+    launched: Option<&str>,
+) -> Result<(), ProviderAccountError> {
+    let signal = RateLimitSignal::stated(limit);
+    record_rate_limit_signal(store, provider, account_id, &signal, launched).await?;
+    // Codex reports its windows on the stream; its poll is a whole app-server
+    // exchange.
+    if provider != Provider::Claude {
+        return Ok(());
+    }
+    let Some(account) = store
+        .get_provider_account(provider.as_str(), account_id)
+        .await?
+    else {
+        return Ok(());
+    };
+    if let Ok(usage) = crate::subscription::poll_account(&account).await {
+        save_polled_usage(store, &account, &usage.windows).await?;
+    }
+    Ok(())
+}
+
+/// Save a usage reading of `account`, clearing its cooldown when the reading
+/// has account-wide windows and none is spent. Only a rejection sets that cooldown,
+/// and a rejection can be about something the account still has room for; a
+/// spent model's window holds that model by itself. Returns whether it cleared.
+pub(crate) async fn save_polled_usage(
+    store: &SharedStore,
+    account: &ProviderAccount,
+    polled: &[crate::store::AccountLimitWindow],
+) -> Result<bool, ProviderAccountError> {
+    store
+        .upsert_provider_account_limits(&account.provider, &account.account_id, polled, "poll")
+        .await?;
+    let cooling = account
+        .cooldown_until
+        .is_some_and(|until| until > now_unix());
+    let account_wide: Vec<_> = polled
+        .iter()
+        .filter(|window| window.model.is_none())
+        .collect();
+    let spent = account_wide.iter().any(|window| window.used_percent >= 100);
+    if !cooling || account_wide.is_empty() || spent {
+        return Ok(false);
+    }
+    store
+        .clear_provider_account_cooldown(&account.provider, &account.account_id)
+        .await?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -759,12 +1066,111 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
-/// The `provider` login this launch's `--account` names when it differs from
-/// the one conversation `agent_session` is pinned to: a request to move it.
+const LIMIT_REASON_ENV: &str = "LF_LIMIT_REASON";
+
+/// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
+/// not ours to read, so this hook is how lf hears of it. Recording it can wait
+/// on Claude's lock and the provider's token endpoint, longer than the hook's
+/// timeout, and a kill between a token reply and the profile write loses a
+/// rotated grant. So the hook starts `record_limit` beside the provider and
+/// exits.
+pub fn observe_native_limit() {
+    let input = std::io::read_to_string(std::io::stdin()).unwrap_or_default();
+    if let Err(error) = start_limit_recording(&input) {
+        RecordingGap::default().note("usage limit", &format!("{error:#}"));
+    }
+}
+
+fn start_limit_recording(input: &str) -> anyhow::Result<()> {
+    // Anything else, a capacity blip included, records nothing: the person
+    // still sees Claude's own message.
+    let Some(limit) = spent_limit_reason(input) else {
+        return Ok(());
+    };
+    crate::os_process::detached_context_block("record-limit")?
+        .env(LIMIT_REASON_ENV, limit.reason)
+        .spawn()?;
+    Ok(())
+}
+
+/// The spent quota a `StopFailure` reports. Every 429 reaches the hook as
+/// `rate_limit` and Claude keeps the cause to itself, so only the line it
+/// displayed tells spent quota from a capacity blip.
+fn spent_limit_reason(input: &str) -> Option<crate::agent::SpentLimit> {
+    let details: serde_json::Value = serde_json::from_str(input).ok()?;
+    crate::agent::subscription_limit_text(details["last_assistant_message"].as_str()?)
+}
+
+/// The recorder a limit hook started: the account cools and a shared login
+/// moves to the eligible account that ranks first, which every open Claude
+/// follows. Their next message runs there, with no input of ours. Other
+/// Sessions reporting the same limit find the login already moved.
+pub fn record_limit() {
+    // The hook passes the displayed line it matched; the recorder reads its
+    // scope from it.
+    let line = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
+    let Some(limit) = crate::agent::subscription_limit_text(&line) else {
+        return;
+    };
+    let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
+        runtime.block_on(record_native_limit(Provider::Claude, limit))
+    });
+    if let Err(error) = recorded {
+        RecordingGap::default().note("usage limit", &error);
+    }
+}
+
+async fn record_native_limit(
+    provider: Provider,
+    limit: crate::agent::SpentLimit,
+) -> Result<(), ProviderAccountError> {
+    let Some(store) = route_store().await? else {
+        return Ok(());
+    };
+    let settled = now_unix() - SWITCH_SETTLE_SECS;
+    if store
+        .provider_account_switched_since(provider, settled)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let native = activation::native_home(provider, None);
+    let Some(active) = activation::observe_active_account(&store, provider, &native).await? else {
+        return Ok(());
+    };
+    // Read before the switch, while the spent login is still the active home.
+    // A terminal's model is its own to change; credits land on the default.
+    record_stated_limit(&store, provider, &active, limit, None).await?;
+    // A Session a person pinned to accounts keeps to them.
+    if !selection::AccountSelection::from_env()?.is_default() {
+        return Ok(());
+    }
+    let wave = crate::work::wave::context::ambient_wave_id();
+    match select_route(provider, None, None, wave.as_ref(), None).await {
+        Ok(Some(route)) => {
+            activation::activate(
+                &store,
+                provider,
+                &route.account_id,
+                &native,
+                activation::SwitchCause::Exhaustion,
+            )
+            .await?;
+            Ok(())
+        }
+        // Nothing has capacity: the login stays, and Sessions wait for the reset.
+        Ok(None) | Err(ProviderAccountError::NoEligibleAccount { .. }) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// The `provider` login this launch's `--account` names when `current` is not
+/// among them: a request to move to it.
 pub(crate) async fn names_another_account(
     store: &SharedStore,
     provider: Provider,
-    agent_session: &AgentSessionId,
+    current: Option<ProviderAccountId>,
 ) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
     let selection = selection::AccountSelection::from_env()?;
     if selection.is_default() {
@@ -776,10 +1182,7 @@ pub(crate) async fn names_another_account(
         .filter(|(selected, _)| *selected == provider)
         .map(|(_, account_id)| account_id)
         .collect::<Vec<_>>();
-    let pinned = store
-        .provider_session_account(provider, agent_session)
-        .await?;
-    if pinned.is_some_and(|pinned| named.contains(&pinned)) {
+    if current.is_some_and(|account| named.contains(&account)) {
         return Ok(None);
     }
     Ok(named.into_iter().next())
@@ -792,48 +1195,45 @@ pub(crate) async fn resolve_provider_account_exact(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
-    isolate: Option<bool>,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id, isolate).await?;
+    let route = select_route(provider, agent_session, exact_account_id, wave_id, model)
+        .await?
+        .map(|route| route.launching(model));
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
     Ok(route)
 }
 
+/// `model` is the launch's, when it names one; a scoped limit on another
+/// model leaves an account eligible for this launch. A resumed conversation
+/// runs under whichever account the shared home routes to; the account it
+/// began under is history, not a pin.
 async fn select_route(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
-    isolate: Option<bool>,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
-    // A conversation resumes in the home it started in; a new one follows the
-    // launch's mode.
-    let recorded = match (&store, agent_session) {
-        (Some(store), Some(session_id)) => {
-            store
-                .provider_session_isolated(provider, session_id)
-                .await?
-        }
-        _ => None,
+    let resumed = match (&store, agent_session) {
+        (Some(store), Some(session_id)) => store
+            .provider_session_account(provider, session_id)
+            .await?
+            .is_some(),
+        _ => false,
     };
-    let isolated = recorded
-        .or(isolate)
-        .unwrap_or_else(activation::launch_isolated);
-    // A shared conversation resumes under whichever account is active; the
-    // account it began under is history, not a pin.
-    let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
+    let exact_account_id = exact_account_id.filter(|_| !resumed);
     if !selection::AccountSelection::from_env()?.is_default() {
         return resolve_selected_provider_account(
             provider,
-            agent_session,
             exact_account_id,
             wave_id,
             store,
-            isolated,
+            model,
         )
         .await;
     }
@@ -842,29 +1242,33 @@ async fn select_route(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: format!("'{account_id}' is not available on this Machine"),
+                retry_at: None,
             });
         }
         return Ok(None);
     };
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    // A launch pins its login, then resolves that pin, so naming the held login
+    // is still the hold.
+    if exact_account_id.is_none_or(|id| hold::held(provider).as_ref() == Some(id)) {
+        if let Some(held) = held_login(&store, provider, &accounts, model).await? {
+            let route = shared_route(provider, held.clone(), store, exact_account_id.is_some())?;
+            return Ok(Some(route));
+        }
+    }
 
     let routed_repo_id = current_repo_id()?;
-    let Some(candidates) =
-        provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider).await?
-    else {
-        if let Some(account_id) = exact_account_id {
-            return Err(ProviderAccountError::NoEligibleAccount {
-                provider,
-                accounts: format!("'{account_id}' is outside the configured account route"),
-            });
-        }
-        return Ok(None);
-    };
-
+    let candidates = provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider)
+        .await?
+        .unwrap_or_default();
     if candidates.is_empty() {
         if let Some(account_id) = exact_account_id {
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: format!("'{account_id}' is outside the configured account route"),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -878,16 +1282,13 @@ async fn select_route(
         }
         None => candidates,
     };
-    let accounts = store
-        .list_provider_accounts(Some(provider.as_str()))
-        .await?;
     let mut rejected = Vec::new();
     let mut eligible = Vec::new();
     for id in &candidates {
         let Some(account) = accounts.iter().find(|account| account.account_id == *id) else {
             continue;
         };
-        match identity::check_current_identity(account, &accounts).await {
+        match identity::check_routable_identity(&store, account, &accounts).await {
             Ok(()) => eligible.push(id.clone()),
             Err(error) => {
                 let reason = error.to_string();
@@ -900,101 +1301,108 @@ async fn select_route(
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: rejected.join("; "),
+            retry_at: None,
         });
     }
-    let selection = if isolated {
-        store
-            .select_provider_account(provider, &eligible, agent_session)
-            .await?
-    } else {
-        select_shared_account(&store, provider, &eligible).await?
-    };
+    // The most urgent eligible account, whichever login is active: the shared
+    // login switches, and every open Claude follows, whenever another account
+    // ranks ahead.
+    let selection = store
+        .select_provider_account(provider, &eligible, model)
+        .await?;
     let Some(selection) = selection else {
-        let accounts = store
-            .list_provider_accounts(Some(provider.as_str()))
+        let limits = store
+            .provider_account_limits(Some(provider.as_str()))
             .await?;
+        let now = now_unix();
         let reasons = candidates
             .iter()
             .map(|account_id| {
                 accounts
                     .iter()
                     .find(|account| account.account_id == *account_id)
-                    .map(account_unavailable_reason)
+                    .map(|account| account_unavailable_reason(account, &limits, model, now))
                     .unwrap_or_else(|| format!("'{account_id}' missing"))
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let cooling = candidates.iter().filter_map(|account_id| {
+            accounts
+                .iter()
+                .find(|account| account.account_id == *account_id)
+        });
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: reasons,
+            retry_at: earliest_release(cooling, &limits, model, now),
         });
     };
-    let account_id = selection.account.account_id.clone();
-    let home = match selection.account.home.as_deref() {
-        Some(home) => {
-            let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            ensure_account_home_at(&operator_home, home, provider)?;
-            home.to_path_buf()
-        }
-        None => {
-            return Err(ProviderAccountError::Runtime(format!(
-                "managed {provider}/{account_id} has no credential home"
-            )))
-        }
-    };
-    if !isolated {
-        return Ok(Some(ProviderAccountRoute::shared(
-            provider,
-            account_id,
-            store,
-            home,
-            exact_account_id.is_some(),
-        )));
-    }
-    Ok(Some(ProviderAccountRoute {
+    let route = shared_route(
         provider,
-        account_id,
-        home: RouteHome::Isolated,
-        login: AccountLogin::Stored {
-            store,
-            profile: home,
-        },
-    }))
+        selection.account,
+        store,
+        exact_account_id.is_some(),
+    )?;
+    Ok(Some(route))
 }
 
-/// Shared routing takes the eligible account with the most room. The
-/// active account wins ties, so a launch switches every running conversation
-/// only when another account is ahead.
-async fn select_shared_account(
+fn shared_route(
+    provider: Provider,
+    account: ProviderAccount,
+    store: SharedStore,
+    explicit: bool,
+) -> Result<ProviderAccountRoute, ProviderAccountError> {
+    let account_id = account.account_id;
+    let Some(home) = account.home else {
+        return Err(ProviderAccountError::Runtime(format!(
+            "managed {provider}/{account_id} has no credential home"
+        )));
+    };
+    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    ensure_account_home_at(&operator_home, &home, provider)?;
+    Ok(ProviderAccountRoute::shared(
+        provider, account_id, store, home, explicit,
+    ))
+}
+
+/// The login `lf account use` holds, when it can take this launch. A hold
+/// answers to no order and no pause: a model it cannot run goes to the order
+/// and keeps the hold, and a full login ends it.
+async fn held_login<'a>(
     store: &SharedStore,
     provider: Provider,
-    eligible: &[ProviderAccountId],
-) -> Result<Option<crate::store::ProviderAccountSelection>, ProviderAccountError> {
-    let native = activation::native_home(provider, None);
-    let active = activation::observe_active_account(store, provider, &native).await?;
-    let mut ordered = eligible.to_vec();
-    if let Some(index) = active.and_then(|active| ordered.iter().position(|id| *id == active)) {
-        let active = ordered.remove(index);
-        ordered.insert(0, active);
+    accounts: &'a [ProviderAccount],
+    model: Option<&str>,
+) -> Result<Option<&'a ProviderAccount>, ProviderAccountError> {
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let now = now_unix();
+    let Some(account) = hold::ready(provider, accounts, &limits, model, now) else {
+        hold::end_when_full(provider, accounts, &limits, now)?;
+        return Ok(None);
+    };
+    if let Err(error) = identity::check_routable_identity(store, account, accounts).await {
+        tracing::warn!("skipping held account: {error}");
+        return Ok(None);
     }
-    Ok(store
-        .select_provider_account(provider, &ordered, None)
-        .await?)
+    Ok(Some(account))
 }
 
 async fn resolve_selected_provider_account(
     provider: Provider,
-    agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
-    isolated: bool,
+    model: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = current_repo_id()?;
-    let Some(mut candidates) = ordered_selected_candidates(
+    let Some(candidates) = ordered_selected_candidates(
         provider,
-        agent_session,
-        exact_account_id,
+        LaunchAsk {
+            exact_account_id,
+            model,
+        },
         repo_id.as_ref(),
         wave_id,
         local_store.as_ref(),
@@ -1007,14 +1415,15 @@ async fn resolve_selected_provider_account(
     let store = local_store
         .as_ref()
         .expect("candidates belong to the machine store");
-    if !isolated {
-        let native = activation::native_home(provider, None);
-        let active = activation::observe_active_account(store, provider, &native).await?;
-        if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
-            let active = candidates.remove(index);
-            candidates.insert(0, active);
-        }
-    }
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let retry_at = earliest_release(
+        candidates.iter().map(|(candidate, _)| &candidate.account),
+        &limits,
+        model,
+        now_unix(),
+    );
     for (candidate, explicit) in candidates {
         let home = &candidate.home;
         if !explicit
@@ -1022,7 +1431,7 @@ async fn resolve_selected_provider_account(
                 .select_provider_account(
                     provider,
                     std::slice::from_ref(&candidate.account.account_id),
-                    agent_session,
+                    model,
                 )
                 .await?
                 .is_none()
@@ -1031,74 +1440,53 @@ async fn resolve_selected_provider_account(
         }
         let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         ensure_account_home_at(&operator_home, home, provider)?;
-        if !isolated {
-            return Ok(Some(ProviderAccountRoute::shared(
-                provider,
-                candidate.account.account_id.clone(),
-                Arc::clone(store),
-                home.clone(),
-                explicit,
-            )));
-        }
-        return Ok(Some(ProviderAccountRoute {
+        return Ok(Some(ProviderAccountRoute::shared(
             provider,
-            account_id: candidate.account.account_id.clone(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store: Arc::clone(store),
-                profile: home.clone(),
-            },
-        }));
+            candidate.account.account_id.clone(),
+            Arc::clone(store),
+            home.clone(),
+            explicit,
+        )));
     }
 
     Err(ProviderAccountError::NoEligibleAccount {
         provider,
         accounts: "no healthy selected account remains".to_string(),
+        retry_at,
     })
 }
 
-/// A shared launch stays on the active account where its own choice allows:
-/// among the accounts it named, or among all of them when it named none, as
-/// long as no other account there has more room.
-fn active_candidate(
-    active: &ProviderAccountId,
-    candidates: &[(AccountCandidate, bool)],
-) -> Option<usize> {
-    let named = candidates.iter().any(|(_, explicit)| *explicit);
-    let group = || {
-        candidates
-            .iter()
-            .filter(|(candidate, explicit)| *explicit == named && candidate.credential_available)
-    };
-    let best = group().map(|(candidate, _)| candidate.rank).min()?;
-    candidates.iter().position(|(candidate, explicit)| {
-        *explicit == named
-            && candidate.credential_available
-            && candidate.rank == best
-            && candidate.account.account_id == *active
-    })
+/// What a launch asks of the route: the login it names and the model it runs.
+#[derive(Debug, Clone, Copy, Default)]
+struct LaunchAsk<'a> {
+    exact_account_id: Option<&'a ProviderAccountId>,
+    model: Option<&'a str>,
 }
 
 async fn ordered_selected_candidates(
     provider: Provider,
-    agent_session: Option<&AgentSessionId>,
-    exact_account_id: Option<&ProviderAccountId>,
+    ask: LaunchAsk<'_>,
     repo_id: Option<&CanonicalRepo>,
     wave_id: Option<&WaveId>,
     local_store: Option<&SharedStore>,
     verify_identity: bool,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
+    let LaunchAsk {
+        exact_account_id,
+        model,
+    } = ask;
     let mut catalog = match &local_store {
         Some(store) => store.list_provider_accounts(None).await?,
         None => Vec::new(),
     };
     let mut candidates = Vec::new();
     let mut local_route = Vec::new();
+    let mut limits = Vec::new();
     if let Some(store) = &local_store {
         local_route = provider_route_account_ids(store, repo_id, wave_id, provider)
             .await?
             .unwrap_or_default();
-        let limits = store
+        limits = store
             .provider_account_limits(Some(provider.as_str()))
             .await?;
         let now = now_unix();
@@ -1107,7 +1495,7 @@ async fn ordered_selected_candidates(
             .filter(|account| account.provider == provider.as_str())
         {
             let identity = if verify_identity {
-                identity::check_current_identity(account, &catalog)
+                identity::check_routable_identity(store, account, &catalog)
                     .await
                     .map_err(|error| error.to_string())
             } else {
@@ -1126,7 +1514,7 @@ async fn ordered_selected_candidates(
             candidates.push(AccountCandidate {
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
-                rank: room_rank(account, &limits, now),
+                rank: route_rank(account, &limits, model, now),
                 account: account.clone(),
                 home,
             });
@@ -1140,6 +1528,7 @@ async fn ordered_selected_candidates(
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
                 accounts: "the restricted account selection excludes this provider".to_string(),
+                retry_at: None,
             });
         }
         return Ok(None);
@@ -1157,11 +1546,8 @@ async fn ordered_selected_candidates(
         }
     }
 
-    // A resumed conversation moves to the login named for it and never falls
-    // back to the one it ran on.
-    let moving = agent_session.is_some() && !explicitly_preferred.is_empty();
     let mut order = explicitly_preferred.clone();
-    if !selection.is_restricted() && !moving {
+    if !selection.is_restricted() {
         for account_id in &local_route {
             if let Some(index) = candidates
                 .iter()
@@ -1176,33 +1562,15 @@ async fn ordered_selected_candidates(
         }
     }
 
-    // A resume replays the login the conversation last ran on; one named for
-    // it replaces that login.
-    if let Some(account_id) = exact_account_id.filter(|_| !moving) {
+    if let Some(account_id) = exact_account_id {
         order.retain(|index| candidates[*index].account.account_id == *account_id);
     }
     if order.is_empty() {
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
             accounts: "the account selection is empty".to_string(),
+            retry_at: None,
         });
-    }
-
-    if let Some(session_id) = agent_session.filter(|_| !moving) {
-        let local_pin = match &local_store {
-            Some(store) => store.provider_session_account(provider, session_id).await?,
-            None => None,
-        };
-        if let Some(index) = order.iter().position(|index| {
-            let candidate = &candidates[*index];
-            local_pin
-                .as_ref()
-                .is_some_and(|account_id| *account_id == candidate.account.account_id)
-        }) {
-            let pinned = order.remove(index);
-            push_candidate(&mut explicitly_preferred, pinned);
-            order.insert(0, pinned);
-        }
     }
 
     let now = now_unix();
@@ -1218,26 +1586,10 @@ async fn ordered_selected_candidates(
             let candidate = &candidates[*index];
             let explicit = position < preferred_count;
             (candidate.credential_available
-                && (explicit || account_route_eligible(&candidate.account, now)))
+                && (explicit || account_route_eligible(&candidate.account, &limits, model, now)))
             .then(|| (candidate.clone(), explicit))
         })
         .collect::<Vec<_>>();
-    if moving && ordered.is_empty() {
-        return Err(ProviderAccountError::NoEligibleAccount {
-            provider,
-            accounts: order
-                .iter()
-                .map(|index| match candidates[*index].account.credential_state {
-                    CredentialState::Connected => format!(
-                        "'{}' does not match its stored login",
-                        account_login(&candidates[*index].account)
-                    ),
-                    _ => account_unavailable_reason(&candidates[*index].account),
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-        });
-    }
     Ok(Some(ordered))
 }
 
@@ -1247,8 +1599,12 @@ fn push_candidate(order: &mut Vec<usize>, index: usize) {
     }
 }
 
-fn account_unavailable_reason(account: &ProviderAccount) -> String {
-    let now = now_unix();
+pub(crate) fn account_unavailable_reason(
+    account: &ProviderAccount,
+    limits: &[AccountLimitRow],
+    model: Option<&str>,
+    now: i64,
+) -> String {
     if account.credential_state != CredentialState::Connected {
         return format!("'{}' credential is missing", account_login(account));
     }
@@ -1260,10 +1616,16 @@ fn account_unavailable_reason(account: &ProviderAccount) -> String {
             routing.as_str()
         );
     }
-    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
+    if let Some(until) = account_held_until(account, limits, model, now) {
         return format!(
-            "'{}' cooling{}",
+            "'{}' cooling{}{}",
             account_login(account),
+            match model {
+                Some(model) if account.cooldown_until.is_none_or(|cooling| cooling <= now) => {
+                    format!(" for {model}")
+                }
+                _ => String::new(),
+            },
             format_reset_time(until)
         );
     }
@@ -1327,31 +1689,43 @@ pub(crate) async fn inspect_provider_route(
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
-        return Ok(
-            ordered_selected_candidates(provider, None, None, repo_id, None, store, false)
-                .await?
-                .map(|candidates| {
-                    candidates
-                        .into_iter()
-                        .map(|(candidate, _)| candidate.account)
-                        .collect()
-                }),
-        );
+        return Ok(ordered_selected_candidates(
+            provider,
+            LaunchAsk::default(),
+            repo_id,
+            None,
+            store,
+            false,
+        )
+        .await?
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|(candidate, _)| candidate.account)
+                .collect()
+        }));
     }
     let Some(store) = store else {
         return Ok(None);
     };
-    let Some(ids) = provider_route_account_ids(store, repo_id, None, provider).await? else {
-        return Ok(None);
-    };
+    let ids = provider_route_account_ids(store, repo_id, None, provider).await?;
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
     let now = now_unix();
+    let limits = store
+        .provider_account_limits(Some(provider.as_str()))
+        .await?;
+    let held = hold::ready(provider, &accounts, &limits, None, now)
+        .filter(|account| identity::check_account_identity(account, &accounts).is_ok());
+    if ids.is_none() && held.is_none() {
+        return Ok(None);
+    }
     let mut available = ids
         .iter()
+        .flatten()
         .filter_map(|id| accounts.iter().find(|a| a.account_id == *id))
-        .filter(|account| account_route_eligible(account, now))
+        .filter(|account| account_route_eligible(account, &limits, None, now))
         .filter(
             |account| match identity::check_account_identity(account, &accounts) {
                 Ok(()) => true,
@@ -1363,14 +1737,40 @@ pub(crate) async fn inspect_provider_route(
         )
         .cloned()
         .collect::<Vec<_>>();
-    order_accounts_by_room(
-        &mut available,
-        &store
-            .provider_account_limits(Some(provider.as_str()))
-            .await?,
-        now,
-    );
+    order_accounts_by_urgency(&mut available, &limits, None, now);
+    if let Some(held) = held {
+        available.retain(|account| account.account_id != held.account_id);
+        available.insert(0, held.clone());
+    }
     Ok(Some(available))
+}
+
+/// Whether `account` is the login signed in to `provider`'s shared home.
+pub(crate) async fn is_active_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<bool, ProviderAccountError> {
+    let native = activation::native_home(provider, None);
+    Ok(activation::observe_active_account(store, provider, &native)
+        .await?
+        .is_some_and(|active| active == account.account_id))
+}
+
+/// The login to switch the shared home to when `account` leaves automatic
+/// routing: the route's top other login, `None` when nothing else can take
+/// its work.
+pub(crate) async fn replacement_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    repo_id: Option<&CanonicalRepo>,
+) -> Result<Option<ProviderAccount>, ProviderAccountError> {
+    Ok(inspect_provider_route(Some(store), repo_id, provider)
+        .await?
+        .unwrap_or_default()
+        .into_iter()
+        .find(|other| other.account_id != account.account_id))
 }
 
 /// The nearest route for a launch: the Wave's, then the repository's, then
@@ -1474,7 +1874,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
-    isolate: Option<bool>,
+    model: Option<String>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
@@ -1482,7 +1882,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             agent_session.as_ref(),
             exact_account_id.as_ref(),
             wave_id.as_ref(),
-            isolate,
+            model.as_deref(),
         ))
     })
 }
@@ -1512,6 +1912,7 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                         "'{account_id}' has no credential Machine at {}",
                         home.display()
                     ),
+                    retry_at: None,
                 });
             }
             let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -1528,7 +1929,6 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
             let route = ProviderAccountRoute {
                 provider,
                 account_id,
-                home: RouteHome::Isolated,
                 login: AccountLogin::Replayed {
                     catalog,
                     profile: home,
@@ -1819,9 +2219,8 @@ mod tests {
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
             account_id: parse_account_id("reserve").unwrap(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store,
+            login: AccountLogin::Replayed {
+                catalog: store,
                 profile: temp.path().join("codex-reserve"),
             },
         };
@@ -1858,7 +2257,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_routes_select_independent_provider_homes() {
+    async fn replayed_routes_run_in_their_recorded_profiles() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -1874,9 +2273,8 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Claude,
                     account_id: parse_account_id("primary").unwrap(),
-                    home: RouteHome::Isolated,
-                    login: AccountLogin::Stored {
-                        store: store.clone(),
+                    login: AccountLogin::Replayed {
+                        catalog: store.clone(),
                         profile: claude_home.clone(),
                     },
                 },
@@ -1887,9 +2285,8 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Codex,
                     account_id: parse_account_id("reserve").unwrap(),
-                    home: RouteHome::Isolated,
-                    login: AccountLogin::Stored {
-                        store,
+                    login: AccountLogin::Replayed {
+                        catalog: store,
                         profile: codex_home.clone(),
                     },
                 },
@@ -1928,15 +2325,13 @@ mod tests {
             None,
         );
         store.upsert_provider_account(&account).await.unwrap();
-        let route = ProviderAccountRoute {
-            provider: Provider::Claude,
-            account_id: account_id.clone(),
-            home: RouteHome::Isolated,
-            login: AccountLogin::Stored {
-                store: store.clone(),
-                profile: temp.path().join("primary"),
-            },
-        };
+        let route = ProviderAccountRoute::shared(
+            Provider::Claude,
+            account_id.clone(),
+            store.clone(),
+            temp.path().join("primary"),
+            true,
+        );
 
         route
             .record_rate_limit(&RateLimitSignal {
@@ -1949,7 +2344,11 @@ mod tests {
                     used_percent: 100,
                     resets_at: Some(now_unix() + 300),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
+                model: None,
+                credits: false,
             })
             .await
             .unwrap();
@@ -1964,6 +2363,137 @@ mod tests {
             .cooldown_until
             .is_some_and(|until| until > now_unix()));
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
+    }
+
+    /// November 7: a bare `claude` step ran Fable, which needs usage credits,
+    /// and the rejection cooled the whole account for three days.
+    #[tokio::test]
+    async fn a_credits_rejection_holds_the_launched_model_and_never_the_account() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let account_id = parse_account_id("primary").unwrap();
+        let account = new_account(
+            Provider::Claude,
+            account_id.clone(),
+            temp.path().join("primary"),
+            None,
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+        let reset = now_unix() + 3 * 24 * 3600;
+        let rejection = RateLimitSignal {
+            utilization_percent: Some(100),
+            resets_at: Some(reset),
+            limited: true,
+            reason: "rejected: seven_day_overage_included".to_string(),
+            windows: vec![crate::store::AccountLimitWindow {
+                window: "seven_day_overage_included".to_string(),
+                used_percent: 100,
+                resets_at: Some(reset),
+                plan: None,
+                model: None,
+                limited_until: None,
+            }],
+            model: None,
+            credits: true,
+        };
+        let launch = |model: Option<&str>| {
+            ProviderAccountRoute::shared(
+                Provider::Claude,
+                account_id.clone(),
+                store.clone(),
+                temp.path().join("primary"),
+                false,
+            )
+            .launching(model)
+        };
+        launch(None).record_rate_limit(&rejection).await.unwrap();
+
+        let held = |model: &'static str| {
+            let store = store.clone();
+            let account_id = account_id.clone();
+            async move {
+                let account = store
+                    .get_provider_account("claude", &account_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+                account_held_until(&account, &limits, Some(model), now_unix())
+            }
+        };
+        let account = store
+            .get_provider_account("claude", &account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.cooldown_until, None);
+        assert_eq!(
+            held("claude-fable-5-1").await,
+            Some(reset + RESET_GRACE_SECS)
+        );
+        assert_eq!(held("opus").await, None);
+
+        // A launch that named its model holds that one.
+        launch(Some("sonnet"))
+            .record_rate_limit(&rejection)
+            .await
+            .unwrap();
+        assert!(held("sonnet").await.is_some());
+        assert_eq!(held("opus").await, None);
+    }
+
+    /// The November 7 store: weekly 93% and weekly Fable 88%, yet a cooldown
+    /// until the weekly reset. A refresh that reads room clears it.
+    #[tokio::test]
+    async fn a_fresh_reading_with_room_clears_a_cooldown_a_rejection_set() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let mut account = new_account(
+            Provider::Claude,
+            parse_account_id("loopflow").unwrap(),
+            temp.path().join("loopflow"),
+            None,
+        );
+        account.cooldown_until = Some(now_unix() + 3 * 24 * 3600);
+        account.cooldown_reason = Some("rejected: seven_day_overage_included".into());
+        store.upsert_provider_account(&account).await.unwrap();
+        let window =
+            |name: &str, used_percent, model: Option<&str>| crate::store::AccountLimitWindow {
+                window: name.into(),
+                used_percent,
+                resets_at: Some(now_unix() + 3 * 24 * 3600),
+                plan: None,
+                model: model.map(str::to_owned),
+                limited_until: None,
+            };
+
+        // A reading without account-wide windows says nothing.
+        assert!(!save_polled_usage(&store, &account, &[]).await.unwrap());
+        let spent = [window("weekly", 100, None)];
+        assert!(!save_polled_usage(&store, &account, &spent).await.unwrap());
+        let room = [
+            window("weekly", 93, None),
+            window("weekly:fable", 100, Some("fable")),
+        ];
+        assert!(save_polled_usage(&store, &account, &room).await.unwrap());
+        let stored = store
+            .get_provider_account("claude", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.cooldown_until, None);
     }
 }
 
@@ -2001,6 +2531,47 @@ mod account_first_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_running_codex_keeps_its_login_and_a_running_claude_follows_the_home() {
+        let home = tempdir().unwrap();
+        let on = |provider, name| {
+            new_account(
+                provider,
+                parse_account_id(name).unwrap(),
+                home.path().join(name),
+                None,
+            )
+        };
+        let (work, spare) = (
+            parse_account_id("work").unwrap(),
+            parse_account_id("spare").unwrap(),
+        );
+        let capacity = LaunchCapacity {
+            accounts: vec![
+                on(Provider::Claude, "work"),
+                on(Provider::Claude, "spare"),
+                on(Provider::Codex, "work"),
+                on(Provider::Codex, "spare"),
+            ],
+            limits: Vec::new(),
+            active: vec![
+                (Provider::Claude, Some(spare.clone())),
+                (Provider::Codex, Some(spare.clone())),
+            ],
+            now: 1,
+        };
+        let login = |provider, recorded, running| {
+            capacity
+                .login(provider, recorded, running)
+                .map(|account: &ProviderAccount| account.account_id.clone())
+        };
+        assert_eq!(login("codex", Some(&work), true), Some(work.clone()));
+        assert_eq!(login("codex", Some(&work), false), Some(spare.clone()));
+        assert_eq!(login("codex", None, true), Some(spare.clone()));
+        assert_eq!(login("claude", Some(&work), true), Some(spare));
+        assert_eq!(login("gemini", Some(&work), true), None);
     }
 
     fn account(provider: Provider, account_id: &str, home: &Path) -> ProviderAccount {
@@ -2415,6 +2986,8 @@ mod account_first_tests {
                 limited: true,
                 reason: "subscription usage limit".to_string(),
                 windows: Vec::new(),
+                model: None,
+                credits: false,
             })
             .await
             .unwrap();
@@ -2427,58 +3000,7 @@ mod account_first_tests {
     }
 
     #[tokio::test]
-    async fn a_resumed_conversation_prefers_its_pinned_account_over_strain() {
-        let temp = tempdir().unwrap();
-        let store = Arc::new(
-            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                temp.path().join("store.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let first = account(Provider::Codex, "first", temp.path());
-        let second = account(Provider::Codex, "second", temp.path());
-        store.upsert_provider_account(&first).await.unwrap();
-        store.upsert_provider_account(&second).await.unwrap();
-        store
-            .upsert_provider_account_limits(
-                Provider::Codex.as_str(),
-                &second.account_id,
-                &[crate::store::AccountLimitWindow {
-                    window: "weekly".to_string(),
-                    used_percent: 95,
-                    resets_at: Some(now_unix() + 3600),
-                    plan: None,
-                }],
-                "poll",
-            )
-            .await
-            .unwrap();
-        store
-            .pin_provider_session_route(
-                Provider::Codex,
-                &"session".into(),
-                &second.account_id,
-                true,
-            )
-            .await
-            .unwrap();
-
-        let selection = store
-            .select_provider_account(
-                Provider::Codex,
-                &[first.account_id, second.account_id.clone()],
-                Some(&"session".into()),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(selection.account.account_id, second.account_id);
-    }
-
-    #[tokio::test]
-    async fn automatic_selection_prefers_the_account_with_more_room() {
+    async fn automatic_selection_prefers_the_account_with_the_most_quota_left_per_hour() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -2496,61 +3018,66 @@ mod account_first_tests {
             used_percent,
             resets_at,
             plan: None,
+            model: None,
+            limited_until: None,
         };
-        store
-            .upsert_provider_account_limits(
-                Provider::Codex.as_str(),
-                &first.account_id,
-                &[window(95, Some(now_unix() + 3600))],
-                "poll",
-            )
-            .await
-            .unwrap();
+        let soon = now_unix() + 3 * 3600;
+        let both = [first.account_id.clone(), second.account_id.clone()];
+        let select = || {
+            let store = Arc::clone(&store);
+            let both = both.clone();
+            async move {
+                store
+                    .select_provider_account(Provider::Codex, &both, None)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .account
+                    .account_id
+            }
+        };
+        let observe = |account: &ProviderAccount,
+                       windows: Vec<crate::store::AccountLimitWindow>| {
+            let store = Arc::clone(&store);
+            let account_id = account.account_id.clone();
+            async move {
+                store
+                    .upsert_provider_account_limits(
+                        Provider::Codex.as_str(),
+                        &account_id,
+                        &windows,
+                        "poll",
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        // 5% left in 3 hours must be spent faster than an unobserved full week.
+        observe(&first, vec![window(95, Some(soon))]).await;
+        assert_eq!(select().await, first.account_id);
 
-        let selection = store
-            .select_provider_account(
-                Provider::Codex,
-                &[first.account_id.clone(), second.account_id.clone()],
-                None,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(selection.account.account_id, second.account_id);
-
-        let only = store
-            .select_provider_account(
-                Provider::Codex,
-                std::slice::from_ref(&first.account_id),
-                None,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(only.account.account_id, first.account_id);
-
-        // Already reset or never resetting: full room, so declared order stands.
+        // Already reset or no reset time: a full week to spend, as the
+        // unobserved second has, so declared order stands.
         for window in [window(95, Some(now_unix() - 1)), window(95, None)] {
-            store
-                .upsert_provider_account_limits(
-                    Provider::Codex.as_str(),
-                    &first.account_id,
-                    &[window],
-                    "poll",
-                )
-                .await
-                .unwrap();
-            let selection = store
-                .select_provider_account(
-                    Provider::Codex,
-                    &[first.account_id.clone(), second.account_id.clone()],
-                    None,
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(selection.account.account_id, first.account_id);
+            observe(&first, vec![window]).await;
+            assert_eq!(select().await, first.account_id);
         }
+        // An unobserved login's full week outranks 40% left over 5 days.
+        observe(&first, vec![window(60, Some(now_unix() + 5 * 86_400))]).await;
+        assert_eq!(select().await, second.account_id);
+        // 70% left in 3 hours outranks 5% left in 3 hours, and 40% left in
+        // 5 days; the short window only decides room.
+        observe(&first, vec![window(95, Some(soon))]).await;
+        observe(&second, vec![window(30, Some(soon))]).await;
+        assert_eq!(select().await, second.account_id);
+        observe(&first, vec![window(60, Some(now_unix() + 5 * 86_400))]).await;
+        assert_eq!(select().await, second.account_id);
+        let short = crate::store::AccountLimitWindow {
+            window: "session".to_string(),
+            ..window(99, Some(now_unix() + 600))
+        };
+        observe(&second, vec![window(30, Some(soon)), short]).await;
+        assert_eq!(select().await, second.account_id);
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -2638,25 +3165,18 @@ mod account_first_tests {
         assert_eq!(route.account_id(), &healthy.account_id);
     }
 
-    const SHARED_ENV: [&str; 5] = [
+    const SHARED_ENV: [&str; 4] = [
         "LF_HOME",
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "LF_TEST_CLAUDE_PROFILE_URL",
-        activation::ACCOUNT_ISOLATION_ENV,
     ];
-
-    fn set_isolation(isolate: bool) {
-        let (name, mode) = activation::isolation_env(isolate);
-        std::env::set_var(name, mode);
-    }
 
     /// A Machine with `provider` accounts `first` and `second` on the default
     /// route and a native home signed in as `active`; `native` is a login no
     /// stored account holds.
     async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
         let native = temp.join("native");
         fs::create_dir_all(&native).unwrap();
         std::env::set_var(activation::home_env(provider).unwrap(), &native);
@@ -2836,7 +3356,6 @@ mod account_first_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(resumed.is_shared());
         assert_eq!(resumed.account_id(), route.account_id());
         let lock = resumed.launch_as(&mut command).await.unwrap();
         assert!(command.output().unwrap().status.success());
@@ -2910,7 +3429,7 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn codex_same_login_recovery_uses_custom_and_isolated_homes() {
+    async fn codex_same_login_recovery_uses_a_custom_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
@@ -2933,16 +3452,6 @@ mod account_first_tests {
         drop(lock);
         assert_eq!(fs::read(custom.join("auth.json")).unwrap(), good);
         assert_eq!(fs::read(native.join("auth.json")).unwrap(), ambient);
-        set_isolation(true);
-        set_codex_fixture_access(&profile, "rejected");
-        let route = resolve_provider_account(Provider::Codex, None)
-            .await
-            .unwrap()
-            .unwrap();
-        let lock = route.launch_as(&mut command).await.unwrap();
-        drop(lock);
-        assert_eq!(fs::read(profile.join("auth.json")).unwrap(), ambient);
-        assert_eq!(launch_home(&command), Some(Some(profile)));
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -3205,10 +3714,8 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
-        assert!(activate(&store, Provider::Claude, "second", &native).await);
+        let (_store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
 
-        // `second` is active though the route lists `first` ahead of it.
         let route = resolve_provider_account(Provider::Claude, None)
             .await
             .unwrap()
@@ -3217,8 +3724,7 @@ mod account_first_tests {
         command.env("CLAUDE_CODE_OAUTH_TOKEN", "inherited");
         let switched = route.launch_as(&mut command).await.unwrap();
 
-        assert!(route.is_shared());
-        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(route.account_id().as_str(), "first");
         assert!(switched.is_none());
         let set = |name: &str| {
             command
@@ -3227,8 +3733,237 @@ mod account_first_tests {
         };
         assert!(!set("CLAUDE_CONFIG_DIR") && !set("CLAUDE_CODE_OAUTH_TOKEN"));
         assert_eq!(
-            activation::claude_credential_home(&temp.path().join("second")),
+            activation::claude_credential_home(&temp.path().join("first")),
             native
+        );
+    }
+
+    /// Leave `id`'s stored Claude login with an expired access token and a
+    /// refresh token, its identity observed on those bytes: a login parked
+    /// for longer than a token lasts.
+    async fn expire_claude_login(store: &SharedStore, temp: &Path, id: &str) -> String {
+        let credential = serde_json::json!({"claudeAiOauth": {
+            "accessToken": format!("expired-{id}"),
+            "refreshToken": format!("refresh-{id}"),
+            "expiresAt": 1000
+        }})
+        .to_string();
+        fs::write(temp.join(id).join(".credentials.json"), &credential).unwrap();
+        store
+            .record_provider_account_identity(
+                "claude",
+                &parse_account_id(id).unwrap(),
+                &format!("{id}@example.com"),
+                id,
+                None,
+                Some(&identity::credential_digest(&credential)),
+            )
+            .await
+            .unwrap();
+        credential
+    }
+
+    async fn credential_state(store: &SharedStore, id: &str) -> CredentialState {
+        store
+            .get_provider_account("claude", &parse_account_id(id).unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .credential_state
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_rejected_grant_takes_a_parked_login_out_of_routing() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let signed_in = claude_credential(&native);
+        let dead = expire_claude_login(&store, temp.path(), "first").await;
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![(400, r#"{"error":"invalid_grant"}"#.into())],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+        let switched = route.launch_as(&mut Command::new("claude")).await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(switched.is_none());
+        assert_eq!(claude_credential(&native), signed_in);
+        assert_eq!(claude_credential(&temp.path().join("first")), dead);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Missing
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_parked_login_with_a_live_grant_stays_on_top_and_pays_once() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        expire_claude_login(&store, temp.path(), "first").await;
+        let install_lock = native.join(".oauth_refresh.lock");
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            // An `activate` now would copy the grant this refresh spends.
+            move |_| assert!(install_lock.is_dir()),
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+        route.launch_as(&mut Command::new("claude")).await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "first");
+        assert!(claude_credential(&temp.path().join("first")).contains("rotated"));
+        assert!(claude_credential(&native).contains("rotated"));
+        // No endpoint answers now: the next launch needs none.
+        let next = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.account_id().as_str(), "first");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unreachable_token_endpoint_skips_a_parked_login_for_this_launch() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let parked = expire_claude_login(&store, temp.path(), "first").await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(claude_credential(&temp.path().join("first")), parked);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn routing_leaves_the_active_logins_refresh_to_claude() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let profile = temp.path().join("first");
+        let due = expire_claude_login(&store, temp.path(), "first").await;
+        fs::write(native.join(".credentials.json"), &due).unwrap();
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "first");
+        assert_eq!(claude_credential(&native), due);
+        assert_eq!(claude_credential(&profile), due);
+
+        // Claude rotated both tokens, so the stored copy holds a spent grant
+        // and matches nothing until the provider places the native login.
+        let rotated = serde_json::json!({"claudeAiOauth": {
+            "accessToken": "rotated-access",
+            "refreshToken": "rotated-refresh",
+            "expiresAt": 4102444800000i64
+        }})
+        .to_string();
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        // Placing the login, then each candidate's check on this launch's
+        // catalog, which predates the placement. No token request is served.
+        let first = serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}});
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![(200, first.to_string()); 3],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "first");
+        assert_eq!(claude_credential(&profile), rotated);
+        assert_eq!(claude_credential(&native), rotated);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_login_the_provider_cannot_place_spends_no_stored_grant() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
+        let stored = expire_claude_login(&store, temp.path(), "first").await;
+        // `first` may be this rotated login: only the profile endpoint could say.
+        let rotated = serde_json::json!({"claudeAiOauth": {
+            "accessToken": "rotated-access",
+            "refreshToken": "rotated-refresh",
+            "expiresAt": 4102444800000i64
+        }})
+        .to_string();
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        // The profile endpoint is down for both reads of the native login. A
+        // token request for `first` in the second's place would read rejection.
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (503, "{}".into()),
+                (400, r#"{"error":"invalid_grant"}"#.into()),
+            ],
+            |_| {},
+        )
+        .await;
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(claude_credential(&temp.path().join("first")), stored);
+        assert_eq!(
+            credential_state(&store, "first").await,
+            CredentialState::Connected
         );
     }
 
@@ -3241,11 +3976,12 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn shared_launch_follows_the_active_account_in_the_native_home() {
+    async fn shared_launch_switches_to_the_top_account_though_another_is_active() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        // `second` is active though the route lists `first` ahead of it.
+        // `second` is active; the route lists `first` ahead of it and nothing
+        // else ranks them.
         let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
 
         let route = resolve_provider_account(Provider::Codex, None)
@@ -3255,42 +3991,161 @@ mod account_first_tests {
         let mut command = Command::new("codex");
         let switched = route.launch_as(&mut command).await.unwrap();
 
-        assert!(route.is_shared());
-        assert_eq!(route.account_id().as_str(), "second");
-        assert!(switched.is_none());
+        assert_eq!(route.account_id().as_str(), "first");
+        assert!(switched.is_some());
         assert_eq!(launch_home(&command), None);
         assert!(route.provider_args().is_empty());
-        assert_eq!(codex_login(&native), "second@example.com");
+        assert_eq!(codex_login(&native), "first@example.com");
     }
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn shared_launch_moves_off_a_strained_active_account() {
+    async fn a_held_login_takes_launches_until_it_is_full() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let launch = || async {
+            let route = resolve_provider_account(Provider::Codex, None)
+                .await
+                .unwrap()
+                .unwrap();
+            route.launch_as(&mut Command::new("codex")).await.unwrap();
+            codex_login(&native)
+        };
+        // 90% left in 10 minutes outranks second's unobserved week...
         store
             .upsert_provider_account_limits(
                 "codex",
                 &parse_account_id("first").unwrap(),
                 &[crate::store::AccountLimitWindow {
                     window: "weekly".to_string(),
-                    used_percent: 99,
-                    resets_at: Some(now_unix() + 3600),
+                    used_percent: 10,
+                    resets_at: Some(now_unix() + 600),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "poll",
             )
             .await
             .unwrap();
+        assert_eq!(launch().await, "first@example.com");
+        // ...but a hold on second keeps every launch there.
+        hold::hold(Provider::Codex, &parse_account_id("second").unwrap()).unwrap();
+        assert_eq!(launch().await, "second@example.com");
+        assert_eq!(launch().await, "second@example.com");
 
+        // Full: routing takes over and the hold is gone.
+        let mut second = store
+            .get_provider_account("codex", &parse_account_id("second").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        second.cooldown_until = Some(now_unix() + 3_600);
+        store.upsert_provider_account(&second).await.unwrap();
+        assert_eq!(launch().await, "first@example.com");
+        assert_eq!(hold::held(Provider::Codex), None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_model_the_held_login_cannot_take_goes_to_the_order_and_keeps_the_hold() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Codex,
+                accounts: vec![parse_account_id("first").unwrap()],
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let second = parse_account_id("second").unwrap();
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &second,
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly:opus".to_string(),
+                    used_percent: 100,
+                    resets_at: Some(now_unix() + 600),
+                    plan: None,
+                    model: Some("opus".to_string()),
+                    limited_until: Some(now_unix() + 600),
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
+        hold::hold(Provider::Codex, &second).unwrap();
+        let launch = |model: &'static str| {
+            let native = native.clone();
+            async move {
+                let route =
+                    resolve_provider_account_exact(Provider::Codex, None, None, None, Some(model))
+                        .await
+                        .unwrap()
+                        .unwrap();
+                route.launch_as(&mut Command::new("codex")).await.unwrap();
+                codex_login(&native)
+            }
+        };
+        assert_eq!(launch("opus").await, "first@example.com");
+        assert_eq!(hold::held(Provider::Codex), Some(second));
+        assert_eq!(launch("sonnet").await, "second@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn shared_launch_stays_on_a_strained_account_until_another_has_more_to_spend() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let observe = |account: &str, used_percent: u8, resets_in: i64| {
+            let store = Arc::clone(&store);
+            let account_id = parse_account_id(account).unwrap();
+            async move {
+                store
+                    .upsert_provider_account_limits(
+                        "codex",
+                        &account_id,
+                        &[crate::store::AccountLimitWindow {
+                            window: "weekly".to_string(),
+                            used_percent,
+                            resets_at: Some(now_unix() + resets_in),
+                            plan: None,
+                            model: None,
+                            limited_until: None,
+                        }],
+                        "poll",
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        // Its last 1% in an hour outranks an unobserved account's full week.
+        observe("first", 99, 3600).await;
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
             .unwrap();
         let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
+        assert!(switched.is_none());
+        assert_eq!(codex_login(&native), "first@example.com");
 
+        // 90% left in 10 minutes must be spent faster: the login moves there.
+        observe("second", 10, 600).await;
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let switched = route.launch_as(&mut Command::new("codex")).await.unwrap();
         assert!(switched.is_some());
         assert_eq!(codex_login(&native), "second@example.com");
     }
@@ -3302,6 +4157,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let reset = now_unix() + 3600;
         for (account, used_percent) in [("first", 80), ("second", 30)] {
             store
                 .upsert_provider_account_limits(
@@ -3310,8 +4166,10 @@ mod account_first_tests {
                     &[crate::store::AccountLimitWindow {
                         window: "weekly".to_string(),
                         used_percent,
-                        resets_at: Some(now_unix() + 3600),
+                        resets_at: Some(reset),
                         plan: None,
+                        model: None,
+                        limited_until: None,
                     }],
                     "poll",
                 )
@@ -3319,7 +4177,8 @@ mod account_first_tests {
                 .unwrap();
         }
 
-        // `first` is active and first in the route, but `second` has more room.
+        // `first` is active and first in the route; both reset together and
+        // `second` has more room.
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
@@ -3329,37 +4188,6 @@ mod account_first_tests {
         assert_eq!(route.account_id().as_str(), "second");
         assert!(switched.is_some());
         assert_eq!(codex_login(&native), "second@example.com");
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn isolated_launch_and_its_conversation_stay_in_the_account_home() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
-        set_isolation(true);
-
-        let route = resolve_provider_account(Provider::Codex, None)
-            .await
-            .unwrap()
-            .unwrap();
-        let mut command = Command::new("codex");
-        let switched = route.launch_as(&mut command).await.unwrap();
-        route.pin_session(&"conversation".into()).await.unwrap();
-
-        assert!(switched.is_none());
-        assert_eq!(launch_home(&command), Some(Some(temp.path().join("first"))));
-        assert_eq!(codex_login(&native), "second@example.com");
-
-        // Resumed from a shared launch, it returns to the home it started in.
-        set_isolation(false);
-        let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(!resumed.is_shared());
-        assert_eq!(resumed.account_id().as_str(), "first");
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -3375,14 +4203,29 @@ mod account_first_tests {
             .unwrap();
         route.pin_session(&"conversation".into()).await.unwrap();
         assert!(activate(&store, Provider::Codex, "second", &native).await);
+        // `second` now has more quota to spend before its reset.
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &parse_account_id("second").unwrap(),
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".into(),
+                    used_percent: 10,
+                    resets_at: Some(now_unix() + 86_400),
+                    plan: None,
+                    model: None,
+                    limited_until: None,
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
 
-        set_isolation(true);
         let resumed = resolve_provider_account(Provider::Codex, Some(&"conversation".into()))
             .await
             .unwrap()
             .unwrap();
 
-        assert!(resumed.is_shared());
         assert_eq!(resumed.account_id().as_str(), "second");
 
         // The account it began under is history: resuming does not switch back.
@@ -3402,7 +4245,350 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn a_named_account_list_keeps_the_active_account_it_includes() {
+    async fn one_native_limit_moves_the_shared_login_and_repeats_change_nothing() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let active = || {
+            let store = Arc::clone(&store);
+            let native = native.clone();
+            async move {
+                activation::observe_active_account(&store, Provider::Codex, &native)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .as_str()
+                    .to_string()
+            }
+        };
+        let cooling = |id: &'static str| {
+            let store = Arc::clone(&store);
+            async move {
+                store
+                    .get_provider_account("codex", &parse_account_id(id).unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .cooldown_until
+            }
+        };
+
+        record_native_limit(Provider::Codex, stated("usage limit reached"))
+            .await
+            .unwrap();
+        assert_eq!(active().await, "second");
+        assert!(cooling("first").await.is_some());
+
+        // Every other open Session reports the same limit moments later.
+        record_native_limit(Provider::Codex, stated("usage limit reached"))
+            .await
+            .unwrap();
+        assert_eq!(active().await, "second");
+        assert_eq!(cooling("second").await, None);
+    }
+
+    fn stated(line: &str) -> crate::agent::SpentLimit {
+        crate::agent::subscription_limit_text(line).unwrap()
+    }
+
+    async fn held_back(store: &SharedStore, id: &str, model: Option<&str>, at: i64) -> bool {
+        let account = store
+            .get_provider_account("claude", &parse_account_id(id).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let limits = store.provider_account_limits(Some("claude")).await.unwrap();
+        !account_route_eligible(&account, &limits, model, at)
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_stated_limit_holds_the_account_until_its_spent_window_resets() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let reset = now_unix() + 3 * 24 * 3600;
+        let resets_at = time::OffsetDateTime::from_unix_timestamp(reset)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"limits": [
+                        {"group": "session", "percent": 40},
+                        {"group": "weekly", "percent": 100, "resets_at": resets_at},
+                    ]})
+                    .to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated(SPENT_LINE),
+            None,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+
+        let after_default = now_unix() + DEFAULT_COOLDOWN_SECS + 60;
+        assert!(held_back(&store, "first", None, after_default).await);
+        assert!(!held_back(&store, "first", None, reset + RESET_GRACE_SECS + 1).await);
+    }
+
+    /// The poll right after a stated limit is the reading that refutes it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_stated_limit_whose_poll_reads_room_leaves_the_account_routable() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"limits": [
+                        {"group": "session", "percent": 40},
+                        {"group": "weekly", "percent": 93},
+                    ]})
+                    .to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated(SPENT_LINE),
+            None,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+
+        assert!(!held_back(&store, "first", None, now_unix()).await);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_fable_limit_leaves_other_models_on_the_account() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+
+        // No usage endpoint answers: the stated scope alone holds.
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated("You've reached your Fable limit. Switch to another model to continue."),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let now = now_unix();
+        assert!(!held_back(&store, "first", Some("claude-opus-5-5"), now).await);
+        assert!(held_back(&store, "first", Some("claude-fable-5-1"), now).await);
+        assert!(
+            !held_back(
+                &store,
+                "first",
+                Some("claude-fable-5-1"),
+                now + DEFAULT_COOLDOWN_SECS + 60
+            )
+            .await
+        );
+    }
+
+    const SPENT_LINE: &str = "You've hit your weekly limit \u{b7} resets Wed 12:00";
+
+    /// `StopFailure`'s input as Claude 2.1.319 writes it: every 429 is `rate_limit`.
+    fn stop_failure(line: &str, details: Option<&str>) -> String {
+        let mut input = serde_json::json!({
+            "hook_event_name": "StopFailure",
+            "error": "rate_limit",
+            "last_assistant_message": line,
+        });
+        if let Some(details) = details {
+            input["error_details"] = details.into();
+        }
+        input.to_string()
+    }
+
+    #[test]
+    fn only_spent_quota_starts_a_limit_recording() {
+        for input in [
+            stop_failure(
+                "API Error: Request rejected (429) \u{b7} this may be a temporary capacity issue.",
+                None,
+            ),
+            stop_failure(
+                "API Error: Usage credits required for 1M context \u{b7} run /model to switch to standard context",
+                Some("429 long context requires usage credits"),
+            ),
+            stop_failure(
+                "Fable 5 is currently unavailable. Learn more: https://www.anthropic.com/news/",
+                None,
+            ),
+            serde_json::json!({"hook_event_name":"StopFailure","error":"rate_limit"}).to_string(),
+        ] {
+            assert_eq!(spent_limit_reason(&input), None, "{input}");
+        }
+        assert!(spent_limit_reason(&stop_failure(SPENT_LINE, None)).is_some());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_limit_hook_returns_while_its_recorder_waits_on_the_provider() {
+        // The stand-in endpoints exist only in this binary, so `lf` here is it.
+        // Its ctor drops the provider home, so the fixture variable carries it.
+        if let Some(native) = std::env::var_os("LIMIT_RECORDER_NATIVE") {
+            std::env::set_var("CLAUDE_CONFIG_DIR", native);
+            record_limit();
+            return;
+        }
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _lf_bin = EnvRestore::capture(&["LF_BIN"]);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        expire_claude_login(&store, temp.path(), "second").await;
+        let recorder = temp.path().join("lf");
+        fs::write(
+            &recorder,
+            format!(
+                "#!/bin/sh\nLIMIT_RECORDER_NATIVE='{}' exec '{}' --exact provider_account::account_first_tests::a_limit_hook_returns_while_its_recorder_waits_on_the_provider\n",
+                native.display(),
+                std::env::current_exe().unwrap().display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(
+            &recorder,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        std::env::set_var("LF_BIN", &recorder);
+        let (asked, token_requested) = std::sync::mpsc::channel();
+        let (answer, answered) = std::sync::mpsc::channel::<()>();
+        // The spent login's usage is read first, then the parked login refreshes.
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (200, serde_json::json!({"limits": []}).to_string()),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"second@example.com","uuid":"second"}})
+                        .to_string(),
+                ),
+            ],
+            move |request| {
+                if request == 2 {
+                    asked.send(()).unwrap();
+                    answered.recv().unwrap();
+                }
+            },
+        )
+        .await;
+
+        // Run inline, this would sit on the token request the endpoint holds.
+        start_limit_recording(&stop_failure(SPENT_LINE, None)).unwrap();
+        tokio::task::spawn_blocking(move || {
+            token_requested
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+
+        let first = parse_account_id("first").unwrap();
+        let limited = store.get_provider_account("claude", &first).await.unwrap();
+        assert!(limited.unwrap().cooldown_until.is_some());
+        assert!(!claude_credential(&native).contains("rotated"));
+
+        answer.send(()).unwrap();
+        server.await.unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !claude_credential(&native).contains("rotated") {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the login never moved"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(claude_credential(&temp.path().join("second")).contains("rotated"));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_login_taken_out_of_routing_is_replaced_by_the_next() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let mut first = store
+            .get_provider_account("codex", &parse_account_id("first").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        first.routing_state = RoutingState::ExplicitOnly;
+        store.upsert_provider_account(&first).await.unwrap();
+
+        let next = replacement_login(&store, Provider::Codex, &first, None)
+            .await
+            .unwrap()
+            .expect("second takes the work");
+        assert_eq!(next.account_id.as_str(), "second");
+
+        assert!(is_active_login(&store, Provider::Codex, &first)
+            .await
+            .unwrap());
+        assert!(activate(&store, Provider::Codex, "second", &native).await);
+        assert!(!is_active_login(&store, Provider::Codex, &first)
+            .await
+            .unwrap());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_named_account_list_keeps_its_order_whichever_is_active() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
@@ -3417,24 +4603,26 @@ mod account_first_tests {
             );
         };
 
+        // Named first, so it leads though `second` is active.
         listed(&["first", "second"]);
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
             .unwrap();
-        assert!(route.is_shared());
-        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(route.account_id().as_str(), "first");
 
-        // A strained active account does not displace a healthy named choice.
+        // Named order is the person's: urgency does not reorder it.
         store
             .upsert_provider_account_limits(
                 "codex",
                 &parse_account_id("second").unwrap(),
                 &[crate::store::AccountLimitWindow {
                     window: "weekly".into(),
-                    used_percent: 95,
-                    resets_at: Some(now_unix() + 3600),
+                    used_percent: 20,
+                    resets_at: Some(now_unix() + 600),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )
@@ -3463,104 +4651,11 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn naming_another_login_moves_an_isolated_conversation_with_its_transcript() {
+    async fn a_conversation_from_an_account_home_resumes_in_the_shared_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, _native) = shared_home(Provider::Codex, temp.path(), "first").await;
-        set_isolation(true);
-        // A Claude login on the same email never competes for a Codex launch.
-        store
-            .upsert_provider_account(&account(Provider::Claude, "second", temp.path()))
-            .await
-            .unwrap();
-        let id = "0199a213-81c0-7800-8aa1-bbab2a035a53";
-        let rollout = format!("sessions/2026/10/02/rollout-2026-10-02T10-00-00-{id}.jsonl");
-        let first_home = temp.path().join("first");
-        fs::create_dir_all(first_home.join(&rollout).parent().unwrap()).unwrap();
-        fs::write(first_home.join(&rollout), "{\"type\":\"session_meta\"}\n").unwrap();
-        let conversation: AgentSessionId = id.into();
-        let first = parse_account_id("first").unwrap();
-        store
-            .pin_provider_session_route(Provider::Codex, &conversation, &first, true)
-            .await
-            .unwrap();
-        let named = |login: &str| {
-            let selection =
-                selection::AccountSelection::from_flags(&[login.to_string()], &[]).unwrap();
-            std::env::set_var(
-                selection::ACCOUNT_SELECTION_ENV,
-                selection.env_value().unwrap(),
-            );
-        };
-
-        // A resume replays the login it last ran on; naming another moves it.
-        named("second@example.com");
-        let route = resolve_provider_account_exact(
-            Provider::Codex,
-            Some(&conversation),
-            Some(&first),
-            None,
-            None,
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(route.account_id().as_str(), "second");
-        assert!(!route.is_shared());
-        assert!(temp.path().join("second").join(&rollout).is_file());
-        assert_eq!(
-            store
-                .provider_session_account(Provider::Codex, &conversation)
-                .await
-                .unwrap()
-                .unwrap()
-                .as_str(),
-            "second"
-        );
-
-        // A conversation whose transcript is nowhere fails instead of starting empty.
-        let lost: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a54".into();
-        store
-            .pin_provider_session_route(Provider::Codex, &lost, &first, true)
-            .await
-            .unwrap();
-        let error = resolve_provider_account(Provider::Codex, Some(&lost))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("transcript"), "{error}");
-
-        // A named login that cannot launch fails rather than falling back.
-        let mut second = store
-            .list_provider_accounts(Some("codex"))
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|account| account.account_id.as_str() == "second")
-            .unwrap();
-        second.credential_state = CredentialState::Missing;
-        store.upsert_provider_account(&second).await.unwrap();
-        named("first@example.com");
-        resolve_provider_account(Provider::Codex, Some(&conversation))
-            .await
-            .unwrap();
-        named("second@example.com");
-        let error = resolve_provider_account(Provider::Codex, Some(&conversation))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("second@example.com"), "{error}");
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn naming_another_login_moves_an_isolated_claude_conversation_with_its_transcript() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
-        set_isolation(true);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "second").await;
         let id = "0199a213-81c0-7800-8aa1-bbab2a035a55";
         let project = "projects/-Users-jack-src-loopflow";
         let first_home = temp.path().join("first");
@@ -3577,61 +4672,37 @@ mod account_first_tests {
             "{}\n",
         )
         .unwrap();
-        let conversation: AgentSessionId = id.into();
-        let first = parse_account_id("first").unwrap();
         store
-            .pin_provider_session_route(Provider::Claude, &conversation, &first, true)
-            .await
-            .unwrap();
-        let selection =
-            selection::AccountSelection::from_flags(&["second@example.com".to_string()], &[])
-                .unwrap();
-        std::env::set_var(
-            selection::ACCOUNT_SELECTION_ENV,
-            selection.env_value().unwrap(),
-        );
+            .sqlite
+            .record_account_home_conversation(Provider::Claude, id, "first");
+        let conversation: AgentSessionId = id.into();
 
         let route = resolve_provider_account(Provider::Claude, Some(&conversation))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(route.account_id().as_str(), "second");
-        assert!(!route.is_shared());
-        let second_project = temp.path().join("second").join(project);
-        assert!(second_project.join(format!("{id}.jsonl")).is_file());
-        assert!(second_project
-            .join(format!("{id}/subagents/agent.jsonl"))
-            .is_file());
-
-        // A conversation whose id lf assigned before its first launch starts there.
-        let fresh: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a56".into();
-        let route = resolve_provider_account(Provider::Claude, Some(&fresh))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(route.account_id().as_str(), "second");
-        assert_eq!(
-            store
-                .provider_session_account(Provider::Claude, &conversation)
-                .await
+        assert_eq!(route.account_id().as_str(), "first");
+        let shared = native.join(project);
+        assert!(shared.join(format!("{id}.jsonl")).is_file());
+        assert!(shared.join(format!("{id}/subagents/agent.jsonl")).is_file());
+        // Read from the account home until a launch runs it in the shared one.
+        let home = || {
+            crate::transcript::conversation_home(&store.sqlite, Provider::Claude, &conversation)
                 .unwrap()
-                .unwrap()
-                .as_str(),
-            "second"
-        );
+        };
+        assert_eq!(home(), Some(first_home.clone()));
+        route.pin_session(&conversation).await.unwrap();
+        assert_eq!(home(), Some(native.clone()));
 
-        // One that arrived from another Machine sits in the native home, unrecorded here.
-        let received = "0199a213-81c0-7800-8aa1-bbab2a035a57";
-        fs::create_dir_all(native.join(project)).unwrap();
-        fs::write(
-            native.join(project).join(format!("{received}.jsonl")),
-            format!("{{\"type\":\"user\",\"sessionId\":\"{received}\"}}\n"),
-        )
-        .unwrap();
-        resolve_provider_account(Provider::Claude, Some(&received.into()))
+        // A conversation whose transcript is nowhere fails instead of starting empty.
+        let lost = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+        store
+            .sqlite
+            .record_account_home_conversation(Provider::Claude, lost, "first");
+        let error = resolve_provider_account(Provider::Claude, Some(&lost.into()))
             .await
-            .unwrap();
-        assert!(second_project.join(format!("{received}.jsonl")).is_file());
+            .unwrap_err();
+        assert!(error.to_string().contains("transcript"), "{error}");
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -3669,7 +4740,7 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn shared_launch_under_an_isolated_parent_drops_the_inherited_home() {
+    async fn a_launch_under_a_stored_profile_home_drops_the_inherited_home() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
@@ -3753,6 +4824,8 @@ mod inspection_tests {
                     used_percent: 95,
                     resets_at: Some(now + 1000),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 }],
                 "stream",
             )
@@ -3780,12 +4853,14 @@ mod inspection_tests {
                 .await
                 .unwrap()
                 .unwrap();
+            // Strained has an observed weekly window and healthy has none, so strained
+            // leads; cooling is held back.
             assert_eq!(
                 inspected
                     .iter()
                     .map(|a| a.account_id.as_str())
                     .collect::<Vec<_>>(),
-                ["healthy", "strained"]
+                ["strained", "healthy"]
             );
             assert_eq!(store.list_provider_accounts(None).await.unwrap(), before);
             let selected = store

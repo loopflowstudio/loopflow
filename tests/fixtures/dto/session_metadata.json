@@ -8,6 +8,8 @@
   "title_source": "generated",
   "detail": "review-design",
   "provider": "codex",
+  "model": null,
+  "blocked": true,
   "cwd": "/src/loopflow.task",
   "state": "unknown",
   "ready_summary": null,

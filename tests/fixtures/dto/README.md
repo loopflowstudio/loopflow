@@ -57,7 +57,7 @@ The optional `task_pr_id` retains the PR captured by the managed Graph;
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 
-`task_execution_stalled.json` retains stalled Session evidence. `graph_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
+`task_execution_stalled.json` retains stalled Session evidence; `task_execution_waiting.json` a step held by a usage limit. `graph_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
 
 `task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
 exact comparison bases,

@@ -25,7 +25,7 @@ Keep the current contract. The same-connection workflow passed live QA below.
 Review page: `scratch/concept-review.html`. This review inspected code and prior
 check results; it did not rerun tests.
 
-Remaining: delivery review, CI repair if needed, merge and post-merge verification
+Remaining: hosted CI, CI repair if needed, merge and post-merge verification
 before Task completion. Sync again before delivery as other follow-ups land.
 Gate coverage: `test(git::tests::) | test(journal::request::tests::) |
 test(lf::commands::subscribe::) | test(lf::commands::waves::) | binary(served_reads)`.
@@ -34,7 +34,7 @@ Docs presentation: `lf open --host desktop --file rust/loopflow/src/server/READM
 failed because this Task has no workspace in the attached Desktop window; no
 presentation changed.
 
-Check: `TMPDIR=/private/tmp cargo test -p loopflow --lib --test served_reads subscription_git_retention` (inherited `LF_*` unset) — 7 passed after compression; macOS linker emitted its unwind-table size warning. `cargo fmt` and `git diff --check` passed. Clippy and broader affected suites remain with gate.
+Check: `TMPDIR=/private/tmp cargo test -p loopflow --lib --test served_reads subscription_git_retention` (inherited `LF_*` unset) — 7 passed after compression; macOS linker emitted its unwind-table size warning. `cargo fmt` and `git diff --check` passed; broader checks are recorded below.
 
 QA (2026-11-08): `cargo build -p loopflow --bin lf` and
 `uv run python scratch/qa-live.py` passed against the public socket protocol.
@@ -45,3 +45,12 @@ The isolated server was stopped, temporary state removed, and checkout probes
 restored. Desktop rendering and signed installation were not exercised headless.
 
 Publication check (2026-11-08): `lf sync` merged `da7e82310` cleanly; no code repair needed. `TMPDIR=/private/tmp uv run python scripts/test.py --reuse-passing --rust-filter 'test(git::tests::) | test(journal::request::tests::) | test(lf::commands::subscribe::) | test(lf::commands::waves::) | binary(served_reads)'` (inherited `LF_*` unset, rustup proxies first on PATH) passed: 66 tests, architecture, inventory, fmt and all-target Clippy; 278 seconds for two suites. Log: `/private/tmp/loo805-publish-gate.log`. Only scratch notes and PR copy changed afterward. Hosted CI remains for delivery after scratch cleanup.
+
+Gate review (2026-11-08): no code or contract repair needed. Reviewed retention
+scope restoration, inherited checkout/detail/request workers, shared refresh and
+the same-connection regression. README and PR #1860 describe the implemented
+behavior and QA limits. Remote main remains `da7e82310`, already merged here.
+Hosted CI on the scratch-bearing checkpoint skipped its test matrix; it is not
+a passing candidate result. The running auto Graph owns landing next.
+
+Gate check (2026-11-08): the affected-gate command above with `--reuse-passing` ran afresh on `3de466e69` — PASS, 66 tests, architecture, inventory, fmt, CLI build and all-target Clippy; 233 seconds for two suites; resource pre/postflight passed despite a nonblocking automatic build-cleanup warning. Log: `/private/tmp/loo805-gate.log`. `git diff --check` passed. Only this scratch note changed afterward; no test input changed. Hosted CI remains deferred until landing clears scratch.

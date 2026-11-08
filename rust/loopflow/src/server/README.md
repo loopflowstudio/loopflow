@@ -144,7 +144,11 @@ error; anything else a read returns is `unavailable`.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
-the shared kinds; `wire::ServerOperation` owns the server's own:
+the shared kinds; `wire::ServerOperation` owns the server's own.
+
+Rust variants use the kind's PascalCase spelling (`ProcessList`); Swift cases
+use lowerCamelCase (`processList`). Dots and underscores separate words. Each
+case names one operation, including distinct claim/unassign and pin/unpin writes.
 
 | API kind | CLI | Engine |
 | --- | --- | --- |

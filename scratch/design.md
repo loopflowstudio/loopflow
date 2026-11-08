@@ -1,17 +1,12 @@
 # LOO-809: remote attach tickets
 
-Reuse the local attach flow and wire shapes. The planned identity, lifetime and
-rejection contract lives in
+Reuse the local attach flow and wire shapes. The planned contract lives in
 `rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
 `docs/server.md`; keep client behavior there instead of repeating it here.
 
 Implementation and publication wait for LOO-718's remote admission. Its listener,
 mobile settings and bulk protocol are outside this Task. No product decision is
-missing.
-
-The checkout contains the planned remote contract only. Its existing local
-tickets bind to a Unix UID, consume on every redemption attempt and use
-`Instant`; remote identity binding and expiry across host sleep remain unbuilt.
+missing. This checkout contains the planned remote contract only.
 
 ## Transport dependency — November 8, 2026
 
@@ -32,13 +27,17 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-`lf task status LOO-718 --json` still reported the interactive
+The November 8 implement check found:
+`lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
-again reported OPEN, no merge or auto-merge, at the published head above during
-the November 8 implement check. `git fetch origin main` advanced origin/main to
-`7165925e5df60cef61cd014821deebb4d4339de0`; `git ls-tree` still found neither
-`server/mobile.rs` nor `server/ticket.rs`. The transport dependency remains;
-no implementation or publication can proceed within this Task's scope.
+reported OPEN, no merge or auto-merge, at the published head above.
+`git fetch origin main` found origin/main at
+`237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
+`server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
+above are from the earlier inspection, not a landed implementation.
+
+Graph decision finding: blocked on LOO-718 landing. Repeating implementation
+cannot resolve this external dependency; retain the checkout for continuation.
 
 ## Delete — do not maintain
 
@@ -50,22 +49,16 @@ bridge rejection test and wire fixtures: they exercise the surviving protocol.
 Reconcile wire and lifetime differences against the landed revision. Retain
 consume-on-attempt; replace ticket timing with `SystemTime` so the 60-second
 deadline includes host sleep. Leave unrelated throttles on `Instant`.
+The terminal ticket contract must not silently change bulk transfer redemption
+policy when both use the shared store.
 
 ## Remaining acceptance
 
 Exercise every case in the remote attach contract through authenticated client
-and bridge connections during implementation, gate and QA. Keep the contract
-there so the plan cannot drift into a second specification. Reconcile PR #1812's
-tests while keeping bulk transfer behavior intact.
+and bridge connections during implementation, gate and QA. Reconcile PR #1812's
+tests while keeping bulk transfer behavior intact. Visual review remains for
+demo or QA; Desktop opening results are in `questions.md`.
 
-The November 8 write-docs run reused `docs/server.md` and
-`rust/loopflow/src/server/README.md` unchanged. `lf open --host desktop --file
-docs/server.md --file rust/loopflow/src/server/README.md` returned success,
-reporting both paths opening in Loopflow Desktop after the earlier failures in
-`questions.md`. Visual review remains for demo or QA; the transport is the
-implementation dependency.
-
-`git diff --check` — clean on the November 8 implement check; prose-only edits,
-no build or tests required. `lf context` — scratch within both limits.
-
-Compress: `git diff --check` — clean; plan-only edits, no build or tests required.
+Compress removed repeated status and acceptance prose; no code changed.
+`git diff --check` — clean; `lf context` — within both scratch limits. No build
+or tests required for plan-only edits.

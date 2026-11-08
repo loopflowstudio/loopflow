@@ -8,3 +8,7 @@ nothing opened."
 
 The next November 8 write-docs attempt reported: "Error: The pane content was
 replaced; inspect Desktop again."
+
+A later November 8 write-docs run returned success for the same command,
+reporting both paths opening in Loopflow Desktop. Visual review remains for
+demo or QA; no open product question resulted from these failures.

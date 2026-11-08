@@ -65,8 +65,7 @@ native phone client are separate work in LOO-718; local server readiness alone
 does not mean a phone can connect. Pairing a phone will grant client access to a
 host, independently of adding a Machine as an execution destination.
 
-The planned remote attachment flow binds each terminal ticket to the identity
-authenticated on both connections. Client authors can follow the
+For the planned ticket exchange and identity requirements, see the
 [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
 
 Local use needs no network listener. Keep the local socket private; remote

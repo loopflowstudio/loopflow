@@ -359,11 +359,24 @@ Planned for the authenticated endpoint in [Phone access](../../../../docs/server
 this build supports local attachment only.
 
 To attach a phone to a running Session, request `session.attach` on its
-authenticated client connection. Open a separate authenticated bridge connection
-and send `{"type":"attach","ticket":"<returned ticket>"}` as its first message.
-After `bridged {owner_lf_process_id}`, use the binary owner protocol described
-above. The ticket itself does not take input or geometry control from another
-viewer; request control through the owner protocol.
+authenticated client connection after `welcome`:
+
+```text
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
+← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
+```
+
+Open a separate authenticated bridge connection and send the returned ticket as
+its first message:
+
+```text
+→ {"type":"attach","ticket":"<ticket>"}
+← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
+```
+
+After `bridged`, use the [binary owner protocol](../transport/README.md).
+The ticket itself does not take input or geometry control from another viewer;
+request control through the owner protocol.
 
 Both connections must authenticate as the same Tailscale node and user, using
 the transport's node stable ID and user ID. The same account on a different

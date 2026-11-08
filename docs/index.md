@@ -13,6 +13,13 @@ work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on you
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 
+**Your agent can drive it.** The last install line teaches your own coding agent
+to use `lf`, so you can just ask it: *"Split the auth cleanup into Tasks and run
+them with lf."* [What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
+
+Run Tasks in parallel, each in its own worktree and branch. Nothing is hosted:
+conversations stay on your machine, and only the plan travels.
+
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
@@ -39,10 +46,6 @@ lf task status <ID>                            # where it is in its workflow, an
 lf history usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
-
-The last install line teaches your own coding agent to do all of this, so you
-can just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
-[What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
 
 **2. Write down how work runs.** A Task's workflow is a Graph: a YAML list of
 Skills, and a Skill is a Markdown file, both in your repository and reviewed like

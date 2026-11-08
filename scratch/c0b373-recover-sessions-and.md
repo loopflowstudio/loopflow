@@ -146,11 +146,10 @@ Outstanding demo questions (bare login names, `pause` with no "disabled", Anthro
 Merge 0f71d266c8 (#1831) undid main's `native_codex.py` and `session_launch_contract.rs`; both restored. `support`'s ctor moves `HOME` into the temp directory for every test binary (questions 27).
 
 ## Demo (November 7, 2026; store copy, temp HOME, network blocked)
-Shown: `lf account --cached` rows match the mock; `next` gives reasons; ambiguity and unknown-login errors; the repository-order fix-it line. Not shown: `use`, `pause`, the refresh lock (they switch the real login). Jack Heart, on the three fixes below: "go for it".
-Next pass:
-1. The old spelling `lf account claude use jack@` errors with "a login and --cached or --json before a verb apply to `lf account` alone"; name the new spelling instead (`lf account use claude=jack@`).
-2. `lf account <login>` prints the old long dump (every window, "Local services: none", every browser profile). Show only that login: its windows with age and source, auth, plan, and its own browser profile.
-3. `lf account use bogus@` exits 1; the CLI contract is 0 fine, 2 blocked, 3 login needed. An unknown login is a usage error: exit 2 with the existing message, or document otherwise.
+Shown: `lf account --cached` rows match the mock; `next` gives reasons; ambiguity and unknown-login errors; the repository-order fix-it line. Not shown: `use`, `pause`, the refresh lock (they switch the real login). Jack Heart, on the three fixes: "go for it". Built, same day:
+1. `lf account claude use jack@` answers with the current spelling, `lf account use claude=jack@` (any verb; `--cached`/`--json` before a verb keep their own line).
+2. `lf account <login>` shows that login alone: auth, one `plan:` line (set and observed), each window with age and source, and `browser N:` lines for the profiles bound to it with whether this Chrome has them signed in; `--json` carries the same scoped `browser`. The provider form keeps the sections and every saved browser. The `source=managed_home configured plan=… expires=…` footer is gone from both.
+3. `lf account use bogus@` (unknown or ambiguous) prints the resolver's message and exits 2, Clap's usage code; documented beside the 2/3 contract.
 Demo hazard: `lf account use` with a temp HOME still reads stored logins from the real `~/.lf/accounts/` (absolute homes in the store) and calls the real `security`; it failed before writing. Demos of switching need fake logins in a fake LF_HOME, not a store copy.
 
 ## Remaining
@@ -199,8 +198,8 @@ Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --s
 13. **A spent line naming a model scopes its limit.** `subscription_limit_text` returns `SpentLimit { reason, model }` (`opus|sonnet|haiku|fable` between "your" and "limit"); `stated` carries it. The terminal recorder still moves the login: a no-model `select_route` is held by every scope.
 14. **A spent account stays out until its window resets.** `record_stated_limit` (native recorder, before the switch; `record_limit_blocking` for steps) polls a Claude account once. `subscription::poll_account` gives every 100% window `limited_until` at its reset, so `lf account` polls no longer clear a stream-set hold. A failed poll keeps 15 minutes. Codex is not polled (questions.md). Test builds default the usage URL to `127.0.0.1:1`.
 
-## Concept review (November 7, 2026, headless, after item 14), next implement
-15. **A capacity 429 retries, in steps as in terminals.** Item 12 rests on telling a capacity blip from spent quota, and accepted scope 2 has a step retry on a blip, not fail. `classify_retryable_agent_failure` misses Claude's own line, `Request rejected (429) · this may be a temporary capacity issue`: no "at capacity", no "status 429". A step whose stderr carries only that line classifies as nothing and fails the Graph Blocked. Implement: match "capacity issue" as `AgentFailure::Capacity`, beside "at capacity"; add the line to the classifier test that already lists it as not spent.
+## Concept review (November 7, 2026, headless, after item 14), built
+15. **A capacity 429 retries, in steps as in terminals.** Item 12 rests on telling a capacity blip from spent quota, and accepted scope 2 has a step retry on a blip, not fail. `classify_retryable_agent_failure` misses Claude's own line, `Request rejected (429) · this may be a temporary capacity issue`: no "at capacity", no "status 429". A step whose stderr carried only that line classified as nothing and failed the Graph Blocked; "capacity issue" now classifies as `AgentFailure::Capacity` beside "at capacity" (43c2d6a69).
     Unverified, left as built: `You're out of usage credits` may be the credits-only model's line (Fable) rather than the account's, which would make item 13 cool the whole account and move every open Claude for a model limit. Source-read only; no live case.
 
-Check, isolated (empty cwd, isolated HOME, CARGO_HOME kept, LF_* unset, stdin /dev/null): `provider_account::` 65, `agent::` 45, `context_block::` 10, `subscription::` 12 pass. Clippy: gate. Live spent limits: demo.
+Check, isolated (empty cwd, isolated HOME, CARGO_HOME kept, LF_* unset, stdin /dev/null): `provider_account::` 65, `agent::` 45, `context_block::` 10, `subscription::` 12 pass. November 7 demo fixes: `--lib account` (status 4, Clap 5), `--test global_commands machine_commands_and_catalog`, clippy pass from this checkout; `provider_account::account_first_tests` fail here only with "has no resident login" (this Machine's routes; unchanged by the fixes). Live spent limits: demo.

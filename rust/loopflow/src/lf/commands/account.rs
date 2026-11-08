@@ -126,7 +126,7 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    if let Some(misuse) = AccountCommand::misuse(cmd, target.is_some() || cached || json) {
+    if let Some(misuse) = AccountCommand::misuse(cmd, target, cached || json) {
         bail!(misuse);
     }
     match cmd {
@@ -261,6 +261,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
 }
 
 /// A script reads why `next` or `use` could not proceed from its exit code.
+/// 2 is also Clap's usage exit, so a login that names nothing shares it.
 pub(super) const EXIT_BLOCKED: u8 = 2;
 pub(super) const EXIT_LOGIN_NEEDED: u8 = 3;
 
@@ -281,7 +282,15 @@ async fn use_login(raw: &str) -> Result<()> {
         return Ok(());
     }
     let store = open_account_store().await?;
-    let account = super::profile::resolve_login(&store, provider, &login, "lf account use").await?;
+    // A login that names nothing stored is a usage error, like a misspelt flag.
+    let account =
+        match super::profile::resolve_login(&store, provider, &login, "lf account use").await {
+            Ok(account) => account,
+            Err(error) => {
+                eprintln!("{error}");
+                return Err(crate::process::CommandExit(EXIT_BLOCKED).into());
+            }
+        };
     let provider: Provider = account.provider.parse()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     if account.credential_state != CredentialState::Connected {

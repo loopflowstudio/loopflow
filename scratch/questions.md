@@ -7,15 +7,9 @@ Assumptions made in the headless implement step, each reversible.
 3. **A rejected event cools the account until its reset**, including `seven_day_overage_included`. If overage rejection leaves the plan's own quota usable, this cools too much. Stays as built (Jack Heart, November 7: "none of this concersn me").
 4. **Waits have no upper bound.** A weekly limit can hold a step for days, in one idle process, until someone interrupts it. Stays as built (same answer).
 
-# Jack's direction at demo (November 5, 2026; under discussion, not yet accepted design)
+# Jack's direction at demo (November 5, 2026)
 
-Overturns decision 7 and question 2 as policy. Exact shape still open.
-
-- Fail through in order: another account, then another provider (and model), and only when everything explicitly allowed is exhausted, fail or wait and retry. Tasks can declare, or be assumed by default, that they may switch between Claude, Codex and OpenCode.
-- Limits come in many kinds (5-hour windows, which may be gone; Claude's Fable-specific limit). Detect them all, and ideally anticipate them.
-- Load balance Task work across as many accounts as possible instead of filling one and moving on. Open idea: Task workers balance across accounts while interactive Sessions share a single account, which keeps switching them simple.
-
-Scope (Jack, November 5): this discussion covers Claude and Codex only. OpenCode and Pi accounts generalize later in their own Task.
+Became the design doc's "Accepted at demo" (fall through account, then provider and model; detect every limit kind; balance across accounts). Claude and Codex only; OpenCode and Pi later in their own Task. Full text at dacc487bc.
 
 # Account separation research (November 5, 2026)
 
@@ -23,28 +17,12 @@ Settled by deleting isolation (Accepted at demo, item 7); the research is in git
 
 # Interactive policy (Jack, November 5, 2026)
 
-Bias against an interactive Session changing provider by itself; no surprising experiences. Task workers do retry and move automatically, within their approved harnesses. Whether interactive Sessions move automatically at all is still open. Required either way: a command, and probably a Desktop button, that transfers all open Sessions in the least disruptive way. It must cover isolated and shared Sessions, and three targets: from Claude to Codex when Claude is out, to another Claude account, to Opus when Fable runs out.
+Bias against an interactive Session changing provider by itself. Bulk move: blocked Sessions by default, interactive only, never Runs; `--all` widens. "all blocked" is the most important query (history at 447a7c016). Worker fallback: an explicit agent is followed only within itself (`claude:<model>` stays; bare `claude` may fall back across Claude models and accounts); cross-provider fall-through lives in preferences. Settled shape in the design doc; full text at dacc487bc.
 
-Bulk move scope (Jack, November 5): default to blocked Sessions, not all. Interactive Sessions only, never Runs. Sketch under discussion: blocked means the Session's account or model has no capacity, derived from limit observations, so provider follows from what ran out; isolation decides how a Session moves, not whether. `--all` widens it.
-
-Selector (Jack, November 5; history at 447a7c016): "all blocked" is the most important query; flags on `lf session list` and every bulk action, list as the preview; comps kubectl (CLI) and Linear (Desktop). Query language not planned.
-
-Live login test (November 5, Claude 2.1.318, Jack approved): fake tokens in a throwaway Keychain item, local stand-in API recording token hashes, no real login or quota. TUI and stream-json agree. With `.credentials.json` present, a Keychain change was not picked up (still old token after 36s and 72s); updating that file's mtime moved the next request to the new token within 3s. With no such file, the Keychain change was picked up by the next turn after 36s.
-`~/.claude/.credentials.json` on Jack's Machine is a stub: 22-character token, expiresAt 4102444800000, matching this repo's test fixtures, dated October 18. It likely leaked from a test and likely explains why `/login` does not spread. Removal is Jack's call.
-Fix for #1828: touch that file after writing the Keychain in `activate`; decision 6 then holds.
-Scope (Jack): the bulk move goes in #1828 (Jack said 1820, which is merged and unrelated), not a stacked Task.
-
-Stub removed from `~/.claude` (Jack approved, November 5); `/login` spreading across real Sessions still to be seen in use.
-
-Worker fallback (Jack, November 5): an explicit agent is followed only within itself. `claude:<model>` stays on that model; bare `claude` may fall back across Claude models (e.g. Fable to Opus) and accounts. Preferences (default agent, no explicit agent) are where cross-provider fall-through lives. Before landing, nothing built-in or in this repo's config requires Claude or Codex explicitly; Jack only ever sets preferences.
-Interactive automatic moves: start shared-only (Jack); trade-offs explained at review.
+Live login test (November 5, Claude 2.1.318, Jack approved): fake tokens in a throwaway Keychain item, local stand-in API recording token hashes. With `.credentials.json` present, a Keychain change was not picked up (old token after 36s and 72s); touching that file's mtime moved the next request to the new token within 3s. With no such file, the next turn after 36s picked up the Keychain. Jack's `~/.claude/.credentials.json` was a 22-character test stub dated October 18; removed November 5 (Jack approved). `/login` spreading across real Sessions still to be seen in use.
 
 # Why isolation exists (research, November 5)
-Jack's goal: use several Max accounts to spread work without thinking about which one is in use. Jack wants isolation settled in this Task (#1828).
-- Before October 4 every launch ran in its account's own home: that was the load-balancing mechanism. #1416 (October 4) made the shared native home the default because conversations scattered across homes and plain `claude --resume` / `codex resume` could not find them. Isolation stayed for already-pinned conversations and explicit `--isolate`.
-- Today only `lf ssh` sets isolation automatically (remote Machines). Locally, no isolated Claude conversation since October 27 and no Codex one since October 28; none of the running Claude processes are isolated. Shared: 5,312 Claude conversations since November 2.
-- Weekly limits make sequential use as good as concurrent for total capacity; isolation's concurrency helps only short windows (5-hour) or throughput. Capacity is lost only when an account resets with room left, which suggests routing by soonest reset among accounts with room rather than most room.
-- Gaps that kept shared mode from meeting the goal: the switch did not reach running Claude (stub file; mtime fix), and limits were misclassified or unhandled (this PR).
+Jack's goal: several Max accounts spread work without thinking about which is in use. Isolation was the pre-October-4 balancing mechanism (#1416 made the shared home default); locally unused since October 27–28; deleted in this Task. Weekly limits make sequential use as good as concurrent, which is why routing ranks by soonest reset among logins with room. Detail at dacc487bc.
 
 # Assumptions while building the demo decisions (November 5, 2026)
 
@@ -53,16 +31,10 @@ Jack's goal: use several Max accounts to spread work without thinking about whic
 8. **Ordered preferences** are a comma list in `default_agent` (`lf set default_agent claude,codex`), mirroring account routes. The first entry is the agent; the rest are providers a headless step may fall through to.
 9. **Claude model rungs** are `opus`, `sonnet`, `haiku` in that order, skipping the model already running; Codex limits are account-wide, so it has no model rungs.
 10. **Busy Sessions** move at their next Stop hook rather than mid-turn.
-- Remote isolation (`lf ssh`, `f72bc3ab9d` #1493): set only when a launch selects accounts. Two reasons: a laptop-selected account must not switch the target's shared login under the target's own work, and SSH launches need file-backed credentials (the macOS Keychain is generally unusable from SSH). Jack doubts it is essential. Both look replaceable on Jack's own Machines: a shared home can hold a file login (Claude falls back to a plaintext `.credentials.json`; mtime change is what running Claude watches). That would make isolation deletable everywhere, pending Jack's choice.
-- Comps for remote credentials (Paseo, Omnara, Warp): none forward subscription logins; detail in git at 400ab22ea.
+- Remote isolation (`lf ssh`, `f72bc3ab9d` #1493) existed for a laptop-selected account not switching the target's shared login, and for SSH needing file credentials; a shared home holding a file login replaces both. Comps for remote credentials (Paseo, Omnara, Warp) forward no subscription logins; detail at 400ab22ea.
 
 # HumanLayer comp (github.com/humanlayer/humanlayer, read November 5)
-- One provider login per daemon host, nothing forwarded; no multiple accounts or switching. Its own login: device flow, refresh session in `~/.humanlayer/riptide/`, or a short-lived launch token used for one process and never saved.
-- Session state `waiting_for_usage_limit` (golden/session_state_machine.md): `running` → waiting on a rejected `rate_limit_event` with no overage; back to `running` when the window resets and the agent streams again.
-- Overage (`host-usage-limits.ts`): `overage` and `seven_day_overage_included` are overage types; a rejection parks only when `overageStatus` is not allowed/allowed_warning and overage is not in use. This answers questions.md 3: a `seven_day_overage_included` rejection should not cool the account when overage is still allowed or in use.
-- The Claude CLI itself waits out a rejected window, reporting each wait as `system`/`api_retry`; the SDK emits no result while parked. lf must not wait for an exit to detect the limit.
-- Windows: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, model-scoped as `model:<display name>`; snapshot from the Agent SDK's get-usage control request; credit and codename buckets ignored. The five-hour window is still in their current schema.
-- ccdaddy (third-party): daemon swaps `~/.claude/.credentials.json` account keys under Claude's own locks at a usage threshold (default 80%); running sessions pick it up on the next request.
+One login per daemon host, no switching. Two facts still live: `overage` and `seven_day_overage_included` rejections park a session only when overage is not allowed or in use (answers question 3: such a rejection should not cool the account while overage is allowed); the Claude CLI waits out a rejected window itself, reporting `system`/`api_retry`, and the SDK emits no result while parked, so lf must not wait for an exit to detect a limit. ccdaddy swaps `.credentials.json` keys under Claude's locks at 80% and running sessions pick it up next request. Detail at dacc487bc.
 11. **Unobserved logins.** Settled at demo (Jack, November 6): a window past its reset, one with no reset time, and a login with no weekly reading score a full week (100% over 168h); `lf account connect` also polls once.
 12. **No draft signal.** Nothing records a typed-but-unsent draft, so `lf session move` treats an available Session as idle and moves it; a busy one (no availability) waits for its Stop hook. The design's "draft-holding Session listed as skipped" has no source yet.
 14. **A model change starts a seeded thread.** `lf session move -a claude:opus` on a Claude Session goes through `lf session new -a`, not a native resume with another `--model`; the native thread stays in history.

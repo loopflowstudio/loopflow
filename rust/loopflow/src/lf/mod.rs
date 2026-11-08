@@ -335,7 +335,7 @@ impl Cli {
         }) = &self.command
         {
             if let Some(misuse) =
-                AccountCommand::misuse(cmd.as_ref(), target.is_some() || *cached || *json)
+                AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *cached || *json)
             {
                 return Err(clap::Error::raw(
                     clap::error::ErrorKind::ArgumentConflict,
@@ -2895,7 +2895,7 @@ pub enum AccountCommand {
     },
     /// Switch this Machine to a login and keep launches there until it fills
     /// up; `auto` hands them back to routing. Exits 2 when the login has no
-    /// room, 3 when it needs a login
+    /// room or names nothing stored, 3 when it needs a login
     #[command(
         after_help = "lf account use work@          # every launch takes work@ until it is full\n\
                             lf account use auto           # back to the login with the most to spend\n\
@@ -2991,9 +2991,51 @@ fn parse_account_target(raw: &str) -> Result<String, String> {
 
 impl AccountCommand {
     /// A login or overview flag before a verb belongs to bare `lf account`.
-    pub fn misuse(cmd: Option<&Self>, overview: bool) -> Option<&'static str> {
-        (cmd.is_some() && overview)
-            .then_some("a login and --cached or --json before a verb apply to `lf account` alone")
+    /// The old `lf account claude use jack@` spelling is answered with the
+    /// current one, `lf account use claude=jack@`.
+    pub fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
+        let cmd = cmd?;
+        if let Some(target) = target {
+            let spelling = match cmd.login() {
+                Some(login) if !login.contains('=') && !target.contains('=') => {
+                    format!("lf account {} {target}={login}", cmd.verb())
+                }
+                Some(login) => format!("lf account {} {login}", cmd.verb()),
+                None => format!("lf account {}", cmd.verb()),
+            };
+            return Some(format!(
+                "the verb comes first and the provider goes with the login: {spelling}"
+            ));
+        }
+        overview
+            .then(|| "--cached and --json before a verb apply to `lf account` alone".to_string())
+    }
+
+    fn verb(&self) -> &'static str {
+        match self {
+            Self::Next { .. } => "next",
+            Self::Use { .. } => "use",
+            Self::Pause { .. } => "pause",
+            Self::Unpause { .. } => "unpause",
+            Self::Connect { .. } => "connect",
+            Self::Disconnect { .. } => "disconnect",
+            Self::Set { .. } => "set",
+            Self::RedeemReset { .. } => "redeem-reset",
+        }
+    }
+
+    /// The login or provider the verb acts on.
+    fn login(&self) -> Option<&str> {
+        match self {
+            Self::Next { .. } => None,
+            Self::Use { login }
+            | Self::Pause { login }
+            | Self::Unpause { login }
+            | Self::RedeemReset { login, .. } => Some(login),
+            Self::Connect { target, .. }
+            | Self::Disconnect { target }
+            | Self::Set { target, .. } => Some(target),
+        }
     }
 }
 
@@ -3652,10 +3694,21 @@ mod tests {
             };
             assert!(Cli::try_parse_from(args).is_ok(), "{verb}");
         }
+        let old_spelling = Cli::try_parse_from(["lf", "ops", "account", "codex", "use", "jack@"])
+            .and_then(Cli::checked)
+            .unwrap_err()
+            .to_string();
         assert!(
-            Cli::try_parse_from(["lf", "ops", "account", "codex", "use", "jack@"])
-                .and_then(Cli::checked)
-                .is_err()
+            old_spelling.contains("lf account use codex=jack@"),
+            "{old_spelling}"
+        );
+        let flags_first = Cli::try_parse_from(["lf", "ops", "account", "--json", "next"])
+            .and_then(Cli::checked)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            flags_first.contains("apply to `lf account` alone"),
+            "{flags_first}"
         );
         for old in [
             vec!["lf", "ops", "account", "--details"],

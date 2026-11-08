@@ -140,8 +140,8 @@ moves into the shared home when it resumes.
 
 ```bash
 lf account                       # one row per login; stale rows refresh
-lf account work@                 # every window, its age and source, saved browsers
-lf account claude                # the same for every Claude login and Claude's local credentials
+lf account work@                 # that login: auth, plan, each window's age and source, its browsers
+lf account claude                # every Claude login and Claude's local credentials, with every saved browser
 lf account --cached              # offline: no provider contact, no writes
 lf account --json                # every login and local service as one document
 ```
@@ -149,11 +149,13 @@ lf account --json                # every login and local service as one document
 Naming a login or a provider asks the provider about each one shown.
 
 `lf account` shows one row per login, then a line per thing to fix with the
-command that fixes it. Naming a login or provider shows stable account IDs
-beside full logins. Codex rows show the credential's observed login, and report mismatches
+command that fixes it. Naming a login shows that login alone: its auth, plan,
+each usage window with its age and source, and the browser profiles it
+connects through. Naming a provider shows stable account IDs beside full
+logins for every login. Codex rows show the credential's observed login, and report mismatches
 or shared logins with a reconnect command even during cached inspection.
 Verification only accepts usage after the server and native identity agree.
-That long form lists managed accounts and local service credentials in
+The provider form lists managed accounts and local service credentials in
 separate sections: an expired local token says nothing about a managed account.
 Missing local tokens leave ambient auth uninspected. Cached inspection reads
 account state without starting a provider, decrypting local tokens or creating
@@ -413,8 +415,8 @@ paused or not, until the login is full (a cooldown or a limit on every model) or
 `lf account use auto` releases it. A limit on one model sends only that model's
 launches to the order, and `--account` still wins. Pausing the held login also
 releases it.
-It exits 2 when the login is out until a reset and 3 when it needs a login,
-changing nothing. It first saves the current login back to its stored account,
+It exits 2 when the login is out until a reset or names no stored login, and 3
+when it needs a login, changing nothing. It first saves the current login back to its stored account,
 so a token the provider refreshed while active is kept; a login Loopflow has
 never seen is kept as a new paused account.
 

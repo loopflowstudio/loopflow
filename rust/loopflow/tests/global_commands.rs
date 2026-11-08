@@ -294,6 +294,31 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
             "{args:?} wrote repository state"
         );
     }
+    // A login that names nothing stored is a usage error, like a misspelt
+    // flag: exit 2, nothing switched.
+    let unknown = command(home.path(), cwd.path(), &["account", "use", "bogus@"])
+        .env("PATH", no_tools.path())
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2), "{unknown:?}");
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("no stored login matches 'bogus@'"),
+        "{unknown:?}"
+    );
+    // The old provider-then-verb spelling answers with the current one.
+    let old_spelling = command(
+        home.path(),
+        cwd.path(),
+        &["account", "claude", "use", "jack@"],
+    )
+    .env("PATH", no_tools.path())
+    .output()
+    .unwrap();
+    assert_eq!(old_spelling.status.code(), Some(2), "{old_spelling:?}");
+    assert!(
+        String::from_utf8_lossy(&old_spelling.stderr).contains("lf account use claude=jack@"),
+        "{old_spelling:?}"
+    );
 }
 
 #[test]

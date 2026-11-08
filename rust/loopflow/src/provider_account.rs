@@ -616,8 +616,8 @@ impl ProviderAccountRoute {
 
     /// The one place a launch takes on an account. Every route configures
     /// `command`; a stored login first signs the shared home in as its
-    /// account, doing nothing when that account is already active. Hold the
-    /// returned lock until the child has spawned.
+    /// account, reconciling Claude's native items even when already active.
+    /// Hold the returned lock until the child has spawned.
     pub(crate) async fn launch_as(
         &self,
         command: &mut Command,

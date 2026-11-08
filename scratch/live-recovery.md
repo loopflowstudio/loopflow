@@ -168,6 +168,26 @@ processes referencing it. These fixture results do not complete live QA. No
 production defect surfaced; no runtime code changed. Gate checks and the live
 login/installed/running-client observations listed above remain outstanding.
 
+## Publication checks — November 8
+
+`lf sync` merged cleanly with main at `7165925e5`. Review retained the scoped
+two-item repair and the live acceptance limits above. The shared test module's
+`pub(crate)` visibility exposed an architecture scanner false positive: it counted
+test-only `sh` and `sleep` subprocesses. The scanner now excludes visible
+`#[cfg(test)]` modules; a regression also checks that real subprocesses still count.
+
+- `scripts/test.py --reuse-passing --rust-filter 'test(provider_auth::) | test(provider_account::) | test(lf::commands::account::) | test(documented_commands::)'` with inherited LF_* unset and the candidate on PATH — Rust inventory, build, formatting, 196 selected tests, clippy with warnings denied, and 73 website tests passed. The initial architecture phase failed before the scanner repair; log: `.lf/tmp/loo-811-publish-gate.log`.
+- `uv run pytest python/tests/test_architecture.py` — 24 passed after the repair.
+- `uv run python scripts/check_architecture.py` — passed after the repair, 36/36 subprocess edges.
+- Ruff check/format for the changed Python files and `git diff --check` — passed.
+
+No runtime code changed during publication review. The Rust launch comment and
+concept review now describe same-login reconciliation and the later native QA.
+Existing native receipts remain applicable; installed and real-login acceptance
+remain open. The Wave memory's statement that all native runs predate retry is
+superseded by the scoped QA observations above; native Keychain rejection remains
+unobserved.
+
 ## Native observations — November 8
 
 Installed lf 0.15.2+dad2621c1 and Claude 2.1.319 passed the shared-home fixture

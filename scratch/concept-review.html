@@ -54,7 +54,8 @@ Retry B, repaired          USER=B  legacy=B  → success</pre>
   <p><strong>Built:</strong> changing A → B → A updates and verifies both selected items.
     Two candidate native runs passed before the retry repair. <strong>Retry repair:</strong> same-login
     activation now reaches the writer and reload marker under the existing locks. Command-path
-    stand-ins cover partial writes, rotation and marker recovery; native retry remains unobserved.</p>
+    stand-ins cover partial writes, rotation and marker recovery. Later <a href="qa.html">native QA</a>
+    passed seeded stale-item reconciliation and a real marker permission failure/retry.</p>
   <p><strong>Recovery:</strong> “Fix the reported storage problem and repeat
     <code>lf account use claude=work@</code>. It finishes installing that login before reporting success.”</p>
   <h2>Keep the model small</h2>
@@ -66,7 +67,7 @@ Retry B, repaired          USER=B  legacy=B  → success</pre>
   <ol>
     <li>Does failure → same-command retry repair both items and reach the reload marker?
       <strong>Covered through command installation and activation with a Keychain stand-in;
-      native failure → retry remains unobserved.</strong></li>
+      native marker failure → retry passed; native Keychain write rejection → retry remains unobserved.</strong></li>
     <li>Does retry retain a newer native credential for the same login, with normal switches and
       complete repeats still working? <strong>Covered for access-only and both-token rotation. Retry, repeats and normal switches cover scoped and unsuffixed services.</strong></li>
     <li>Does installed recovery keep live conversations working?

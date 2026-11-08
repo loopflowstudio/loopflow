@@ -28,7 +28,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8 implement recheck reconfirmed the dependency after realign:
+The November 8, 20:29 UTC implement recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -53,12 +53,17 @@ policy when both use the shared store.
 ## Remaining acceptance
 
 Exercise the remote attach contract through authenticated client and bridge
-connections during implementation, gate and QA. Visual review remains for demo
-or QA; Desktop opening results are in `questions.md`.
+connections: matching node/user succeeds once; a different node, different user,
+or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
+60 seconds with a clock advance representing host sleep, expired-ticket sweeping,
+and unchanged bulk-transfer redemption behavior. These checks remain for
+implementation, gate and QA; local UID tests alone cannot satisfy them.
+
+Visual review remains for demo or QA; Desktop opening results are in
+`questions.md`.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
 
-Compress consolidated repeated status notes; runtime cuts await the transport.
 `git diff --check` — clean; `lf context` — within both scratch limits. Plan-only
 edits need no build or tests.

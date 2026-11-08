@@ -117,6 +117,9 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 operation's value: what its CLI spelling prints with `--json`, a ticket
 `{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
 once a subscription is confirmed.
+A completed request's ID can be reused immediately after its response or error. A
+subscription keeps its ID after acknowledgement and readings, until `ended`,
+an error or cancellation.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
 answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases

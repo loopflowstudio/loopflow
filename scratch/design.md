@@ -9,6 +9,10 @@ Implementation and publication wait for LOO-718's remote admission. Its listener
 mobile settings and bulk protocol are outside this Task. No product decision is
 missing.
 
+The checkout contains the planned remote contract only. Its existing local
+tickets bind to a Unix UID, consume on every redemption attempt and use
+`Instant`; remote identity binding and expiry across host sleep remain unbuilt.
+
 ## Transport dependency — November 8, 2026
 
 LOO-718's PR #1812 supplies `Admission::Remote { node: String, user: u64 }` through
@@ -31,28 +35,37 @@ Task's consume-on-attempt contract.
 `lf task status LOO-718 --json` still reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 again reported OPEN, no merge or auto-merge, at the published head above during
-the November 8 17:26 UTC implement retry. `git fetch origin main` advanced main
-to `dad2621c1528ab59c031ed79c417e02f7e55264b`; `git ls-tree` still found neither
+the November 8 implement check. `git fetch origin main` advanced origin/main to
+`7165925e5df60cef61cd014821deebb4d4339de0`; `git ls-tree` still found neither
 `server/mobile.rs` nor `server/ticket.rs`. The transport dependency remains;
 no implementation or publication can proceed within this Task's scope.
 
 ## Delete — do not maintain
 
 When the transport lands, replace any remaining UID-only `service.rs::Ticket` /
-`Tickets` with its shared authority. Move local identity isolation and rejection/
-lifetime coverage onto that store; do not refactor the predecessor while waiting.
+`Tickets` with its shared authority; do not refactor the predecessor while waiting.
+Move `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` onto that store,
+retaining identity, single-use, expiry and sweep coverage. Keep the service-level
+bridge rejection test and wire fixtures: they exercise the surviving protocol.
 Reconcile wire and lifetime differences against the landed revision. Retain
 consume-on-attempt; replace ticket timing with `SystemTime` so the 60-second
 deadline includes host sleep. Leave unrelated throttles on `Instant`.
 
 ## Remaining acceptance
 
-All remote acceptance remains for implementation, gate and QA: authenticated
-client/bridge issuance and redemption; same identity succeeds once; changed node
-or user, local/remote crossover, unknown, spent and expired tickets fail and
-close; a foreign attempt consumes the ticket. Verify expiry at 60 seconds,
-including sleep, and unchanged owner control. Reconcile PR #1812's tests while
-keeping bulk transfer behavior intact.
+Exercise every case in the remote attach contract through authenticated client
+and bridge connections during implementation, gate and QA. Keep the contract
+there so the plan cannot drift into a second specification. Reconcile PR #1812's
+tests while keeping bulk transfer behavior intact.
 
-`git diff --check` — clean on the November 8 implement retry; prose-only edits,
+The November 8 write-docs run reused `docs/server.md` and
+`rust/loopflow/src/server/README.md` unchanged. `lf open --host desktop --file
+docs/server.md --file rust/loopflow/src/server/README.md` returned success,
+reporting both paths opening in Loopflow Desktop after the earlier failures in
+`questions.md`. Visual review remains for demo or QA; the transport is the
+implementation dependency.
+
+`git diff --check` — clean on the November 8 implement check; prose-only edits,
 no build or tests required. `lf context` — scratch within both limits.
+
+Compress: `git diff --check` — clean; plan-only edits, no build or tests required.

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-808 · Concept review</title>
+<style>
+:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+body { max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; }
+h1 { font-size: 1.8rem; line-height: 1.15; } h2 { font-size: 1.1rem; margin-top: 1.5rem; }
+header, small { color: light-dark(#57534e, #bdb8b0); }
+code { font-size: .86em; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; vertical-align: top; padding: .65rem .5rem; border-bottom: 1px solid light-dark(#d6d3d1, #57534e); }
+th:first-child, td:first-child { padding-left: 0; }
+blockquote { margin: 1rem 0; padding-left: 1rem; border-left: 3px solid light-dark(#33736b, #8dcfc4); }
+@media (max-width: 520px) { body { margin-top: 1.5rem; } th, td { padding: .5rem .25rem; } }
+</style>
+<body>
+<header>LOO-808 · concept-review · 2026-11-08</header>
+<h1>Advance with the existing design</h1>
+<p>No product decision is needed. Session panes keep the same connection controls;
+quiet mailboxes stop scheduling reads. This is implemented behavior, with QA and gate still ahead.</p>
+<h2>Before → implemented</h2>
+<p>Every pane reads its mailbox ten times a second → each surface watches its mailbox
+directory and reads on change. Retained hidden panes remain current.</p>
+<blockquote>The mismatch was idle work: retaining a conversation also retained a polling
+loop. Observation now follows mailbox changes without adding a setting or action.</blockquote>
+<table>
+<thead><tr><th>Action</th><th>Concept</th><th>API and effect</th></tr></thead>
+<tbody>
+<tr><td>Open, then hide a pane</td><td>Surface owns observation</td><td><code>start(changed:)</code> arms the directory source before the initial read; hiding keeps it alive.</td></tr>
+<tr><td>Retry an unavailable connection</td><td>Same Session, another reconnect cycle</td><td><code>retry()</code> writes <code>status.retry</code>; the relay publishes recovery status.</td></tr>
+<tr><td>Move here to type</td><td>Input needs owner acknowledgement</td><td><code>moveHere()</code> writes the current generation to <code>status.move</code>; input pauses until a newer reading grants it.</td></tr>
+<tr><td>Close the pane</td><td>Surface ends; history survives</td><td><code>stop()</code> cancels observation and removes the mailbox. Release performs the same cleanup.</td></tr>
+</tbody>
+</table>
+<h2>Failure and recovery</h2>
+<p><strong>Reconnecting…</strong> pauses input and retains the last screen.
+Exhausted recovery offers <strong>Retry</strong>. Recovery can return a read-only pane;
+<strong>Move here</strong> requests control once, without replaying an uncertain takeover.</p>
+<p>Missing or malformed status keeps the last valid reading; a later atomic publication
+updates it. Bursts converge on the latest reading rather than replay every transition.
+The mailbox is temporary presentation state; the wire format, relay, Session persistence
+and execution ownership stay as they are.</p>
+<h2>Counterexamples the design must handle</h2>
+<p>A file watch loses later replacements, so watch the directory. A hidden-pane pause
+leaves status stale, so retain observation. A queued event after Close must neither notify
+the pane nor recreate its mailbox. Existing focused tests cover replacement, recovery,
+acknowledgement and closure; mounted UI behavior remains for QA.</p>
+<small>Built from <code>scratch/loo-808.md</code>,
+<code>swift/LoopflowMac/Services/ServerConnection.swift</code>,
+<code>swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift</code>,
+<code>swift/LoopflowTests/ServerConnectionTests.swift</code>, <code>swift/README.md</code>,
+and <code>rust/loopflow/src/transport/{connection.rs,README.md}</code>.</small>
+<h2>Review questions</h2>
+<ol>
+<li>Does this require another action or concept? No; existing Retry, Move here and Close suffice.</li>
+<li>Is a product choice still open? No. Loop-or-next can advance to the remaining checks.</li>
+</ol>
+</body>
+</html>

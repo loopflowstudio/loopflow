@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-808 · Mailbox QA</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.55 system-ui,sans-serif}body{max-width:900px;margin:3rem auto;padding:0 1.2rem}h1{line-height:1.15}h2{font-size:1.2rem;margin-top:2rem}table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.6rem;border-bottom:1px solid #8886}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:1rem;background:#8881;font-size:.8rem}small{opacity:.75}.limit{border-left:4px solid #b98422;padding-left:1rem}
+</style><body>
+<small>LOO-808 · 2026-11-08 · HEAD 6eb1ce3e4fba3698361c963584c7859de4997180</small>
+<h1>Mailbox delivery and closure worked headlessly</h1>
+<p class="limit">Partial QA: real CLI preparation and server/relay exercised; the production Swift observer ran in a command-line component probe. The Desktop app was not launched. No mounted-window or visual acceptance is claimed.</p>
+<h2>Scenarios</h2><table><thead><tr><th>Scenario</th><th>Action</th><th>Observed result</th></tr></thead><tbody>
+<tr><td>Fresh repository</td><td>Created a temporary Git repository, isolated HOME and LF_HOME; selected this branch's target/debug/lf. Ran resume --prepare --json.</td><td>Exit 0; repository Session created with no running owner. No provider started.</td></tr>
+<tr><td>Returning preparation</td><td>Repeated resume --prepare --json against the same private Machine.</td><td>Same Session ID. This checks returning to data created in this run, not an upgrade from a released build.</td></tr>
+<tr><td>Unavailable owner</td><td>Started the real foreground server, then its native relay targeting the prepared Session and an absent owner. Compiled the unchanged production ServerConnection.swift with a small command-line driver; it owned the mailbox and logged callbacks.</td><td>Reconnecting → unavailable, input false. The message explained that no running owner exists and nothing was started. No mock endpoint or synthetic status publisher was used.</td></tr>
+<tr><td>Quiet mailbox</td><td>Left the unavailable connection unchanged for one second.</td><td>No duplicate callbacks. This is not a filesystem-read or CPU measurement.</td></tr>
+<tr><td>Retry</td><td>Called the production observer's retry action.</td><td>Real relay consumed status.retry and published reconnecting → unavailable; observer received both. Same Session, no provider launch.</td></tr>
+<tr><td>Close</td><td>Stopped the production observer while the relay was waiting.</td><td>Mailbox and .closed directory absent; no late callback; relay exited 0. Private server terminated and reaped.</td></tr>
+</tbody></table>
+<h2>Transcript</h2><pre>Private server listening (ready=true, protocol revision 2)
+Fresh: lf resume --prepare --json -a codex — exit 0; Session created, no owner
+Returning: lf resume --prepare --json — exit 0; same Session ID
+observer generation=0 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=unavailable input=false title=Session unavailable. Last screen is stale. Session 1cbafdf91f0e487a884523834090605d has no running owner; nothing was started. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.
+quiet mailbox: no duplicate callbacks for 1 second
+Retry requested through production observer
+observer generation=1 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=unavailable input=false title=Session unavailable. Last screen is stale. Session 1cbafdf91f0e487a884523834090605d has no running owner; nothing was started. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.
+Close: relay exited 0; mailbox and .closed absent; no late callback
+
+Private server stopped and reaped. No provider or Graph launched.
+</pre>
+<h2>Repairs</h2><p>No product repair was needed on the exercised path. The probe initially matched whitespace in compact server-status JSON; parsing JSON corrected that driver error. Repository QA instructions now describe isolation, private server readiness, and the distinction between component probes and mounted Desktop QA.</p>
+<h2>What remains unchecked</h2><ol>
+<li>Mounted Session UI: successful connection/input, Move here acknowledgement, hidden/retained panes, Close during a rendered transition, copy/Find/scroll, and visual appearance. This run is headless; these need an optional display-session diagnostic.</li>
+<li>Live-owner recovery across server loss and a competing viewer. This run deliberately used a Session without an owner and did not launch a provider.</li>
+<li>Missing/malformed status, burst coalescing, startup publication and release off the main actor were not repeated here. The existing eight focused ServerConnectionTests passed during implementation and compress; those are test results, not this real-product QA.</li>
+<li>Full headless Swift suite and Xcode fallback build remain with gate. No new source change requires a focused test rerun in this step.</li>
+</ol><p>No defect observed in the exercised path. The limits above remain; this report does not establish complete Desktop acceptance.</p></body></html>

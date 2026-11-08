@@ -1,0 +1,13 @@
+Private server listening (ready=true, protocol revision 2)
+Fresh: lf resume --prepare --json -a codex — exit 0; Session created, no owner
+Returning: lf resume --prepare --json — exit 0; same Session ID
+observer generation=0 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=unavailable input=false title=Session unavailable. Last screen is stale. Session 1cbafdf91f0e487a884523834090605d has no running owner; nothing was started. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.
+quiet mailbox: no duplicate callbacks for 1 second
+Retry requested through production observer
+observer generation=1 state=reconnecting input=false title=Reconnecting… Input paused; last screen may be stale.
+observer generation=1 state=unavailable input=false title=Session unavailable. Last screen is stale. Session 1cbafdf91f0e487a884523834090605d has no running owner; nothing was started. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.
+Close: relay exited 0; mailbox and .closed absent; no late callback
+
+Private server stopped and reaped. No provider or Graph launched.

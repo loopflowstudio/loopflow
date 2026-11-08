@@ -28,6 +28,10 @@ def check_launch(executable: Path, work_dir: Path) -> None:
     if not executable.is_file():
         raise RuntimeError(f"No Desktop executable at {executable}; run `swift build` first")
     snapshot = work_dir / "snapshot.png"
+    sample_path = work_dir / "hang-sample.txt"
+    # A retained capture directory must describe this launch, not the last one.
+    snapshot.unlink(missing_ok=True)
+    sample_path.unlink(missing_ok=True)
     _launch(
         [str(executable), "-ui-test-mode", "empty-workspaces"],
         env={
@@ -37,7 +41,7 @@ def check_launch(executable: Path, work_dir: Path) -> None:
             "LOOPFLOW_UI_TEST_WIDTH": "900",
             "LOOPFLOW_UI_TEST_HEIGHT": "600",
         },
-        sample_path=work_dir / "hang-sample.txt",
+        sample_path=sample_path,
     )
     if not snapshot.is_file() or snapshot.stat().st_size == 0:
         raise RuntimeError("App quit without writing its -ui-test-mode snapshot")

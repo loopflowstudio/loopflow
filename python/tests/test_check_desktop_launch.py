@@ -33,13 +33,35 @@ def test_passes_when_the_app_snapshots_and_quits(
     assert "quit" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("script", ["exit 0\n", ': > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n'])
 def test_fails_when_the_app_quits_without_a_snapshot(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], script: str
 ) -> None:
-    app = _app(tmp_path, "exit 0\n")
+    app = _app(tmp_path, script)
 
     assert check_desktop_launch.main([str(app)]) == 1
     assert "without writing its -ui-test-mode snapshot" in capsys.readouterr().err
+
+
+def test_requires_a_fresh_snapshot_when_reusing_a_capture_directory(tmp_path: Path) -> None:
+    app = _app(tmp_path, 'printf png > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\n')
+    check_desktop_launch.check_launch(app, tmp_path)
+    app = _app(tmp_path, "exit 0\n")
+
+    with pytest.raises(RuntimeError, match="without writing its -ui-test-mode snapshot"):
+        check_desktop_launch.check_launch(app, tmp_path)
+
+
+def test_fails_with_output_when_the_app_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = _app(
+        tmp_path,
+        'printf png > "$LOOPFLOW_UI_TEST_SNAPSHOT_PATH"\necho launch failed >&2\nexit 7\n',
+    )
+
+    assert check_desktop_launch.main([str(app)]) == 1
+    assert "App exited 7 from -ui-test-mode: launch failed" in capsys.readouterr().err
 
 
 def test_fails_with_output_when_the_app_hangs(

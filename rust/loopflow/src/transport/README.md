@@ -24,6 +24,12 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
 but never answers reads `detached` too.
 
+`lf session rename SESSION 'Resume repair'` updates the attached terminal title,
+including Rex and other terminals that support OSC titles. Reattaching shows the
+current name. Updates wait for complete provider control sequences; slow name
+lookups leave input and output running. cmux tabs and tmux windows also follow the
+Session name, while cmux workspaces keep their Task name or a hand-edited name.
+
 Desktop's server relay stays alive when its service connection drops. Its native
 status row shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Recovery refreshes the same owner's screen;

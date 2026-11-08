@@ -34,6 +34,28 @@ routes focus an existing conversation or report it as `elsewhere`.
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
 
+## Session titles
+
+```bash
+lf session rename SESSION 'Resume repair'
+```
+
+Bare `lf` starts a taskless Session with its directory name until the work is known.
+Renames follow it through the standard OSC terminal-title protocol, including
+reattachment. cmux tabs and tmux windows also receive host-specific renames;
+cmux workspaces follow the Task title while preserving hand-edited names.
+
+Rex can display the program title; its **Prefer generated titles** setting can
+override that display. Loopflow leaves this preference unchanged.
+[Rex settings](https://www.superlogical.com/rex/docs/reference/mac-settings).
+
+Herdr keeps OSC names as `terminal_title` and `terminal_title_stripped`, separate
+from manual pane/tab names. Its default Agent sidebar rows omit these values,
+and its outer title shows the host and workspace. To show Session names, add
+`terminal_title_stripped` to your Agent rows and `{terminal_title}` to your
+`ui.window_title` template. Loopflow leaves those layouts and manual names intact.
+[Herdr title and sidebar settings](https://herdr.dev/tui/docs/configuration/).
+
 ## Present documentation in Desktop
 
 ```bash

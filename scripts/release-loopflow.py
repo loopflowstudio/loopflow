@@ -20,7 +20,6 @@ import json
 import os
 import plistlib
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,7 @@ from bundle_version import (
     stamp_bundle_version,
     stamp_release_bundle_id,
 )
+from check_desktop_launch import check_launch
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -300,49 +300,6 @@ def _resource_check_copy(
     return check_app / "Contents" / "MacOS" / executable_name(info_plist)
 
 
-RESOURCE_CHECK_TIMEOUT = 30
-
-
-def _launch_resource_check(
-    cmd: list[str], env: dict[str, str], sample_path: Path
-) -> subprocess.CompletedProcess:
-    """Run the check app; if it hangs, raise with its output and a stack sample."""
-    print(f"$ {' '.join(cmd)}", flush=True)
-    process = subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
-    try:
-        output, _ = process.communicate(timeout=RESOURCE_CHECK_TIMEOUT)
-        return subprocess.CompletedProcess(cmd, process.returncode, output, "")
-    except subprocess.TimeoutExpired:
-        # macOS `sample`; without it the error still carries the app's output.
-        try:
-            subprocess.run(
-                ["sample", str(process.pid), "2", "-mayDie", "-file", str(sample_path)],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        # Children the app started hold the output pipe; end the whole group.
-        os.killpg(process.pid, signal.SIGKILL)
-        output, _ = process.communicate()
-    sample = sample_path.read_text(errors="replace") if sample_path.is_file() else ""
-    call_graph = sample.partition("Call graph:")[2]
-    stacks = "\n".join(call_graph.splitlines()[:120]) or "(no stack sample)"
-    raise RuntimeError(
-        f"Packaged app did not exit within {RESOURCE_CHECK_TIMEOUT}s of "
-        f"-ui-test-mode.\nOutput:\n{output.strip()[-2000:] or '(none)'}\n"
-        f"Stacks:\n{stacks}"
-    )
-
-
 def _verify_app_resource_self_containment(
     app_path: Path, build_dir: Path, identity: str, entitlements: Path
 ) -> None:
@@ -359,7 +316,6 @@ def _verify_app_resource_self_containment(
         dir=build_dir.parent,
     ) as temp:
         holding_dir = Path(temp)
-        snapshot = holding_dir / "snapshot.png"
         (holding_dir / "app").mkdir()
         executable = _resource_check_copy(app_path, holding_dir / "app", identity, entitlements)
         moved: list[tuple[Path, Path]] = []
@@ -369,30 +325,10 @@ def _verify_app_resource_self_containment(
                 bundle.rename(held)
                 moved.append((held, bundle))
 
-            result = _launch_resource_check(
-                [str(executable), "-ui-test-mode", "empty-workspaces"],
-                env={
-                    **os.environ,
-                    "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(snapshot),
-                    "LOOPFLOW_UI_TEST_DELAY": "0.2",
-                    "LOOPFLOW_UI_TEST_WIDTH": "900",
-                    "LOOPFLOW_UI_TEST_HEIGHT": "600",
-                },
-                sample_path=holding_dir / "hang-sample.txt",
-            )
+            check_launch(executable, holding_dir)
         finally:
             for held, bundle in reversed(moved):
                 held.rename(bundle)
-
-        if result.returncode != 0:
-            diagnostic = result.stdout.strip()[-2000:]
-            detail = f": {diagnostic}" if diagnostic else ""
-            raise RuntimeError(
-                "Packaged app failed without SwiftPM build resources "
-                f"(exit {result.returncode}){detail}"
-            )
-        if not snapshot.is_file() or snapshot.stat().st_size == 0:
-            raise RuntimeError("Packaged app produced no resource-check snapshot")
     print(
         "Verified packaged app renders without SwiftPM build resources",
         flush=True,

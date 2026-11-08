@@ -412,7 +412,8 @@ read -r answer < /dev/tty
     }
     fn ends(&self, owner: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
-        while self.running(owner) {
+        // The completion receipt can precede the owner's socket cleanup.
+        while self.running(owner) || self.endpoint(owner).exists() {
             assert!(
                 Instant::now() < deadline,
                 "{owner} kept running; logs: {:?}",
@@ -1771,6 +1772,70 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         fixture.stop(&owner);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
+}
+
+#[test]
+fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s\n' "$*" > "$HOME/launches"
+while read -r answer < /dev/tty; do
+    [ "$answer" = stale ] || exit 0
+    printf '\033]2;default\007\033]7501;state=idle:app=claude-code\033\\'
+done
+"#,
+    );
+    let mut command = fixture.serve(true, &[env!("CARGO_BIN_EXE_lf"), "-i", "-a", "claude"]);
+    command
+        .env("PATH", path)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE");
+    let owner = fixture.owner(command);
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let initial: String = fixture
+        .sql()
+        .query_row(
+            "SELECT title FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut viewer = fixture.viewer(&owner, true);
+    until_out(&mut viewer, &format!("\x1b]0;{initial}\x07"));
+    let renamed = fixture
+        .command(&["session", "rename", &session, "Resume repair"])
+        .output()
+        .unwrap();
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    until_out(&mut viewer, "\x1b]0;Resume repair\x07");
+    viewer.input("stale\n");
+    let overwritten = out(&until_out(&mut viewer, "\x1b]0;Resume repair\x07"));
+    assert!(overwritten
+        .windows(b"\x1b]2;default\x07".len())
+        .any(|bytes| bytes == b"\x1b]2;default\x07"));
+    assert!(overwritten
+        .windows(b"7501;state=idle".len())
+        .any(|bytes| bytes == b"7501;state=idle"));
+    drop(viewer);
+    let mut viewer = fixture.viewer(&owner, true);
+    let snapshot = match viewer.next().unwrap() {
+        Item::Snapshot(bytes) => bytes,
+        other => panic!("expected snapshot, got {other:?}"),
+    };
+    viewer.input("bye\n");
+    viewer.finish();
+    fixture.ends(&owner);
+    assert_ne!(initial, "default");
+    let title = b"\x1b]0;Resume repair\x07";
+    assert!(snapshot.windows(title.len()).any(|bytes| bytes == title));
 }
 
 #[test]

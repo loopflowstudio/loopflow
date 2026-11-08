@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-804 · Served launch QA</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.55 system-ui,sans-serif}body{max-width:72rem;margin:auto;padding:2rem 1.2rem}h1{font-size:2rem;line-height:1.15}h2{font-size:1.25rem;margin-top:2rem}header{opacity:.75}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #8885;padding:.7rem;text-align:left;vertical-align:top}th:first-child{width:25%}pre{white-space:pre-wrap;overflow-wrap:anywhere;font: .85rem/1.5 ui-monospace,monospace;background:#8881;padding:1rem}details{border-bottom:1px solid #8885;padding:.6rem 0}summary{cursor:pointer}a{color:inherit}.outcome{border-left:4px solid #31865d;padding:.5rem 1rem}code{overflow-wrap:anywhere}
+</style></head><body>
+<header>LOO-804 · 2026-11-08 · macOS · branch build 0fe0c44c8.dirty</header>
+<h1>Served launches return uncertainty and keep the work recoverable</h1>
+<p class="outcome">The real server returned <code>outcome_unknown</code> after 5.05 seconds of registry loss for a Task launch. The original command remained alive, resumed, and completed exactly one Graph. No runtime repair was needed.</p>
+<h2>How this ran</h2>
+<p>Built with <code>cargo build -p loopflow --bin lf</code>. Launched that binary’s <code>server run</code> in disposable Machine homes, with isolated HOME, LF_HOME and LF_BIN and no inherited LF_* context. Real revision-2 JSON requests crossed the private Unix socket. Git repositories, local bare origins, Tasks, execution owners, Graphs and reports were created by the product. Graphs ran <code>lf help</code>, avoiding provider accounts and external writes.</p>
+<p>Faults used operating-system signals and files: SIGSTOP delayed the real child before its report; SIGKILL interrupted one child. For registry loss, stopped both child and owner, moved the disposable database and sidecars aside, and placed a directory at the database path. Restoring those files and sending SIGCONT recovered the original processes. No stand-in executable, internal setter, mock endpoint or fabricated report was used. Timing below starts at the stated fault or pause; full served uncertainty requests took about 5.5 seconds.</p>
+<table><thead><tr><th>Scenario</th><th>What happened</th><th>Result</th></tr></thead><tbody>
+<tr><td>Fresh server and normal Graph</td><td>Started an empty Machine; requested graph.run for a command-only Graph. Read process.get afterward.</td><td>Server ready; launch report returned; help step exited 0 and Graph completed.</td></tr>
+<tr><td>Wrong Graph name</td><td>Requested qa-does-not-exist.</td><td>Returned outcome_unknown with “command exited with status 2”; no hang. Diagnostic rough edge noted below.</td></tr>
+<tr><td>Known-live owner</td><td>Paused its command for 6.06 seconds, then resumed it.</td><td>No premature reply; success after resume. The five-second grace is not an overall launch deadline.</td></tr>
+<tr><td>Child dies without a report</td><td>Killed the paused command.</td><td>Returned outcome_unknown in 7.03 seconds. This run lost liveness information after owner retirement and used the unknown branch.</td></tr>
+<tr><td>Registry recovers</td><td>Hid it for one second, restored it, kept the processes paused for another six seconds, then resumed them.</td><td>Still waiting at 7.08 seconds; returned success after resume. Polling observed restored live ownership and reset the grace.</td></tr>
+<tr><td>Registry stays unavailable</td><td>Kept the registry unreadable through the grace.</td><td>Graph launch returned outcome_unknown at 5.08 seconds. Both child and owner remained alive.</td></tr>
+<tr><td>Late direct Graph</td><td>Restored the registry and resumed that same launch; never sent another graph.run.</td><td>Exactly one completed Graph found by graph list --processes; process.get showed the help step succeeded.</td></tr>
+<tr><td>Normal Task</td><td>Created local Git planning, sent task.run, then read task status and task runs.</td><td>Returned running; one Graph completed; Task reached end.</td></tr>
+<tr><td>Late Task</td><td>Paused task.run, lost registry access, received uncertainty, restored access and resumed the original command.</td><td>Uncertainty at 5.05 seconds; task status and task runs later showed one completed Graph, no retry.</td></tr>
+<tr><td>Two client operations</td><td>A second socket requested graph.list while the Task launch was paused.</td><td>Read completed independently; waiting launch did not block the server.</td></tr>
+<tr><td>Returning reads and cleanup</td><td>Read existing Task/Graph state and server readiness after faults; stopped private servers and checked their children.</td><td>Server remained ready; original Graph run left no live nodes. All QA servers and children exited; final PID check empty.</td></tr>
+</tbody></table>
+<h2>What changed during QA</h2>
+<p>Troubleshooting now names <code>lf graph list --processes</code> and <code>lf process show &lt;ID&gt;</code> for a finished direct Graph: the live process list is empty after completion. Customized <code>.lf/skills/qa.md</code> records the isolated server, socket and local Task setup.</p>
+<p>An initial setup attempt used <code>task create --graph</code> without <code>--run</code>; Clap correctly refused it. The working setup puts <code>graph: qa-normal</code> in repository configuration, commits and pushes it, creates the Task without launching, and sends task.run through the socket.</p>
+<h2>Transcripts</h2>
+<p>Exact replies below, except the explicitly summarized concurrent Graph catalog. Full runs: <a href="qa-transcript.json">Graph transcript</a> · <a href="qa-task-transcript.json">Task transcript</a> · <a href="qa-first-run.json">initial Graph run</a>. Drivers: <a href="qa_served_launch.py">Graph scenarios</a> · <a href="qa_task_launch.py">Task scenarios</a>.</p>
+<details><summary>fresh server status</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;socket&quot;: &quot;/private/tmp/lf-501-9f8e73d0934acbfc/machine.sock&quot;,
+    &quot;ready&quot;: true,
+    &quot;listening&quot;: true,
+    &quot;instance&quot;: &quot;af362a1d-4914-4175-ae31-2e33c0c4565f&quot;,
+    &quot;revision&quot;: 2,
+    &quot;clients&quot;: [],
+    &quot;error&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>normal graph launch</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;normal&quot;,
+  &quot;trace_id&quot;: &quot;c59390fc-b4ff-4277-a0a9-7efd0006788a&quot;,
+  &quot;result&quot;: {
+    &quot;lf_process_id&quot;: &quot;6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec&quot;,
+    &quot;log&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec.log&quot;,
+    &quot;operation&quot;: &quot;graph.run&quot;,
+    &quot;run&quot;: &quot;graph qa-normal&quot;
+  }
+}</pre></details><details><summary>normal graph result</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;normal-result&quot;,
+  &quot;trace_id&quot;: &quot;ccc3623d-e632-47fb-95fb-ac59e1190d95&quot;,
+  &quot;result&quot;: {
+    &quot;compiled&quot;: {
+      &quot;name&quot;: &quot;qa-normal&quot;,
+      &quot;steps&quot;: [
+        {
+          &quot;id&quot;: null,
+          &quot;interactive&quot;: false,
+          &quot;key&quot;: 0,
+          &quot;kind&quot;: &quot;op&quot;,
+          &quot;label&quot;: &quot;help&quot;,
+          &quot;paths&quot;: [],
+          &quot;returns_to&quot;: null,
+          &quot;sources&quot;: [
+            &quot;qa-normal&quot;
+          ]
+        }
+      ]
+    },
+    &quot;completed&quot;: [
+      0
+    ],
+    &quot;current&quot;: null,
+    &quot;cwd&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/repo&quot;,
+    &quot;entry&quot;: {
+      &quot;ended_at&quot;: 1794142134,
+      &quot;id&quot;: &quot;6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec&quot;,
+      &quot;name&quot;: &quot;qa-normal&quot;,
+      &quot;repo&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/repo&quot;,
+      &quot;state&quot;: &quot;completed&quot;,
+      &quot;task_id&quot;: null,
+      &quot;updated_at&quot;: 1794142134,
+      &quot;wave_id&quot;: null
+    },
+    &quot;iterations&quot;: [
+      []
+    ],
+    &quot;returns&quot;: [],
+    &quot;steps&quot;: [
+      {
+        &quot;completed_at&quot;: 1794142134,
+        &quot;exit_code&quot;: 0,
+        &quot;iterations&quot;: [
+          []
+        ],
+        &quot;key&quot;: 0,
+        &quot;label&quot;: &quot;help&quot;,
+        &quot;lf_process_id&quot;: &quot;c7391692-7c67-4618-9536-f44d3ab51b23&quot;,
+        &quot;outcome&quot;: &quot;succeeded&quot;,
+        &quot;started_at&quot;: 1794142134
+      }
+    ]
+  }
+}</pre></details><details><summary>invalid graph</summary><pre>{
+  &quot;type&quot;: &quot;error&quot;,
+  &quot;id&quot;: &quot;invalid&quot;,
+  &quot;code&quot;: &quot;outcome_unknown&quot;,
+  &quot;message&quot;: &quot;command exited with status 2; inspect the affected work before retrying&quot;,
+  &quot;data&quot;: null
+}</pre></details><details><summary>live owner still waiting</summary><pre>{
+  &quot;seconds&quot;: 6.06
+}</pre></details><details><summary>live owner resumed</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;live&quot;,
+  &quot;trace_id&quot;: &quot;9dc92025-4931-46bc-9910-23eb4388a717&quot;,
+  &quot;result&quot;: {
+    &quot;lf_process_id&quot;: &quot;1368ae80-0445-4488-883a-bd53f8769afe&quot;,
+    &quot;log&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-1368ae80-0445-4488-883a-bd53f8769afe.log&quot;,
+    &quot;operation&quot;: &quot;graph.run&quot;,
+    &quot;run&quot;: &quot;graph qa-live&quot;
+  }
+}</pre></details><details><summary>child killed without report</summary><pre>{
+  &quot;seconds&quot;: 7.03,
+  &quot;reply&quot;: {
+    &quot;type&quot;: &quot;error&quot;,
+    &quot;id&quot;: &quot;killed&quot;,
+    &quot;code&quot;: &quot;outcome_unknown&quot;,
+    &quot;message&quot;: &quot;`lf --batch graph qa-killed` has not reported a result and its liveness could not be determined; inspect the affected work before retrying&quot;,
+    &quot;data&quot;: null
+  }
+}</pre></details><details><summary>restored registry keeps live launch waiting</summary><pre>{
+  &quot;seconds&quot;: 7.08
+}</pre></details><details><summary>registry recovered before grace</summary><pre>{
+  &quot;seconds&quot;: 7.08,
+  &quot;reply&quot;: {
+    &quot;type&quot;: &quot;response&quot;,
+    &quot;id&quot;: &quot;recovered&quot;,
+    &quot;trace_id&quot;: &quot;520c04ff-d748-41a9-a676-bcb296cf91a3&quot;,
+    &quot;result&quot;: {
+      &quot;lf_process_id&quot;: &quot;219590ac-1484-402a-8ecc-6601056e6da5&quot;,
+      &quot;log&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-219590ac-1484-402a-8ecc-6601056e6da5.log&quot;,
+      &quot;operation&quot;: &quot;graph.run&quot;,
+      &quot;run&quot;: &quot;graph qa-recovered&quot;
+    }
+  }
+}</pre></details><details><summary>registry unavailable through grace</summary><pre>{
+  &quot;seconds&quot;: 5.08,
+  &quot;reply&quot;: {
+    &quot;type&quot;: &quot;error&quot;,
+    &quot;id&quot;: &quot;unknown&quot;,
+    &quot;code&quot;: &quot;outcome_unknown&quot;,
+    &quot;message&quot;: &quot;`lf --batch graph qa-unknown` has not reported a result and its liveness could not be determined; inspect the affected work before retrying&quot;,
+    &quot;data&quot;: null
+  },
+  &quot;child_alive&quot;: true,
+  &quot;owner_alive&quot;: true
+}</pre></details><details><summary>late result found through CLI inventory</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;entries&quot;: [
+      {
+        &quot;id&quot;: &quot;4c0c82c5-f2d6-4ea9-b34a-c92611be6aee&quot;,
+        &quot;name&quot;: &quot;qa-unknown&quot;,
+        &quot;state&quot;: &quot;completed&quot;,
+        &quot;task_id&quot;: null,
+        &quot;wave_id&quot;: null,
+        &quot;updated_at&quot;: 1794142162,
+        &quot;repo&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/repo&quot;,
+        &quot;ended_at&quot;: 1794142162
+      }
+    ],
+    &quot;next&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>late work discoverable</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;late-result&quot;,
+  &quot;trace_id&quot;: &quot;20f684f3-a944-4537-81df-da170079420f&quot;,
+  &quot;result&quot;: {
+    &quot;compiled&quot;: {
+      &quot;name&quot;: &quot;qa-unknown&quot;,
+      &quot;steps&quot;: [
+        {
+          &quot;id&quot;: null,
+          &quot;interactive&quot;: false,
+          &quot;key&quot;: 0,
+          &quot;kind&quot;: &quot;op&quot;,
+          &quot;label&quot;: &quot;help&quot;,
+          &quot;paths&quot;: [],
+          &quot;returns_to&quot;: null,
+          &quot;sources&quot;: [
+            &quot;qa-unknown&quot;
+          ]
+        }
+      ]
+    },
+    &quot;completed&quot;: [
+      0
+    ],
+    &quot;current&quot;: null,
+    &quot;cwd&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/repo&quot;,
+    &quot;entry&quot;: {
+      &quot;ended_at&quot;: 1794142162,
+      &quot;id&quot;: &quot;4c0c82c5-f2d6-4ea9-b34a-c92611be6aee&quot;,
+      &quot;name&quot;: &quot;qa-unknown&quot;,
+      &quot;repo&quot;: &quot;/private/tmp/loo804-qa-hh1scesn/repo&quot;,
+      &quot;state&quot;: &quot;completed&quot;,
+      &quot;task_id&quot;: null,
+      &quot;updated_at&quot;: 1794142162,
+      &quot;wave_id&quot;: null
+    },
+    &quot;iterations&quot;: [
+      []
+    ],
+    &quot;returns&quot;: [],
+    &quot;steps&quot;: [
+      {
+        &quot;completed_at&quot;: 1794142162,
+        &quot;exit_code&quot;: 0,
+        &quot;iterations&quot;: [
+          []
+        ],
+        &quot;key&quot;: 0,
+        &quot;label&quot;: &quot;help&quot;,
+        &quot;lf_process_id&quot;: &quot;b68dda52-f6af-4c51-881d-ab9fa7309bdb&quot;,
+        &quot;outcome&quot;: &quot;succeeded&quot;,
+        &quot;started_at&quot;: 1794142162
+      }
+    ]
+  }
+}</pre></details><details><summary>returning server status</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;socket&quot;: &quot;/private/tmp/lf-501-9f8e73d0934acbfc/machine.sock&quot;,
+    &quot;ready&quot;: true,
+    &quot;listening&quot;: true,
+    &quot;instance&quot;: &quot;af362a1d-4914-4175-ae31-2e33c0c4565f&quot;,
+    &quot;revision&quot;: 2,
+    &quot;clients&quot;: [],
+    &quot;error&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>process list after scenarios</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;processes&quot;,
+  &quot;trace_id&quot;: &quot;685bb37d-5316-4abd-b7c2-0cf11149253a&quot;,
+  &quot;result&quot;: {
+    &quot;nodes&quot;: []
+  }
+}</pre></details><details><summary>cleanup</summary><pre>{
+  &quot;server_exit&quot;: 130,
+  &quot;remaining_owned_pids&quot;: []
+}</pre></details><details><summary>served Task launch</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;f26903&quot;,
+  &quot;trace_id&quot;: &quot;a64c89fe-14dc-4b3d-834f-8d777f5acbd2&quot;,
+  &quot;result&quot;: {
+    &quot;graph_process&quot;: &quot;6289c1b7-b21a-40ea-92a9-412ebf101d8e&quot;,
+    &quot;issue&quot;: &quot;f26903&quot;,
+    &quot;log&quot;: &quot;/private/tmp/loo804-qa-p629jf6c/machine/logs/graph-6289c1b7-b21a-40ea-92a9-412ebf101d8e.log&quot;,
+    &quot;run&quot;: &quot;qa-normal from start&quot;,
+    &quot;state&quot;: &quot;running&quot;
+  }
+}</pre></details><details><summary>Task launch uncertain</summary><pre>{
+  &quot;seconds&quot;: 5.05,
+  &quot;reply&quot;: {
+    &quot;type&quot;: &quot;error&quot;,
+    &quot;id&quot;: &quot;07291f&quot;,
+    &quot;code&quot;: &quot;outcome_unknown&quot;,
+    &quot;message&quot;: &quot;`lf task run 07291f --json` has not reported a result and its liveness could not be determined; inspect the affected work before retrying&quot;,
+    &quot;data&quot;: null
+  },
+  &quot;child_alive&quot;: true
+}</pre></details><details><summary>late Task runs</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;entries&quot;: [
+      {
+        &quot;id&quot;: &quot;0cc11842-604c-4281-b386-5f17e54e0a48&quot;,
+        &quot;name&quot;: &quot;qa-normal&quot;,
+        &quot;state&quot;: &quot;completed&quot;,
+        &quot;task_id&quot;: &quot;task_07291fa61b744ec9993b5657497d5fcd&quot;,
+        &quot;wave_id&quot;: null,
+        &quot;updated_at&quot;: 1794142217,
+        &quot;repo&quot;: &quot;/private/tmp/loo804-qa-p629jf6c/repo&quot;,
+        &quot;ended_at&quot;: 1794142217
+      }
+    ],
+    &quot;next&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>late Task status</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;comments&quot;: {
+      &quot;comments&quot;: [
+        {
+          &quot;author&quot;: {
+            &quot;kind&quot;: &quot;integration&quot;
+          },
+          &quot;body&quot;: &quot;Launch QA claimed this on home_d10678fccc24bbb1e2d3c474368e3293\n\n&lt;!-- loopflow-ownership:{\&quot;id\&quot;:\&quot;own_2ea66eeff5684b5c942ac39649eee4f6\&quot;,\&quot;task_id\&quot;:\&quot;task_07291fa61b744ec9993b5657497d5fcd\&quot;,\&quot;kind\&quot;:\&quot;claim\&quot;,\&quot;person\&quot;:\&quot;Launch QA\&quot;,\&quot;person_key\&quot;:\&quot;qa@example.invalid\&quot;,\&quot;machine_id\&quot;:\&quot;home_d10678fccc24bbb1e2d3c474368e3293\&quot;,\&quot;machine_label\&quot;:null,\&quot;at\&quot;:1794142217} --&gt;&quot;,
+          &quot;created_at&quot;: &quot;2026-11-08T12:50:17.16Z&quot;,
+          &quot;id&quot;: &quot;2d295cf8-58b5-49a0-9acd-9a94be36d1c4&quot;
+        }
+      ],
+      &quot;conflicts&quot;: {},
+      &quot;pending_sync&quot;: [],
+      &quot;refresh_error&quot;: null
+    },
+    &quot;graph_processes&quot;: [
+      {
+        &quot;id&quot;: &quot;0cc11842-604c-4281-b386-5f17e54e0a48&quot;,
+        &quot;name&quot;: &quot;qa-normal&quot;,
+        &quot;state&quot;: &quot;completed&quot;,
+        &quot;step&quot;: &quot;help&quot;,
+        &quot;updated_at&quot;: &quot;2026-11-08T12:50:17Z&quot;
+      }
+    ],
+    &quot;sessions&quot;: [],
+    &quot;task&quot;: {
+      &quot;graph&quot;: {
+        &quot;name&quot;: &quot;qa-normal&quot;,
+        &quot;step&quot;: &quot;end&quot;
+      },
+      &quot;id&quot;: &quot;task_07291fa61b744ec9993b5657497d5fcd&quot;,
+      &quot;identifier&quot;: &quot;07291f&quot;,
+      &quot;next&quot;: null,
+      &quot;pr&quot;: null,
+      &quot;project&quot;: null,
+      &quot;reason&quot;: &quot;done&quot;,
+      &quot;state&quot;: &quot;done&quot;,
+      &quot;title&quot;: &quot;late Task&quot;,
+      &quot;wave&quot;: null
+    }
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>finished Graph inventory</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;entries&quot;: [
+      {
+        &quot;id&quot;: &quot;0cc11842-604c-4281-b386-5f17e54e0a48&quot;,
+        &quot;name&quot;: &quot;qa-normal&quot;,
+        &quot;state&quot;: &quot;completed&quot;,
+        &quot;task_id&quot;: &quot;task_07291fa61b744ec9993b5657497d5fcd&quot;,
+        &quot;wave_id&quot;: null,
+        &quot;updated_at&quot;: 1794142217,
+        &quot;repo&quot;: &quot;/private/tmp/loo804-qa-p629jf6c/repo&quot;,
+        &quot;ended_at&quot;: 1794142217
+      },
+      {
+        &quot;id&quot;: &quot;6289c1b7-b21a-40ea-92a9-412ebf101d8e&quot;,
+        &quot;name&quot;: &quot;qa-normal&quot;,
+        &quot;state&quot;: &quot;completed&quot;,
+        &quot;task_id&quot;: &quot;task_f2690388caec4cc6a8e261b01a5c7159&quot;,
+        &quot;wave_id&quot;: null,
+        &quot;updated_at&quot;: 1794142209,
+        &quot;repo&quot;: &quot;/private/tmp/loo804-qa-p629jf6c/repo&quot;,
+        &quot;ended_at&quot;: 1794142209
+      }
+    ],
+    &quot;next&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>final server status</summary><pre>{
+  &quot;exit&quot;: 0,
+  &quot;stdout&quot;: {
+    &quot;socket&quot;: &quot;/private/tmp/lf-501-6ee6e6a6450bc28b/machine.sock&quot;,
+    &quot;ready&quot;: true,
+    &quot;listening&quot;: true,
+    &quot;instance&quot;: &quot;eca787cf-8b0b-40cf-9e13-80c6ed55c20e&quot;,
+    &quot;revision&quot;: 2,
+    &quot;clients&quot;: [],
+    &quot;error&quot;: null
+  },
+  &quot;stderr&quot;: &quot;&quot;
+}</pre></details><details><summary>cleanup after process shutdown settled</summary><pre>{
+  &quot;remaining_owned_pids&quot;: []
+}</pre></details><details><summary>Independent client read during delayed Task launch (result summarized)</summary><pre>{
+  &quot;type&quot;: &quot;response&quot;,
+  &quot;id&quot;: &quot;parallel-read&quot;,
+  &quot;graph_names&quot;: [
+    &quot;auto&quot;,
+    &quot;code&quot;,
+    &quot;deliver&quot;,
+    &quot;feature&quot;,
+    &quot;incident&quot;,
+    &quot;optimize&quot;,
+    &quot;pursue&quot;,
+    &quot;qa-killed&quot;,
+    &quot;qa-live&quot;,
+    &quot;qa-normal&quot;,
+    &quot;qa-recovered&quot;,
+    &quot;qa-unknown&quot;,
+    &quot;queue&quot;,
+    &quot;refresh&quot;,
+    &quot;research&quot;,
+    &quot;task-design&quot;,
+    &quot;vsm-operate&quot;
+  ]
+}</pre></details>
+<h2>What works now, limits, and remaining rough edges</h2>
+<p><strong>No in-scope runtime failure found.</strong> Bounded uncertainty, registry recovery, waiting for live owners, late results, Task recovery reads and independent served reads worked through the real product.</p>
+<ul><li>Wrong-name diagnostic: the served invalid Graph request reports only “command exited with status 2,” rather than naming the missing Graph. This comes from the existing launch error path, outside the liveness change; left unchanged.</li>
+<li>Late report retention: a small report JSON remains in the private transport directory when it arrives after uncertainty. The caller has already returned; Graph/Task history remains the recovery route. No cleanup policy was added here.</li>
+<li>Exact same-poll exit/report races and the known-dead branch were not deterministically forced through the OS. The six focused polling tests from implementation cover race ordering, malformed reports and missing-registry recovery; QA did not rerun them.</li>
+<li>No production Machine, Desktop interaction, remote provider, pre-change store upgrade or CI run was exercised. Local Git Tasks and command-only Graphs reached the same launch path without credentials; this change adds no schema or wire shape. Gate still owns affected suites and required lint.</li></ul>
+<p>Checks: branch CLI build passed; real Graph and Task scenarios passed; git diff --check passed. Private servers and all observed descendants are stopped. Disposable files remain under /private/tmp for inspection.</p>
+</body></html>

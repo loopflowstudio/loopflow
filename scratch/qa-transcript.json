@@ -1,0 +1,320 @@
+[
+  {
+    "scenario": "environment",
+    "value": {
+      "root": "/private/tmp/loo804-qa-hh1scesn",
+      "binary": "/Users/jack/src/loopflow.loo-804-served-launches-stop/target/debug/lf",
+      "server_pid": 77933
+    }
+  },
+  {
+    "scenario": "fresh server status",
+    "value": {
+      "exit": 0,
+      "stdout": "{\"socket\":\"/private/tmp/lf-501-9f8e73d0934acbfc/machine.sock\",\"ready\":true,\"listening\":true,\"instance\":\"af362a1d-4914-4175-ae31-2e33c0c4565f\",\"revision\":2,\"clients\":[],\"error\":null}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "normal graph launch",
+    "value": {
+      "type": "response",
+      "id": "normal",
+      "trace_id": "c59390fc-b4ff-4277-a0a9-7efd0006788a",
+      "result": {
+        "lf_process_id": "6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec",
+        "log": "/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec.log",
+        "operation": "graph.run",
+        "run": "graph qa-normal"
+      }
+    }
+  },
+  {
+    "scenario": "normal graph result",
+    "value": {
+      "type": "response",
+      "id": "normal-result",
+      "trace_id": "ccc3623d-e632-47fb-95fb-ac59e1190d95",
+      "result": {
+        "compiled": {
+          "name": "qa-normal",
+          "steps": [
+            {
+              "id": null,
+              "interactive": false,
+              "key": 0,
+              "kind": "op",
+              "label": "help",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "qa-normal"
+              ]
+            }
+          ]
+        },
+        "completed": [
+          0
+        ],
+        "current": null,
+        "cwd": "/private/tmp/loo804-qa-hh1scesn/repo",
+        "entry": {
+          "ended_at": 1794142134,
+          "id": "6c8e1f1c-999c-4ea1-95a1-1a47f83ec4ec",
+          "name": "qa-normal",
+          "repo": "/private/tmp/loo804-qa-hh1scesn/repo",
+          "state": "completed",
+          "task_id": null,
+          "updated_at": 1794142134,
+          "wave_id": null
+        },
+        "iterations": [
+          []
+        ],
+        "returns": [],
+        "steps": [
+          {
+            "completed_at": 1794142134,
+            "exit_code": 0,
+            "iterations": [
+              []
+            ],
+            "key": 0,
+            "label": "help",
+            "lf_process_id": "c7391692-7c67-4618-9536-f44d3ab51b23",
+            "outcome": "succeeded",
+            "started_at": 1794142134
+          }
+        ]
+      }
+    }
+  },
+  {
+    "scenario": "invalid graph",
+    "value": {
+      "type": "error",
+      "id": "invalid",
+      "code": "outcome_unknown",
+      "message": "command exited with status 2; inspect the affected work before retrying",
+      "data": null
+    }
+  },
+  {
+    "scenario": "live suspended",
+    "value": {
+      "child_pid": 86934,
+      "owner_pid": 86761,
+      "reports": []
+    }
+  },
+  {
+    "scenario": "live owner still waiting",
+    "value": {
+      "seconds": 6.06
+    }
+  },
+  {
+    "scenario": "live owner resumed",
+    "value": {
+      "type": "response",
+      "id": "live",
+      "trace_id": "9dc92025-4931-46bc-9910-23eb4388a717",
+      "result": {
+        "lf_process_id": "1368ae80-0445-4488-883a-bd53f8769afe",
+        "log": "/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-1368ae80-0445-4488-883a-bd53f8769afe.log",
+        "operation": "graph.run",
+        "run": "graph qa-live"
+      }
+    }
+  },
+  {
+    "scenario": "killed suspended",
+    "value": {
+      "child_pid": 5332,
+      "owner_pid": 5201,
+      "reports": []
+    }
+  },
+  {
+    "scenario": "child killed without report",
+    "value": {
+      "seconds": 7.03,
+      "reply": {
+        "type": "error",
+        "id": "killed",
+        "code": "outcome_unknown",
+        "message": "`lf --batch graph qa-killed` has not reported a result and its liveness could not be determined; inspect the affected work before retrying",
+        "data": null
+      }
+    }
+  },
+  {
+    "scenario": "recovered suspended",
+    "value": {
+      "child_pid": 25814,
+      "owner_pid": 25583,
+      "reports": []
+    }
+  },
+  {
+    "scenario": "restored registry keeps live launch waiting",
+    "value": {
+      "seconds": 7.08
+    }
+  },
+  {
+    "scenario": "registry recovered before grace",
+    "value": {
+      "seconds": 7.08,
+      "reply": {
+        "type": "response",
+        "id": "recovered",
+        "trace_id": "520c04ff-d748-41a9-a676-bcb296cf91a3",
+        "result": {
+          "lf_process_id": "219590ac-1484-402a-8ecc-6601056e6da5",
+          "log": "/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-219590ac-1484-402a-8ecc-6601056e6da5.log",
+          "operation": "graph.run",
+          "run": "graph qa-recovered"
+        }
+      }
+    }
+  },
+  {
+    "scenario": "unknown suspended",
+    "value": {
+      "child_pid": 50681,
+      "owner_pid": 50472,
+      "reports": []
+    }
+  },
+  {
+    "scenario": "registry unavailable through grace",
+    "value": {
+      "seconds": 5.08,
+      "reply": {
+        "type": "error",
+        "id": "unknown",
+        "code": "outcome_unknown",
+        "message": "`lf --batch graph qa-unknown` has not reported a result and its liveness could not be determined; inspect the affected work before retrying",
+        "data": null
+      },
+      "child_alive": true,
+      "owner_alive": true
+    }
+  },
+  {
+    "scenario": "late result found through CLI inventory",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"entries\": [\n    {\n      \"id\": \"4c0c82c5-f2d6-4ea9-b34a-c92611be6aee\",\n      \"name\": \"qa-unknown\",\n      \"state\": \"completed\",\n      \"task_id\": null,\n      \"wave_id\": null,\n      \"updated_at\": 1794142162,\n      \"repo\": \"/private/tmp/loo804-qa-hh1scesn/repo\",\n      \"ended_at\": 1794142162\n    }\n  ],\n  \"next\": null\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "late reports after uncertain reply",
+    "value": [
+      {
+        "Ok": {
+          "lf_process_id": "4c0c82c5-f2d6-4ea9-b34a-c92611be6aee",
+          "log": "/private/tmp/loo804-qa-hh1scesn/machine/logs/graph-graph-run-4c0c82c5-f2d6-4ea9-b34a-c92611be6aee.log",
+          "operation": "graph.run",
+          "run": "graph qa-unknown"
+        }
+      }
+    ]
+  },
+  {
+    "scenario": "late work discoverable",
+    "value": {
+      "type": "response",
+      "id": "late-result",
+      "trace_id": "20f684f3-a944-4537-81df-da170079420f",
+      "result": {
+        "compiled": {
+          "name": "qa-unknown",
+          "steps": [
+            {
+              "id": null,
+              "interactive": false,
+              "key": 0,
+              "kind": "op",
+              "label": "help",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "qa-unknown"
+              ]
+            }
+          ]
+        },
+        "completed": [
+          0
+        ],
+        "current": null,
+        "cwd": "/private/tmp/loo804-qa-hh1scesn/repo",
+        "entry": {
+          "ended_at": 1794142162,
+          "id": "4c0c82c5-f2d6-4ea9-b34a-c92611be6aee",
+          "name": "qa-unknown",
+          "repo": "/private/tmp/loo804-qa-hh1scesn/repo",
+          "state": "completed",
+          "task_id": null,
+          "updated_at": 1794142162,
+          "wave_id": null
+        },
+        "iterations": [
+          []
+        ],
+        "returns": [],
+        "steps": [
+          {
+            "completed_at": 1794142162,
+            "exit_code": 0,
+            "iterations": [
+              []
+            ],
+            "key": 0,
+            "label": "help",
+            "lf_process_id": "b68dda52-f6af-4c51-881d-ab9fa7309bdb",
+            "outcome": "succeeded",
+            "started_at": 1794142162
+          }
+        ]
+      }
+    }
+  },
+  {
+    "scenario": "create local Task",
+    "value": {
+      "exit": 2,
+      "stdout": "",
+      "stderr": "error: the following required arguments were not provided:\n  --run\n\nUsage: lf task create --run --title <TITLE> --graph <GRAPH> --json [REQUEST]\n\nFor more information, try '--help'.\n"
+    }
+  },
+  {
+    "scenario": "returning server status",
+    "value": {
+      "exit": 0,
+      "stdout": "{\"socket\":\"/private/tmp/lf-501-9f8e73d0934acbfc/machine.sock\",\"ready\":true,\"listening\":true,\"instance\":\"af362a1d-4914-4175-ae31-2e33c0c4565f\",\"revision\":2,\"clients\":[],\"error\":null}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "process list after scenarios",
+    "value": {
+      "type": "response",
+      "id": "processes",
+      "trace_id": "685bb37d-5316-4abd-b7c2-0cf11149253a",
+      "result": {
+        "nodes": []
+      }
+    }
+  },
+  {
+    "scenario": "cleanup",
+    "value": {
+      "server_exit": 130,
+      "remaining_owned_pids": []
+    }
+  }
+]

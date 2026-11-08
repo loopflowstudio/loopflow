@@ -97,14 +97,18 @@ lf task runs <ID>
 
 `outcome_unknown` means the launch may have taken effect but did not report a
 usable result. If the command exits, the server stops waiting. If it cannot
-determine whether the command is still running, it retries for a bounded time
-before returning the error. Access to the Machine's records can recover during
-that wait.
+determine whether the command is still running, it continues checking for a
+bounded time before returning the error. Access to the Machine's records can
+recover during that wait.
 
 This error does not stop or repeat the launched work. Leave a running Graph
 alone. If status is unavailable, use `lf doctor` and check again once reads work.
 Retry only after inspecting the affected work; for launches other than Tasks,
 inspect the operation's result and `lf process list` first.
+
+For a Graph launched directly, `lf graph list --processes` also finds finished
+runs. Inspect one with `lf process show <ID>`; a finished run no longer appears
+in the live process list.
 
 ## A Task stopped advancing
 

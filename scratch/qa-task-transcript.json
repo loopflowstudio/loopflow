@@ -1,0 +1,2056 @@
+[
+  {
+    "scenario": "environment",
+    "value": {
+      "root": "/private/tmp/loo804-qa-p629jf6c",
+      "server_pid": 7101
+    }
+  },
+  {
+    "scenario": "create normal Task",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"id\": \"task_f2690388caec4cc6a8e261b01a5c7159\",\n  \"revision\": 1,\n  \"identifier\": \"f26903\",\n  \"title\": \"normal Task\",\n  \"description\": \"normal Task\",\n  \"rank\": 0,\n  \"assignee\": null,\n  \"due_date\": null,\n  \"state\": \"unstarted\",\n  \"completed_at\": null,\n  \"linear_id\": null,\n  \"pm_snapshot_synced_at\": null,\n  \"pm_writeback\": {\n    \"state\": \"current\"\n  },\n  \"wave_id\": null,\n  \"repo_id\": \"repo_7640bedbbc1e4447b44b72f7c9ea68e8\",\n  \"project_id\": null,\n  \"worktree\": null,\n  \"workspace_slug\": \"\",\n  \"branch\": \"\",\n  \"base_commit\": \"\",\n  \"parent_pr_id\": null,\n  \"created_at\": \"2026-11-08T12:50:08Z\",\n  \"updated_at\": \"2026-11-08T12:50:08Z\"\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "served Task launch",
+    "value": {
+      "type": "response",
+      "id": "f26903",
+      "trace_id": "a64c89fe-14dc-4b3d-834f-8d777f5acbd2",
+      "result": {
+        "graph_process": "6289c1b7-b21a-40ea-92a9-412ebf101d8e",
+        "issue": "f26903",
+        "log": "/private/tmp/loo804-qa-p629jf6c/machine/logs/graph-6289c1b7-b21a-40ea-92a9-412ebf101d8e.log",
+        "run": "qa-normal from start",
+        "state": "running"
+      }
+    }
+  },
+  {
+    "scenario": "normal Task runs",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"entries\": [\n    {\n      \"id\": \"6289c1b7-b21a-40ea-92a9-412ebf101d8e\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"task_id\": \"task_f2690388caec4cc6a8e261b01a5c7159\",\n      \"wave_id\": null,\n      \"updated_at\": 1794142209,\n      \"repo\": \"/private/tmp/loo804-qa-p629jf6c/repo\",\n      \"ended_at\": 1794142209\n    }\n  ],\n  \"next\": null\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "normal Task status",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"comments\": {\n    \"comments\": [\n      {\n        \"author\": {\n          \"kind\": \"integration\"\n        },\n        \"body\": \"Launch QA claimed this on home_d10678fccc24bbb1e2d3c474368e3293\\n\\n<!-- loopflow-ownership:{\\\"id\\\":\\\"own_6abf24bc0d3a4229b75b2682dba166ce\\\",\\\"task_id\\\":\\\"task_f2690388caec4cc6a8e261b01a5c7159\\\",\\\"kind\\\":\\\"claim\\\",\\\"person\\\":\\\"Launch QA\\\",\\\"person_key\\\":\\\"qa@example.invalid\\\",\\\"machine_id\\\":\\\"home_d10678fccc24bbb1e2d3c474368e3293\\\",\\\"machine_label\\\":null,\\\"at\\\":1794142209} -->\",\n        \"created_at\": \"2026-11-08T12:50:09.263Z\",\n        \"id\": \"ddb3061e-1a72-48f9-a3b9-c81e0359ff2e\"\n      }\n    ],\n    \"conflicts\": {},\n    \"pending_sync\": [],\n    \"refresh_error\": null\n  },\n  \"graph_processes\": [\n    {\n      \"id\": \"6289c1b7-b21a-40ea-92a9-412ebf101d8e\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"step\": \"help\",\n      \"updated_at\": \"2026-11-08T12:50:09Z\"\n    }\n  ],\n  \"sessions\": [],\n  \"task\": {\n    \"graph\": {\n      \"name\": \"qa-normal\",\n      \"step\": \"end\"\n    },\n    \"id\": \"task_f2690388caec4cc6a8e261b01a5c7159\",\n    \"identifier\": \"f26903\",\n    \"next\": null,\n    \"pr\": null,\n    \"project\": null,\n    \"reason\": \"done\",\n    \"state\": \"done\",\n    \"title\": \"normal Task\",\n    \"wave\": null\n  }\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "create late Task",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"id\": \"task_07291fa61b744ec9993b5657497d5fcd\",\n  \"revision\": 1,\n  \"identifier\": \"07291f\",\n  \"title\": \"late Task\",\n  \"description\": \"late Task\",\n  \"rank\": 1,\n  \"assignee\": null,\n  \"due_date\": null,\n  \"state\": \"unstarted\",\n  \"completed_at\": null,\n  \"linear_id\": null,\n  \"pm_snapshot_synced_at\": null,\n  \"pm_writeback\": {\n    \"state\": \"current\"\n  },\n  \"wave_id\": null,\n  \"repo_id\": \"repo_7640bedbbc1e4447b44b72f7c9ea68e8\",\n  \"project_id\": null,\n  \"worktree\": null,\n  \"workspace_slug\": \"\",\n  \"branch\": \"\",\n  \"base_commit\": \"\",\n  \"parent_pr_id\": null,\n  \"created_at\": \"2026-11-08T12:50:10Z\",\n  \"updated_at\": \"2026-11-08T12:50:10Z\"\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "07291f suspended",
+    "value": {
+      "child_pid": 18417,
+      "owner_pid": 18290,
+      "reports": []
+    }
+  },
+  {
+    "scenario": "independent read while launch waits",
+    "value": {
+      "type": "response",
+      "id": "parallel-read",
+      "trace_id": "bf4a4c4b-59ce-4e74-88e5-eab8be758b51",
+      "result": [
+        {
+          "compiled": {
+            "name": "auto",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "write-docs",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "implement",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 5,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 6,
+                "kind": "skill",
+                "label": "concept-review",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 7,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 8,
+                "kind": "skill",
+                "label": "qa",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 9,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 10,
+                "kind": "skill",
+                "label": "pr-publish",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 11,
+                "kind": "skill",
+                "label": "gate",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 12,
+                "kind": "op",
+                "label": "land --wait-and-fix",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "auto",
+                  "deliver"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 0,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 1,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 2,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "id": "group-1",
+                    "items": [
+                      {
+                        "key": 3,
+                        "kind": "node",
+                        "paths": {}
+                      },
+                      {
+                        "key": 4,
+                        "kind": "node",
+                        "paths": {}
+                      }
+                    ],
+                    "kind": "group",
+                    "name": "refresh"
+                  },
+                  {
+                    "key": 5,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 6,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 7,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 8,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 9,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 10,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "pursue"
+              },
+              {
+                "id": "group-2",
+                "items": [
+                  {
+                    "key": 11,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 12,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "deliver"
+              }
+            ],
+            "revision": "08e482f3c8a9f075dbc7fe1acedc0a8f407124e2d3e51b70ff09d37c54ff9d96"
+          },
+          "name": "auto",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "code",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "write-docs",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "implement",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 5,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 6,
+                "kind": "skill",
+                "label": "concept-review",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 7,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 8,
+                "kind": "skill",
+                "label": "qa",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 9,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 10,
+                "kind": "skill",
+                "label": "pr-publish",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 11,
+                "kind": "skill",
+                "label": "demo",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "code"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 12,
+                "kind": "skill",
+                "label": "gate",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 13,
+                "kind": "op",
+                "label": "land --wait-and-fix",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "code",
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 14,
+                "kind": "skill",
+                "label": "verify",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "code"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 0,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 1,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 2,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "id": "group-1",
+                    "items": [
+                      {
+                        "key": 3,
+                        "kind": "node",
+                        "paths": {}
+                      },
+                      {
+                        "key": 4,
+                        "kind": "node",
+                        "paths": {}
+                      }
+                    ],
+                    "kind": "group",
+                    "name": "refresh"
+                  },
+                  {
+                    "key": 5,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 6,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 7,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 8,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 9,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 10,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "pursue"
+              },
+              {
+                "key": 11,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-2",
+                "items": [
+                  {
+                    "key": 12,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 13,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "deliver"
+              },
+              {
+                "key": 14,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "b7510bbdc2f5b904e6b90c31a30d4374cbbca918ff0d2705b2a1c5f5f5734c81"
+          },
+          "name": "code",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "deliver",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "gate",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "op",
+                "label": "land --wait-and-fix",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "deliver"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "cb13aa8b445b343809b57cdd2175e6a138d317a84c191bd40cb23f580ed83fba"
+          },
+          "name": "deliver",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "feature",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "kickoff",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 1,
+                "kind": "skill",
+                "label": "explore",
+                "paths": [],
+                "returns_to": 0,
+                "sources": [
+                  "feature"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "write-docs",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "skill",
+                "label": "implement",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 5,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 6,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 7,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 3,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 8,
+                "kind": "skill",
+                "label": "concept-review",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 9,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 3,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 10,
+                "kind": "skill",
+                "label": "qa",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 11,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 3,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 12,
+                "kind": "skill",
+                "label": "pr-publish",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 13,
+                "kind": "skill",
+                "label": "demo",
+                "paths": [],
+                "returns_to": 3,
+                "sources": [
+                  "feature"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 14,
+                "kind": "skill",
+                "label": "gate",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 15,
+                "kind": "op",
+                "label": "land --wait-and-fix",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "feature",
+                  "deliver"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 16,
+                "kind": "skill",
+                "label": "verify",
+                "paths": [],
+                "returns_to": 3,
+                "sources": [
+                  "feature"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 2,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 3,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 4,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "id": "group-1",
+                    "items": [
+                      {
+                        "key": 5,
+                        "kind": "node",
+                        "paths": {}
+                      },
+                      {
+                        "key": 6,
+                        "kind": "node",
+                        "paths": {}
+                      }
+                    ],
+                    "kind": "group",
+                    "name": "refresh"
+                  },
+                  {
+                    "key": 7,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 8,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 9,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 10,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 11,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 12,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "pursue"
+              },
+              {
+                "key": 13,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-2",
+                "items": [
+                  {
+                    "key": 14,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 15,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "deliver"
+              },
+              {
+                "key": 16,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "ac8a99ea7a5c4dbe799df162bc6c55a977f67c56bc99b348c8bd2a0fdf3cabe4"
+          },
+          "name": "feature",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "incident",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "unbreak",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "incident"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "debug",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "incident"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "5whys",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "incident"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "skill",
+                "label": "launch-plan",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "incident"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 2,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 3,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "0fc4ae4f819daa77aa47f12ef65fd6f348e621d23777668eee172bd20dac9367"
+          },
+          "name": "incident",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "optimize",
+            "steps": [
+              {
+                "id": "baseline",
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "measure",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": "first-plan",
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "optimize-plan",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": "climb",
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "implement",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": "compare",
+                "interactive": false,
+                "key": 3,
+                "kind": "skill",
+                "label": "measure",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "optimize-plan",
+                "paths": [],
+                "returns_to": 2,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 5,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 6,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 7,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize",
+                  "refresh"
+                ]
+              },
+              {
+                "id": "final",
+                "interactive": false,
+                "key": 8,
+                "kind": "skill",
+                "label": "measure",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "optimize"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 2,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 3,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 4,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 5,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 6,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 7,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "refresh"
+              },
+              {
+                "key": 8,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "4d5761a268886602d93c998eea48d65791eab0a2318b1a4465ba7817f37292f6"
+          },
+          "name": "optimize",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "pursue",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "write-docs",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "implement",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 5,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 6,
+                "kind": "skill",
+                "label": "concept-review",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 7,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 8,
+                "kind": "skill",
+                "label": "qa",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 9,
+                "kind": "skill",
+                "label": "loop-or-next",
+                "paths": [],
+                "returns_to": 1,
+                "sources": [
+                  "pursue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 10,
+                "kind": "skill",
+                "label": "pr-publish",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "pursue"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 2,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 3,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 4,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "refresh"
+              },
+              {
+                "key": 5,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 6,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 7,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 8,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 9,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 10,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "ecb6ca2619b31e3ef47f08d889a569afc69f4b41592414af26637b760e37f575"
+          },
+          "name": "pursue",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "qa-killed",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "help",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "qa-killed"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "ac3d60e14a2af2a6af80cb64825ac59d536c71e5cc89db049280987d2188b4c9"
+          },
+          "name": "qa-killed",
+          "source": ".lf/graphs/qa-killed.yaml",
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "qa-live",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "help",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "qa-live"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "a97900dd02909a05ebb5718d376dfd142ef96d64c36958974e387bf621862831"
+          },
+          "name": "qa-live",
+          "source": ".lf/graphs/qa-live.yaml",
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "qa-normal",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "help",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "qa-normal"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "342d8ab0356f40b7f530010df1c5e07c20fcdb653a4a8142e5958a673fc4e37b"
+          },
+          "name": "qa-normal",
+          "source": ".lf/graphs/qa-normal.yaml",
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "qa-recovered",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "help",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "qa-recovered"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "3d75debf6385c94537f35d295076e8e50c6c42ed46f48cd03594df8ef0554944"
+          },
+          "name": "qa-recovered",
+          "source": ".lf/graphs/qa-recovered.yaml",
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "qa-unknown",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "help",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "qa-unknown"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "f4394a8a8dbac4e32859136aadd08b66bfeef3bf43b3cdde3c7eb15b7837738f"
+          },
+          "name": "qa-unknown",
+          "source": ".lf/graphs/qa-unknown.yaml",
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "queue",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "compress",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "queue"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "queue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "queue",
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "skill",
+                "label": "gate",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "queue"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "id": "group-0",
+                "items": [
+                  {
+                    "key": 1,
+                    "kind": "node",
+                    "paths": {}
+                  },
+                  {
+                    "key": 2,
+                    "kind": "node",
+                    "paths": {}
+                  }
+                ],
+                "kind": "group",
+                "name": "refresh"
+              },
+              {
+                "key": 3,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "383f19a36ce44b1b5371508b4bd2929a10e885b407fc6b661d6383f6d52d25ab"
+          },
+          "name": "queue",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "refresh",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "sync",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "refresh"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "realign",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "refresh"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "e5de421998b18062c983631aada2c386b3042b2828308ed62b2bb028c3b13f39"
+          },
+          "name": "refresh",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "research",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "research",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "research"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": true,
+                "key": 1,
+                "kind": "skill",
+                "label": "research",
+                "paths": [],
+                "returns_to": 0,
+                "sources": [
+                  "research"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "75083cb496f4da39c4eb1f8054d0a0ad7f8c52a4ab3522372d74de322d86f2a1"
+          },
+          "name": "research",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "task-design",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "kickoff",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "task-design"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "218eb66c16fe348b786cfb490e53df940bf7805b29291ced85479520abb02558"
+          },
+          "name": "task-design",
+          "source": null,
+          "unavailable": null
+        },
+        {
+          "compiled": {
+            "name": "vsm-operate",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "skill",
+                "label": "s1",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "vsm-operate"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "skill",
+                "label": "s2",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "vsm-operate"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 2,
+                "kind": "skill",
+                "label": "s3",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "vsm-operate"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 3,
+                "kind": "skill",
+                "label": "s4",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "vsm-operate"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 4,
+                "kind": "skill",
+                "label": "s5",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "vsm-operate"
+                ]
+              }
+            ]
+          },
+          "composition": {
+            "items": [
+              {
+                "key": 0,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 1,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 2,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 3,
+                "kind": "node",
+                "paths": {}
+              },
+              {
+                "key": 4,
+                "kind": "node",
+                "paths": {}
+              }
+            ],
+            "revision": "8db6f747becd431a2c5d8ea0ea4bff8d18f9449ad2d485a243ba331f30664868"
+          },
+          "name": "vsm-operate",
+          "source": null,
+          "unavailable": null
+        }
+      ]
+    }
+  },
+  {
+    "scenario": "Task launch uncertain",
+    "value": {
+      "seconds": 5.05,
+      "reply": {
+        "type": "error",
+        "id": "07291f",
+        "code": "outcome_unknown",
+        "message": "`lf task run 07291f --json` has not reported a result and its liveness could not be determined; inspect the affected work before retrying",
+        "data": null
+      },
+      "child_alive": true
+    }
+  },
+  {
+    "scenario": "late Task runs",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"entries\": [\n    {\n      \"id\": \"0cc11842-604c-4281-b386-5f17e54e0a48\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"task_id\": \"task_07291fa61b744ec9993b5657497d5fcd\",\n      \"wave_id\": null,\n      \"updated_at\": 1794142217,\n      \"repo\": \"/private/tmp/loo804-qa-p629jf6c/repo\",\n      \"ended_at\": 1794142217\n    }\n  ],\n  \"next\": null\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "late Task status",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"comments\": {\n    \"comments\": [\n      {\n        \"author\": {\n          \"kind\": \"integration\"\n        },\n        \"body\": \"Launch QA claimed this on home_d10678fccc24bbb1e2d3c474368e3293\\n\\n<!-- loopflow-ownership:{\\\"id\\\":\\\"own_2ea66eeff5684b5c942ac39649eee4f6\\\",\\\"task_id\\\":\\\"task_07291fa61b744ec9993b5657497d5fcd\\\",\\\"kind\\\":\\\"claim\\\",\\\"person\\\":\\\"Launch QA\\\",\\\"person_key\\\":\\\"qa@example.invalid\\\",\\\"machine_id\\\":\\\"home_d10678fccc24bbb1e2d3c474368e3293\\\",\\\"machine_label\\\":null,\\\"at\\\":1794142217} -->\",\n        \"created_at\": \"2026-11-08T12:50:17.16Z\",\n        \"id\": \"2d295cf8-58b5-49a0-9acd-9a94be36d1c4\"\n      }\n    ],\n    \"conflicts\": {},\n    \"pending_sync\": [],\n    \"refresh_error\": null\n  },\n  \"graph_processes\": [\n    {\n      \"id\": \"0cc11842-604c-4281-b386-5f17e54e0a48\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"step\": \"help\",\n      \"updated_at\": \"2026-11-08T12:50:17Z\"\n    }\n  ],\n  \"sessions\": [],\n  \"task\": {\n    \"graph\": {\n      \"name\": \"qa-normal\",\n      \"step\": \"end\"\n    },\n    \"id\": \"task_07291fa61b744ec9993b5657497d5fcd\",\n    \"identifier\": \"07291f\",\n    \"next\": null,\n    \"pr\": null,\n    \"project\": null,\n    \"reason\": \"done\",\n    \"state\": \"done\",\n    \"title\": \"late Task\",\n    \"wave\": null\n  }\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "finished Graph inventory",
+    "value": {
+      "exit": 0,
+      "stdout": "{\n  \"entries\": [\n    {\n      \"id\": \"0cc11842-604c-4281-b386-5f17e54e0a48\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"task_id\": \"task_07291fa61b744ec9993b5657497d5fcd\",\n      \"wave_id\": null,\n      \"updated_at\": 1794142217,\n      \"repo\": \"/private/tmp/loo804-qa-p629jf6c/repo\",\n      \"ended_at\": 1794142217\n    },\n    {\n      \"id\": \"6289c1b7-b21a-40ea-92a9-412ebf101d8e\",\n      \"name\": \"qa-normal\",\n      \"state\": \"completed\",\n      \"task_id\": \"task_f2690388caec4cc6a8e261b01a5c7159\",\n      \"wave_id\": null,\n      \"updated_at\": 1794142209,\n      \"repo\": \"/private/tmp/loo804-qa-p629jf6c/repo\",\n      \"ended_at\": 1794142209\n    }\n  ],\n  \"next\": null\n}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "final server status",
+    "value": {
+      "exit": 0,
+      "stdout": "{\"socket\":\"/private/tmp/lf-501-6ee6e6a6450bc28b/machine.sock\",\"ready\":true,\"listening\":true,\"instance\":\"eca787cf-8b0b-40cf-9e13-80c6ed55c20e\",\"revision\":2,\"clients\":[],\"error\":null}\n",
+      "stderr": ""
+    }
+  },
+  {
+    "scenario": "cleanup",
+    "value": {
+      "server_exit": 130,
+      "remaining_owned_pids": [
+        18290,
+        18417
+      ]
+    }
+  },
+  {
+    "scenario": "cleanup after process shutdown settled",
+    "value": {
+      "remaining_owned_pids": []
+    }
+  }
+]

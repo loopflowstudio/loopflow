@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-804 · Launch recovery</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { margin: 0 auto; padding: 2rem 1.2rem; max-width: 48rem; }
+  header { font-size: .85rem; opacity: .75; }
+  h1 { font-size: 1.65rem; line-height: 1.2; margin-bottom: .6rem; }
+  h2 { font-size: 1.1rem; margin-top: 1.6rem; }
+  code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; padding: .8rem; border: 1px solid #8886; }
+  .mismatch { border-left: 3px solid #b77734; padding-left: 1rem; }
+  li { margin-bottom: .5rem; }
+</style>
+<header>
+  LOO-804 · concept-review · 2026-11-08<br>
+  Sources: scratch/design.md; docs/troubleshooting.md; engine/launch.rs;
+  engine/task.rs; engine/mod.rs; journal/mod.rs; store/mod.rs;
+  builtins/ops/skill/work.md. Rust paths are under rust/loopflow/src/.
+</header>
+<main>
+<h1>No product decision needed; keep the recovery model</h1>
+<p>The caller gets a result or an uncertain outcome. The work keeps its own
+Process and Task state. <strong>No design revision proposed.</strong>
+The behavior below is implemented on this branch; served-client QA is pending.</p>
+
+<p class="mismatch"><strong>Biggest mismatch, before:</strong> failure to open
+the registry once could leave the launch waiting forever, even after the child
+exited. <strong>After:</strong> each poll can see recovery; continuously unknown
+liveness eventually returns <code>outcome_unknown</code>. That reply says nothing
+about whether the work stopped.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<ol>
+  <li><strong>Start a Task in a connected client.</strong> A launch starts an
+  independent execution owner. <code>task.run → engine::task::run → launch::start</code>
+  returns the command’s typed report when its Graph registers or it refuses.</li>
+  <li><strong>Read the reply.</strong> A report wins over owner exit or unknown
+  expiry, including a final report read. <code>read_existing_registry → lf_evidence</code>
+  supplies Live, Dead or Unknown; these observations add no Task state.</li>
+  <li><strong>Inspect before retrying.</strong> Existing Task, Graph and Process
+  records carry recovery. <code>outcome_unknown</code> neither cancels the owner
+  nor repeats the launch. No new record, wire type or setting is needed.</li>
+</ol>
+
+<h2>A concrete recovery</h2>
+<pre><code>Start Task → no usable reply; liveness stays unknown
+outcome_unknown: … inspect the affected work before retrying
+
+lf task status &lt;ID&gt; --json
+lf task runs &lt;ID&gt;
+
+Graph running → leave it running
+Reads unavailable → lf doctor, then inspect again when reads recover</code></pre>
+<p>For other launches, inspect the operation’s result and
+<code>lf process list</code>. Existing operating instructions already require
+inspection and leaving live Graphs alone; no skill changes are needed.</p>
+
+<h2>Cases the model must keep</h2>
+<p><strong>Normal:</strong> return the typed report.
+<strong>Failure:</strong> an exited owner without a report or continuously
+unknown liveness returns uncertainty.
+<strong>Recovery:</strong> a readable registry can restore observation;
+a live observation resets the internal five-second grace.</p>
+<p>A late success can happen after the error. The affected work must remain
+discoverable without relaunching it. A known-live owner can wait beyond the
+grace: this is not a deadline for every command.</p>
+
+<h2>Review questions, resolved for this headless step</h2>
+<ol>
+  <li>Does uncertainty need a new work state or automatic retry? No; existing
+  records and inspection provide the intended recovery.</li>
+  <li>Does the design need to iterate? No. Next, exercise recovery through the
+  served client; polling tests alone do not establish that interaction.</li>
+</ol>
+</main>
+</html>

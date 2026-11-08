@@ -318,12 +318,16 @@ def _launch_resource_check(
         output, _ = process.communicate(timeout=RESOURCE_CHECK_TIMEOUT)
         return subprocess.CompletedProcess(cmd, process.returncode, output, "")
     except subprocess.TimeoutExpired:
-        subprocess.run(
-            ["sample", str(process.pid), "2", "-mayDie", "-file", str(sample_path)],
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
+        # macOS `sample`; without it the error still carries the app's output.
+        try:
+            subprocess.run(
+                ["sample", str(process.pid), "2", "-mayDie", "-file", str(sample_path)],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         # Children the app started hold the output pipe; end the whole group.
         os.killpg(process.pid, signal.SIGKILL)
         output, _ = process.communicate()

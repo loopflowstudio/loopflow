@@ -145,6 +145,14 @@ Outstanding demo questions (bare login names, `pause` with no "disabled", Anthro
 ## Built: November 7 pass
 Merge 0f71d266c8 (#1831) undid main's `native_codex.py` and `session_launch_contract.rs`; both restored. `support`'s ctor moves `HOME` into the temp directory for every test binary (questions 27).
 
+## Demo (November 7, 2026; store copy, temp HOME, network blocked)
+Shown: `lf account --cached` rows match the mock; `next` gives reasons; ambiguity and unknown-login errors; the repository-order fix-it line. Not shown: `use`, `pause`, the refresh lock (they switch the real login). Jack Heart, on the three fixes below: "go for it".
+Next pass:
+1. The old spelling `lf account claude use jack@` errors with "a login and --cached or --json before a verb apply to `lf account` alone"; name the new spelling instead (`lf account use claude=jack@`).
+2. `lf account <login>` prints the old long dump (every window, "Local services: none", every browser profile). Show only that login: its windows with age and source, auth, plan, and its own browser profile.
+3. `lf account use bogus@` exits 1; the CLI contract is 0 fine, 2 blocked, 3 login needed. An unknown login is a usage error: exit 2 with the existing message, or document otherwise.
+Demo hazard: `lf account use` with a temp HOME still reads stored logins from the real `~/.lf/accounts/` (absolute homes in the store) and calls the real `security`; it failed before writing. Demos of switching need fake logins in a fake LF_HOME, not a store copy.
+
 ## Remaining
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none). `--owned` is likewise unexercised on a real rental: it takes a browser approval, so tests cover it with a stand-in `ssh`.
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.

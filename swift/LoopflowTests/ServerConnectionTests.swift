@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Testing
 @testable import LoopflowMac
@@ -5,6 +6,82 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ServerConnectionTests {
+    @Test func startReadsStatusPublishedBeforeReturning() throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        var visible: ServerConnectionReading?
+        try connection.start {
+            visible = $0
+            if $0.generation == 0 {
+                // Stand in for a relay publishing while observation starts.
+                try? writeStatus(connection, generation: 1, state: "connected", input: true)
+            }
+        }
+        #expect(visible?.generation == 1)
+        #expect(visible?.acceptsInput == true)
+    }
+
+    @Test func atomicReplacementsCoalesceToLatestReading() async throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        var visible: ServerConnectionReading?
+        try connection.start { visible = $0 }
+        for generation in 1..<20 {
+            try writeStatus(connection, generation: UInt64(generation), state: "reconnecting", input: false)
+        }
+        try await publish(connection, generation: 20, state: "connected", input: true)
+        #expect(visible?.generation == 20)
+        #expect(visible?.acceptsInput == true)
+        // A later replacement must still be observed on the same connection.
+        try await publish(connection, generation: 21, state: "ended", input: false)
+        #expect(visible?.state == .ended)
+    }
+
+    @Test func missingMalformedAndDuplicateReadingsKeepLastStatus() async throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        var updates = 0
+        try connection.start { _ in updates += 1 }
+        try await publish(connection, generation: 1, state: "connected", input: true)
+        let status = URL(fileURLWithPath: connection.path)
+        try FileManager.default.removeItem(at: status)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(connection.reading.acceptsInput)
+        try Data("{".utf8).write(to: status, options: .atomic)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(connection.reading.acceptsInput)
+        try writeStatus(connection, generation: 1, state: "connected", input: true)
+        try Data().write(to: connection.directory.appendingPathComponent("status.retry"), options: .atomic)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(updates == 2)
+        try await publish(connection, generation: 2, state: "unavailable", input: false)
+        #expect(updates == 3)
+    }
+
+    @Test func stopDiscardsQueuedReadingAndRemovesMailbox() async throws {
+        let connection = ServerConnection()
+        var updates = 0
+        try connection.start { _ in updates += 1 }
+        try writeStatus(connection, generation: 1, state: "connected", input: true)
+        connection.stop()
+        connection.stop()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(updates == 1)
+        #expect(!FileManager.default.fileExists(atPath: connection.directory.path))
+        #expect(!FileManager.default.fileExists(atPath: connection.directory.appendingPathExtension("closed").path))
+    }
+
+    @Test nonisolated func releaseOutsideMainActorClosesMailboxWithPendingEvents() async throws {
+        var connection: ServerConnection? = await ServerConnection()
+        let directory = try #require(await connection?.directory)
+        try await connection?.start { _ in }
+        try Data(#"{"generation":1,"state":"connected","input":true,"message":null}"#.utf8)
+            .write(to: directory.appendingPathComponent("status.json"), options: .atomic)
+        connection = nil
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
     @Test func recoveryPreservesReadingAndRequiresAcknowledgedInput() async throws {
         let connection = ServerConnection()
         defer { connection.stop() }
@@ -80,11 +157,15 @@ struct ServerConnectionTests {
         #expect(!FileManager.default.fileExists(atPath: connection.directory.path))
     }
 
-    private func publish(_ connection: ServerConnection, generation: UInt64, state: String, input: Bool, message: String? = nil) async throws {
+    private func writeStatus(_ connection: ServerConnection, generation: UInt64, state: String, input: Bool, message: String? = nil) throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "generation": generation, "state": state, "input": input, "message": message as Any? ?? NSNull()
         ])
         try data.write(to: URL(fileURLWithPath: connection.path), options: .atomic)
+    }
+
+    private func publish(_ connection: ServerConnection, generation: UInt64, state: String, input: Bool, message: String? = nil) async throws {
+        try writeStatus(connection, generation: generation, state: state, input: input, message: message)
         let deadline = ContinuousClock.now + .seconds(2)
         while connection.reading.generation != generation || connection.reading.state.rawValue != state
                 || connection.reading.input != input || connection.reading.message != message {
@@ -93,3 +174,4 @@ struct ServerConnectionTests {
         }
     }
 }
+#endif

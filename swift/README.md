@@ -133,6 +133,10 @@ Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
+Session panes watch their relay's connection-status mailbox for changes.
+Quiet mailboxes schedule no reads, including in retained hidden panes. Closing
+a pane stops observation and removes its mailbox.
+
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 

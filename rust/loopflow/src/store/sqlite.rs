@@ -20,6 +20,7 @@ use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
 mod children;
+pub mod creation;
 pub(crate) mod ci_incidents;
 mod durable;
 mod github_people;

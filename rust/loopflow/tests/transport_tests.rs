@@ -4712,6 +4712,48 @@ fn an_immediate_resume_can_reclaim_input_and_resize() {
 }
 
 #[test]
+fn resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.viewer(&owner, true);
+    first.until_event("owner");
+    let mut back = fixture.connect(&owner);
+    back.request(json!({"kind":"resume","reconnect":first.reconnect,
+        "received":first.received,"control":true,"own":"request","rows":35,"cols":110}));
+    let reply = back.until_reply();
+    assert_eq!(reply["kind"], "attached");
+    assert_eq!(reply["viewer"], first.id);
+    assert!(!reply["token"].is_null());
+    back.accept(&reply);
+    back.input("size\n");
+    until_out(&mut back, "35 110");
+    // Closing the superseded socket cannot release the replacement's claims.
+    drop(first);
+    back.input("one\n");
+    until_out(&mut back, "line one");
+    let mut newer = fixture.viewer(&owner, true);
+    newer.until_event("owner");
+    newer.request(json!({"kind":"resize","rows":40,"cols":120}));
+    newer.input("size\n");
+    until_out(&mut newer, "40 120");
+    let mut again = fixture.connect(&owner);
+    again.request(json!({"kind":"resume","reconnect":back.reconnect,
+        "received":back.received,"control":true,"own":"request","rows":20,"cols":70}));
+    let reply = again.until_reply();
+    assert_eq!(reply["kind"], "attached");
+    assert!(reply["token"].is_null(), "{reply}");
+    assert_eq!(reply["owner"], newer.id);
+    again.accept(&reply);
+    drop(back);
+    newer.input("size\n");
+    until_out(&mut newer, "40 120");
+    newer.input("done\n");
+    newer.finish();
+    again.finish();
+}
+
+#[test]
 fn a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);

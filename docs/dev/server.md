@@ -75,14 +75,20 @@ attribution. `journal::request` carries tracing and diagnostics into nested
 blocking work; the response trace correlates diagnostics and effects in
 `logs/lf.log`. It is neither an execution owner nor a durable retry receipt.
 Canceling releases the client's wait, but an admitted mutation may still complete.
-A lost reply means outcome unknown: refresh authoritative state before another
-deliberate edit, and never automatically replay the request.
+A lost reply means outcome unknown. For `task.create` and `session.new`, look up
+the durable creation receipt; only confirmed absence or a server-declared safe
+continuation permits resubmitting the identical request. For other writes,
+refresh authoritative state before another deliberate edit. The
+[client contract](../../rust/loopflow/src/server/README.md#client-contract)
+defines persistence, receipt lookup, admission budgets and recovery by error scope.
 
-Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
+`task.create` shares its creation function and receipt with the CLI, covering
+both new Tasks and Session adoption; `run` requests the Task's Graph launch.
 `task.run` and `task.ship` start the same command a terminal would, detached
 under its own execution owner, and answer the typed value that process reports
-(`engine/launch.rs`); the request never carries the run. Create-and-run and
-Session launches retain their ordinary CLI path and existing Session/Graph owners. Ghostty rendering and app-owned automation retain
+(`engine/launch.rs`); the request never carries the run. Desktop's Work operations
+use the shared protocol; execution stays with existing Session/Graph owners.
+Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
@@ -107,7 +113,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
-| `task.create` | `lf task create --session <id>` | write |
+| `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |

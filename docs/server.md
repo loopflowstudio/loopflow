@@ -46,6 +46,34 @@ their configured grace. See [Sessions](sessions.md#come-back-to-a-conversation).
 Logout or reboot ends live processes; [resume from saved history](sessions.md#after-a-crash-or-reboot)
 afterward.
 
+## Recover a submitted creation
+
+Submit **New Task**, then quit Desktop before its answer arrives. On reopening,
+Desktop checks that submission on its original Machine and repository and shows
+the same Task. Switching repositories or opening another window does not submit
+it somewhere else.
+
+This recovery also covers **Create Task from this conversation** and starting a
+new thread in an existing Session. Desktop saves each submitted request on this
+device before sending it. If saving fails, the form stays open with the error
+and nothing is sent. This saves submitted creations, not an editable offline
+queue; submissions do not sync to other devices.
+
+The server's receipt determines what happened. Desktop checks it after reconnect
+or app restart, and sends the identical creation again only when the server
+confirms it is absent or safe to continue. An unavailable server leaves the
+submission unresolved. Once Desktop presents a confirmed result, it removes the
+saved request.
+
+**Task created; start unconfirmed** means the Task exists but its launch has not
+been confirmed. Open the Task and inspect its status and Graph history before
+starting anything. Desktop keeps this submission available for inspection and
+does not launch it again. Recovering a receipt for a removed Task does not
+recreate it.
+
+Other changes have no automatic retry contract. If their reply is lost, refresh
+the affected Work to see what happened before making another change.
+
 ## Updates and disabled background access
 
 Use `lf install` to update the selected build. Installation reconciles the server

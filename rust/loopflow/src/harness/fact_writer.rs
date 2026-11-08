@@ -883,7 +883,7 @@ mod tests {
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
-            .replace_session_input(original.captured, next)
+            .replace_session_input(original.captured, next, None)
             .unwrap();
         hear(
             &mut decoder,
@@ -1188,7 +1188,7 @@ mod tests {
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
-                .replace_session_input(original.captured, next)
+                .replace_session_input(original.captured, next, None)
                 .unwrap();
             let current = store
                 .claim_session_attachment("conversation", Some(&middle), &a, false)
@@ -1358,7 +1358,7 @@ mod tests {
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(previous.captured, next.clone())
+            .replace_session_input(previous.captured, next.clone(), None)
             .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(

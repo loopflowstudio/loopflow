@@ -196,6 +196,8 @@ pub struct ConnectedClient {
     pub connected_at: String,
     /// Requests the connection has sent, subscriptions included.
     pub requests: u64,
+    pub open: usize,
+    pub retained_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -203,6 +205,8 @@ pub struct ConnectedClient {
 pub struct Limits {
     pub max_message: usize,
     pub max_connections: usize,
+    pub max_open: usize,
+    pub max_retained_bytes: usize,
 }
 
 impl ServerMessage {

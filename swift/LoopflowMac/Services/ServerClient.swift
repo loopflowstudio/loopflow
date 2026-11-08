@@ -25,6 +25,11 @@ enum ServerClient {
         String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
+    static func submittedCreation(_ payload: Data) async throws -> String {
+        let value = try JSONDecoder().decode(JSONValue.self, from: payload)
+        return String(decoding: try JSONEncoder().encode(await request(.submittedCreation(value), location: .shared)), as: UTF8.self)
+    }
+
     static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
         try JSONEncoder().encode(await request(.config(operation), location: location))
     }

@@ -2334,29 +2334,10 @@ final class WorkModel {
     /// When nothing was filed, the sheet keeps the request and the error. A Task
     /// filed before its run failed is selected with the error at its Start control.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let receipt: TaskCreateReceipt
-        var runError: String?
-        do {
-            receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
-        } catch let failed as TaskCreateRunFailed {
-            (receipt, runError) = (failed.receipt, failed.message)
-        } catch {
-            try? await confirmWorkUpdate()
-            throw error
-        }
+        let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
         navigation.palette = nil
-        let id = receipt.task.id
-        guard let runError else {
-            // Open it from its own read now; waiting for every reading to confirm
-            // first left the window unchanged for seconds after Start.
-            await openTaskConversation(id)
-            try? await confirmWorkUpdate()
-            return
-        }
+        await openTaskConversation(receipt.task.id)
         try? await confirmWorkUpdate()
-        if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
-        else { select(.task(id: id)) }
-        navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

@@ -1842,7 +1842,7 @@ mod tests {
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(session.captured, replacement.clone())
+            .replace_session_input(session.captured, replacement.clone(), None)
             .unwrap();
         store
             .claim_session_attachment(&session.id, Some(&attachment), &second, true)

@@ -19,6 +19,8 @@ use crate::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
 static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
+const CREATION_ENV: &str = "LF_CREATION_REQUEST";
+static CREATION: Mutex<Option<String>> = Mutex::new(None);
 
 /// What a detached operation set going: the `lf` Process that carries it.
 /// `process.get` reads how it is going; `log` is its output.
@@ -81,6 +83,10 @@ pub(crate) fn carry(operation: &str, run: impl Into<String>) -> anyhow::Result<O
 /// Take the report path this process's launcher passed. The execution owner
 /// between them passes it on; this process's own children never inherit it.
 pub fn expect() {
+    if let Ok(id) = std::env::var(CREATION_ENV) {
+        std::env::remove_var(CREATION_ENV);
+        *CREATION.lock().expect("creation request poisoned") = Some(id);
+    }
     if let Some(path) = std::env::var_os(REPORT_ENV) {
         std::env::remove_var(REPORT_ENV);
         *REPORT.lock().expect("report path poisoned") = Some(path.into());
@@ -100,6 +106,16 @@ pub fn report<T: Serialize>(result: std::result::Result<&T, &anyhow::Error>) {
         Err(error) => Ok(Err(Error::written(error))),
     }
     .unwrap_or_else(Err);
+    if let Some(id) = CREATION.lock().expect("creation request poisoned").take() {
+        if let Ok(value) = &result {
+            let saved = (|| -> anyhow::Result<()> {
+                let store = crate::store::read_existing_registry()?.context("Machine registry is unavailable")?;
+                store.sqlite.record_creation_launch(&id, value)?;
+                Ok(())
+            })();
+            if let Err(error) = saved { tracing::warn!(%error, request_id = %id, "Could not record creation launch"); }
+        }
+    }
     if let Err(error) = write(&path, &result) {
         tracing::warn!(path = %path.display(), %error, "Could not report the launched command's result");
     }
@@ -118,6 +134,14 @@ fn write(
 /// Start `lf <args>` in `directory` under its own execution owner and return
 /// the result it reports. No deadline: the owner's exit bounds the wait.
 pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> Result<T> {
+    start_reported(directory, args, None)
+}
+
+pub(crate) fn start_creation<T: DeserializeOwned>(directory: &Path, args: &[String], request: &str) -> Result<T> {
+    start_reported(directory, args, Some(request))
+}
+
+fn start_reported<T: DeserializeOwned>(directory: &Path, args: &[String], creation: Option<&str>) -> Result<T> {
     let launched = (|| -> anyhow::Result<_> {
         let path = crate::transport::private_directory()?
             .join(format!("report-{}.json", uuid::Uuid::new_v4()));
@@ -127,10 +151,12 @@ pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> R
             .into_owned()];
         argv.extend(args.iter().cloned());
         let report = path.to_string_lossy().into_owned();
+        let mut environment = vec![(REPORT_ENV, report.as_str())];
+        if let Some(id) = creation { environment.push((CREATION_ENV, id)); }
         let owner = crate::os_process::start_lf_session(
             directory,
             &argv,
-            &[(REPORT_ENV, report.as_str())],
+            &environment,
             &|_| {},
         )?;
         Ok((path, owner))

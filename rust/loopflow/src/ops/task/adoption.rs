@@ -141,6 +141,7 @@ pub(super) async fn save(
     source: Source,
     acquisition: Option<Arc<PlanningLocks>>,
     continue_in_task: bool,
+    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     if let Some(task) = source.task.as_ref().filter(|task| task.id != id) {
         return Err(task_error(format!(
@@ -201,6 +202,7 @@ pub(super) async fn save(
             source.session,
             destination.clone(),
             acquisition,
+            receipt,
         )
         .await
         .map_err(task_error)?;
@@ -255,6 +257,7 @@ pub(crate) async fn bind_session(
         source,
         acquisition,
         true,
+        None,
     )
     .await?;
     Ok(())

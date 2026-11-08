@@ -243,6 +243,7 @@ impl SqliteStore {
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
         destination: Option<&Path>,
+        receipt: Option<&super::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -313,6 +314,12 @@ impl SqliteStore {
             }
         }
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if let Some(identity) = receipt {
+            let result = serde_json::to_value(crate::engine::creation::TaskCreateReceipt {
+                task: task.clone(), graph: None, session_id: session.map(|s| s.id.clone()), milestone: "filed".into(),
+            })?;
+            super::creation::insert_in(&tx, identity, Some(task_id.as_str()), session.map(|s| s.id.as_str()), None, "filed", Some(&result))?;
+        }
         tx.commit()?;
         Ok(task)
     }

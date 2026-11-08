@@ -21,6 +21,7 @@ impl Store {
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
+        receipt: Option<super::sqlite::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
@@ -30,6 +31,7 @@ impl Store {
                 placement.as_ref(),
                 session.as_ref(),
                 destination.as_deref(),
+                receipt.as_ref(),
             )
         })
         .await

@@ -302,7 +302,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..bound
                 },
-            )
+            None)
             .unwrap();
         let before = store.session_history(&session.id, 0, 0).unwrap();
         {
@@ -326,7 +326,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..captured
                 },
-            )
+            None)
             .unwrap();
         assert_eq!(next.wave_id, Some(product.wave_id.clone()));
         assert!(store.move_task(&task.id, None, Some(&other.id)).is_err());
@@ -344,7 +344,7 @@ mod tests {
                     artifact_key: Some(new_artifact_key()),
                     ..next
                 },
-            )
+            None)
             .unwrap();
         assert!(final_input.wave_id.is_none());
         let conn = store.conn.lock().unwrap();

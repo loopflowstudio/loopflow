@@ -488,7 +488,7 @@ impl World {
             Some(title.to_string()),
             Some(report.to_string()),
             crate::ops::task::TaskAdoptionOptions::default(),
-        )?)
+         None,)?)
     }
 
     /// Place a Task in its own worktree the way `lf task checkout` does.

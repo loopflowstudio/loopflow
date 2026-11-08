@@ -11,7 +11,11 @@ enum RegistryQueryLocal {
     }, serve: { query in
         try await ServerClient.read(query)
     }, write: { change in
-        try await ServerClient.write(change)
+        switch change {
+        case .taskCreate(_, let requestID, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
+            return try await CreationSubmissions.shared.submit(change, requestID: requestID)
+        default: return try await ServerClient.write(change)
+        }
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {

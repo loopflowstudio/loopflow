@@ -50,6 +50,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
+    case creationReceipt(requestID: String)
     case monitorPs
     case desktopPlans(directory: String)
     case desktopSessions(directory: String, headless: Bool)
@@ -108,6 +109,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
+        case .creationReceipt(let requestID): return ["server", "receipt", requestID, "--json"]
         case .monitorPs:
             return ["process", "list", "--json"]
         case .desktopPlans:
@@ -213,6 +215,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .creationReceipt(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .monitorPs: TaggedFields("process.list")
         case .desktopPlans(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .desktopSessions(let directory, let headless):
@@ -287,7 +290,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 /// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
 /// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
-    case taskFromSession(directory: String, id: String, title: String)
+    case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: String?, graph: String?, session: String?, run: Bool)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -295,13 +298,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskOwnership(directory: String, issue: String, claimed: Bool)
     /// Start the Task's run detached; `approve` runs every step headless to
     /// `end` and approves Auto-Ship, as `-b` does.
-    case taskRun(directory: String, issue: String, from: String?, agent: String?, approve: Bool)
+    case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
-    case taskMove(directory: String, issue: String, wave: String?)
+    case taskMove(directory: String, issue: String, wave: String?, machine: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     /// A steer one Session, every Session of the Wave or, with neither, every
     /// Session of the repository reads at its next boundary.
@@ -311,7 +314,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
-    case sessionNew(directory: String, id: String, agent: String?)
+    case sessionNew(directory: String, requestID: String, id: String, agent: String?)
+    case waveRename(directory: String, wave: String, name: String)
+    case waveRemove(directory: String, wave: String, preview: Bool)
+    case waveMachine(directory: String, wave: String, machine: String)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
     case wavePlanningBind(directory: String, wave: String, project: String)
@@ -375,21 +381,25 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["--batch"] + Self.option("--agent", agent) + ["graph", name] + argument(nil, message)
         case .skillRun(_, let name, let message, let agent):
             return ["--batch"] + Self.option("--agent", agent) + ["skill", name] + argument(nil, message)
-        case .taskFromSession(_, let id, let title): return ["task", "create", "--session", id, "--title", title, "--json"]
+        case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
+            return ["task", "create", "--request-id", requestID] + Self.option("--title", title)
+                + Self.option("--wave", wave) + Self.option("--graph", graph) + Self.option("--session", session)
+                + (run ? ["--run"] : []) + ["--json"] + (request.map { ["--", $0] } ?? [])
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
         case .taskNotes(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
         case .taskOwnership(_, let issue, let claimed): return ["task", claimed ? "claim" : "unassign", issue, "--json"]
-        case .taskRun(_, let issue, let from, let agent, let approve):
+        case .taskRun(_, let issue, let graph, let from, let agent, let approve):
             return (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
-                + Self.option("--from", from) + ["--json"]
+                + [graph].compactMap { $0 } + Self.option("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
         case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
-        case .taskMove(_, let issue, let wave):
+        case .taskMove(_, let issue, let wave, let machine):
+            if let machine { return ["task", "move", issue, "--machine", machine, "--json"] }
             return ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
             return ["task", "save", issue, path, "--revision", revision, "--json"]
@@ -402,8 +412,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
-        case .sessionNew(_, let id, let agent):
-            return Self.prepared(agent, ["session", "new", id], repo: nil)
+        case .sessionNew(_, let requestID, let id, let agent):
+            return Self.prepared(agent, ["session", "new", id, "--request-id", requestID], repo: nil)
+        case .waveRename(_, let wave, let name): return ["wave", "rename", wave, name, "--json"]
+        case .waveRemove(_, let wave, let preview): return ["wave", "remove", wave, "--json"] + (preview ? ["--preview"] : [])
+        case .waveMachine(_, let wave, let machine): return ["--wave", wave, "set", "machine", machine, "--json"]
         case .waveAdd(_, let wave, let objective): return ["wave", "create", wave] + Self.option("--objective", objective) + ["--json"]
         case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
         case .wavePlanningBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
@@ -553,8 +566,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .taskFromSession(let directory, let id, let title):
-            TaggedFields("task.create", ["directory": directory, "id": id, "title": title])
+        case .taskCreate(let directory, let requestID, let title, let request, let wave, let graph, let session, let run):
+            TaggedFields("task.create", ["directory": directory, "request_id": requestID, "title": title,
+                "request": request, "wave": wave, "graph": graph, "session": session, "run": run])
         case .taskComplete(let directory, let issue):
             TaggedFields("task.complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
@@ -565,8 +579,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
         case .taskOwnership(let directory, let issue, let claimed):
             TaggedFields(claimed ? "task.claim" : "task.unassign", ["directory": directory, "issue": issue])
-        case .taskRun(let directory, let issue, let from, let agent, let approve):
-            TaggedFields("task.run", ["directory": directory, "issue": issue, "from": from, "agent": agent,
+        case .taskRun(let directory, let issue, let graph, let from, let agent, let approve):
+            TaggedFields("task.run", ["directory": directory, "issue": issue, "graph": graph, "from": from, "agent": agent,
                                       "approve": approve])
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
@@ -578,8 +592,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.report", ["directory": directory, "issue": issue, "message": message])
         case .taskInterrupt(let directory, let issue):
             TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
-        case .taskMove(let directory, let issue, let wave):
-            TaggedFields("task.move", ["directory": directory, "issue": issue, "wave": wave])
+        case .taskMove(let directory, let issue, let wave, let machine):
+            TaggedFields("task.move", ["directory": directory, "issue": issue, "wave": wave, "machine": machine])
         case .taskSave(let directory, let issue, let path, let revision, let content):
             TaggedFields("task.save", ["directory": directory, "issue": issue, "path": path,
                                        "revision": revision, "content": content])
@@ -592,8 +606,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
             TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent, "intent": intent.rawValue])
-        case .sessionNew(let directory, let id, let agent):
-            TaggedFields("session.new", ["directory": directory, "id": id, "agent": agent])
+        case .sessionNew(let directory, let requestID, let id, let agent):
+            TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "agent": agent])
+        case .waveRename(let directory, let wave, let name):
+            TaggedFields("wave.rename", ["directory": directory, "wave": wave, "name": name])
+        case .waveRemove(let directory, let wave, let preview):
+            TaggedFields("wave.remove", ["directory": directory, "wave": wave, "preview": preview])
+        case .waveMachine(let directory, let wave, let machine):
+            TaggedFields("wave.machine", ["directory": directory, "wave": wave, "machine": machine])
         case .waveAdd(let directory, let wave, let objective):
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
@@ -994,14 +1014,12 @@ public struct RegistryQuery: Sendable {
     /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
     /// The receipt's `summary` names anything left to finish.
     public func renameWave(wave: String, newName: String, cwd: String) async throws -> WaveRenamed {
-        try Self.decode(WaveRenamed.self, from: await run(["wave", "rename", wave, newName, "--json"], cwd))
+        try Self.decode(WaveRenamed.self, from: await write(.waveRename(directory: cwd, wave: wave, name: newName)))
     }
 
     /// `lf wave remove`: with `preview`, the consequences without changing anything.
     public func removeWave(name: String, preview: Bool, cwd: String) async throws -> WaveRemoval {
-        var args = ["wave", "remove", name, "--json"]
-        if preview { args.append("--preview") }
-        return try Self.decode(WaveRemoval.self, from: await run(args, cwd))
+        try Self.decode(WaveRemoval.self, from: await write(.waveRemove(directory: cwd, wave: name, preview: preview)))
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
@@ -1103,26 +1121,15 @@ public struct RegistryQuery: Sendable {
     /// runs. `graph` takes up another graph; `from` starts at that step instead,
     /// and an interactive `from` only puts the Task there.
     public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
-        var args = ["task", "run", issue]
-        if let graph { args.append(graph) }
-        if let from { args += ["--from", from] }
-        _ = try await run(args, cwd)
+        _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false))
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the
     /// repository), starts it as `lf task run` does and admits its conversation
     /// with the request as the first turn. Returns once the Graph registers.
-    /// A run that fails after the Task was filed throws `TaskCreateRunFailed`.
     public func createTask(request: String, wave: String?, graph: String?, cwd: String?) async throws -> TaskCreateReceipt {
-        var args = ["task", "create"] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
-        if let graph { args += ["--graph", graph] }
-        args += ["--run", "--json", "--", request]
-        let stdout: String
-        do { stdout = try await run(args, cwd) } catch let error as RegistryQueryError {
-            guard let receipt = try? Self.decode(TaskCreateReceipt.self, from: error.stdout) else { throw error }
-            throw TaskCreateRunFailed(receipt: receipt, message: error.message)
-        }
-        return try Self.decode(TaskCreateReceipt.self, from: stdout)
+        try Self.decode(TaskCreateReceipt.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: UUID().uuidString,
+            title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
@@ -1133,7 +1140,7 @@ public struct RegistryQuery: Sendable {
     /// Ship the Task: run the rest of its graph to the end headless, standing
     /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
     public func shipTask(issue: String, cwd: String?) async throws {
-        _ = try await run(["--task", issue, "ship"], cwd)
+        _ = try await write(.taskShip(directory: cwd ?? "/", issue: issue))
     }
 
     /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
@@ -1143,7 +1150,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
-        _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave))
+        _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave, machine: nil))
     }
 
     /// Your registered Machines. This Machine appears only when a default names it.
@@ -1155,8 +1162,8 @@ public struct RegistryQuery: Sendable {
     /// Machine for a Wave through `lf set machine`.
     public func useMachine(_ machine: String, for target: WorkMachineTarget, cwd: String?) async throws {
         switch target {
-        case .task(let issue): _ = try await run(["task", "move", issue, "--machine", machine, "--json"], cwd)
-        case .wave(let id): _ = try await run(["--wave", id, "set", "machine", machine], cwd)
+        case .task(let issue): _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: nil, machine: machine))
+        case .wave(let id): _ = try await write(.waveMachine(directory: cwd ?? "/", wave: id, machine: machine))
         }
     }
 
@@ -1281,13 +1288,13 @@ public struct RegistryQuery: Sendable {
     /// last thread knew; the same Session keeps its history.
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
+            .sessionNew(directory: cwd ?? "/", requestID: UUID().uuidString, id: session.id, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.
     public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
-        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await write(
-            .taskFromSession(directory: cwd ?? "/", id: id, title: title)))
+        try Self.decode(TaskCreateReceipt.self, from: await write(
+            .taskCreate(directory: cwd ?? "/", requestID: UUID().uuidString, title: title, request: nil, wave: nil, graph: nil, session: id, run: false))).task
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
@@ -1366,18 +1373,12 @@ public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
     public let task: CreatedTask
     public let graph: String?
     public let sessionId: String?
+    public let milestone: String
 
     enum CodingKeys: String, CodingKey {
-        case task, graph
+        case task, graph, milestone
         case sessionId = "session_id"
     }
-}
-
-/// New Task filed `receipt.task`, then its run failed with `message`.
-public struct TaskCreateRunFailed: LocalizedError, Sendable {
-    public let receipt: TaskCreateReceipt
-    public let message: String
-    public var errorDescription: String? { message }
 }
 
 /// `lf wave graph show --json`: the graph a scope's new Tasks take up, resolved

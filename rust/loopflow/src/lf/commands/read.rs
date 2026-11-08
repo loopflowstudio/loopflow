@@ -79,6 +79,10 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
+    /// Look up a creation without starting or retrying it. Null confirms absence.
+    #[serde(rename = "creation.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    CreationReceipt { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -352,6 +356,7 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
+            Self::CreationReceipt { request_id } => words(&["server", "receipt", request_id, "--json"]),
             Self::MonitorPs => words(&["process", "list", "--json"]),
             Self::DesktopPlans { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -606,6 +611,7 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
+            Self::CreationReceipt { request_id } => value(&crate::engine::creation::lookup(request_id)?),
             Self::MonitorPs => value(&super::top::load_snapshot()?),
             Self::DesktopPlans { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)

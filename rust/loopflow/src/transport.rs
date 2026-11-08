@@ -1179,7 +1179,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 continue;
             };
             let target = viewers.iter().position(|viewer| {
-                !viewer.connection.is_open()
+                viewer.id != viewers[index].id
                     && viewer.reconnect == resume.reconnect
                     && viewer.spool.holds(resume.received)
             });
@@ -1197,6 +1197,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             viewers[index].leaving = true;
             let viewer = &mut viewers[target];
             viewer.size = dimensions(resume.rows, resume.cols);
+            size_change |= ownership.held_by(viewer);
             if resume.control && control.is_none() {
                 let token = uuid::Uuid::new_v4().to_string();
                 control = Some(token.clone());

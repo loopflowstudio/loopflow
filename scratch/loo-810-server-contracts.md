@@ -1,0 +1,428 @@
+# LOO-810: server recovery, mutation and provider-transition contracts
+
+Stacked on LOO-593 (#1813, revision 2). Five rows of the 2026-11-07 report card
+grade B. This plan closes each gap where the code lives, keeps the three
+recovery contracts separate (Work readings, terminal, provider conversation)
+and adds no event log, generic execution owner or byte-path role for `lf`.
+
+## Direction · 2026-11-08
+
+Jack Heart: "ok, lets do C with simpler records"
+
+Jack Heart: "lets pursue"
+
+Build C: submitted creation requests survive Desktop restart. Use one immutable
+client record containing request ID, original destination, exact versioned
+payload and submission time. Persist before first send; the server owns all
+milestones and outcomes. Reconcile on reconnect and startup, then remove the
+record after presenting the result. Unknown effects remain inspectable and do
+not authorize another launch. No editable outbox or generic mutation queue.
+
+Keep the complete Work protocol cutover, one creation result shape for CLI and
+server, and the short provider-transition explanation plus history. The latter
+two are the proposed implementation defaults carried forward with this design.
+Implementation proceeds through the existing feature Graph's pursue step to demo.
+
+[The exploration](explore.html) retains the alternatives as background. Its
+interactions simulate failures and create no Work.
+
+### Source comparison · 2026-11-08
+
+Jack Heart: "how bad are the recovery records? how does etiher approach compare to t3code, paseo, orc, or paradev's approaches"
+
+Source inspection led to C limited to immutable submitted creation requests.
+Most difficult
+server work (fingerprint, resource IDs, concurrency and interrupted-effect
+handling) is already required by B. C adds remembering which requests to recover.
+The smallest client record is request ID, original destination, exact versioned
+payload and submission time, saved before the first send. The server owns the
+outcome; a second client-side milestone state machine is unnecessary. Resolve and
+remove the local record after showing its result; a failed removal can repeat
+lookup safely. Keep unknown launches inspectable. Editing queued payloads,
+offline composition/delivery, attachment queues and arbitrary mutation replay are
+excluded. Receipt expiry must never turn an old request into a new creation.
+
+Inspected November 7 clones plus November 8 reads of the corresponding upstream
+source files; no competitor app or crash tests were run:
+
+- **T3:** server `EventSink.commitCommand` commits command receipts, events,
+  projections and effect-outbox entries together. Mobile also persists outgoing
+  messages, including thread creation; it confirms persistence before dispatch,
+  reloads at startup and reconciles delivered creations. This is C-like and
+  broader: edit races, attachments and queued delivery add much of its complexity.
+  [Server](https://github.com/pingdotgg/t3code/blob/71c2d3a302092b94511eb7e6ab4e6844a66dbf22/apps/server/src/orchestration-v2/EventSink.ts),
+  [mobile storage](https://github.com/pingdotgg/t3code/blob/71c2d3a302092b94511eb7e6ab4e6844a66dbf22/apps/mobile/src/state/thread-outbox-storage.ts),
+  [delivery](https://github.com/pingdotgg/t3code/blob/71c2d3a302092b94511eb7e6ab4e6844a66dbf22/apps/mobile/src/state/threadOutboxDelivery.ts).
+- **Paseo:** creation persists fingerprint, resource IDs and milestones; an
+  interrupted in-flight effect becomes outcomeUnknown. Its CreationClient keeps
+  operations in memory and reconnects by observing a receipt, submitting again
+  only when no receipt is found. The app create-flow store is also in memory in
+  these paths. Closest to B, with useful receipt observation already included;
+  no C-style cold-app recovery is established by those paths.
+  [Server](https://github.com/getpaseo/paseo/blob/71439e51a555bfca21dc21e74bcfb39f1eb5e760/packages/server/src/server/creation/index.ts),
+  [client](https://github.com/getpaseo/paseo/blob/71439e51a555bfca21dc21e74bcfb39f1eb5e760/packages/client/src/creation/index.ts).
+- **Orca:** operation-specific approaches. Orchestration has SQLite mutation
+  receipts with caller/request identity, method/payload checks and pending/completed
+  state. Worktree creation instead reuses an in-memory promise/result by mutation
+  ID, retaining success for 60 seconds. Terminal creation separately reconciles a
+  stable handle against the host's process inventory. These establish neither
+  uniform durable retry nor a general C-style client outbox.
+  [Receipts](https://github.com/stablyai/orca/blob/e799cb419e89e1aa52f49feec0e273f8f613d737/src/main/runtime/orchestration/db/mutation-receipts/mutation-receipt-store.ts),
+  [creation](https://github.com/stablyai/orca/blob/e799cb419e89e1aa52f49feec0e273f8f613d737/src/main/runtime/terminal/launch/terminal-create-deduplication.ts).
+- **Paradev:** chat command dedupe caches 500 results in memory. Mobile retries
+  queries only; its source explains that retrying workspaces.create can duplicate
+  a workspace. B and C would offer stronger creation retry than these paths.
+  [Dedupe](https://github.com/ParadevAI/Paradev/blob/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/packages/chat-runtime/src/commands/commandDedupe/commandDedupe.ts),
+  [retry policy](https://github.com/ParadevAI/Paradev/blob/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/apps/mobile/lib/errors/transport-retry.ts).
+
+### Implementation constraints
+
+- Count producer reservations before dispatch. Kickoff's serialize-then-reserve
+  queue budget alone does not meet the brief's retained-work requirement. Bound
+  concurrent materialization as well as queued bytes, including across clients;
+  distinguish this accounting from a measured process-RSS cap. Limits remain
+  provisional. Reads may be refused before running; admitted writes cannot be
+  reported as unrun when delivery fills the budget.
+- A retry must correlate the exact creation request to its launch attempt;
+  finding an arbitrary current Task Graph cannot prove this request started it.
+  Receipt advancement and resource/input creation must be atomic where local;
+  interrupted external work remains unknown. Cover concurrent duplicate requests,
+  restart, and the Session stop/append crash windows, not just a dropped socket.
+- Retain server receipts in this version. Do not introduce pruning and an expiry
+  protocol for small creation records. A failed read is not absence, and a receipt
+  for a removed resource never authorizes recreating it. Future retention must
+  keep old request IDs from becoming new creations.
+- Record observed provider transitions, not a success claim at process
+  reservation. Provider IDs can arrive later. Keep unavailable lineage unknown.
+  An attach result can report retained without overwriting the last actual
+  provider change. `original_running` must be dated or refreshed, not presented
+  as current forever. Keep `started`: account failover clears the resume token
+  and carries the original task prompt, not the previous conversation history.
+- `busy` is operation-specific: the current checkpoint overflow ends that
+  subscription and requires resubscribe; it does not require reconnecting an
+  otherwise healthy connection. Document recovery by operation and error scope.
+
+## Demo
+
+Desktop attached to a running Task; the Mac sleeps; it wakes. The window shows
+**Reconnecting…**, then the same Task, the same terminal screen (same owner,
+no input replayed) and the conversation's continuation line reading "Same
+process". A New Task sheet submitted as the connection dropped files exactly
+one Task. Quit Desktop before the answer returns, reopen it, and recover that
+same Task from the submitted request and its receipt. An unconfirmed launch
+shows "Task created; start unconfirmed" and starts nothing again. Headless
+analog at gate: the tests in each slice below.
+
+## What the code shows today (LOO-593 base `971897b8b`)
+
+- `server/service.rs` `session()`: every distinct request/subscription ID is
+  spawned into a `JoinSet` and `inflight` map with no count limit. Answers go
+  through `mpsc::channel(QUEUE = 64)` of `ServerMessage` values, serialized only
+  in `send()`. A finished `request()` holds its whole `serde_json::Value` while
+  awaiting `outgoing.send`, outside the 64 slots. Worst case per connection is
+  unbounded; 64 queued 32 MiB readings alone is 2 GiB. No exhaustion was
+  reproduced; this is from reading the code.
+- A subscription already coalesces: `Notify` stores one wake, `pull()` reads
+  the newest state, and `deliver` awaits, so one subscription has at most one
+  reading in flight. `Subscription::checkpoint(n)` pushes a request the next
+  frame answers, so a dropped frame can be re-asked by calling it again.
+- Desktop's **New Task** does not use the server: `RegistryQuery.createTask`
+  runs `lf task create --wave … --run --json -- REQUEST` as a subprocess and
+  parses stdout, including a failure path (`TaskCreateRunFailed`). `runTask`,
+  `shipTask`, `moveTask --machine`, wave set machine, `removeWave`,
+  `processHistory` also shell out, though `task.run` and `task.ship` are served.
+- Served `task.create` (`Write::TaskFromSession`) only adopts an existing
+  Session. The Task ID is minted at `ops/task.rs:1570`. `create_task_in`
+  (`store/sqlite/children.rs:57`) already returns the existing Task for a
+  repeated `NewTask` with identical content and refuses a different one: the
+  receipt half exists, but the client cannot name the ID, so a retry mints a
+  new one.
+- `session.new` (`human_session::new_thread`) stops the running agent and
+  appends a new input on every call: a retry stops it again and starts another
+  thread. `session.resume` with a scope is find-or-create under `lock_scope`
+  and needs no receipt.
+- Terminal coverage (`tests/transport_tests.rs`): case (c) below is untested;
+  (a), (b), (d), (e) are partial. `attached_owner`'s
+  `{owner_lf_process_id, current_lf_process_id}` refusal has no test anywhere.
+  Untested edge: a resume that reaches the owner while that viewer's old
+  connection is still open is refused (`transport.rs:1182`), so the relay falls
+  back to a passive fresh attach behind its own stale connection.
+- No operation reports what happened to the provider conversation.
+  `SessionRecord` has no provider session ID. `--explain`'s
+  `SessionResumeIntent` is a forecast. `lf resume --fork` makes a log-seeded
+  new LfSession titled "(fork)" with no link to its source. Account failover
+  in `agent/mod.rs:1016` silently starts a history-less provider conversation.
+  The only typed record is `agent_session_selected` (`store/sqlite/steers.rs:87`)
+  for in-process switches (Codex `/new`, `/fork`), and it writes nothing when
+  the ID is unchanged.
+
+## Implementation contract
+
+### 1. Retained-work budget (structured-state recovery)
+
+Per connection, in `service.rs`:
+
+- **Open limit:** 256 open requests plus subscriptions. The slot is taken at
+  admission, before dispatch; over the limit answers `busy {id, data:
+  {limit: "open", max: 256}}` and nothing ran. Writes have a second limit of
+  16 open writes, since a finished write can only wait (below).
+- **Byte budget:** an `Outbox` replaces the `mpsc` queue. Reserve producer
+  headroom before dispatch or subscription materialization, conservatively up to
+  `MAX_MESSAGE` when the operation has no smaller bound. Serialize in the worker,
+  shrink the reservation to actual bytes and carry it through queue and socket
+  delivery. Budget starts at 32 MiB per connection and 256 MiB across the process;
+  both include producer reservations, not only enqueued messages. Bound temporary
+  value construction as well; serialized accounting does not measure RSS.
+  Errors and subscription acknowledgments need bounded control headroom, with
+  a send deadline when the peer drains nothing.
+- **When a reservation fails:**
+  - A read drops its value and answers `busy {id, data: {limit: "retained_bytes"}}`.
+    Reads have no effect, so "retry shortly" is honest.
+  - A write is admitted only after its producer reservation. After admission its
+    effect finishes; backpressure never turns it into an "unrun" refusal.
+  - A subscription reading drops its bytes, re-asks any checkpoint it carried
+    (`checkpoint(n)` again) and re-pulls when budget frees. A subscription
+    never holds more than one reading, and an old reading never waits behind
+    a newer one, so this is the "replace complete readings" coalescing. Order
+    stays: null response, readings, then the final reading before `ended`
+    (a re-pulled `task.wait` reading still reports `reached`), and error
+    frames last.
+- `welcome.limits` gains `max_open` and `max_retained_bytes`;
+  `lf server status` clients gain `open` and `retained_bytes`. The 5 s send
+  timeout stays: a client that takes nothing still loses its connection.
+- Deltas stay out. If mobile measurement justifies them later, model a
+  latest-value-per-entity collection with a monotonic sequence, bounded
+  tombstones and a snapshot when a cursor expires. Written in the README as the
+  only sanctioned direction.
+
+### 2. Terminal recovery
+
+Behavior is kept: exact-owner continuation, 1 MiB spool with 60 s grace,
+fresh-screen fallback, no input replay, owner-held geometry. Work is tests plus
+one fix, using the existing `transport_tests.rs` fixtures (proxy, observer,
+`Fixture::serve(true, …)`):
+
+| Case | Existing | Add |
+| --- | --- | --- |
+| (a) phone asleep while Desktop resizes and types | `server_reconnect_preserves_newer_viewers_input_and_geometry` :5988 | newer viewer resizes during the outage; read the PTY size back after recovery; check the terminal-mode screen shows the newer output |
+| (b) return after retention expired | `a_resume_past_the_spool_is_refused…` :4715, `server_reconnect_refreshes_expired_output…` :6196 | expiry by the 60 s grace (shortened under `#[cfg(test)]`), no `Out` bytes before the refusal, snapshot content, terminal mode |
+| (c) old owner ends, Session gets a new owner | none | exact-owner attach answers `not_found {owner_lf_process_id, current_lf_process_id}`; attach by Session reaches the new owner; no provider launched by either |
+| (d) one viewer stops draining | `slow_observer_does_not_block_output…` :1354 | through the server bridge: one stalled bridge, one healthy bridge receiving, and the same client connection answering a read and a subscription checkpoint meanwhile |
+| (e) old socket finishes after a replacement | `server_move_lost_ack` :6051 | replacement that asked for free claims (no takeover); old controller's socket closes after; replacement keeps input and geometry |
+
+Fix: a stream-mode resume carrying the viewer's own `reconnect` identity while
+that viewer's previous connection is still open at the owner supersedes the
+stale connection instead of being refused. It takes only claims that
+connection held, never another viewer's. Covered by a variant of (e).
+
+### 3. Durable creation receipts (mutation intent)
+
+`task.create` and `session.new` get a retry contract; nothing else changes.
+Every other write keeps "admitted mutations finish; a lost answer is
+`outcome_unknown`".
+
+- **Wire:** `request_id` (required, 1–128 bytes, client-chosen; Desktop uses a
+  UUID per sheet submission) on both. `Write::TaskFromSession` becomes
+  `Write::TaskCreate {directory, request_id, title, request, wave, graph,
+  session, run}`, the full `lf task create` shape, so Desktop's New Task and
+  "make this conversation a Task" are one served kind. `wave: null` is the
+  repository, as Desktop's `--no-wave` today. The CLI mints a fresh
+  `request_id` unless `--request-id` is given, so agents and scripts can retry
+  safely too.
+- **Result:** `TaskCreateReceipt {task, graph, session_id, milestone}` for
+  both `run` values; the CLI prints the same. `milestone` is `filed`,
+  `started` or `admitted`.
+- **Store:** one migration, `creation_receipts (request_id PRIMARY KEY, kind,
+  fingerprint, task_id, session_id, artifact_key, milestone, created_at,
+  updated_at)`. `fingerprint` is SHA-256 of the canonical operation JSON
+  without `request_id`. The row is written, with the Task ID or the new
+  thread's artifact key reserved, in the same transaction as the first
+  effect, before any provisioning. Retain these small receipts without age-based
+  pruning in this version; request identity must not become reusable.
+- **Retry:** same `request_id`, same fingerprint: continue from the recorded
+  milestone and reuse every recorded ID (`create_task_in` already accepts the
+  identical `NewTask`; `primary::ensure_task` is find-or-create). Different
+  fingerprint: `conflict {request_id}`, nothing runs.
+- **Interrupted external effect:** `run` records `run_requested` before
+  starting `task.run`'s detached command and `started {graph_process}` when it
+  registers. A retry that finds `run_requested` reconciles only the launch
+  correlated to that exact creation request. An unrelated current Graph cannot
+  establish success. Missing confirmation answers
+  `outcome_unknown {task, milestone: "run_requested"}`, and the client inspects
+  the Task. Never a second launch from a receipt that cannot say what happened.
+- **`session.new`:** records `stopping` before `stop_session_agent`, then the
+  new artifact key with `admitted`. A retry at `admitted` returns the recorded
+  `SessionRecord` without stopping anything. Reserve the artifact identity and
+  record input advancement atomically with the receipt. At an interrupted stop
+  or append, reconcile that exact attempt; never stop a newer process or append
+  another input because a receipt is incomplete.
+- **Receipt lookup:** a read-only shared protocol operation returns the recorded
+  creation outcome or confirmed absence for a request identity. Unavailable reads
+  remain unavailable. It never starts work and cannot recreate a removed Task.
+- **Desktop:** `createTask`, `createTaskFromSession` and `session.new` use the
+  same submission recovery mechanism. Save `{request_id, destination, payload,
+  submitted_at}` before first send; version the record/payload for decode. No
+  local receipt copy, milestone ledger or execution state. Reuse an existing
+  app storage owner where it fits, scoped to the original Machine/repository.
+  On reconnect or cold startup, look up the receipt. Present known outcomes;
+  resubmit the identical request only on confirmed absence or a server-declared
+  safe continuation. Retain unknown outcomes for inspection; never guess that an
+  interrupted external effect is safe to repeat. Remove the local record only
+  after reconciliation is presented; failed removal repeats lookup safely.
+  Multiple windows share one recovery owner. Storage failure keeps the form and
+  reports the error before send. Delete `TaskCreateRunFailed` stdout parsing.
+- The shared functions own receipts (`ops/task.rs` `task_create`,
+  `human_session::new_thread`), so the CLI and server share one path;
+  `service.rs` only passes the request through.
+
+### 4. One client protocol
+
+- `server/README.md` gains **Client contract**: what a client may cache
+  (welcome's `instance` and limits; last readings as stale display only), what
+  it re-reads on reconnect (every subscription, from a complete reading; every
+  attach by exact owner), and recovery by error scope. Lost connections reconnect;
+  per-request `busy` delays that operation; checkpoint overflow resubscribes that
+  subscription. `incompatible`, `invalid`, `not_found` and `conflict` require the
+  corresponding correction, not blind reconnect. `outcome_unknown` means inspect
+  a receipt when available, otherwise inspect the resource; never generic retry.
+- Desktop stops shelling out for Work: `task.create`, `task.run`, `task.ship`
+  move to served kinds this Task. `task.move --machine`, wave machine set,
+  `wave.remove`, `wave.rename` and process history show need served kinds;
+  they are slice 6. Done means `grep "await run(" swift/Loopflow/Services/RegistryQuery.swift`
+  finds no Work mutation. The same-user socket stays local; remote admission
+  is out of scope.
+
+### 5. Provider transitions
+
+- **Type:** `ProviderTransition {kind, from_provider_session,
+  to_provider_session, from_agent_process, to_agent_process, original_running}`
+  with `kind` one of:
+  - `retained`: the same AgentProcess keeps serving (attach to a live owner).
+  - `resumed`: a replacement AgentProcess on the same provider session ID
+    (`lf resume` after exit, account move, Claude respawn, rollover).
+  - `forked`: a new provider conversation carrying the old one's history,
+    `seed: native | log` (`lf resume --fork`, `session.new`, Codex `/fork`, a
+    provider change by `-a`). `original_running` says whether the source still
+    runs beside it: the Paradev trap made visible.
+  - `started`: a provider conversation without the old history. With
+    `from_provider_session` set, the earlier conversation was left behind
+    (account failover, Codex `/new`).
+- **One writer:** recorded as a `provider_transition` observed event once the
+  serving process and provider conversation are known, including in-process
+  switches. Reserving a process does not prove a transition succeeded. Unknown
+  lineage stays unknown; attach can report retained without replacing the last
+  actual provider-change event. It replaces `agent_session_selected` (steers.rs
+  and its reader in `codex_connection.rs:1112`). Shipped rows keep their old
+  payload; readers accept both until those rows age out of history display.
+- **Readers:** `SessionRecord` gains `transition: Option<ProviderTransition>`
+  (the latest; null before any launch). `session.history` shows each.
+  `lf resume --fork`'s new Session records `forked {from_provider_session,
+  original_running}`, linking it to its source.
+- **Desktop:** the pane's connection row shows the latest transition after any
+  change: "Same process", "Resumed in a new process", "Forked from <title>,
+  original was running at fork", "New conversation; earlier one left behind".
+  Current source liveness requires a fresh reading, not the historical boolean.
+  Reading a transcript grants nothing: a read-only pane still needs Move here.
+
+## Forbidden
+
+A universal event log; replaying raw input; retrying any write without a
+receipt; a generic execution owner; receipts in memory only; a second served
+kind for New Task beside `task.create`; Desktop keeping its CLI path beside the
+served one; `lf` in the provider byte path.
+
+## Delete — do not maintain
+
+- `service.rs`'s queue of `ServerMessage` values and unbounded request admission:
+  replace with serialized frames carrying producer reservations through delivery.
+- `Write::TaskFromSession`: replace with the complete `TaskCreate` operation;
+  retain adoption and CLI/server parity coverage on that operation.
+- Desktop `TaskCreateRunFailed` stdout parsing and Work subprocess calls in
+  `RegistryQuery`: move creation, launch, movement, Wave mutations and history
+  to the shared protocol. Keep Ghostty and app automation owners.
+- `agent_session_selected` writer: replace with observed provider transitions;
+  retain a reader for already shipped historical rows.
+- Transport resume's closed-socket precondition: supersede the matching viewer's
+  old socket, retaining exact-owner identity and newer viewers' claims.
+
+## Slices
+
+1. **Budget**. `Outbox`, open and write limits, serialization in
+   the producer, limits in welcome and status, README. Test in `service.rs`:
+   one connection floods 1,000 requests and 300 subscriptions against a read
+   with a large answer; assert refusals are `busy` with their `id` and the
+   `limit` named, every admitted request answers, retained bytes never exceed
+   the declared budget including pending producers (exposed under `#[cfg(test)]`),
+   and a checkpoint is answered after budget frees. Include multiple clients to
+   exercise the shared process budget.
+2. **Terminal cases** (a)–(e) and the stale-connection resume fix.
+3. **Creation receipts**: migration, `Write::TaskCreate` replacing
+   `TaskFromSession`, `session.new` receipts, CLI `--request-id`, fixtures and
+   `ServerProtocolTests`. Test in `tests/served_reads.rs`: send `task.create`,
+   wait until its receipt row exists, drop the connection unread, reconnect,
+   resend; one `tasks` row, same ID, milestone `filed`; resend with a different
+   title is `conflict`. A unit test drives `run_requested` with no Graph to
+   `outcome_unknown`. Include receipt lookup, concurrent duplicates, server restart
+   and Session stop/append crash windows; an unrelated Graph cannot settle a retry.
+4. **Desktop creation and restart recovery**: New Task and adoption through served
+   `task.create`, plus `task.run` and `task.ship` cutover. Persist immutable
+   submissions for Task creation and `session.new` before send. Test restart
+   before send, after effect/before reply, after reply/before local removal;
+   storage failures, original destination, multiple windows and unknown launch.
+   Every replay yields the original resource/input and no extra launch.
+5. **Provider transitions**: type, writer, `agent_session_selected` replaced,
+   `SessionRecord.transition`, Desktop connection row with a view test.
+6. **Remaining Desktop CLI paths** to served kinds, and the README's Client
+   contract section. Each earlier slice writes its own row's README contract.
+
+## Checks
+
+### Shipping docs · write-docs step
+
+These files describe the intended behavior ahead of implementation:
+
+- `docs/server.md`: Desktop submission recovery after connection loss or app restart.
+- `docs/work.md`: CLI creation identity, retry and uncertain launch recovery.
+- `docs/sessions.md`: exact-owner display recovery and provider-transition explanations.
+- `rust/loopflow/src/server/README.md`: shared client, receipt, budget, terminal and provider contracts.
+- `docs/dev/server.md`: creation/cutover overview aligned with the client contract.
+
+Keep them in agreement with the implemented schema and help. The `--request-id`
+example and new welcome/status fields require implementation; this prose-only
+step does not establish runtime behavior. Receipt lookup's final operation name
+and concrete payload belong in the schema and protocol examples once implemented.
+Budget numbers in the welcome example remain the plan's provisional defaults.
+Reconcile the negotiated revision and fixtures with the required DTO additions.
+
+Write-docs checks, 2026-11-08:
+
+- `git diff --check` — passed; implementation/gate checks follow below.
+- `lf open --host desktop --file docs/server.md --file docs/work.md --file docs/sessions.md --file rust/loopflow/src/server/README.md --file docs/dev/server.md` — failed: "task_7dede9dbe66d41ed98569d943ed63ccf has no workspace in this Desktop window; nothing changed." Docs remain in this checkout; demo can present them in its Task workspace.
+- Runtime tests skipped for this prose-only step; the implementation and gate run the checks below.
+
+### Implementation checks
+
+- `cargo test -p loopflow --lib server::service::` — budget flood test (slice 1).
+- `cargo test -p loopflow --test integration transport_tests` filtered to the
+  five case names (slice 2).
+- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection` (slice 3).
+- `swift test --filter ServerProtocolTests` and the connection-row view test (slices 3–5).
+- Schema fixture regenerated: `cargo run -p loopflow --bin lf -- server describe --json > tests/fixtures/dto/server_schema.json`.
+- Desktop submitted-request persistence and restart reconciliation tests (slice 4).
+- Mac sleep and app quit/reopen demos: demo/review, not gate.
+
+## Done when
+
+The README states each row's contract beside its code; the flood test shows
+bounded retained bytes and honest `busy` refusals; a dropped New Task resend
+files one Task, including after Desktop restarts; saved client requests contain
+no duplicated outcome state; unknown launches stay inspectable; the five terminal
+cases pass with claim and geometry assertions; every provider-changing operation records retained, resumed,
+forked or started, and Desktop's connection row shows it.
+
+## Exclusions
+
+Remote admission and pairing; delta subscriptions; structured chat; receipts
+for writes other than `task.create` and `session.new`; LOO-796's reconnect UX
+(reading, copying, drafts, focus); editable pending submissions, offline creation,
+attachment queues, cross-device submission sync and arbitrary mutation replay.

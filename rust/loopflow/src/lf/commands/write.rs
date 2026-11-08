@@ -35,13 +35,18 @@ impl SessionOpenIntent {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Write {
-    /// `lf task create --session <id> --title <title> --json`, without launching.
+    /// File or adopt a Task, with a durable request identity; optionally start it.
     #[serde(rename = "task.create")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
-    TaskFromSession {
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::creation::TaskCreateReceipt>()))]
+    TaskCreate {
         directory: PathBuf,
-        id: String,
-        title: String,
+        request_id: String,
+        title: Option<String>,
+        request: Option<String>,
+        wave: Option<String>,
+        graph: Option<String>,
+        session: Option<String>,
+        run: bool,
     },
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
@@ -80,6 +85,7 @@ pub enum Write {
     TaskRun {
         directory: PathBuf,
         issue: String,
+        graph: Option<String>,
         from: Option<String>,
         agent: Option<String>,
         approve: bool,
@@ -121,6 +127,7 @@ pub enum Write {
         directory: PathBuf,
         issue: String,
         wave: Option<String>,
+        machine: Option<String>,
     },
     /// `lf task save <issue> <path> --revision <revision> --json`, with
     /// `content` on stdin.
@@ -181,9 +188,19 @@ pub enum Write {
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionNew {
         directory: PathBuf,
+        request_id: String,
         id: String,
         agent: Option<String>,
     },
+    #[serde(rename = "wave.rename")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveRenamed>()))]
+    WaveRename { directory: PathBuf, wave: String, name: String },
+    #[serde(rename = "wave.remove")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveRemoval>()))]
+    WaveRemove { directory: PathBuf, wave: String, preview: bool },
+    #[serde(rename = "wave.machine")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
+    WaveMachine { directory: PathBuf, wave: String, machine: String },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -565,16 +582,9 @@ impl Write {
         let directory = self.directory();
         let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
         match self {
-            Self::TaskFromSession { id, title, .. } => value(&crate::ops::task::task_create(
-                &crate::ops::task::task_repository(directory, None)?,
-                None,
-                Some(title.clone()),
-                None,
-                crate::ops::task::TaskAdoptionOptions {
-                    session: Some(id.clone()),
-                    worktree: None,
-                },
-            )?),
+            Self::TaskCreate { request_id, title, request, wave, graph, session, run, .. } => value(&crate::engine::creation::create(request_id,
+                crate::engine::creation::TaskCreation { directory: directory.to_path_buf(), title: title.clone(), request: request.clone(), wave: wave.clone(),
+                graph: graph.clone(), session: session.clone(), worktree: None, run: *run, agent: None, approve: false })?),
             Self::TaskComplete { issue, .. } => value(&crate::ops::task::task_complete(
                 &task_repo(issue)?,
                 issue,
@@ -605,6 +615,7 @@ impl Write {
             Self::TaskRun {
                 issue,
                 from,
+                graph,
                 agent,
                 approve,
                 ..
@@ -612,6 +623,7 @@ impl Write {
                 directory,
                 issue,
                 from.as_deref(),
+                graph.as_deref(),
                 agent.as_deref(),
                 *approve,
             )?),
@@ -624,7 +636,8 @@ impl Write {
                 value(&task::report(directory, issue, None, message)?)
             }
             Self::TaskInterrupt { issue, .. } => value(&task::interrupt(issue)?),
-            Self::TaskMove { issue, wave, .. } => value(&crate::ops::task::task_move_membership(
+            Self::TaskMove { issue, machine: Some(machine), .. } => value(&super::session_move::move_task(issue, machine)?),
+            Self::TaskMove { issue, wave, machine: None, .. } => value(&crate::ops::task::task_move_membership(
                 &task_repo(issue)?,
                 issue,
                 wave.as_deref(),
@@ -670,6 +683,10 @@ impl Write {
                     .expect("a Session preparation has a CLI spelling")?;
                 value(&super::session::prepared(&cli, directory)?)
             }
+            Self::WaveRename { wave, name, .. } => value(&tokio::runtime::Runtime::new()?.block_on(crate::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None))?),
+            Self::WaveRemove { wave, preview, .. } => value(&crate::ops::wave_lifecycle::remove(directory, wave, *preview, false)?),
+            Self::WaveMachine { wave, machine, .. } => value(&crate::engine::config::set(&crate::config::files::Destination::PersonalWave {
+                repository: directory.to_path_buf(), wave: wave.clone() }, "machine", machine)?),
             Self::WaveAdd {
                 wave, objective, ..
             } => {
@@ -1086,12 +1103,12 @@ impl Write {
                 words.extend(["--prepare", "--json"]);
                 words
             }
-            Self::SessionNew { id, agent, .. } => {
+            Self::SessionNew { id, agent, request_id, .. } => {
                 let mut words = Vec::new();
                 if let Some(agent) = agent {
                     words.extend(["--agent", agent]);
                 }
-                words.extend(["session", "new", id, "--prepare", "--json"]);
+                words.extend(["session", "new", id, "--prepare", "--json", "--request-id", request_id]);
                 words
             }
             _ => return None,
@@ -1150,7 +1167,7 @@ impl Write {
 
     pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskFromSession { directory, .. }
+            Self::TaskCreate { directory, .. }
             | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
@@ -1171,6 +1188,9 @@ impl Write {
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::WaveAdd { directory, .. }
+            | Self::WaveRename { directory, .. }
+            | Self::WaveRemove { directory, .. }
+            | Self::WaveMachine { directory, .. }
             | Self::PlanningRefresh { directory, .. }
             | Self::WavePlanningBind { directory, .. }
             | Self::WavePlanningConnect { directory, .. }

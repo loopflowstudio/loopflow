@@ -72,7 +72,7 @@ by a test and every server fixture must decode.
 
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64}}
+← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":33554432}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"]}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -105,8 +105,10 @@ instance, executable_sha256, clients}`, then the server closes. `lf server statu
 installation use it so readiness never opens Work or speaks the full protocol;
 `lf server status` also reports `listening` (a server accepted the connection),
 `revision` and `clients`: each welcomed connection still open, oldest first, as
-`{id, client, connected_at, requests}`, where `client` is the identity its
+`{id, client, connected_at, requests, open, retained_bytes}`, where `client` is the identity its
 `hello` gave and `requests` counts its requests, subscriptions included. The
+`open` and `retained_bytes` fields report current admitted work and retained-byte
+accounting, including pending producers. The
 identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
 installation, an installation check that never applies to a remote client.
 
@@ -127,17 +129,17 @@ repeated `hello`/`status`. A well-formed `request` or `subscribe` whose
 operation this build does not accept fails alone: `invalid` with its own `id`
 and `data.kind`, and the connection stays open, so a newer client loses only
 that request. `data` is structured detail or null. Clients branch
-on `code`; only `outcome_unknown` means the request may have taken effect:
+on `code`; `outcome_unknown` means the request may have taken effect:
 
 | `code` | Meaning | `data` |
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
 | `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no subscription | `{kind}` for a refused operation, else null |
 | `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
-| `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
+| `conflict` | The request contradicts current state: a still-unanswered transport ID or a creation ID reused with different content | `{id}` or `{request_id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
-| `outcome_unknown` | The operation may have run; inspect state before retrying | null |
-| `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
+| `outcome_unknown` | The operation may have run; inspect its creation receipt when available, otherwise the resource | creation details when known, otherwise null |
+| `busy` | Admission capacity reached, or a subscription fell behind its checkpoints | `{max_connections}` at connection capacity; `{limit, max}` for the open limit; `{limit: "retained_bytes"}` for byte admission |
 
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
@@ -155,7 +157,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
-| `task.create` | `lf task create --session <id>` | write |
+| `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |
@@ -278,8 +280,10 @@ part of what a phone or bot client is offered.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
-  standard output. `task.create {directory,id,title}` adopts the selected
-  conversation and returns the Task without launching work. A write whose Work
+  standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
+  files a Task or adopts the named Session; `run` requests its Graph launch.
+  A null `wave` selects the repository. Both paths return the same creation
+  receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
   `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
   spelling there over SSH and returns what that prints, which is the
@@ -288,9 +292,9 @@ part of what a phone or bot client is offered.
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
   `outcome_unknown`, since the write may have taken partial effect. A lost
-  response means outcome unknown; inspect state before retrying. IDs correlate
-  diagnostics and are **not** durable deduplication receipts. No automatic
-  resubmission.
+  response means outcome unknown; inspect state before retrying. Transport IDs
+  correlate diagnostics and are **not** durable deduplication receipts. Only
+  `task.create` and `session.new` have the creation retry contract below.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
   `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first
@@ -349,3 +353,135 @@ arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+## Client contract
+
+Submit a Task, lose the connection before its answer, then restart the client.
+Recover by looking up the saved creation request on its original destination.
+The receipt identifies the original Task; opening new subscriptions refreshes
+its Work; attaching to the exact terminal owner recovers its display. These are
+separate operations. None grants permission to repeat an uncertain launch.
+
+Desktop, CLI and other Work clients use the shared operation kinds and result
+types. Desktop sends Task creation, run, ship and Machine moves, Wave Machine
+changes, rename and removal, and process history through this protocol. Client
+code must not substitute CLI stdout parsing for a shared Work operation.
+Ordinary CLI use can call the shared Rust functions without a running server.
+Remote authentication and pairing are separate from this same-user socket.
+
+### Cache and reconnect
+
+Negotiate a revision on each new connection and use that revision's schema.
+Keep `welcome.instance` and limits for that connection; an instance change
+means the server restarted. Transport request IDs, subscription IDs and
+checkpoints have no meaning on a replacement connection.
+
+Last Work readings may remain visible as stale data. Resubscribe to every needed
+read and replace its cached value with the complete first reading. There is no
+Work replay cursor or universal event log. Coalescing replaces only complete
+readings of the same subscription; checkpoint answers, errors and the final
+reading before `ended` retain their ordering.
+
+| Failure | Client recovery |
+|---|---|
+| Connection lost | Reconnect with bounded backoff, renegotiate and resubscribe. Recover creations by receipt; inspect other uncertain writes. |
+| Request admission `busy` | Delay that operation; it was not dispatched. Keep the healthy connection. |
+| Checkpoint overflow `busy` | Open a replacement subscription; the old subscription ended. Keep the connection. |
+| Connection-level `busy` | Reconnect after a delay; no operation was admitted on that connection. |
+| `incompatible` | Update the side named by `data.update`. |
+| `invalid`, `not_found`, `conflict` | Correct the arguments, target or conflicting state; reconnecting alone cannot fix it. |
+| `unavailable` | Retry the affected read when its dependency returns. A failed receipt lookup is not absence. |
+| `outcome_unknown` | Look up the creation receipt, or inspect the resource for other writes. Never replay an arbitrary mutation. |
+
+### Admission and retained work
+
+`welcome.limits.max_open` bounds open requests plus subscriptions;
+`max_retained_bytes` bounds per-connection producer reservations and serialized
+answers through socket delivery. Reserve before dispatch or subscription
+materialization, and include pending producers. A process-wide budget also
+bounds retention across clients. This accounting is not a process-RSS limit.
+Clients use advertised limits rather than hardcoding server defaults.
+
+Writes have a separate admission cap. A refused write has not run; an admitted
+write finishes even if its answer can no longer be delivered. Backpressure
+cannot turn an admitted effect into an unrun `busy` refusal. Subscriptions wait
+for room and re-read current state, retaining checkpoint obligations. Bounded
+control headroom keeps refusals and acknowledgments deliverable; a peer that
+does not drain still reaches the five-second send deadline.
+
+### Creation receipts
+
+`task.create` and `session.new` require a client-chosen `request_id` of 1–128
+bytes. This is the durable creation identity, distinct from the outer request's
+connection-local `id`. Use a fresh identity per submission and retain the exact
+payload and destination for recovery. `lf task create` generates one unless
+`--request-id` is supplied.
+
+Before provisioning, the shared creation operation records the request identity,
+content fingerprint and reserved resource identities. Concurrent retries and
+server restarts reuse those identities. The same ID with different operation
+content returns `conflict` without running that content. Receipts are retained
+without age-based pruning; an old ID never becomes a new creation because time
+passed or its resource was removed.
+
+Task creation returns `{task, graph, session_id, milestone}` with or without
+`run`. Milestones distinguish filing, admission and confirmed start. If a launch
+was requested but its registration cannot be confirmed, the result is
+`outcome_unknown` with the Task and `run_requested` milestone. Only a launch
+correlated to this creation can settle that outcome; another current Graph is
+insufficient. Recovery never launches again across that uncertainty.
+
+`session.new` records its stop and new-thread admission against the same request.
+A recovered admitted request returns its recorded Session without stopping
+anything again. An interrupted stop or input append must be reconciled against
+that attempt; it cannot stop a newer process or append duplicate input.
+
+Receipt lookup is read-only: it returns the recorded outcome or confirmed
+absence and starts no work. After reconnect or cold startup, look up the receipt
+first. Resubmit the identical creation only on confirmed absence or a
+server-declared safe continuation. Unavailable lookup stays unavailable;
+unknown effects remain inspectable. A removed resource's receipt never
+authorizes recreating it.
+
+Desktop persists only `{request_id, destination, payload, submitted_at}` before
+first send, with a versioned record and exact payload. The destination pins the
+original Machine and repository. Server receipts own outcomes; client records
+contain no milestone ledger. A single app recovery owner serves all windows.
+Storage failure keeps the form and reports an error before sending. Remove a
+record after presenting its reconciled result; failed removal repeats lookup
+safely. Retain unresolved outcomes for inspection. This is neither an editable
+outbox nor offline creation, cross-device submission sync or generic replay.
+
+### Terminal and provider recovery
+
+Terminal continuation addresses the exact owner, separately from Work reads.
+Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+reconnect grace; expired continuation falls back to a fresh screen from that
+owner. Terminal-mode viewers request a fresh screen. Uncertain input is
+never replayed. Recovery takes only free claims or those held by the viewer's
+own stale connection; a newer viewer keeps input and geometry. Replacing that
+stale socket cannot let its later close revoke the replacement's claims.
+A stalled bridge cannot block another viewer or Work control traffic.
+
+If the Session has a new owner, exact-owner attachment returns `not_found` with
+`owner_lf_process_id` and `current_lf_process_id`. Attaching by Session can reach
+the current owner; neither attachment starts or resumes a provider. A lost
+connection alone does not establish process death.
+
+The Loopflow Session, provider conversation, serving AgentProcess and viewer's
+control claims are distinct. `SessionRecord.transition` reports the latest
+observed provider change, or null when none is known; `session.history` keeps
+the changes. Reserving a process is not a successful transition.
+
+| Transition | Meaning |
+|---|---|
+| `retained` | The same AgentProcess continues serving. Attachment may report this without replacing the latest provider-change event. |
+| `resumed` | A replacement AgentProcess serves the same provider conversation. |
+| `forked` | A new provider conversation carries source history, seeded natively or from the log. |
+| `started` | A new provider conversation starts without the earlier history. If a source is recorded, that conversation was left behind. |
+
+Transitions identify source and destination provider conversations and processes
+when known. Missing lineage remains unknown. A fork's `original_running`
+describes liveness at the transition; current liveness requires a fresh reading.
+Desktop shows the short explanation beside the terminal and keeps the detail in
+history. Reading either grants no authority to drive the provider.

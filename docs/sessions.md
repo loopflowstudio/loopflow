@@ -62,6 +62,30 @@ A newer viewer keeps control until an explicit **Move here** request. **Retry**
 repairs connectivity; it does not resume a new provider or replay input.
 [Connect clients](server.md) covers server updates and connection diagnosis.
 
+Byte-stream viewers catch up from retained output when available; terminal
+viewers refresh the screen from the same owner. Expired output retention also
+falls back to a fresh screen. Another viewer's
+input and terminal size stay in effect. If the old owner has ended, recovery
+stops at that owner; opening the Session again can reach its current owner.
+Reconnecting a display never starts a provider.
+
+The pane's connection row explains which conversation came back:
+
+| What appears | What continued |
+|---|---|
+| **Same process** | The existing provider process is still serving the conversation. |
+| **Resumed in a new process** | A replacement process reopened the same provider conversation. |
+| **Forked from …** | A new provider conversation carries history from the source. “Original was running at fork” describes that moment, not its current status. |
+| **New conversation; earlier one left behind** | The new provider conversation does not carry the earlier history, as can happen on account failover. |
+
+`lf session history <session>` keeps the observed provider changes. Unknown
+history stays unknown; a connection alone does not establish continuity. Reading
+that history or a terminal screen grants no input control.
+
+Starting a new thread also uses
+[submitted-creation recovery](server.md#recover-a-submitted-creation). Returning
+after a lost reply does not stop a newer provider or append the same input again.
+
 ## After a crash or reboot
 
 ```bash

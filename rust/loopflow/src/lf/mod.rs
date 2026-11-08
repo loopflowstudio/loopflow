@@ -320,7 +320,7 @@ impl Cli {
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
-                | SessionCommand::New { id, connection } => Some((id.as_deref(), connection)),
+                | SessionCommand::New { id, connection, .. } => Some((id.as_deref(), connection)),
                 _ => None,
             };
             if let Some((id, connection)) = selected {
@@ -1425,6 +1425,8 @@ impl WtCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
+    /// Look up a submitted creation without retrying it
+    Receipt { request_id: String, #[arg(long)] json: bool },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
     /// Report local readiness without registering or starting anything.
@@ -1832,6 +1834,9 @@ pub enum SessionCommand {
         after_help = "The conversation keeps its name, Work and history; the old thread stays in `lf session history`.\n  lf session new -a claude      continue this scope's conversation on Claude"
     )]
     New {
+        /// Retry a submitted new thread with the same identity and content
+        #[arg(long)]
+        request_id: Option<String>,
         /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
@@ -2220,6 +2225,9 @@ until `lf ship`."
         after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
     )]
     Create {
+        /// Retry a submitted creation with the same identity and content
+        #[arg(long)]
+        request_id: Option<String>,
         /// Existing conversation to promote without replaying its input
         #[arg(long, id = "create_session")]
         session: Option<String>,

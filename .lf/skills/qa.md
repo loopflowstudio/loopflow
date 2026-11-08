@@ -44,6 +44,23 @@ Make the scenario as real as you can reach:
 - Look at it. Read the output, check the screenshot, notice what is confusing,
   slow or ugly, not only what is wrong.
 
+## Launching Loopflow Desktop
+
+The snapshot and quit probe below needs a display; use the headless checks above
+when WindowServer is unavailable.
+
+- Build the CLI and local server: `cargo build -p loopflow --bin lf`.
+- Build the debug app: `swift build --package-path swift -Xswiftc -gnone`
+  (a few seconds when the build cache is warm). Binary: `swift/.build/debug/LoopflowMac`.
+- `uv run python scripts/check_desktop_launch.py` launches it with
+  `-ui-test-mode empty-workspaces`, waits for the snapshot and the quit, and
+  prints the sampled stacks if it hangs. That mode renders fixture data and
+  reads no registry, so it runs safely beside the person's live Loopflow.app.
+- To look at the frame, call `check_launch(executable, dir)` from that script
+  with a directory you keep. `snapshot.png` is written there.
+- `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
+  release build.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience
@@ -69,6 +86,31 @@ keeps real Task records without writing the original database. Never seed rows
 through internal APIs. Use only reads against that backup, keep probe files in
 the current checkout, and restore its prior file bytes and index entries.
 Comparison bases accept `parent`, `head` or a resolved commit SHA, not `HEAD`.
+
+## Loopflow served launches
+
+Build with `cargo build -p loopflow --bin lf`. Use a disposable Git repository
+and separate `HOME` and `LF_HOME`; clear inherited `LF_*`, then set `LF_BIN` to
+the absolute branch-built binary. Start that binary's `server run` there and
+read the socket from `server status`. Never fault the installed Machine's store.
+
+Connect over the Unix socket with newline-delimited JSON: send the revision-2
+hello from `tests/fixtures/dto/server/hello.json`, then requests shaped like
+the adjacent `graph_run.json` or `task_run.json`. A local Graph containing
+`- cmd: help` exercises real execution without a provider. For disposable
+Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
+and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
+then `lf task create --title "Launch QA" --json` creates local planning data.
+Create with stdin closed; `--graph` on creation requires `--run`.
+
+To delay a report, SIGSTOP the launched command before it reports, leaving its
+execution owner running. Check that a live owner waits beyond the unknown grace.
+In this disposable home only, make the registry unavailable and restore it;
+check recovery both before and after the uncertain reply. Resume the command
+and inspect its actual result without launching it again. Find completed direct
+Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
+process list cannot find a finished run. Stop the private server and every
+remaining child after the scenarios.
 
 ## Keep what you learned
 

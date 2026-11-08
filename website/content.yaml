@@ -19,6 +19,9 @@ navigation:
 - label: GitHub ↗
   href: https://github.com/loopflowstudio/loopflow
   optional: true
+- label: Discord ↗
+  href: https://discord.gg/j57B5vyXNJ
+  optional: true
 install:
   label: Install
   href: /#start
@@ -103,3 +106,5 @@ homepage:
       href: /docs/getting-started
     - label: Source ↗
       href: https://github.com/loopflowstudio/loopflow
+    - label: Discord ↗
+      href: https://discord.gg/j57B5vyXNJ

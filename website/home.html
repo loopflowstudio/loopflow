@@ -1,102 +1,62 @@
 <section class="home-hero">
   <h1 aria-label="Loopflow is how you design, implement, demo, release and study software in harmony.">
   <span aria-hidden="true">Loopflow is how you <span class="rotating"><span>design</span><span>implement</span><span>demo</span><span>release</span><span>study</span></span> software in harmony.</span></h1>
+  <p class="tagline">Your software factory, in your own terminal.</p>
   <p class="either">Conduct an orchestra that conducts itself, together with your team.</p>
   <div class="get"><a class="button solid" href="{download_url}">Download for Mac</a><span class="or">or the CLI</span><div class="install-row"><pre tabindex="0" aria-label="Install the lf command line" class="term"><span class="p">$</span> {install_command}</pre><button type="button" data-copy="{install_command}" aria-live="polite" class="copy">Copy</button></div></div>
-  <p class="cost">Free and open source (MIT)</p>
+  <p class="cost">Free and open source (MIT) · macOS and Linux</p>
 </section>
-<section id="mac" class="appmock duo">
-  <figure class="shot">
-    <p class="slot"><span>Your agents</span><span>Loopflow for Mac</span></p>
-    <div class="win dash">
-      <p class="sketch">Coming soon</p>
-      <header><h3>etude</h3><p><b>4</b> running <b class="w">2</b> available <b class="ok">2</b> landed today</p></header>
-      <ul class="runs">
-        <li class="need"><p class="t">Compare two runs’ reward curves</p><p class="m"><span class="ag">claude · opus</span><span class="st">available · demo</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="y"></li><li></li></ol></li>
-        <li><p class="t">Rent CPU pods for templates with no GPU</p><p class="m"><span class="ag">codex</span><span class="st run">pursue · implement</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="r"></li><li></li><li></li><li></li></ol></li>
-        <li class="need"><p class="t">Resume a run after its machine is preempted</p><p class="m"><span class="ag">claude · opus</span><span class="st">available · design</span></p><ol class="steps"><li class="d"></li><li class="y"></li><li></li><li></li><li></li><li></li></ol></li>
-        <li><p class="t">Round-robin tournament across checkpoints</p><p class="m"><span class="ag">claude · sonnet</span><span class="st run">pursue · concept-review</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li><li></li><li></li></ol></li>
-        <li><p class="t">Query benchmarks through DuckDB</p><p class="m"><span class="ag">opencode</span><span class="st run">task-design · kickoff</span></p><ol class="steps"><li class="r"></li><li></li><li></li><li></li><li></li><li></li></ol></li>
-        <li><p class="t">Reuse verified artifact downloads</p><p class="m"><span class="ag">codex</span><span class="st run">ship · gate</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li></ol></li>
-        <li class="done"><p class="t">Retain launch logs through startup failures</p><p class="m"><span class="ag">claude · opus</span><span class="st ok">landed · #10</span></p></li>
-        <li class="done"><p class="t">Split run tracking from training</p><p class="m"><span class="ag">codex</span><span class="st ok">landed · #17</span></p></li>
-      </ul>
-    </div>
-  </figure>
-  <figure class="shot">
-    <p class="slot"><span>Your team</span><span>Loopflow for Mac</span></p>
-    <div class="win team">
-      <p class="sketch">Coming soon</p>
-      <header><h3>etude</h3><ul class="people"><li><i>JH</i>you</li><li><i class="a">AN</i>Ana</li><li><i class="b">TH</i>Theo</li><li><i class="c">MI</i>Mia</li></ul></header>
-      <div class="waves">
-        <section><h4>Runs</h4><p>Launch training runs anywhere, and keep what they record.</p>
-          <ul><li><b>Compare two runs’ reward curves</b><span><i>JH</i>demo</span></li><li><b>Resume a run after its machine is preempted</b><span><i class="a">AN</i>design</span></li><li class="open"><b>Stream metrics from rented machines</b><span><i class="u">?</i>unclaimed</span></li></ul></section>
-        <section><h4>Evals</h4><p>Know which agent is actually better.</p>
-          <ul><li><b>Round-robin tournament across checkpoints</b><span><i class="c">MI</i>implement</span></li><li><b>Query benchmarks through DuckDB</b><span><i class="c">MI</i>design</span></li></ul></section>
-        <section><h4>Machines</h4><p>Rent the right machine for each job.</p>
-          <ul><li><b>Rent CPU pods for templates with no GPU</b><span><i class="b">TH</i>implement</span></li><li><b>Reuse verified artifact downloads</b><span><i class="a">AN</i>ship</span></li><li class="done"><b>Retain launch logs through startup failures</b><span><i class="b">TH</i>landed</span></li></ul></section>
+<section class="heroshot" aria-label="A coding agent splitting work into Loopflow Tasks and running them">
+  <figure class="tw">
+    <div class="tw-tabs"><span class="on">claude · ~/src/etude</span><span class="wait">ETU-21 · design</span><span class="wait">ETU-22 · design</span><span>ETU-23 · implement</span></div>
+    <div class="tw-body">
+      <div class="tw-pane">
+<pre><span class="p">$</span> <b>claude</b>
+<span class="p">&gt;</span> Split the auth cleanup into Tasks and run them with lf.
+
+<span class="a">●</span> <b>lf</b> task create "Move session checks into middleware" --run
+<span class="a">●</span> <b>lf</b> task create "Delete the legacy token table" --run
+<span class="a">●</span> <b>lf</b> task create "Rate-limit password resets" --run
+<span class="c">  3 Tasks · 3 worktrees · feature workflow</span>
+
+<span class="y">◆</span> ETU-21 and ETU-22 want your call on the design.
+<span class="c">  ETU-23 is already implementing.</span>
+
+<span class="p">&gt;</span> <span class="cur"></span></pre>
+      </div>
+      <div class="tw-pane board">
+<pre><span class="p">$</span> <b>lf</b> task status</pre>
+        <ul>
+          <li class="need"><b>ETU-21</b><span>Session checks in middleware</span><i class="pips"><i class="d"></i><i class="y"></i><i></i><i></i><i></i></i><em>design · you</em></li>
+          <li class="need"><b>ETU-22</b><span>Delete legacy token table</span><i class="pips"><i class="d"></i><i class="y"></i><i></i><i></i><i></i></i><em>design · you</em></li>
+          <li><b>ETU-23</b><span>Rate-limit password resets</span><i class="pips"><i class="d"></i><i class="d"></i><i class="r"></i><i></i><i></i></i><em>implement</em></li>
+          <li class="done"><b>ETU-11</b><span>Retain launch logs</span><i class="pips"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></i><em>landed #10</em></li>
+        </ul>
       </div>
     </div>
+    <div class="tw-flow"><span class="lbl">feature</span><span class="st done">task-design</span><span class="ar">→</span><b class="st done stop">design</b><span class="ar">→</span><span class="st now">pursue</span><span class="ar">→</span><b class="st">demo</b><span class="ar">→</span><span class="st">ship</span><span class="note">highlighted steps are where you come in</span></div>
   </figure>
 </section>
 <section class="pair system">
-  <h2>Arrange your coding sessions around sustaining waves and resolving tasks.</h2>
+  <h2>Your agent can drive it.</h2>
   <div class="halves">
     <article>
-      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
-      <p>Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
-      <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
-      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear, with Asana and Notion coming. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
-      <p>Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each wave and task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
-      <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
-      <p class="more"><a href="/docs/work">Tasks and Waves ↗</a><a href="/docs/orchestration#where-a-person-takes-part">Write a workflow ↗</a><a href="/docs/work#share-the-plan">Share the plan ↗</a></p>
+      <p>Everything in Loopflow is an <code>lf</code> command, so the coding agent you already talk to can file Tasks, run them through your workflow, steer them and land them. One line teaches it how.</p>
+      <p>Then you can just ask it: <em>“Split the auth cleanup into Tasks and run them with lf.”</em></p>
+      <p class="more"><a href="https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md">What the skill teaches ↗</a></p>
     </article>
     <article>
-      <div class="card"><ul class="wfs">
-<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
-<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
-<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
-      </ul></div>
-      <p class="cap">Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own.</p>
-<pre tabindex="0" aria-label="A comment reaching a teammate's agent" class="term"><span class="p">$</span> <b>lf</b> task claim ETU-14         <span class="c"># Theo takes it, on their laptop</span>
-<span class="p">$</span> <b>lf</b> task run ETU-14           <span class="c"># their agents start on it</span>
-
-<span class="c">  Ana, on ETU-14:</span>
-<span class="c">  “fall back to a GPU pod when no CPU pod is free”</span>
-
-<span class="c">  ETU-14 · pursue · implement</span>
-<span class="c">  ↳ steer from Ana, read before the next step</span></pre>
-      <p class="cap">Ana leaves a comment; Theo’s agent picks it up before its next step. Nobody has to be in the same conversation.</p>
+<pre tabindex="0" aria-label="Install lf and teach your agent to use it" class="term"><span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh
+<span class="p">$</span> <b>lf</b> init
+<span class="p">$</span> npx skills add loopflowstudio/loopflow --skill loopflow -g
+<span class="c">  # teach your coding agent to use lf</span></pre>
     </article>
   </div>
 </section>
-<section class="pair clihero split">
+<section class="pair split bigcli">
   <h2><code>lf</code>: the workflow CLI for shipping software with coding agents.</h2>
   <p class="lede">Underneath Loopflow’s work-centered API is <code>lf</code>: a universal interface for agent sessions across providers, and the software engineering process between the sessions.</p>
-  <div class="halves">
-    <article>
-      <h3>Sessions</h3>
-      <p>Long-lived, persistent conversations that line up with however you already work with your team. They hang on plain, familiar things (a task, a project, the repository) so there is always one obvious place to go back to. Close the window and come back next week; the conversation and what it knows are still there.</p>
-<pre tabindex="0" aria-label="Open a task's or a wave's conversation" class="term"><span class="p">$</span> <b>lf</b> connect --task ETU-14   <span class="c"># the task's conversation</span>
-<span class="p">$</span> <b>lf</b> connect --wave machines <span class="c"># the wave's conversation</span>
-<span class="p">$</span> <b>lf</b> connect                 <span class="c"># this repository's</span></pre>
-    </article>
-    <article>
-      <h3>Runs</h3>
-      <p>Headless runs in the background that turn one thing into the next: plans into code, code into verified code, numbers into analysis. Get as much as possible off the main thread; runs stop where a person belongs, and their results come back to the session the work lives in.</p>
-<pre tabindex="0" aria-label="Start background runs" class="term"><span class="p">$</span> <b>lf</b> -b task run ETU-14      <span class="c"># plan → code → pull request</span>
-<span class="p">$</span> <b>lf</b> -b gate                 <span class="c"># code → verified code</span>
-<span class="p">$</span> <b>lf</b> -b research "why does reward plateau at 40k steps?"</pre>
-    </article>
-  </div>
-  <p class="hand">Each session knows how to hand its work to a run in a way that stays faithful to your process: a run follows the workflow you wrote down and stops where you said you want to be involved. Every run, its steps and its result are recorded, so you can watch one live or read what it did afterwards. And the work happens in its own process, off the main thread, so a long run never fills your conversation’s context; the session just reads back the outcome.</p>
-  <div class="halves">
-    <article>
-      <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
-      <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/orchestration">Skills and Graphs ↗</a><a href="/docs/subscriptions">Accounts and usage ↗</a></p>
-    </article>
-    <article>
-<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create cpu-pods       <span class="c"># a worktree and a branch</span>
+  <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create cpu-pods       <span class="c"># a worktree and a branch</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
      --account claude=you@ \  <span class="c"># whose login pays</span>
@@ -119,6 +79,109 @@
 
 <span class="p">$</span> <b>lf</b> --machine mini monitor
 <span class="c">  6 sessions running · 2 available</span></pre>
+  <div class="bigcli-foot">
+    <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
+    <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/subscriptions">Accounts and usage ↗</a></p>
+  </div>
+</section>
+<section class="pair split problem">
+  <h2>Shipping code is no longer the hard part. Scaling your attention and vision is.</h2>
+  <p class="lede">Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+  <p class="lede">Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes.</p>
+  <p class="motto">Craft and intentionality, at scale.</p>
+</section>
+<section class="pair system">
+  <h2>Your process, as code.</h2>
+  <div class="halves">
+    <article>
+      <p>Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each wave and task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
+      <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
+      <p>A Wave is an area of work with its own goal, memory and plan, and its own setup for every Task in it: the Graph, the agent, the machine and the login that pays.</p>
+      <p>You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place. Each Task keeps one conversation; runs do the work beside it and report back.</p>
+      <p class="more"><a href="/docs/orchestration#where-a-person-takes-part">Write a workflow ↗</a><a href="/docs/work">Tasks and Waves ↗</a></p>
+    </article>
+    <article>
+      <div class="card"><ul class="wfs">
+<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
+<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
+<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
+      </ul></div>
+      <p class="cap">Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own.</p>
+    </article>
+  </div>
+</section>
+<section class="pair features">
+  <h2>What you can do with it.</h2>
+  <ul class="feats">
+    <li><h3>Run Tasks in parallel</h3><p>Each Task gets its own worktree, branch and pull request, so a dozen can run at once without writing over each other.</p><code>lf task create &quot;fix the flaky retry test&quot; --run</code></li>
+    <li><h3>Steer a running Task</h3><p>Leave a comment. It reaches the next step, in the Task’s own context.</p><code>lf comment ETU-14 &quot;keep the retry budget at 3&quot;</code></li>
+    <li><h3>Get pinged when it needs you</h3><p>Loopflow for Mac and your phone tell you the moment a Task reaches a step that’s yours.</p><code>lf task status</code></li>
+    <li><h3>Pick up any conversation</h3><p>Close the window and come back next week, from any terminal.</p><code>lf resume --task ETU-14</code></li>
+    <li><h3>Review and land</h3><p>Each Task ends in a pull request. It merges when checks pass, fixing them first if they fail.</p><code>lf land --wait-and-fix</code></li>
+    <li><h3>Bring your Conductor workspaces</h3><p>Every worktree becomes a Task, with its branch, uncommitted files and setup scripts.</p><code>lf import conductor</code></li>
+    <li><h3>Use every login you pay for</h3><p>Claude and Codex logins, routed to whichever has room.</p><code>lf account</code></li>
+    <li><h3>Any agent, per run or per step</h3><p>Claude Code, Codex, OpenCode or Pi. A workflow step can name its own.</p><code>lf -a codex : &quot;fix the flaky retry test&quot;</code></li>
+    <li><h3>Your machines, or rented ones</h3><p>Run on your own box over SSH, or rent one for a single Task and give it back.</p><code>lf --machine mini -b task run ETU-14</code></li>
+    <li><h3>Know what it cost</h3><p>Tokens and dollars by Task, Wave or week.</p><code>lf history usage --weekly</code></li>
+    <li><h3>Check in from your phone</h3><p>Answer a design question, try a demo or say ship from Loopflow for iPhone.</p><code>lf phone pair</code></li>
+    <li><h3>Open it where you work</h3><p>A fresh tab with its splits in Rex, cmux, Herdr or tmux, or in Loopflow for Mac.</p><code>lf open --task ETU-14</code></li>
+  </ul>
+  <p class="more"><a href="/docs/getting-started">Get started ↗</a><a href="/docs/lf-reference">Every command ↗</a></p>
+</section>
+<section class="pair split">
+  <h2>Your terminal, your Mac, your phone.</h2>
+  <p class="lede">Loopflow opens each Task in Rex, cmux, Herdr, tmux or a plain terminal: a fresh tab with its splits. Watch every Task at once in Loopflow for Mac, and answer the ones waiting on you from your phone.</p>
+</section>
+<section id="mac" class="appmock duo">
+  <figure class="shot">
+    <p class="slot"><span>Your agents</span><span>Loopflow for Mac</span></p>
+    <div class="win dash">
+      <header><h3>etude</h3><p><b>4</b> running <b class="w">2</b> available <b class="ok">2</b> landed today</p></header>
+      <ul class="runs">
+        <li class="need"><p class="t">Compare two runs’ reward curves</p><p class="m"><span class="ag">claude · opus</span><span class="st">available · demo</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="y"></li><li></li></ol></li>
+        <li><p class="t">Rent CPU pods for templates with no GPU</p><p class="m"><span class="ag">codex</span><span class="st run">pursue · implement</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="r"></li><li></li><li></li><li></li></ol></li>
+        <li class="need"><p class="t">Resume a run after its machine is preempted</p><p class="m"><span class="ag">claude · opus</span><span class="st">available · design</span></p><ol class="steps"><li class="d"></li><li class="y"></li><li></li><li></li><li></li><li></li></ol></li>
+        <li><p class="t">Round-robin tournament across checkpoints</p><p class="m"><span class="ag">claude · sonnet</span><span class="st run">pursue · concept-review</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li><li></li><li></li></ol></li>
+        <li><p class="t">Query benchmarks through DuckDB</p><p class="m"><span class="ag">opencode</span><span class="st run">task-design · kickoff</span></p><ol class="steps"><li class="r"></li><li></li><li></li><li></li><li></li><li></li></ol></li>
+        <li><p class="t">Reuse verified artifact downloads</p><p class="m"><span class="ag">codex</span><span class="st run">ship · gate</span></p><ol class="steps"><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="d"></li><li class="r"></li></ol></li>
+        <li class="done"><p class="t">Retain launch logs through startup failures</p><p class="m"><span class="ag">claude · opus</span><span class="st ok">landed · #10</span></p></li>
+        <li class="done"><p class="t">Split run tracking from training</p><p class="m"><span class="ag">codex</span><span class="st ok">landed · #17</span></p></li>
+      </ul>
+    </div>
+  </figure>
+  <figure class="shot">
+    <p class="slot"><span>Your team</span><span>Loopflow for Mac</span></p>
+    <div class="win team">
+      <header><h3>etude</h3><ul class="people"><li><i>JH</i>you</li><li><i class="a">AN</i>Ana</li><li><i class="b">TH</i>Theo</li><li><i class="c">MI</i>Mia</li></ul></header>
+      <div class="waves">
+        <section><h4>Runs</h4><p>Launch training runs anywhere, and keep what they record.</p>
+          <ul><li><b>Compare two runs’ reward curves</b><span><i>JH</i>demo</span></li><li><b>Resume a run after its machine is preempted</b><span><i class="a">AN</i>design</span></li><li class="open"><b>Stream metrics from rented machines</b><span><i class="u">?</i>unclaimed</span></li></ul></section>
+        <section><h4>Evals</h4><p>Know which agent is actually better.</p>
+          <ul><li><b>Round-robin tournament across checkpoints</b><span><i class="c">MI</i>implement</span></li><li><b>Query benchmarks through DuckDB</b><span><i class="c">MI</i>design</span></li></ul></section>
+        <section><h4>Machines</h4><p>Rent the right machine for each job.</p>
+          <ul><li><b>Rent CPU pods for templates with no GPU</b><span><i class="b">TH</i>implement</span></li><li><b>Reuse verified artifact downloads</b><span><i class="a">AN</i>ship</span></li><li class="done"><b>Retain launch logs through startup failures</b><span><i class="b">TH</i>landed</span></li></ul></section>
+      </div>
+    </div>
+  </figure>
+</section>
+<section class="pair system">
+  <h2>Together, with your team.</h2>
+  <div class="halves">
+    <article>
+      <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
+      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear, with Asana and Notion coming. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
+      <p class="more"><a href="/docs/work#share-the-plan">Share the plan ↗</a></p>
+    </article>
+    <article>
+<pre tabindex="0" aria-label="A comment reaching a teammate's agent" class="term"><span class="p">$</span> <b>lf</b> task claim ETU-14         <span class="c"># Theo takes it, on their laptop</span>
+<span class="p">$</span> <b>lf</b> task run ETU-14           <span class="c"># their agents start on it</span>
+
+<span class="c">  Ana, on ETU-14:</span>
+<span class="c">  “fall back to a GPU pod when no CPU pod is free”</span>
+
+<span class="c">  ETU-14 · pursue · implement</span>
+<span class="c">  ↳ steer from Ana, read before the next step</span></pre>
+      <p class="cap">Ana leaves a comment; Theo’s agent picks it up before its next step. Nobody has to be in the same conversation.</p>
     </article>
   </div>
 </section>
@@ -129,10 +192,11 @@
     <li><b><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></b><span>your code, your pull requests, and your reviewers</span></li>
     <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana · Notion</b><span>the plan your team already reads, or keep it in Git; Asana and Notion coming</span></li>
     <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
-    <li><b><a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
+    <li><b><a href="https://www.superlogical.com/rex" target="_blank" rel="noopener">Rex</a> · <a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
   </ul>
 </section>
 <section class="belief">
   <p>Scale together.</p>
   <div class="get"><a class="button solid" href="{download_url}">Download for Mac</a></div>
+  <p class="talk">Questions, ideas, or something broke? <a href="https://discord.gg/j57B5vyXNJ" target="_blank" rel="noopener">Talk to us on Discord ↗</a></p>
 </section>

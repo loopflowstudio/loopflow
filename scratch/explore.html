@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homepage Prototypes</title>
+<style>
+:root{
+  --paper:#f6f6f4; --surface:#fdfdfc; --ink:#191b1e; --body:#43464b; --soft:#5f6266; --faint:#85888d;
+  --rule:#e4e3df; --chip:#edece7; --wine:#8a1b3d; --code-bg:#1b1d21; --code-fg:#e7e8eb;
+  --ok:#2f7d4f; --wait:#a8641a; --run:#2a6f97; --new:#fff1c2; --new-ink:inherit;
+  --serif:'Instrument Serif',Georgia,'Times New Roman',serif;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#141517; --surface:#1b1c1f; --ink:#ecedef; --body:#c3c5c9; --soft:#a2a5aa; --faint:#7d8085;
+  --rule:#2c2e32; --chip:#26282c; --wine:#e0718f; --code-bg:#0e0f11; --code-fg:#e7e8eb;
+  --ok:#6cc08b; --wait:#e0a356; --run:#6fb3dc; --new:#4a3d12;
+}}
+:root[data-theme="dark"]{
+  --paper:#141517; --surface:#1b1c1f; --ink:#ecedef; --body:#c3c5c9; --soft:#a2a5aa; --faint:#7d8085;
+  --rule:#2c2e32; --chip:#26282c; --wine:#e0718f; --code-bg:#0e0f11; --code-fg:#e7e8eb;
+  --ok:#6cc08b; --wait:#e0a356; --run:#6fb3dc; --new:#4a3d12;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--body);font:16px/1.6 var(--sans)}
+.col{max-width:760px;margin:0 auto;padding:0 16px}
+header.doc{padding-top:44px}
+h1,h2,h3{color:var(--ink);font-weight:400;font-family:var(--serif);line-height:1.15}
+h1{font-size:2.3rem;margin:.2em 0 .3em}
+h2{font-size:1.8rem;margin:2em 0 .3em}
+p{margin:.6em 0}
+a{color:var(--wine)}
+code,pre{font-family:var(--mono);font-size:.82rem}
+code{background:var(--chip);padding:.05em .35em;border-radius:4px}
+pre{background:var(--code-bg);color:var(--code-fg);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.5;margin:10px 0}
+pre .p,pre .c{color:#8b8f96} pre .k{color:#e0b46b} pre .gr{color:#7fcf98} pre .b{color:#7cc0e8}
+.meta{color:var(--faint);font-size:.85rem}
+.decision{border-left:3px solid var(--wine);padding:4px 0 4px 16px;margin:22px 0}
+
+/* switcher */
+.switch{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--rule);padding:10px 0}
+.switch .col{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.tabs{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.tabs button{font:14px var(--sans);background:var(--surface);color:var(--soft);border:0;border-right:1px solid var(--rule);padding:7px 14px;cursor:pointer}
+.tabs button:last-child{border-right:0}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.tabs button:focus-visible,.hl input:focus-visible{outline:2px solid var(--wine);outline-offset:2px}
+.hl{font-size:.85rem;color:var(--soft);display:flex;gap:6px;align-items:center;cursor:pointer}
+.proto-note{margin:18px 0 8px}
+.proto-note b{color:var(--ink)}
+.proto-note .why{font-size:.9rem}
+
+/* new-copy highlight */
+body.show-new .new{background:var(--new);box-shadow:0 0 0 3px var(--new);border-radius:2px}
+
+/* the full mock site */
+.site{background:var(--surface);border:1px solid var(--rule);border-radius:12px;margin:12px auto 40px;max-width:980px;overflow:hidden}
+.site .chrome{display:flex;gap:6px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--rule);font:12px var(--mono);color:var(--faint)}
+.site .chrome i{width:9px;height:9px;border-radius:50%;background:var(--rule);display:inline-block}
+.nav{display:flex;justify-content:space-between;align-items:center;padding:14px 32px;font-size:.88rem;flex-wrap:wrap;gap:8px}
+.nav .logo{font-family:var(--serif);font-size:1.35rem;color:var(--ink)}
+.nav .links{display:flex;gap:18px;color:var(--soft);flex-wrap:wrap;align-items:center}
+.nav .links .btn{padding:5px 12px}
+.pg{padding:0 32px 40px}
+@media (max-width:640px){.pg{padding:0 16px 32px}.nav{padding:12px 16px}}
+.hero{padding:48px 0 28px;max-width:720px}
+.hero h3{font-size:2.6rem;margin:0 0 .3em}
+@media (max-width:640px){.hero h3{font-size:2rem}}
+.rot{color:var(--wine);display:inline-block;min-width:4.5em}
+.hero .sub{font-size:1.15rem;color:var(--soft);margin:0 0 18px}
+.hero .tag{font-family:var(--serif);font-size:1.5rem;color:var(--ink);margin:-4px 0 14px}
+.get{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:7px;font-size:.9rem;display:inline-block}
+.btn.ghost{background:none;color:var(--ink);border:1px solid var(--rule)}
+.inst{font:13px var(--mono);background:var(--code-bg);color:var(--code-fg);padding:8px 12px;border-radius:7px;overflow-x:auto;white-space:nowrap;max-width:100%}
+.cost{font-size:.85rem;color:var(--faint);margin-top:10px}
+.stakes{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:.88rem;color:var(--soft);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:12px 0;margin:8px 0 8px}
+.stakes span::before{content:"·";color:var(--faint);margin-right:8px}
+.banner{border:1px solid var(--rule);background:var(--paper);border-radius:8px;padding:10px 14px;font-size:.92rem;margin:4px 0 8px}
+.banner b{color:var(--ink)}
+.sec{padding:40px 0 8px;border-top:1px solid var(--rule);margin-top:32px}
+.sec:first-of-type{border-top:0}
+.sec h4{font-family:var(--serif);font-weight:400;color:var(--ink);font-size:2rem;line-height:1.15;margin:0 0 .3em;max-width:640px}
+.sec h5{font-family:var(--serif);font-weight:400;color:var(--ink);font-size:1.4rem;margin:0 0 .2em}
+.sec .lead{font-size:1.1rem;color:var(--ink);max-width:640px}
+.sec p{max-width:640px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+@media (max-width:760px){.two,.three{grid-template-columns:1fr}}
+.num{font-family:var(--serif);color:var(--wine);font-size:1.6rem;line-height:1}
+.more{font-size:.88rem}
+.cta{text-align:center;padding:48px 0 16px}
+.cta h4{margin:0 auto .4em}
+.foot{border-top:1px solid var(--rule);padding:16px 32px;font-size:.82rem;color:var(--faint);display:flex;gap:16px;flex-wrap:wrap}
+.works{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 28px;font-size:.92rem}
+@media (max-width:640px){.works{grid-template-columns:1fr}}
+.works b{color:var(--ink);font-weight:600}
+
+/* graph editor */
+.graph{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+.graph button{font:13px var(--mono);border:1px solid var(--rule);background:var(--paper);color:var(--soft);padding:6px 11px;border-radius:999px;cursor:pointer}
+.graph button.stop{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.graph .arr{color:var(--faint);font-size:.8rem}
+.cap{font-size:.86rem;color:var(--soft)}
+
+/* conversation */
+.convo{border:1px solid var(--rule);border-radius:8px;background:var(--paper);padding:10px 12px;font-size:.86rem}
+.convo .t{color:var(--faint);font:11px var(--mono);margin-bottom:6px}
+.msg{margin:6px 0;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--rule)}
+.msg.you{border-color:transparent;background:var(--chip)}
+.msg.run{border-left:3px solid var(--run)} .msg.run b{color:var(--run)}
+.msg.wait{border-left:3px solid var(--wait)} .msg.wait b{color:var(--wait)}
+.msg.ok{border-left:3px solid var(--ok)} .msg.ok b{color:var(--ok)}
+
+/* terminal */
+.term{background:var(--code-bg);color:var(--code-fg);border-radius:8px;overflow:hidden;font:12px/1.5 var(--mono)}
+.term .tb{display:flex;gap:2px;background:#25272c;padding:4px 6px 0;overflow-x:auto}
+.term .tb span{padding:4px 10px;border-radius:5px 5px 0 0;color:#9a9ea5;white-space:nowrap}
+.term .tb span.on{background:var(--code-bg);color:#fff}
+.term .panes{display:grid;grid-template-columns:1.2fr 1fr;min-height:140px}
+.term .panes>div{padding:10px 12px;border-right:1px solid #2c2f35;white-space:pre-wrap;overflow-wrap:anywhere}
+.term .panes>div:last-child{border-right:0}
+@media (max-width:640px){.term .panes{grid-template-columns:1fr}.term .panes>div{border-right:0;border-bottom:1px solid #2c2f35}}
+.term .g{color:#8b8f96}.term .y{color:#e0b46b}.term .b{color:#7cc0e8}.term .gr{color:#7fcf98}
+
+/* desktop app mini */
+.app{border:1px solid var(--rule);border-radius:8px;background:var(--paper);font-size:.82rem;overflow:hidden}
+.app .ah{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--rule);color:var(--ink)}
+.app ul{list-style:none;margin:0;padding:6px 12px}
+.app li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--rule)}
+.app li:last-child{border-bottom:0}
+.app .st{color:var(--faint);font:11px var(--mono);white-space:nowrap}
+.app .st.w{color:var(--wait)} .app .st.r{color:var(--run)} .app .st.k{color:var(--ok)}
+
+/* stepper */
+.stepper{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap}
+.stepper button{font:13px var(--sans);border:1px solid var(--rule);background:var(--paper);color:var(--ink);padding:5px 12px;border-radius:6px;cursor:pointer}
+.stepper button:disabled{opacity:.4;cursor:default}
+.dots{display:flex;gap:5px}.dots i{width:8px;height:8px;border-radius:50%;background:var(--rule)}.dots i.on{background:var(--wine)}
+.btag{font-size:.8rem;color:var(--wine);font-weight:600}
+.prog{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0;font:12px var(--mono)}
+.prog span{padding:3px 8px;border-radius:999px;border:1px solid var(--rule);color:var(--faint)}
+.prog span.d{color:var(--ok);border-color:var(--ok)} .prog span.r{color:var(--run);border-color:var(--run)} .prog span.y{color:var(--wait);border-color:var(--wait)}
+
+/* surfaces switcher */
+.surf{display:inline-flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+.surf button{font:13px var(--sans);border:1px solid var(--rule);background:var(--paper);color:var(--soft);padding:5px 12px;border-radius:999px;cursor:pointer}
+.surf button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.surf button.soon{border-style:dashed}
+
+table{border-collapse:collapse;width:100%;font-size:.88rem;margin:10px 0}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{color:var(--ink);font-weight:600}
+td:first-child{color:var(--faint)}
+.hidden{display:none!important}
+
+ol.qs{padding-left:1.3em} ol.qs>li{margin:1em 0}
+ol.qs ol{list-style:lower-alpha;padding-left:1.3em;margin:.3em 0} ol.qs ol li{margin:.15em 0}
+</style>
+</head>
+<body class="show-new">
+
+<header class="doc col">
+<p class="meta">Homepage differentiators · explore, round 2 · 2026-11-07<br>
+Built from <code>website/home.html</code>, <code>website/content.yaml</code>, <code>README.md</code>, <code>docs/work.md</code> and the competitor reading of 2026-11-07. Design: <code>scratch/homepage-differentiators.md</code></p>
+<h1>Three full homepages</h1>
+<div class="decision">
+<p><b>Decision needed:</b> which homepage to build, or which parts of each to combine.</p>
+<p class="meta">All three keep your hero and subhead word for word. Highlighted text is new copy; everything else is already on the homepage or in the README. All three use problem line A1: “Shipping code is no longer the hard part. Scaling your attention and vision is.”</p>
+</div>
+</header>
+
+<nav class="switch" aria-label="Prototype">
+  <div class="col">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-p="p1">P1 · Craft at scale</button>
+      <button role="tab" aria-selected="false" data-p="p2">P2 · Follow one Task</button>
+      <button role="tab" aria-selected="false" data-p="p3">P3 · Factory in your terminal</button>
+      <button role="tab" aria-selected="false" data-p="p4">P4 · P3 + P1’s voice</button>
+    </div>
+    <label class="hl"><input type="checkbox" id="shownew" checked> Highlight new copy</label>
+  </div>
+</nav>
+
+<!-- ===================================================== P1 -->
+<section id="p1" class="proto">
+<div class="col proto-note">
+  <p><b>P1 · Craft at scale.</b> The page follows Warp's structure (problem, worldview, three answers), and the terminal, your logins, your team and independence close it out.</p>
+  <p class="why meta">The problem line is A1. Surfaces: the terminal first, with Desktop alongside (6a). Conductor gets no mention (2a). Independence is stated as a guarantee (8a). Cost: about a day, mostly reordering existing copy. Risk: it scans like a feature page, and it depends on the "craft" lines holding up.</p>
+</div>
+<div class="site">
+  <div class="chrome"><i></i><i></i><i></i>&nbsp;loopflow.studio</div>
+  <div class="nav"><span class="logo">Loopflow</span><span class="links"><span>For you</span><span>Docs</span><span>Company</span><span>GitHub ↗</span><span class="btn">Install</span></span></div>
+  <div class="pg">
+    <div class="hero">
+      <h3>Loopflow is how you <span class="rot" data-rot>design</span> software in harmony.</h3>
+      <p class="sub">Conduct an orchestra that conducts itself, together with your team.</p>
+      <div class="get"><span class="btn">Download for Mac</span><span class="inst">$ curl -fsSL https://loopflow.studio/install.sh | sh</span></div>
+      <p class="cost">Free and open source (MIT)</p>
+    </div>
+    <div class="stakes new">
+      <span>Parallel agents, each in its own worktree</span>
+      <span>Claude Code, Codex, OpenCode or Pi, on the logins you already pay for</span>
+      <span>Nothing hosted</span>
+      <span>Your agent can drive it</span>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Craft and intentionality, at scale.</h4>
+      <p class="lead new">Shipping code is no longer the hard part. Scaling your attention and vision is.</p>
+      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm?</p>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <span class="num">1</span>
+          <h5 class="new">Intent, written down.</h5>
+          <p><span class="new">How work gets researched, designed, built, tried and shipped is a Graph in your repo, reviewed like code. Every agent follows it.</span> Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
+        </div>
+        <div>
+          <p class="cap">Click a step to make it a stop:</p>
+          <div class="graph" data-graph>
+            <button data-s="task-design" class="stop">task-design</button><span class="arr">→</span>
+            <button data-s="design" class="stop">design</button><span class="arr">→</span>
+            <button data-s="pursue">pursue</button><span class="arr">→</span>
+            <button data-s="demo" class="stop">demo</button><span class="arr">→</span>
+            <button data-s="ship">ship</button>
+          </div>
+          <p class="cap" data-graph-cap aria-live="polite"></p>
+          <pre data-graph-yaml></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <span class="num">2</span>
+          <h5 class="new">Attention, spent where it matters.</h5>
+          <p><span class="new">Each Task keeps one conversation. Runs do the work beside it in their own worktree, and stop only where you said you want to come in.</span> You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
+        </div>
+        <div class="convo">
+          <div class="t">ETU-14 · Rent CPU pods for templates with no GPU</div>
+          <div class="msg you">CPU first. GPU only as a fallback.</div>
+          <div class="msg run"><b>implement</b> ran 41 min in <code>../etude.etu-14</code> · 6 commits</div>
+          <div class="msg">Ana: “fall back to a GPU pod when no CPU pod is free”, read before the next step</div>
+          <div class="msg wait"><b>demo</b> is waiting for you</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <span class="num">3</span>
+          <h5 class="new">Craft, kept.</h5>
+          <p><span class="new">You try every change before it ships. It lands when checks pass, and failing checks get fixed first.</span> Shipping tens of thousands of lines is the easy part; making them lines you don’t revert next month is the hard part.</p>
+        </div>
+<pre><span class="p">$</span> lf task status ETU-14
+pursue · <span class="k">demo</span> · waiting for you
+<span class="p">$</span> lf land --wait-and-fix
+<span class="c">checks: 1 failing (lint) → fixed</span>
+<span class="gr">✓</span> #31 merged</pre>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Work where you already work.</h4>
+      <p class="new">Loopflow opens each Task in Rex, cmux, Herdr, tmux or a plain terminal: a fresh tab with its splits. Or watch every Task at once in Loopflow for Mac.</p>
+      <div class="two">
+        <div class="term">
+          <div class="tb"><span>~/src/etude</span><span class="on">ETU-14 · implement</span><span>ETU-9 · design</span></div>
+          <div class="panes"><div><span class="g">$</span> lf open --task ETU-14
+<span class="g">opened in Rex: new tab, 2 splits</span>
+<span class="b">●</span> Reading scratch/etu-14.md…</div><div><span class="g">$</span> lf task status
+ETU-14 <span class="y">implement</span>
+ETU-9  <span class="y">design</span>
+ETU-11 <span class="gr">landed</span></div></div>
+        </div>
+        <div class="app">
+          <div class="ah"><b>etude</b><span class="meta">4 running · 2 waiting</span></div>
+          <ul>
+            <li><span>Rent CPU pods for templates with no GPU</span><span class="st r">implement</span></li>
+            <li><span>Compare two runs’ reward curves</span><span class="st w">demo</span></li>
+            <li><span>Resume a run after preemption</span><span class="st w">design</span></li>
+            <li><span>Split run tracking from training</span><span class="st k">landed #17</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4>It scales across your machines and your subscriptions.</h4>
+      <p>Private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out. <span class="new">Rent a machine for one Task and give it back after.</span></p>
+<pre><span class="p">$</span> lf account
+claude  you@    78% left
+claude  work@   21% left
+codex   you@    52% left
+<span class="p">$</span> lf --machine mini -b task run ETU-14
+<span class="p">$</span> lf task run ETU-15 --rent runpod-cpu</pre>
+    </div>
+
+    <div class="sec">
+      <h4>Together, with your team.</h4>
+      <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
+      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Yours, even if we disappear.</h4>
+      <p class="new">MIT, and nothing hosted. If Loopflow stopped tomorrow, your Tasks, conversations and Graphs would still be in your repo and on your machine.</p>
+    </div>
+
+    <div class="sec">
+      <h5>Works with</h5>
+      <div class="works">
+        <span><b>Claude Code · Codex · OpenCode · Pi</b>: the coding agent, on your own account</span>
+        <span><b>GitHub</b>: your code, your pull requests, and your reviewers</span>
+        <span><b>Linear</b>: the plan your team already reads, or keep it in Git</span>
+        <span><b>Rex · cmux · Herdr · tmux</b>: lf runs inside them</span>
+        <span><b>Wispr Flow</b>: talk instead of typing</span>
+      </div>
+    </div>
+    <div class="cta"><h4>Scale together.</h4><span class="btn">Download for Mac</span></div>
+  </div>
+  <div class="foot"><span>Loopflow · An open-source software instrument.</span><span>Loopflow Studio</span><span>Get started ↗</span><span>Source ↗</span></div>
+</div>
+</section>
+
+<!-- ===================================================== P2 -->
+<section id="p2" class="proto hidden">
+<div class="col proto-note">
+  <p><b>P2 · Follow one Task.</b> The middle of the page is one Task, from <code>lf task create</code> in Rex to a merged PR. Each step shows a differentiator as it happens. Underneath: what you just saw, how to teach your agent, and everything else.</p>
+  <p class="why meta">The problem line is A1. Surfaces appear inside the story. Conductor gets a banner and its own page (2b). Independence is a single line. Cost: two to three days, plus one real recorded run. Risk: slower to scan, and the story goes stale when commands change.</p>
+</div>
+<div class="site">
+  <div class="chrome"><i></i><i></i><i></i>&nbsp;loopflow.studio</div>
+  <div class="nav"><span class="logo">Loopflow</span><span class="links"><span>For you</span><span>Docs</span><span>Company</span><span>GitHub ↗</span><span class="btn">Install</span></span></div>
+  <div class="pg">
+    <div class="hero">
+      <h3>Loopflow is how you <span class="rot" data-rot>design</span> software in harmony.</h3>
+      <p class="sub">Conduct an orchestra that conducts itself, together with your team.</p>
+      <div class="get"><span class="btn">Download for Mac</span><span class="inst">$ curl -fsSL https://loopflow.studio/install.sh | sh</span></div>
+      <p class="cost">Free and open source (MIT)</p>
+    </div>
+    <div class="banner new"><b>Coming from Conductor?</b> Keep your worktrees, branches and uncommitted work, and keep your team’s plan in your own repo. <a href="#p2">Move in one command →</a></div>
+
+    <div class="sec">
+      <h4 class="new">Shipping code is no longer the hard part. Scaling your attention and vision is.</h4>
+      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. <span class="new">Here is one Task, start to finish.</span></p>
+    </div>
+
+    <div class="sec" style="border-top:0;padding-top:0">
+      <div class="stepper">
+        <button data-s3="prev" aria-label="Previous step">←</button>
+        <button data-s3="next" aria-label="Next step">→</button>
+        <span class="dots" data-s3="dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="btag" data-s3="tag" aria-live="polite"></span>
+      </div>
+      <h5 class="new" data-s3="claim"></h5>
+      <div class="prog" data-s3="prog"></div>
+      <div class="term"><div class="tb" data-s3="tabs"></div><div class="panes"><div data-s3="left"></div><div data-s3="right"></div></div></div>
+      <p class="new" data-s3="vs"></p>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">What you just saw</h4>
+      <div class="three">
+        <div><span class="num">1</span><h5>Your flow</h5><p class="new">The Graph is YAML in your repo. It stopped at design and demo because that’s where you said you come in.</p><p class="more"><a>Write a workflow ↗</a></p></div>
+        <div><span class="num">2</span><h5>One conversation</h5><p class="new">The Task kept one conversation. The run worked beside it and reported back, and Ana’s comment reached your agent.</p><p class="more"><a>Tasks and Waves ↗</a></p></div>
+        <div><span class="num">3</span><h5>Your terminal</h5><p class="new">It all happened in Rex. cmux, Herdr, tmux and Loopflow for Mac work the same way.</p><p class="more"><a>Surfaces ↗</a></p></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4>Or just ask your agent.</h4>
+          <p>The last install line teaches your own coding agent to do all of this, so you can just ask it: <em>“Split the auth cleanup into Tasks and run them with lf.”</em></p>
+        </div>
+<pre><span class="p">$</span> npx skills add loopflowstudio/loopflow \
+    --skill loopflow -g</pre>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4>What else it does</h4>
+      <table>
+        <tbody>
+          <tr><td>use every Claude and Codex login you pay for, routed to the one with room</td><td><code>lf account</code></td></tr>
+          <tr><td>run on your own machine over SSH</td><td><code>lf --machine mini -b task run &lt;ID&gt;</code></td></tr>
+          <tr><td>rent a machine for one Task and give it back after</td><td><code>lf task run &lt;ID&gt; --rent &lt;template&gt;</code></td></tr>
+          <tr><td>see what agents cost, by Task, Wave or week</td><td><code>lf history usage --weekly</code></td></tr>
+          <tr><td>keep a longer objective moving with its own memory, plan and setup</td><td><code>lf wave status</code></td></tr>
+          <tr><td>plan in Git with no tracker, or in Linear</td><td><code>lf task list</code></td></tr>
+        </tbody>
+      </table>
+      <p class="new">MIT and nothing hosted: your conversations stay on your machine, and only the plan travels.</p>
+    </div>
+
+    <div class="sec">
+      <h5>Works with</h5>
+      <div class="works">
+        <span><b>Claude Code · Codex · OpenCode · Pi</b>: on your own account</span>
+        <span><b>GitHub</b>: your code, your pull requests, and your reviewers</span>
+        <span><b>Linear</b>: or keep the plan in Git</span>
+        <span><b>Rex · cmux · Herdr · tmux</b>: lf runs inside them</span>
+      </div>
+    </div>
+    <div class="cta"><h4>Scale together.</h4><span class="btn">Download for Mac</span></div>
+  </div>
+  <div class="foot"><span>Loopflow · An open-source software instrument.</span><span class="new">From Conductor</span><span>Loopflow Studio</span><span>Source ↗</span></div>
+</div>
+</section>
+
+<!-- ===================================================== P3 -->
+<section id="p3" class="proto hidden">
+<div class="col proto-note">
+  <p><b>P3 · Factory in your terminal.</b> The page names the intersection outright: a factory's process in the shape of an agent IDE. It's ordered process first (Graphs, Waves, Tasks), then where you see the work, then a three-way contrast.</p>
+  <p class="why meta">The problem line is A1. Surfaces: "your Tasks follow you" (6b), with the phone shown as not built. Conductor gets no mention. Independence: none. Cost: about two days, since it adds Waves and the contrast. Risk: "factory" is Warp's word, and the contrast table needs upkeep.</p>
+</div>
+<div class="site">
+  <div class="chrome"><i></i><i></i><i></i>&nbsp;loopflow.studio</div>
+  <div class="nav"><span class="logo">Loopflow</span><span class="links"><span>For you</span><span>Docs</span><span>Company</span><span>GitHub ↗</span><span class="btn">Install</span></span></div>
+  <div class="pg">
+    <div class="hero">
+      <h3>Loopflow is how you <span class="rot" data-rot>design</span> software in harmony.</h3>
+      <p class="tag new">Your software factory, in your own terminal.</p>
+      <p class="sub">Conduct an orchestra that conducts itself, together with your team.</p>
+      <div class="get"><span class="btn">Download for Mac</span><span class="inst">$ curl -fsSL https://loopflow.studio/install.sh | sh</span></div>
+      <p class="cost">Free and open source (MIT)</p>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Shipping code is no longer the hard part. Scaling your attention and vision is.</h4>
+      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes.</p>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4 class="new">Your process, as code.</h4>
+          <p>A Task’s workflow is a Graph: a YAML list of Skills, and a Skill is a Markdown file, both in your repository and reviewed like code. Each step can name its own agent. A step marked <code>interactive:</code> is where a person takes part.</p>
+        </div>
+        <div>
+<pre><span class="c">&lt;!-- .lf/skills/audit.md --&gt;</span>
+Audit auth changes on this branch. Fix missing
+validation and untested paths.
+
+<span class="c"># .lf/graphs/ship-api.yaml</span>
+- interactive: design
+- implement
+- audit
+- gate</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4 class="new">Areas of work with their own defaults.</h4>
+          <p>A Wave is an area of work with its own goal, memory and plan, and its own setup for every Task in it: the Graph, the agent, the machine and the login that pays.</p>
+        </div>
+        <div>
+<pre><span class="c"># .lf/wave/infrastructure/config.yaml</span>
+graph: auto     <span class="c"># request to merged PR, without you</span>
+agent: claude:opus
+<span class="p">$</span> lf --wave infrastructure set machine mini
+<span class="p">$</span> lf wave status infrastructure</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Tasks, not panes.</h4>
+      <div class="three">
+        <div><h5>One conversation</h5><p>A persistent chat thread where everything about the Task goes. It outlives terminals and crashes.</p></div>
+        <div><h5>A workflow</h5><p>The Graph it runs, each step in the Task’s own worktree and branch.</p></div>
+        <div><h5>Its own pull request</h5><p>Branch and tracker issue, kept together, with every run and what it cost.</p></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Your Tasks follow you.</h4>
+      <p class="new">The same Task and the same conversation, wherever you open them.</p>
+      <div class="surf" role="group" aria-label="Surface">
+        <button aria-pressed="true" data-surf="rex">Rex</button>
+        <button aria-pressed="false" data-surf="cmux">cmux</button>
+        <button aria-pressed="false" data-surf="mac">Loopflow for Mac</button>
+        <button aria-pressed="false" data-surf="phone" class="soon">Phone (not built yet)</button>
+      </div>
+      <div data-surf-view="rex" class="term"><div class="tb"><span>~/src/etude</span><span class="on">ETU-14 · demo</span></div><div class="panes"><div><span class="g">$</span> lf open --task ETU-14
+<span class="g">opened in Rex: new tab, 2 splits</span>
+<span class="b">●</span> implement finished: PR #31. Try it:
+  uv run etude rent --template cpu-small</div><div><span class="g">$</span> lf task status ETU-14
+pursue · <span class="y">demo</span> · waiting for you</div></div></div>
+      <div data-surf-view="cmux" class="term hidden"><div class="tb"><span>cmux</span><span class="on">etude ▸ ETU-14</span></div><div class="panes"><div><span class="g">$</span> lf open --task ETU-14
+<span class="g">opened in cmux: workspace etude, 2 panes</span>
+<span class="b">●</span> implement finished: PR #31. Try it.</div><div><span class="g">notification</span>
+ETU-14 needs you: demo</div></div></div>
+      <div data-surf-view="mac" class="app hidden"><div class="ah"><b>ETU-14 · Rent CPU pods for templates with no GPU</b><span class="st w">demo</span></div><ul><li><span>implement finished: 6 commits, PR #31</span><span class="st k">done</span></li><li><span>Ana: “fall back to a GPU pod when no CPU pod is free”</span><span class="st">comment</span></li><li><span>Try it: uv run etude rent --template cpu-small</span><span class="st w">waiting</span></li></ul></div>
+      <div data-surf-view="phone" class="app hidden"><div class="ah"><b>Phone</b><span class="st">not built</span></div><ul><li><span>The iOS app is in progress. The page would show it only once it ships.</span><span class="st"></span></li></ul></div>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">An IDE and a factory in one.</h4>
+      <table>
+        <thead><tr><th></th><th>Agent IDE</th><th>Cloud factory</th><th>Loopflow</th></tr></thead>
+        <tbody class="new">
+          <tr><td>Your process</td><td>Prompts in a pane</td><td>A config in their cloud</td><td>Graphs and Skills in your repo</td></tr>
+          <tr><td>Where it runs</td><td>Your laptop</td><td>Their cloud or your VPC</td><td>Your terminal, your machines, rented ones</td></tr>
+          <tr><td>Who pays</td><td>Your subscription</td><td>Per agent run</td><td>Every login you have, routed to the one with room</td></tr>
+          <tr><td>Your team’s plan</td><td>Their cloud</td><td>Their cloud</td><td>A Git ref in your repo, or Linear</td></tr>
+          <tr><td>If the company goes away</td><td>You move</td><td>You move</td><td>Nothing moves: it’s MIT and it’s all yours</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h5>Works with</h5>
+      <div class="works">
+        <span><b>Claude Code · Codex · OpenCode · Pi</b>: on your own account</span>
+        <span><b>GitHub</b>: your code, your pull requests, and your reviewers</span>
+        <span><b>Linear</b>: or keep the plan in Git</span>
+        <span><b>Rex · cmux · Herdr · tmux</b>: lf runs inside them</span>
+      </div>
+    </div>
+    <div class="cta"><h4>Scale together.</h4><span class="btn">Download for Mac</span></div>
+  </div>
+  <div class="foot"><span>Loopflow · An open-source software instrument.</span><span>Loopflow Studio</span><span>Source ↗</span></div>
+</div>
+</section>
+
+<!-- ===================================================== P4 -->
+<section id="p4" class="proto hidden">
+<div class="col proto-note">
+  <p><b>P4 · P3’s structure, P1’s voice.</b> P3’s order (process first, then Waves, Tasks, your terminal, an IDE and a factory in one), with the body copy taken from your own homepage lines wherever one fits. The new copy is mostly headings.</p>
+  <p class="why meta">Problem line A1. Surfaces: your terminal plus Mac, with no phone. Conductor: no mention. Independence as a guarantee. Cost: about two days. Risk: it’s the longest of the four, since the personal lines are longer than P3’s.</p>
+</div>
+<div class="site">
+  <div class="chrome"><i></i><i></i><i></i>&nbsp;loopflow.studio</div>
+  <div class="nav"><span class="logo">Loopflow</span><span class="links"><span>For you</span><span>Docs</span><span>Company</span><span>GitHub ↗</span><span class="btn">Install</span></span></div>
+  <div class="pg">
+    <div class="hero">
+      <h3>Loopflow is how you <span class="rot" data-rot>design</span> software in harmony.</h3>
+      <p class="tag new">Your software factory, in your own terminal.</p>
+      <p class="sub">Conduct an orchestra that conducts itself, together with your team.</p>
+      <div class="get"><span class="btn">Download for Mac</span><span class="inst">$ curl -fsSL https://loopflow.studio/install.sh | sh</span></div>
+      <p class="cost">Free and open source (MIT)</p>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Shipping code is no longer the hard part. Scaling your attention and vision is.</h4>
+      <p>Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
+      <p class="lead new">Craft and intentionality, at scale.</p>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4 class="new">Your process, as code.</h4>
+          <p>Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither.</p>
+          <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
+        </div>
+        <div>
+          <p class="cap">Click a step to make it a stop:</p>
+          <div class="graph" data-graph>
+            <button data-s="task-design" class="stop">task-design</button><span class="arr">→</span>
+            <button data-s="design" class="stop">design</button><span class="arr">→</span>
+            <button data-s="pursue">pursue</button><span class="arr">→</span>
+            <button data-s="demo" class="stop">demo</button><span class="arr">→</span>
+            <button data-s="ship">ship</button>
+          </div>
+          <p class="cap" data-graph-cap aria-live="polite"></p>
+          <pre data-graph-yaml></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4 class="new">Areas of work with their own defaults.</h4>
+          <p>Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes.</p>
+          <p>A Wave is an area of work with its own goal, memory and plan, and its own setup for every Task in it: the Graph, the agent, the machine and the login that pays.</p>
+        </div>
+<pre><span class="c"># .lf/wave/infrastructure/config.yaml</span>
+graph: auto     <span class="c"># request to merged PR, without you</span>
+agent: claude:opus
+<span class="p">$</span> lf --wave infrastructure set machine mini
+<span class="p">$</span> lf wave status infrastructure</pre>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="two">
+        <div>
+          <h4 class="new">Tasks, not panes.</h4>
+          <p>You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
+          <p>Each Task has one conversation, a workflow, and its own pull request, branch and tracker issue, kept together. Runs do the work beside the conversation; their results come back to the session the work lives in.</p>
+        </div>
+        <div class="convo">
+          <div class="t">ETU-14 · Rent CPU pods for templates with no GPU</div>
+          <div class="msg you">CPU first. GPU only as a fallback.</div>
+          <div class="msg run"><b>implement</b> ran 41 min in <code>../etude.etu-14</code> · 6 commits</div>
+          <div class="msg">Ana: “fall back to a GPU pod when no CPU pod is free”, read before the next step</div>
+          <div class="msg wait"><b>demo</b> is waiting for you</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">Your terminal, or ours.</h4>
+      <p class="new">Loopflow opens each Task in Rex, cmux, Herdr, tmux or a plain terminal: a fresh tab with its splits. Or watch every Task at once in Loopflow for Mac.</p>
+      <div class="two">
+        <div class="term">
+          <div class="tb"><span>~/src/etude</span><span class="on">ETU-14 · implement</span><span>ETU-9 · design</span></div>
+          <div class="panes"><div><span class="g">$</span> lf open --task ETU-14
+<span class="g">opened in Rex: new tab, 2 splits</span>
+<span class="b">●</span> Reading scratch/etu-14.md…</div><div><span class="g">$</span> lf task status
+ETU-14 <span class="y">implement</span>
+ETU-9  <span class="y">design</span>
+ETU-11 <span class="gr">landed</span></div></div>
+        </div>
+        <div class="app">
+          <div class="ah"><b>etude</b><span class="meta">4 running · 2 waiting</span></div>
+          <ul>
+            <li><span>Rent CPU pods for templates with no GPU</span><span class="st r">implement</span></li>
+            <li><span>Compare two runs’ reward curves</span><span class="st w">demo</span></li>
+            <li><span>Resume a run after preemption</span><span class="st w">design</span></li>
+            <li><span>Split run tracking from training</span><span class="st k">landed #17</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h4>Together, with your team.</h4>
+      <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
+      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
+    </div>
+
+    <div class="sec">
+      <h4 class="new">An IDE and a factory in one.</h4>
+      <table>
+        <thead><tr><th>From an agent IDE</th><th>From a factory</th></tr></thead>
+        <tbody class="new">
+          <tr><td style="color:inherit">Parallel agents, each in its own worktree</td><td>Your process as code: Graphs and Skills in your repo</td></tr>
+          <tr><td style="color:inherit">Your terminal, your laptop, your machines</td><td>Stops where a person comes in; the rest runs on its own</td></tr>
+          <tr><td style="color:inherit">Claude Code, Codex, OpenCode or Pi, on the logins you already pay for</td><td>Areas of work with their own goals, memory and defaults</td></tr>
+        </tbody>
+      </table>
+      <p class="new">And from neither: nothing hosted. If Loopflow stopped tomorrow, your Tasks, conversations and Graphs would still be in your repo and on your machine.</p>
+    </div>
+
+    <div class="sec">
+      <h5>Works with</h5>
+      <div class="works">
+        <span><b>Claude Code · Codex · OpenCode · Pi</b>: the coding agent, on your own account</span>
+        <span><b>GitHub</b>: your code, your pull requests, and your reviewers</span>
+        <span><b>Linear</b>: the plan your team already reads, or keep it in Git</span>
+        <span><b>Rex · cmux · Herdr · tmux</b>: lf runs inside them</span>
+        <span><b>Wispr Flow</b>: talk instead of typing</span>
+      </div>
+    </div>
+    <div class="cta"><h4>Scale together.</h4><span class="btn">Download for Mac</span></div>
+  </div>
+  <div class="foot"><span>Loopflow · An open-source software instrument.</span><span>Loopflow Studio</span><span>Source ↗</span></div>
+</div>
+</section>
+
+<section class="col" style="padding-bottom:80px">
+<h2>Questions</h2>
+<p class="meta">Recommendation: P1's structure with P2's "What you just saw" story added below the three answers. P1 scans the fastest, and the story is what nobody else in the category shows.</p>
+<ol class="qs">
+  <li>Which homepage?
+    <ol><li>P1 · Craft at scale</li><li>P2 · Follow one Task</li><li>P3 · Factory in your terminal</li><li>P1, with P2’s story added under the three answers</li><li>P1, with P3’s contrast table</li><li>P4 · P3’s structure in P1’s voice</li></ol></li>
+  <li>The basics (parallel worktrees, your logins, nothing hosted, your agent drives it):
+    <ol><li>README only: reorder its “What else it does” table so those rows come first (sketch in the design doc), and drop P1’s strip under the hero</li><li>README, plus the one-line strip under the hero</li><li>Homepage only</li></ol></li></ol></li>
+  <li>“Your software factory, in your own terminal” under the hero (P3):
+    <ol><li>Use it</li><li>No: “factory” is Warp’s word</li><li>Same slot, different words</li></ol></li>
+  <li>Conductor: <ol><li>No mention (P1, P3)</li><li>Banner plus a page (P2)</li></ol></li>
+  <li>Independence: <ol><li>As a guarantee (P1: “Yours, even if we disappear”)</li><li>A single line (P2)</li></ol></li>
+</ol>
+</section>
+
+<script>
+// prototype tabs
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
+  document.querySelectorAll('.proto').forEach(p=>p.classList.toggle('hidden',p.id!==b.dataset.p));
+});
+document.getElementById('shownew').onchange=e=>document.body.classList.toggle('show-new',e.target.checked);
+
+// rotating hero verb (existing behavior)
+(function(){const v=['design','implement','demo','release','study'];let i=0;
+  setInterval(()=>{i=(i+1)%v.length;document.querySelectorAll('[data-rot]').forEach(el=>el.textContent=v[i]);},1800);})();
+
+// graph editor
+document.querySelectorAll('[data-graph]').forEach(g=>{
+  const root=g.parentElement, cap=root.querySelector('[data-graph-cap]'), y=root.querySelector('[data-graph-yaml]');
+  function render(){
+    const steps=[...g.querySelectorAll('button')];
+    steps.forEach(b=>b.setAttribute('aria-pressed',b.classList.contains('stop')));
+    const stops=steps.filter(b=>b.classList.contains('stop')).map(b=>b.dataset.s);
+    cap.textContent=stops.length?'You come in at: '+stops.join(', ')+'. Everything else runs on its own.':'No stops: request to merged PR without you.';
+    y.textContent='# .lf/graphs/feature.yaml\n'+steps.map(b=>(b.classList.contains('stop')?'- interactive: ':'- ')+b.dataset.s).join('\n');
+  }
+  g.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;b.classList.toggle('stop');render();});
+  render();
+});
+
+// P2 story stepper
+(function(){
+  const q=k=>document.querySelector('[data-s3="'+k+'"]');
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const steps=['task-design','design','pursue','demo','ship'];
+  const beats=[
+    {tag:'1 of 5 · Your terminal',claim:'You file the work from the terminal you already use.',prog:{},tabs:['~/src/etude'],
+     left:'<span class="g">$</span> lf task create "rent CPU pods for templates with no GPU" --run\n<span class="g">ETU-14 · Graph feature · worktree ../etude.etu-14</span>\n<span class="g">opened in Rex: new tab</span>',
+     right:'<span class="g"># or ask your agent:\n# "file this as a Task and run it"</span>',vs:'No app to move into. Loopflow opens the Task where you already work.'},
+    {tag:'2 of 5 · The flow you wrote',claim:'The Task runs your Graph and stops where you said you come in.',prog:{y:1,d:[0]},tabs:['~/src/etude','ETU-14 · design'],
+     left:'<span class="g">$</span> claude\n<span class="b">●</span> Two approaches in scratch/etu-14.md. Which?\n<span class="g">&gt;</span> CPU first, GPU only as fallback',
+     right:'<span class="g"># .lf/graphs/feature.yaml</span>\n- interactive: task-design\n- interactive: design\n- pursue\n- interactive: demo\n- ship',vs:'The Graph is YAML in your repo, reviewed like code. Change the stops, and every Task that uses it follows.'},
+    {tag:'3 of 5 · Work beside the conversation',claim:'You close the laptop. The run works in its own worktree, outside your context.',prog:{r:2,d:[0,1]},tabs:['~/src/etude','ETU-14 · implement'],
+     left:'<span class="g">pursue · implement · ../etude.etu-14</span>\n<span class="gr">✓</span> 6 commits\n<span class="gr">✓</span> tests pass\n<span class="g">on mini · billed to work@</span>',
+     right:'<span class="g">Ana, on ETU-14:</span>\n<span class="y">"fall back to a GPU pod when no\nCPU pod is free"</span>\n<span class="g">↳ read before the next step</span>',vs:'Runs do the work. A teammate’s comment reaches your agent without anyone joining your chat.'},
+    {tag:'4 of 5 · Back to one conversation',claim:'The result comes back to the one place you talk about this Task.',prog:{y:3,d:[0,1,2]},tabs:['~/src/etude','ETU-14 · demo'],
+     left:'<span class="g">$</span> lf resume --task ETU-14\n<span class="b">●</span> implement finished: PR #31\n<span class="b">●</span> Ana’s fallback is in. Try it:\n  uv run etude rent --template cpu-small',
+     right:'<span class="g">$</span> lf history usage --task ETU-14\n3 sessions · 412k tokens · $4.18',vs:'The same conversation, a day later, from any terminal. It outlived the window, the run and the crash.'},
+    {tag:'5 of 5 · Merged',claim:'You try it and say ship. It lands when checks pass, after fixing any that fail.',prog:{d:[0,1,2,3,4]},tabs:['~/src/etude','ETU-14 · ship'],
+     left:'<span class="g">$</span> lf land --wait-and-fix\n<span class="g">checks: 1 failing (lint)</span> → fixed\n<span class="gr">✓</span> #31 merged',
+     right:'<span class="g">$</span> lf task status ETU-14\n<span class="gr">done</span> · landed #31',vs:'One Task, one conversation, one worktree, one PR. Run as many at once as you have logins for.'}
+  ];
+  let i=0;
+  function render(){const b=beats[i];
+    q('tag').textContent=b.tag;q('claim').textContent=b.claim;q('vs').textContent=b.vs;
+    q('left').innerHTML=b.left;q('right').innerHTML=b.right;
+    q('tabs').innerHTML=b.tabs.map((t,k)=>'<span'+(k===b.tabs.length-1?' class="on"':'')+'>'+esc(t)+'</span>').join('');
+    const p=b.prog,d=p.d||[];
+    q('prog').innerHTML=steps.map((s,k)=>'<span class="'+(d.includes(k)?'d':p.r===k?'r':p.y===k?'y':'')+'">'+s+'</span>').join('');
+    [...q('dots').children].forEach((el,k)=>el.classList.toggle('on',k===i));
+    q('prev').disabled=i===0;q('next').disabled=i===beats.length-1;}
+  q('prev').onclick=()=>{if(i>0){i--;render();}};
+  q('next').onclick=()=>{if(i<beats.length-1){i++;render();}};
+  render();
+})();
+
+// P3 surfaces
+document.querySelectorAll('[data-surf]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('[data-surf]').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  document.querySelectorAll('[data-surf-view]').forEach(v=>v.classList.toggle('hidden',v.dataset.surfView!==b.dataset.surf));
+});
+</script>
+</body>
+</html>

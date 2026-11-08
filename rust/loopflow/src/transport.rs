@@ -950,6 +950,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut execution_directory_reported = false;
     let mut planning = None;
+    let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
     loop {
         #[cfg(test)]
         input_retry_tests::poll();
@@ -1308,6 +1309,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if detached {
             control = None;
         }
+        if let Some(name) = title.as_mut().and_then(|title| title.tick()) {
+            output.title(&name);
+        }
         if let Some(input) = input.as_mut() {
             // Typing at an idle shell prompt is not an agent draft: retain only
             // input that work running inside the shell could receive.
@@ -1562,6 +1566,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(pending_input.retry_at())
+            .chain(title.as_ref().map(|title| title.deadline()))
             .chain(settling.as_ref().and_then(Settling::deadline))
             .min();
         wait_for_activity(
@@ -1738,10 +1743,15 @@ fn deliver(
     }
     let replies = output.process(stream, bytes, detached);
     pending_input.push(&replies);
+    let reports = output.take_reports();
     viewers.retain_mut(|viewer| {
         !viewer.attached || {
             let written = viewer
                 .stream(Tag::stream(stream), bytes)
+                .and_then(|()| match &reports {
+                    Some(reports) => viewer.stream(Tag::Out, reports),
+                    None => Ok(()),
+                })
                 .and_then(|()| viewer.flush());
             keep(viewer, written)
         }

@@ -26,3 +26,11 @@ launch, matching main's background Task conversation startup.
 (with inherited LF variables unset and stdin closed): 1 passed; linker warned
 that the unwind table exceeds 16 MiB. Full checks remain with gate/CI.
 No push from the conflict resolver; the waiting sync owns publication.
+
+
+2026-11-08 realignment: `lf sync --manual` completed against
+`95c17782a2dfd782a707f2a9beac6fe8cbdf9be3` (#1852) as merge `e2028e1bb`.
+No conflicts; the Work observation backoff and Swift guidance coexist with
+creation presentation. `git merge-base --is-ancestor origin/main HEAD`: passed.
+No runtime checks rerun for the conflict-free merge; final-tree Swift recovery
+checks remain with gate. This sync stayed local.

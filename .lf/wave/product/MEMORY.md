@@ -923,10 +923,13 @@ migration and native trial limits:
 
 Creation recovery keeps only immutable submitted identity, original destination,
 exact versioned payload and submission time on the client. Server receipts own
-outcomes. Lookup failure is not absence; an interrupted launch never authorizes
-another launch. Receipt retention cannot make old identities reusable. Work
-readings, terminal recovery and provider conversation transitions remain separate.
-Displayed recovery never grants input, geometry or provider-launch authority.
+outcomes and derive complete/continue/inspect; handlers recheck under request
+locks. Clear submissions after mounted presentation, including promotion and cold
+recovery, never on replies alone. Failed removal repeats lookup safely. Lookup
+failure is not absence; interrupted launches/stops never authorize repetition.
+Retained receipts cannot revive removed resources or reuse identities. Work,
+terminal and provider recovery stay separate; display grants no input, geometry
+or provider-launch authority.
 
 Reservations must survive cancellation while blocking construction or mutations
 continue; counting queued bytes alone misses pending producers. LOO-810's

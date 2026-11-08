@@ -445,9 +445,9 @@ correlated to this creation can settle that outcome; another current Graph is
 insufficient. Recovery never launches again across that uncertainty.
 
 `session.new` records its stop and new-thread admission against the same request.
-A recovered admitted request returns its recorded Session without stopping
-anything again. An interrupted stop or input append must be reconciled against
-that attempt; it cannot stop a newer process or append duplicate input.
+A completed retry returns the current record for the same Session without
+stopping anything again. An interrupted stop or input append must be reconciled
+against that attempt; it cannot stop a newer process or append duplicate input.
 
 `creation.get` is read-only. It returns the receipt with a derived `disposition`
 and human-readable `explanation`, or `null` for confirmed absence. `complete`

@@ -33,7 +33,7 @@ Gate retains the merged-tree served-operation/schema checks and native demo
 review. The implementation plan records focused checks and remaining acceptance.
 
 The audit edits are checkpointed with the implementation. The recorded route
-and command checks apply to the candidate before the latest server-only sync;
+and command checks precede the latest Task-startup and observation-backoff merges;
 the final gate covers the resulting tree.
 
 Presentation iteration, 2026-11-08: creation guides and protocol/Swift references

@@ -139,72 +139,52 @@ Remaining acceptance belongs to gate and demo:
 - Budget constants remain provisional; no RSS or latency improvement is claimed.
   No product decision is missing before those checks.
 
-### Concept review · 2026-11-08 · next implement direction
+### Presentation lifecycle · reconciled 2026-11-08
 
-Keep C's immutable records. Recovery is the unfinished part of presenting a
-submitted creation, not a second action required after every successful creation.
-This follows the stated direction that server receipts own outcomes and local
-records are removed after presenting the result; it adds no product choice.
+The November 8 concept review found that successful submissions survived until
+recovery Dismiss, Desktop inferred continuation from milestones, and an
+interrupted Session stop displayed start uncertainty. The implemented correction
+keeps C's immutable records and server-owned outcomes.
 
-The normal interaction is **Submit → see the Task or Session**. Retire that
-request's saved record after its result is presented, including Session-to-Task
-promotion. Carry submission identity through the existing result/presentation
-path without changing the shared creation result into a client lifecycle record.
-Do not remove on socket success alone: decoding, navigation or app exit may still
-prevent presentation. Failed removal may repeat recovery safely. Cold startup
-uses the same completion path; unresolved effects retain Inspect.
+The normal interaction is **Submit → see the Task or Session**. Submission
+identity follows the result into the mounted Task workspace or Session pane,
+including promotion. A reply or navigation request alone does not clear it.
+Cold recovery offers **Show result** and clears the saved request only after
+successfully displaying the recovered resource. Failed removal retains recovery;
+failed lookup or an unavailable original Machine sends nothing.
 
-The largest mismatch in the current source is that `presented` is called only
-by recovery's Dismiss action. Ordinary success therefore leaves a submission
-that later appears as “Recovered … · admitted”. In addition, `reconcile` infers
-safe continuation from `run`, milestone strings and result presence, while
-`refresh` separately infers settlement. The shared operation should own that
-decision once.
+`creation.get` derives `complete`, `continue` or `inspect` from the receipt and
+current resource in one read snapshot. The draft migration retains original run
+intent; it adds no stored disposition. Creation handlers recheck under the request
+lock. Desktop sends saved bytes only on confirmed absence or `continue`, presents
+`complete`, and retains `inspect`; it no longer decides from milestone strings.
+Interrupted launches say **Task created; start unconfirmed**; interrupted Session
+stops say **Conversation change unconfirmed**. Removed resources remain inspectable
+without recreation. Superseded Session input cannot continue an older change;
+already-published input can finish its receipt without republishing.
 
-**Shared API:** `creation.get` returns a derived
-recovery disposition alongside its receipt: `complete`, `continue`, or
-`inspect`. `null` still means confirmed absence. Derive it in Rust from the
-operation's receipt and required current-resource checks; persist no new outcome
-column and no client outcome fields. If the original request's run intent is
-needed, retain that fact with the server receipt in the existing draft migration.
-The server's creation handler rechecks every continuation under its existing
-request lock; a lookup never grants permission to repeat an uncertain effect.
-Desktop sends the saved bytes only for confirmed absence or `continue`, presents
-`complete`, and retains `inspect`. Remove its milestone-based retry/settlement
-branches. Update the schema and Rust/Swift fixtures together.
+Focused lifecycle, removal/lookup failure, destination, removed-resource and
+superseded-input checks passed as recorded below. They do not establish the
+composed native workflow. Demo still needs ordinary New Task and promotion
+without a recovery chore, quit-before-answer recovery, and an interrupted
+conversation change with truthful Inspect text. No product choice is open.
 
-Expose the operation's meaning in recovery text: **Task created; start
-unconfirmed** for `run_requested`; **Conversation change unconfirmed** for an
-interrupted `session.new` stop. Do not describe stopping as an unconfirmed start,
-or show `filed`/`admitted` as the explanation. Keep raw receipt details available
-for inspection. A removed resource remains identifiable through its receipt;
-show its absence without recreating it. No new launch or takeover action belongs
-in this recovery surface.
+The original review and implementation direction remain at
+`ce571a5a4:scratch/loo-810-server-contracts.md`, **Concept review**.
 
-Proposed usage text for the existing creation-recovery docs:
+### Upstream integration · 2026-11-08
 
-> Submit once. When the Task or conversation appears, the saved submission is
-> cleared. If Desktop closes before showing the result, reopening recovers it on
-> the original Machine. An unconfirmed change stays available to Inspect;
-> recovery does not repeat an uncertain launch or stop.
+Main's Task conversation startup (`da7e82310`, #1844) starts the conversation
+beside the Graph. Creation now prepares the first input before launching, so
+startup cannot race ahead of the submitted prompt. The merged-tree first-turn
+check passed; the sync record retains its command and linker warning.
 
-Existing agent guidance to inspect uncertain writes remains sufficient; no new
-skill or generic retry instruction is needed. Work snapshots, terminal claims,
-provider transitions and output budgets retain their current design.
-
-Counterexamples for implement/gate: normal success must leave no redundant
-recovery notice; exit after a reply but before presentation must retain the
-request; failed removal may repeat only presentation/lookup for a complete
-receipt; failed lookup or another Machine never sends; a removed resource never
-returns to life; interrupted launch/stop stays inspectable; safe local
-continuation must reuse the exact request and stop if newer Session input has
-superseded it. Verify these through the presentation owner as well as the
-submission actor. No runtime checks ran in this concept review.
-
-Next show: ordinary New Task without a recovery chore, then quit-before-answer
-recovery and an interrupted conversation change with truthful Inspect text.
-Outcome for loop-or-next: **design changed; iterate to implement**. No open
-product choice.
+Main's observation recovery (`95c17782a`, #1852) resets reconnect backoff only
+after sustained healthy Work observation. It merged without conflicts as
+`e2028e1bb`. This governs reopening Work observations; submitted-creation lookup
+retains its separate owner and cannot infer permission to repeat effects from
+connection health. Final-tree gate includes the new retry suite alongside the
+creation and protocol suites. Neither integration changes the sleep/wake demo.
 
 ## Implementation contract
 
@@ -295,9 +275,9 @@ Every other write keeps "admitted mutations finish; a lost answer is
   `outcome_unknown {task, milestone: "run_requested"}`, and the client inspects
   the Task. Never a second launch from a receipt that cannot say what happened.
 - **`session.new`:** records `stopping` before `stop_session_agent`, then the
-  new artifact key with `admitted`. A retry at `admitted` returns the recorded
-  `SessionRecord` without stopping anything. Reserve the artifact identity and
-  record input advancement atomically with the receipt. At an interrupted stop
+  new artifact key with `admitted`. A completed retry returns the current
+  `SessionRecord` for that same Session without stopping anything. Reserve the
+  artifact identity and record input advancement atomically with the receipt. At an interrupted stop
   or append, reconcile that exact attempt; never stop a newer process or append
   another input because a receipt is incomplete.
 - **Receipt lookup:** a read-only shared protocol operation returns the recorded
@@ -312,7 +292,8 @@ Every other write keeps "admitted mutations finish; a lost answer is
   resubmit the identical request only on confirmed absence or a server-declared
   safe continuation. Retain unknown outcomes for inspection; never guess that an
   interrupted external effect is safe to repeat. Remove the local record only
-  after reconciliation is presented; failed removal repeats lookup safely.
+  after the normal or recovered result is presented; failed removal repeats
+  lookup safely.
   Multiple windows share one recovery owner. Storage failure keeps the form and
   reports the error before send. Delete `TaskCreateRunFailed` stdout parsing.
 - The shared functions own receipts (`engine::creation::create`,
@@ -476,14 +457,18 @@ Gate owns affected suites and the complete terminal acceptance set:
 `exact_owner_refuses_a_replacement_while_session_attach_finds_it`,
 `a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live`, and
 the stale-socket case above. It also owns merged-frontier migration checks and
-CLI/server parity across the remaining Work operations. The grace test uses
-61 seconds of production time. Mac sleep and quit/reopen remain demo/review.
+CLI/server parity across the remaining Work operations. Final-tree Swift checks
+include `WorkObservationRetryTests` and the affected WorkModel recovery tests
+from #1852. The grace test uses 61 seconds of production time.
+Mac sleep and quit/reopen remain demo/review.
 
 ## Done when
 
 The README states each row's contract beside its code; the flood test shows
 bounded retained bytes and honest `busy` refusals; a dropped New Task resend
-files one Task, including after Desktop restarts; saved client requests contain
+files one Task, including after Desktop restarts; normal, promoted and
+cold-recovered results retire their saved requests only after presentation;
+saved client requests contain
 no duplicated outcome state; unknown launches stay inspectable; the five terminal
 cases pass with claim and geometry assertions; every provider-changing operation records retained, resumed,
 forked or started, and Desktop's connection row shows it.
@@ -520,3 +505,11 @@ Gate retains the full terminal set, merged-frontier migration/parity suites and
 Clippy on this final tree. Physical sleep/wake and quit/reopen with a configured
 provider remain demo checks. Existing Product memory edits were not changed in
 this implementation iteration.
+
+Presentation realignment: code inspection confirms mounted-result cleanup and
+shared recovery dispositions; the stale next-implement section is replaced above.
+Product GOAL and MEMORY were read in full; no immediate child Wave directories
+exist. Memory now carries the presentation/removal lesson. Runtime checks were
+not repeated for these prose changes or the conflict-free #1852 merge.
+`git diff --check` passed; `lf context` reports Product memory and scratch below
+both configured limits after reconciliation.

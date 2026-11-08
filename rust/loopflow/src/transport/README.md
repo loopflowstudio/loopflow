@@ -24,6 +24,12 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
 but never answers reads `detached` too.
 
+`lf session rename SESSION 'Resume repair'` updates the attached terminal title,
+including Rex and other terminals that support OSC titles. Reattaching shows the
+current name. Updates wait for complete provider control sequences; slow name
+lookups leave input and output running. cmux tabs and tmux windows also follow the
+Session name, while cmux workspaces keep their Task name or a hand-edited name.
+
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn, pending request

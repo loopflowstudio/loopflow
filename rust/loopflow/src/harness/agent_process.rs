@@ -1011,6 +1011,8 @@ mod tests {
             let _ = child.kill();
             child.wait().unwrap();
             stopped.unwrap();
+            let retained = store.session(&session.id).unwrap().unwrap();
+            assert_eq!(retained.completed_at, None, "a move continues the Session");
             assert_eq!(
                 store
                     .attachment_departure(&session.id, &attachment)

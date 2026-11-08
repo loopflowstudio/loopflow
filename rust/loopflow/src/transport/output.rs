@@ -21,6 +21,7 @@ pub(super) struct Terminal {
     terminal: ghostty_vt::Terminal,
     pending_reports: Vec<u8>,
     directory: Option<Vec<u8>>,
+    title: Option<String>,
 }
 
 impl Output {
@@ -30,6 +31,7 @@ impl Output {
                 terminal: ghostty_vt::Terminal::new(80, 24).context("Open the owner's terminal")?,
                 pending_reports: Vec::new(),
                 directory: None,
+                title: None,
             })))
         } else {
             Ok(Self::Pipes {
@@ -58,6 +60,9 @@ impl Output {
             terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
         if let Some(directory) = &terminal.directory {
             bytes.extend(directory);
+        }
+        if let Some(title) = &terminal.title {
+            bytes.extend(title_report(title));
         }
         bytes.extend(terminal.terminal.program_status().replay());
         bytes.extend(
@@ -158,14 +163,33 @@ impl Output {
         }
     }
 
+    pub fn title(&mut self, title: &str) {
+        let Self::Terminal(terminal) = self else {
+            return;
+        };
+        terminal.title = Some(title.chars().filter(|ch| !ch.is_control()).collect());
+    }
+
     pub fn take_reports(&mut self) -> Option<Vec<u8>> {
         let Self::Terminal(terminal) = self else {
             return None;
         };
-        if terminal.pending_reports.is_empty() || !terminal.terminal.at_ground() {
+        if !terminal.terminal.at_ground() {
             return None;
         }
-        let reports = std::mem::take(&mut terminal.pending_reports);
+        // The Session owns its title even when a provider publishes an older
+        // launch-time name. Compare parsed state, without another OSC parser.
+        let title = terminal
+            .title
+            .as_deref()
+            .filter(|title| terminal.terminal.title().unwrap_or_default() != *title);
+        if terminal.pending_reports.is_empty() && title.is_none() {
+            return None;
+        }
+        let mut reports = std::mem::take(&mut terminal.pending_reports);
+        if let Some(title) = title {
+            reports.extend(title_report(title));
+        }
         // Reduce lf reports at the same stream boundary where viewers receive
         // them, through the same parser as native provider reports.
         terminal.terminal.write(&reports);
@@ -179,6 +203,10 @@ impl Output {
             Self::Pipes { .. } => None,
         }
     }
+}
+
+fn title_report(title: &str) -> Vec<u8> {
+    format!("\x1b]0;{title}\x07").into_bytes()
 }
 
 fn directory_report(cwd: &std::path::Path, host: &str) -> Option<Vec<u8>> {
@@ -204,6 +232,51 @@ mod tests {
     use super::{directory_report, Output};
     use crate::ghostty_vt::Terminal;
     use crate::program_status::{Kind, Records, Report, State};
+
+    #[test]
+    fn session_renames_wait_for_complete_sequences_and_replay_on_attach() {
+        for sequence in [
+            b"\x1b]0;provider title\x07".as_slice(),
+            b"\x1b]0;provider title\x1b\\",
+            b"\x1b[38;2;12;34;56m",
+            b"\x1bP$qm\x1b\\",
+            "雪".as_bytes(),
+        ] {
+            for split in 1..sequence.len() {
+                let mut output = Output::new(true).unwrap();
+                output.title("checkout");
+                assert_eq!(output.take_reports().unwrap(), b"\x1b]0;checkout\x07");
+                output.process(1, &sequence[..split], false);
+                output.title("intermediate name");
+                output.title("Resume repair\x07\x1b");
+                assert!(output.take_reports().is_none(), "{sequence:?} at {split}");
+                let snapshot = output.snapshot().unwrap().unwrap();
+                let title = b"\x1b]0;Resume repair\x07";
+                assert!(snapshot.windows(title.len()).any(|bytes| bytes == title));
+                let mut viewer = Terminal::new(80, 24).unwrap();
+                viewer.write(&snapshot);
+                output.process(1, &sequence[split..], false);
+                viewer.write(&sequence[split..]);
+                let report = output.take_reports().unwrap();
+                assert_eq!(report, title);
+                viewer.write(&report);
+                assert!(viewer.at_ground());
+                assert_eq!(viewer.title(), Some("Resume repair"));
+                output.title("Resume repair");
+                assert!(output.take_reports().is_none());
+                // A later Claude title or terminal reset cannot leave the
+                // launch-time name over the Session's current name.
+                for provider in [b"\x1b]2;old name\x07".as_slice(), b"\x1bc"] {
+                    output.process(1, provider, false);
+                    assert_eq!(output.take_reports().unwrap(), title);
+                    assert_eq!(output.terminal().unwrap().title(), Some("Resume repair"));
+                }
+            }
+        }
+        let mut pipes = Output::new(false).unwrap();
+        pipes.title("No terminal");
+        assert!(pipes.take_reports().is_none());
+    }
 
     #[test]
     fn directory_report_identifies_execution_host_and_escapes_paths() {

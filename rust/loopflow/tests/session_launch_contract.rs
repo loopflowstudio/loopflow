@@ -976,6 +976,96 @@ fn codex_headless_start_receives_current_policy_on_the_wire() {
 }
 
 #[test]
+fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input() {
+    let fixture = Fixture::new("claude");
+    let script = fixture.home.path().join("bin/claude");
+    let source = fs::read_to_string(&script).unwrap().replace(
+        "if stream:\n    token =",
+        "if not stream:\n    import time\n    while True: time.sleep(0.1)\nif stream:\n    token =",
+    );
+    fs::write(script, source).unwrap();
+    let mut first = fixture
+        .command()
+        .args(["-i", ":", "original request"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !fixture.home.path().join("received.json").exists() {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "first launch ended early"
+        );
+        if std::time::Instant::now() >= deadline {
+            let _ = first.kill();
+            first.wait().unwrap();
+            panic!("Claude fixture never started");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let received = fixture.received();
+    let native = args(&received)[args(&received)
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1];
+    let session = fixture.session();
+    let transcript = fixture
+        .home
+        .path()
+        .join(format!(".claude/projects/fixture/{native}.jsonl"));
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(
+        &transcript,
+        serde_json::json!({
+            "type": "user", "userType": "external",
+            "message": {"content": "Preserve the original design"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let machine = fixture.home.path().join("machine");
+    support::register_codex_account(&machine);
+    let store = loopflow::store::sqlite::SqliteStore::new(&machine.join("loopflow.db")).unwrap();
+    let before = store.session(&session).unwrap().unwrap();
+    assert!(before.completed_at.is_none());
+    assert!(before.task_id.is_none() && before.wave_id.is_none());
+    let switched = fixture
+        .command()
+        .args(["-i", "resume", &session, "-a", "codex"])
+        .output()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while first.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = first.kill();
+    first.wait().unwrap();
+    success(&switched);
+    let imported = fixture.received();
+    assert!(
+        imported["turns"][0]
+            .to_string()
+            .contains("Preserve the original design"),
+        "{imported}"
+    );
+    assert_eq!(fixture.session(), session);
+    let after = store.session(&session).unwrap().unwrap();
+    assert_eq!(after.title, before.title);
+    assert_eq!(after.provider.as_deref(), Some("codex"));
+    assert_ne!(after.captured, before.captured);
+    assert_eq!(
+        store
+            .session_for_artifact(before.artifact_key.as_deref().unwrap())
+            .unwrap()
+            .unwrap()
+            .id,
+        after.id
+    );
+}
+
+#[test]
 fn provider_switch_imports_session_history_with_current_policy() {
     let fixture = Fixture::new("claude");
     fixture.create_wave();

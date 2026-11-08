@@ -4,9 +4,10 @@ Reuse the local attach flow and wire shapes. The planned contract lives in
 `rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
 `docs/server.md`; keep client behavior there instead of repeating it here.
 
-Implementation and publication wait for LOO-718's remote admission. Its listener,
-mobile settings and bulk protocol are outside this Task. No product decision is
-missing. This checkout contains the planned remote contract only.
+Implementation, authenticated connection checks and publication wait for
+LOO-718's remote admission; the local UID-only store cannot exercise remote
+identity. Its listener, mobile settings and bulk protocol are outside this Task.
+No product decision is missing. This checkout contains the planned contract only.
 
 ## Transport dependency — November 8, 2026
 
@@ -36,10 +37,6 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-LOO-718's authenticated transport is still absent from main. Implementation and
-authenticated connection checks remain dependent on it landing; the local
-UID-only store cannot exercise remote identity. No product decision is missing.
-
 ## Delete — do not maintain
 
 When the transport lands, replace any remaining UID-only `service.rs::Ticket` /
@@ -55,14 +52,13 @@ policy when both use the shared store.
 
 ## Remaining acceptance
 
-Exercise every case in the remote attach contract through authenticated client
-and bridge connections during implementation, gate and QA. Reconcile PR #1812's
-tests while keeping bulk transfer behavior intact. Visual review remains for
-demo or QA; Desktop opening results are in `questions.md`.
+Exercise the remote attach contract through authenticated client and bridge
+connections during implementation, gate and QA. Visual review remains for demo
+or QA; Desktop opening results are in `questions.md`.
 
 After integration, update the docs' planned/local-only wording to match the
-implemented endpoint. Until then, the remote contract describes acceptance,
-not available behavior.
+implemented endpoint.
 
-`git diff --check` — clean; no code changed, so build and focused tests remain
-for implementation after the transport lands.
+Compress consolidated the dependency and acceptance wording; deletion targets
+still await the transport. `git diff --check` — clean; `lf context` — within both
+scratch limits. Plan-only edits need no build or tests.

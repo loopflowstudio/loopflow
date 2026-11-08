@@ -153,6 +153,7 @@ Shown: `lf account --cached` rows match the mock; `next` gives reasons; ambiguit
 Demo hazard: `lf account use` with a temp HOME still reads stored logins from the real `~/.lf/accounts/` (absolute homes in the store) and calls the real `security`; it failed before writing. Demos of switching need fake logins in a fake LF_HOME, not a store copy.
 
 ## Remaining
+- Single-pass review, November 7: the old-spelling correction treats any leading target as a provider. `lf account alice@ use bob@` suggests `lf account use alice@=bob@`, which cannot resolve as a provider. Keep for verify; the intended `lf account claude use bob@` correction works.
 - Scheduled renewal is unexercised against a live rental; demo owns it (`lf machine credentials renew` with one live rental, then none). `--owned` is likewise unexercised on a real rental: it takes a browser approval, so tests cover it with a stand-in `ssh`.
 - Whether a Claude refresh cancels earlier access tokens is unverified (needs a live refresh of a real login); the resend-to-every-rental after each refresh is correct either way.
 - No single laptop view across Machines; `lf --machine <m> account` shows one.
@@ -203,3 +204,5 @@ Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --s
     Unverified, left as built: `You're out of usage credits` may be the credits-only model's line (Fable) rather than the account's, which would make item 13 cool the whole account and move every open Claude for a model limit. Source-read only; no live case.
 
 Check, isolated (empty cwd, isolated HOME, CARGO_HOME kept, LF_* unset, stdin /dev/null): `provider_account::` 65, `agent::` 45, `context_block::` 10, `subscription::` 12 pass. November 7 demo fixes: `--lib account` (status 4, Clap 5), `--test global_commands machine_commands_and_catalog`, clippy pass from this checkout; `provider_account::account_first_tests` fail here only with "has no resident login" (this Machine's routes; unchanged by the fixes). Live spent limits: demo.
+
+Publication check, November 7: compiled library tests `lf::tests::account_` (5) and `lf::commands::account::account_status::tests::` (4), plus `global_commands::machine_commands_and_catalog_work_without_git_or_a_repository` (1), pass from empty cwd with temporary HOME, CARGO_HOME retained, LF_* unset and stdin closed. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` pass. `lf sync --manual` merged main's release metadata without conflicts, using a temporary HOME and LF_HOME. Live-provider checks remain for verify; no real provider login used.

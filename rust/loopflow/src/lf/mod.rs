@@ -2990,10 +2990,10 @@ fn parse_account_target(raw: &str) -> Result<String, String> {
 }
 
 impl AccountCommand {
-    /// A login or overview flag before a verb belongs to bare `lf account`.
-    /// The old `lf account claude use jack@` spelling is answered with the
-    /// current one, `lf account use claude=jack@`.
-    pub fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
+    /// A login or overview flag before a verb belongs to bare `lf account`;
+    /// `Cli::checked` rejects it. The old `lf account claude use jack@`
+    /// spelling is answered with the current one, `lf account use claude=jack@`.
+    fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
         let cmd = cmd?;
         if let Some(target) = target {
             let spelling = match cmd.login() {

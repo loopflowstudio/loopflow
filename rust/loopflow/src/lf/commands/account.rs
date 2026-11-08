@@ -126,9 +126,6 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    if let Some(misuse) = AccountCommand::misuse(cmd, target, cached || json) {
-        bail!(misuse);
-    }
     match cmd {
         Some(cmd) => rt.block_on(run_async(cmd)),
         None => {

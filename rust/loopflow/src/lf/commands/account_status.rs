@@ -133,7 +133,7 @@ pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool)
             Ok(choices) => (choices, None),
             Err(_) => (vec![], Some("local Chrome profiles unavailable".into())),
         };
-        Some(BrowserDetails {
+        let browser = BrowserDetails {
             profiles: match &store {
                 Some(store) => store.list_access_profiles().await?,
                 None => vec![],
@@ -144,13 +144,14 @@ pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool)
             },
             local_choices,
             discovery_diagnostic,
+        };
+        // One login shows only the browsers bound to it.
+        Some(match (&only, rows.first()) {
+            (Some(_), Some(row)) => login_browser(browser, row),
+            _ => browser,
         })
     } else {
         None
-    };
-    let browser = match (browser, rows.first()) {
-        (Some(browser), Some(row)) if only.is_some() => Some(login_browser(browser, row)),
-        (browser, _) => browser,
     };
     let report = AccountReport {
         accounts: rows,

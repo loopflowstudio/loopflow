@@ -363,9 +363,11 @@ again for that same `session`, with `owner_lf_process_id: null`. Present the new
 ticket on a fresh bridge connection and attach to the returned owner. Pinning
 the old owner instead returns `not_found` once the replacement owns the Session.
 
-The owner sends one final frame before closing an orderly connection. The server
-bridge and Desktop's relay pass it through unchanged. Its `reason` tells a
-terminal client what to do. The frame is tag `0x05`, followed by the four-byte
+The owner queues one final frame before closing an orderly connection, with a
+bounded drain so a slow viewer cannot hold execution. A slow or lost connection
+may close before the frame arrives. The server bridge and Desktop's relay pass
+it through unchanged. Its `reason` tells a terminal client what to do. The frame
+is tag `0x05`, followed by the four-byte
 big-endian payload length and UTF-8 JSON, for example `{"reason":"replaced"}`.
 It is outside the counted terminal byte stream and needs no event nonce.
 `lf server describe --json` exposes its schema under `x-owner-close`.

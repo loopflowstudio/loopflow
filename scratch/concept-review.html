@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-774 · Terminal endings</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.45; }
+  body { max-width: 48rem; margin: 2rem auto; padding: 0 1.2rem 2rem; }
+  header { font-size: .8rem; color: light-dark(#555, #bbb); }
+  h1 { font-size: 1.65rem; line-height: 1.2; margin-bottom: .6rem; }
+  h2 { font-size: 1.05rem; margin-top: 1.4rem; }
+  code { font-size: .9em; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; vertical-align: top; padding: .55rem .4rem; border-bottom: 1px solid light-dark(#ccc, #555); }
+  th:first-child, td:first-child { padding-left: 0; }
+  aside { border-left: 3px solid light-dark(#78552c, #deb57d); padding-left: 1rem; }
+  li { margin: .4rem 0; }
+  @media (max-width: 500px) { body { margin-top: 1rem; } table { font-size: .8rem; } }
+</style>
+<header>
+  LOO-774 · concept-review · 2026-11-08<br>
+  Sources: scratch/loo-774.md; transport.rs; transport/{wire,lifetime,connection}.rs;
+  ops/human_session.rs; lf/commands/rollover.rs; server/{README.md,schema.rs}; transport_tests.rs.
+</header>
+<main>
+  <h1>Keep the design; advance to verification.</h1>
+  <p>No open product choice. The branch implements an owner’s final reason without
+  adding a Session lifecycle or a recovery service.</p>
+  <aside><strong>Biggest mismatch resolved:</strong> a bridge disappearing used to
+  look the same whether execution finished or its owner was replaced. A final
+  <code>Close</code> separates those outcomes. Bare EOF still means unknown.</aside>
+
+  <h2>Before → implemented on this branch</h2>
+  <p><code>terminal bytes → EOF → guess or read again</code><br>
+  <code>terminal bytes → 0x05 {"reason":"…"} → close</code></p>
+  <table>
+    <thead><tr><th>Action</th><th>Concept</th><th>API and effect</th></tr></thead>
+    <tbody>
+      <tr><td>Follow a replacement</td><td>Same Session, new owner</td><td><code>replaced</code> → fresh <code>session.attach</code>; find existing execution.</td></tr>
+      <tr><td>Keep the final screen</td><td>Execution finished</td><td><code>finished</code> → stop automatic reattachment.</td></tr>
+      <tr><td>Return later</td><td>Owner retired by policy</td><td><code>retired</code> → stop; deliberate <code>lf resume SESSION</code> uses saved history.</td></tr>
+      <tr><td>Recover a lost bridge</td><td>Unknown connection loss</td><td>EOF → existing bounded same-owner recovery; never replay uncertain input.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>One interaction, including failure</h2>
+  <p>A viewer receives <code>replaced</code>, keeps its screen and requests a new
+  attachment by Session. The successor has fresh stream and control claims.
+  Another viewer’s input claim remains theirs. After execution finishes,
+  <code>finished</code> stops reconnection.</p>
+  <p><strong>Counterexample:</strong> replacement launch can fail after Close.
+  The reason announces intent, not readiness. Bounded attachment reports unavailable;
+  it cannot launch a provider. A slow or broken connection can lose Close entirely,
+  so its EOF cannot become <code>finished</code>.</p>
+  <p>Close is transient and outside counted terminal bytes. The server and raw relay
+  forward it; Desktop’s decoded relay presents the ending and stops recovery.
+  Desktop does not automatically follow a replacement.</p>
+
+  <h2>Checks for the next step</h2>
+  <ol>
+    <li>Does the model need another state? No: owner reason, Session identity and
+    existing recovery cover the normal and failed paths.</li>
+    <li>What remains to show? Production resume/rollover and Desktop’s decoded
+    ending. Recorded passing tests use a manually supplied successor and do not
+    establish those paths.</li>
+  </ol>
+</main>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-774 terminal QA</title>
+<style>
+body{max-width:960px;margin:48px auto;padding:0 24px;font:17px/1.55 system-ui;color:#252826;background:#faf9f5}
+h1{font-size:36px;line-height:1.15}h2{margin-top:36px;font-size:24px}h3{font-size:19px}
+pre{padding:18px;background:#eeeee8;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.5 ui-monospace,monospace}
+code{font:14px ui-monospace,monospace}table{border-collapse:collapse;width:100%}td,th{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #d5d6ce}
+.pass{color:#286040}small{color:#5e645e}a{color:#235f65}
+</style>
+<h1>Terminal endings, through the real CLI</h1>
+<p><small>LOO-774 · November 8, 2026 · macOS · HEAD c07dff898 plus existing documentation edits</small></p>
+<p class="pass">The three orderly reasons reached real clients. Production resume and rollover replaced a real Codex Session; reattachment retained its identity and history. No defect in the changed close handling required a code repair.</p>
+<h2>What remains unchecked</h2>
+<ul><li>Mounted Desktop status-row appearance and interaction: this run was headless. Its production decoded relay and status mailbox were exercised; that does not establish the rendered Swift view.</li>
+<li>A full installed-build upgrade and released database migration were not attempted. A stripped, ad-hoc-signed copy of this branch build supplied a different executable for replacement. Both executables contain this change.</li>
+<li>Linux and the affected automated suites remain with gate/CI. This QA ran the product, not the fixture suite.</li></ul>
+<h2>Setup</h2>
+<p><code>cargo build -p loopflow --bin lf</code> passed. Every product command used a temporary Git repository under <code>/tmp/loo774-qa</code> and its own <code>LF_HOME</code>, with inherited <code>LF_*</code> removed. No existing Session or service was replaced. A fresh real Codex conversation answered the minimal request below using the configured login. No database rows were inserted or rebound by the QA driver.</p>
+<pre>lf -i -a codex : 'Reply only terminal-qa-ready. Do not use tools or change files. This conversation tests terminal attachment.'
+• terminal-qa-ready
+Session: session_06c5074109534b23994b7c50a21fa6b6</pre>
+<h2>Scenarios</h2>
+<table><thead><tr><th>Experience</th><th>Action and observed result</th></tr></thead><tbody>
+<tr><td>Discover the protocol</td><td><code>lf server describe --json</code> exposed <code>x-owner-close: {tag: 5, payload: {$ref: '#/$defs/Close'}}</code>, with the reason schema. An unknown Session returned <code>not_found</code> without creating execution.</td></tr>
+<tr><td>Finish with output</td><td>Started real shell owners through <code>lf session serve</code>, with pipes and with a PTY. Sent one input line; stdout and stderr ended with an unfinished OSC escape and exit 7. Direct and raw-relay clients each received final output, exactly one <code>{"reason":"finished"}</code>, then EOF. A separate decoded CLI exited 7.</td></tr>
+<tr><td>Replace through rollover</td><td><code>lf process rollover --dry-run --json</code> selected the idle saved Codex Session. The real rollover reported <code>resumed</code>, <code>turn_cut_off: false</code>. The old server bridge got <code>replaced</code>; the decoded relay exited 0 with <code>state: ended</code>, input disabled, and “Session owner replaced; reattach by Session.” A fresh attachment resolved another owner under the same Session ID and restored the saved response.</td></tr>
+<tr><td>Replace through resume</td><td>Ran ordinary <code>lf resume SESSION</code> on a PTY from the second executable. Both the old raw relay and server bridge got <code>replaced</code>. Retried by Session while the successor started; the old pinned owner returned <code>not_found</code>. Transcript below.</td></tr>
+<tr><td>Lose the server, then return</td><td>Stopped the isolated real server while its decoded relay controlled Codex. Status advanced to reconnecting, generation 2, input disabled. Typed <code>UNSENT-QA-MARKER</code> during the outage, restarted the server, and recovered the same owner. A fresh terminal snapshot contained the saved response and no marker.</td></tr>
+<tr><td>Quit the native client</td><td>Typed <code>/quit</code> in Codex and submitted after its completion menu rendered. The server bridge got <code>finished</code>; the decoded relay exited 0, recorded ended with input disabled, and stopped recovery. Further attachment returned <code>not_found</code>; Session state was closed.</td></tr>
+<tr><td>Close a shell</td><td>Created a sandbox worktree and Task using <code>lf wt create</code> and <code>lf task create --worktree</code>, without starting a Graph. Opened the real <code>lf desktop shell … --create</code> runtime, started a background sleep, then used <code>--close</code>. The raw relay got <code>retired</code> and the job no longer existed.</td></tr>
+<tr><td>Malformed and slow clients</td><td>An invalid tag closed that client alone. A healthy viewer then received all 3,145,728 zero bytes and <code>finished</code> while another client stayed unread. The owner exited; the slow client's eventual EOF had no reason. Elapsed time was 2.232 seconds, including execution and shutdown.</td></tr>
+<tr><td>Abrupt owner loss</td><td>Killed only a sandbox shell owner with SIGKILL. Its attached client received bare EOF, with no invented final reason. A separate private-socket replacement request was acknowledged and delivered <code>replaced</code> without creating a successor.</td></tr>
+</tbody></table>
+<h2>Production resume, outage, and quit transcript</h2>
+<pre>returning Session: session_06c5074109534b23994b7c50a21fa6b6 owner: f5e4d998-e257-4f62-850f-761efd1b4fe6
+original raw relay {&#x27;reason&#x27;: &#x27;replaced&#x27;}
+server bridge {&#x27;reason&#x27;: &#x27;replaced&#x27;}
+resume replacement: f89fbca0-6547-4924-b5b6-3bfdc1485024 old pinned: not_found
+connected: {&#x27;generation&#x27;: 1, &#x27;state&#x27;: &#x27;connected&#x27;, &#x27;input&#x27;: True, &#x27;message&#x27;: None}
+server outage: {&#x27;generation&#x27;: 2, &#x27;state&#x27;: &#x27;reconnecting&#x27;, &#x27;input&#x27;: False, &#x27;message&#x27;: None}
+reconnected: {&#x27;generation&#x27;: 2, &#x27;state&#x27;: &#x27;connected&#x27;, &#x27;input&#x27;: True, &#x27;message&#x27;: None}
+same owner and saved response; disconnected typing absent
+server bridge native quit: {&#x27;reason&#x27;: &#x27;finished&#x27;}
+decoded normal end: 0 {&#x27;generation&#x27;: 2, &#x27;state&#x27;: &#x27;ended&#x27;, &#x27;input&#x27;: False, &#x27;message&#x27;: None}
+after finish attachment: not_found
+Session after quit: closed
+</pre>
+<h2>Retirement and slow-client transcripts</h2>
+<pre>shell attached: attached
+background job: 84853
+close command: 0 
+shell Close: {&#x27;reason&#x27;: &#x27;retired&#x27;}
+background job remains: False
+</pre>
+<pre>malformed client EOF: None
+fast viewer: {&#x27;reason&#x27;: &#x27;finished&#x27;} zero bytes: 3145728 elapsed: 2.232
+owner stopped despite unread viewer: 0
+slow viewer eventual close: None
+decoded nonzero exit: 7 output contains: True
+</pre>
+<h2>Corrections while driving</h2>
+<p>The first sandbox configuration placed <code>session</code> in a repository declaration, which the current settings catalog rejected. Removing that declaration allowed the fresh launch. An initial free-input relay refused because the launch viewer already controlled input; the explicit-takeover scenario then connected. Neither failure was treated as a successful attachment.</p>
+<p>The driver initially tried to parse ordinary resume startup as framed output, requested a replacement ticket before its successor existed, and checked the saved screen before Codex finished restoring it. The corrected run uses a PTY for resume, bounded ticket retry, and the actual restored screen. A slash-command completion needed another Enter before native quit. The full corrected resume/outage/quit run above passed from the start; no test-only endpoint or substitute provider supplied the outcome.</p>
+<h2>What works now</h2>
+<p>Real direct, raw-relay, and server clients distinguish orderly replacement, completion, and shell retirement. Desktop's decoded relay stops on orderly Close, keeps EOF recoverable, and discards disconnected typing. The final Session history contained one started/completed provider turn across all resumes; attachment and recovery added no turn. Production replacement deliberately resumes history under the same Session identity.</p>
+<p>All QA owners, providers, relays, shell jobs, and servers were stopped. Final isolated <code>lf process list --json</code>: <code>{"nodes":[]}</code>. <code>lf server status</code> reported <code>listening: false</code>; no owner socket accepted a connection. Reusable launch and driving steps were added through <code>lf skill customize qa</code> to <a href="../.lf/skills/qa.md">the repository QA skill</a>. No in-scope failure remains; the display and platform limits above remain unclaimed.</p>
+</html>

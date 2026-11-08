@@ -200,8 +200,9 @@ snapshot; a byte the spool no longer holds answers `reconnect_required`, and the
 viewer attaches afresh. Input control and ownership release when the connection
 ends; a resume asks for them again.
 
-Before an orderly owner shutdown, each attached viewer receives one final `close`
-frame naming the reason. It does not count toward the stream byte offset. The
+Before an orderly owner shutdown, the owner queues one final `close` frame for
+each attached viewer and drains for a bounded interval. A slow or lost connection
+may miss it. The frame does not count toward the stream byte offset. The
 `child_exited` event carries the exit code; wait for `close` before ending the
 attachment. Clients use it to distinguish a replacement owner from
 finished execution or policy retirement; a bare EOF leaves the reason unknown.

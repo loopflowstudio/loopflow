@@ -16,7 +16,9 @@ The shared state lives in `session_record/runtime.rs`: it owns the current
 provider, account, thread and attachment. Its `SessionRecorder` keeps manifests,
 receipts and history in `session_record.rs`, with no attachment or process-control
 operations. Both remain under the same lock so launch, retry and settlement stay
-serialized.
+serialized. The execution retains the store that admitted its attachment; launch,
+retry and exit use that owner directly instead of reopening through the recording
+directory.
 
 ## lf never breaks the conversation
 

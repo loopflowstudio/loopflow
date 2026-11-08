@@ -20,7 +20,7 @@ use super::{
     CAPTURE_KEY_ENV, SCHEMA_VERSION,
 };
 use crate::chat::types::ConversationEvent;
-use crate::harness::agent_process::close_session_agent_process;
+use crate::harness::agent_process::{close_session_agent_process, AttachmentOwner};
 use crate::id::AgentSessionId;
 use crate::naming::generated_session_title;
 use crate::process::SessionAttachment;
@@ -201,7 +201,7 @@ impl AgentExecution {
         next.model = spec.model.clone();
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
-                crate::harness::agent_process::close_session_agent_process(&store, session)
+                close_session_agent_process(&store, session)
             })?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
@@ -227,7 +227,7 @@ impl AgentExecution {
                     .0
                     .lock()
                     .expect("Agent execution mutex poisoned")
-                    .attachment = Some((session.to_string(), attachment));
+                    .owner = Some((store.clone(), session.to_string(), attachment));
                 capture.register_interrupt();
                 Ok(capture)
             }
@@ -400,7 +400,7 @@ impl AgentExecution {
             StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
         })?;
         let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if capture.attachment.is_some() {
+        if capture.owner.is_some() {
             return Ok(());
         }
         let store = row_store(&capture.recorder.dir)?;
@@ -415,7 +415,7 @@ impl AgentExecution {
         if let Some(owner) = crate::transport::current() {
             store.bind_session_transport(&session.id, &attachment, owner)?;
         }
-        capture.attachment = Some((session.id.to_string(), attachment));
+        capture.owner = Some((store, session.id.to_string(), attachment));
         drop(capture);
         self.register_interrupt();
         Ok(())
@@ -437,6 +437,9 @@ impl AgentExecution {
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<AgentSessionId>> {
         let capture = self.0.lock().expect("Agent execution mutex poisoned");
+        if let Some((store, session, _)) = &capture.owner {
+            return store.session_thread(session);
+        }
         let store = row_store(&capture.recorder.dir)?;
         let Some(session) = store.session_for_artifact(&capture.recorder.manifest.artifact_key)?
         else {
@@ -453,24 +456,19 @@ impl AgentExecution {
         if capture.settled_outcome.is_some() {
             return Err(StoreError::InvalidAuthority("Capture already settled".into()).into());
         }
-        let (session, expected) = capture.attachment.as_ref().ok_or_else(|| {
+        let owner = capture.owner.as_mut().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
         })?;
-        let store = row_store(&capture.recorder.dir)?;
-        let session = session.clone();
-        let attachment = store.prepare_session_agent_process(&session, expected)?;
+        let (store, session, attachment) = owner;
+        *attachment = store.prepare_session_agent_process(session, attachment)?;
         command.env(
             crate::process::AGENT_CALLER_ENV,
             serde_json::to_string(&attachment.caller(session.clone().into()))?,
         );
-        capture.attachment = Some((session.clone(), attachment.clone()));
-        // Keep the capture's settlement snapshot fixed through admission. The
-        // recorder only touches the store, never this mutex.
-        let child = crate::harness::agent_process::spawn_native(
-            command,
-            &(store, session, attachment.clone()),
-        )?;
-        Ok((child, attachment))
+        let snapshot = attachment.clone();
+        // Keep the execution's settlement snapshot fixed through admission.
+        let child = crate::harness::agent_process::spawn_native(command, owner)?;
+        Ok((child, snapshot))
     }
 
     pub(crate) fn record_native_agent_exit(
@@ -478,7 +476,7 @@ impl AgentExecution {
         expected: &crate::process::SessionAttachment,
     ) -> StoreResult<()> {
         let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        let Some((session, attachment)) = &capture.attachment else {
+        let Some((store, session, attachment)) = &capture.owner else {
             return Err(StoreError::InvalidAuthority(
                 "Capture has no attachment".into(),
             ));
@@ -488,26 +486,24 @@ impl AgentExecution {
                 "Capture attachment changed".into(),
             ));
         }
-        row_store(&capture.recorder.dir)?.record_agent_process_exit(session, expected, true)
+        store.record_agent_process_exit(session, expected, true)
     }
 
     pub(crate) fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
         self.0
             .lock()
             .expect("Agent execution mutex poisoned")
-            .attachment
-            .clone()
+            .owner
+            .as_ref()
+            .map(|(_, session, attachment)| (session.clone(), attachment.clone()))
     }
 
     pub(crate) fn attachment_replaced(&self) -> StoreResult<bool> {
         let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        let Some((session, expected)) = &capture.attachment else {
+        let Some((store, session, expected)) = &capture.owner else {
             return Ok(false);
         };
-        Ok(row_store(&capture.recorder.dir)?
-            .session_attachment(session)?
-            .as_ref()
-            != Some(expected))
+        Ok(store.session_attachment(session)?.as_ref() != Some(expected))
     }
 
     /// Only the invocation's capture owner advances its settlement snapshot.
@@ -518,20 +514,14 @@ impl AgentExecution {
         expected: &crate::process::SessionAttachment,
     ) -> StoreResult<crate::process::SessionAttachment> {
         let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if capture.settled_outcome.is_some()
-            || capture
-                .attachment
-                .as_ref()
-                .map(|(id, owner)| (id.as_str(), owner))
-                != Some((session, expected))
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Capture attachment changed".into(),
-            ));
-        }
-        let next =
-            row_store(&capture.recorder.dir)?.prepare_session_agent_process(session, expected)?;
-        capture.attachment = Some((session.to_owned(), next.clone()));
+        let settled = capture.settled_outcome.is_some();
+        let (store, id, attachment) = capture
+            .owner
+            .as_mut()
+            .filter(|(_, id, attachment)| !settled && id == session && attachment == expected)
+            .ok_or_else(|| StoreError::InvalidAuthority("Capture attachment changed".into()))?;
+        let next = store.prepare_session_agent_process(id, attachment)?;
+        *attachment = next.clone();
         Ok(next)
     }
 
@@ -544,7 +534,7 @@ impl AgentExecution {
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
             environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
-        if let Some((session, attachment)) = &capture.attachment {
+        if let Some((_, session, attachment)) = &capture.owner {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attachment.caller(session.clone().into()))
@@ -573,10 +563,9 @@ impl AgentExecution {
         if capture.settled_outcome.is_some() {
             anyhow::bail!("Capture already settled");
         }
-        let (session, expected) = capture.attachment.as_ref().ok_or_else(|| {
+        let (store, session, expected) = capture.owner.as_ref().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess retry has no attachment".into())
         })?;
-        let store = row_store(&capture.recorder.dir)?;
         // The provider may have switched threads while history was unavailable.
         // Its latest observation outranks an older persisted projection.
         let saved_thread = capture
@@ -589,9 +578,9 @@ impl AgentExecution {
             anyhow::bail!("AgentProcess retry must retain its thread");
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
-            crate::harness::agent_process::close_session_agent_process(&store, session)
+            close_session_agent_process(store, session)
         })?;
-        capture.attachment = Some((session.clone(), next));
+        capture.owner = Some((store.clone(), session.clone(), next));
         if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
             capture.recorder.warn_telemetry(error);
         }
@@ -687,7 +676,7 @@ impl Drop for ExecutionState {
 
 #[derive(Debug)]
 struct ExecutionState {
-    attachment: Option<(String, crate::process::SessionAttachment)>,
+    owner: Option<AttachmentOwner>,
     provider: String,
     model: Option<String>,
     account_id: Option<crate::store::ProviderAccountId>,
@@ -762,7 +751,7 @@ impl ExecutionState {
 
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
         Self {
-            attachment: None,
+            owner: None,
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
             account_id: manifest
@@ -845,10 +834,8 @@ impl ExecutionState {
         }
         self.recorder.finish(outcome)?;
         self.settled_outcome = Some(outcome.to_string());
-        if let Some((session, attachment)) = self.attachment.take() {
-            match row_store(&self.recorder.dir)
-                .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
-            {
+        if let Some((store, session, attachment)) = self.owner.take() {
+            match finish_session_attachment(&store, &session, &attachment, outcome) {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => {
                     tracing::warn!(%error, %session, "cannot record the Session attachment's end")
@@ -877,18 +864,16 @@ impl AgentExecution {
         self.record_best_effort(|capture| {
             let now = time::OffsetDateTime::now_utc();
             let quiet_since = capture.recorder.activity.observe(now, body_pid, processes);
-            let Some((session, attachment)) = &capture.attachment else {
+            let Some((store, session, attachment)) = &capture.owner else {
                 return Ok(());
             };
-            super::row_store(&capture.recorder.dir)
-                .and_then(|store| {
-                    store.record_session_cpu(
-                        session,
-                        attachment,
-                        now.unix_timestamp(),
-                        quiet_since.map(time::OffsetDateTime::unix_timestamp),
-                    )
-                })
+            store
+                .record_session_cpu(
+                    session,
+                    attachment,
+                    now.unix_timestamp(),
+                    quiet_since.map(time::OffsetDateTime::unix_timestamp),
+                )
                 .map_err(std::io::Error::other)
         });
     }

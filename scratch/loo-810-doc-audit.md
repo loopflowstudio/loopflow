@@ -32,5 +32,11 @@ launches remain unresolved and cannot be dismissed as a confirmed result.
 Gate retains the merged-tree served-operation/schema checks and native demo
 review. The implementation plan records focused checks and remaining acceptance.
 
-The docs audit edits are in the checkout; the first batch is checkpointed by the
-implementation agent before sync. Later prose edits remain alongside active code.
+The audit edits are checkpointed with the implementation. The recorded route
+and command checks apply to the candidate before the latest server-only sync;
+the final gate covers the resulting tree.
+
+Presentation iteration, 2026-11-08: creation guides and protocol/Swift references
+now describe mounted-result cleanup, Show result for cold recovery, shared
+complete/continue/inspect decisions, and conversation-change uncertainty.
+The branch CLI regenerated all 33 website documentation routes again.

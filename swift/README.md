@@ -813,8 +813,12 @@ have creation receipts. `CreationSubmissions` saves the exact submitted payload,
 request ID, original Machine and protocol version before sending; the payload
 contains the original repository directory. A single app recovery owner looks up
 receipts after restart and continues only absent or safely resumable submissions.
-Unknown launches remain inspectable. It keeps unresolved records until a confirmed
-result is presented and dismissed; it stores no local milestone ledger.
+The server derives `complete`, `continue` or `inspect`; Desktop does not infer
+continuation from milestones. `CreationPresentation` retires a submission when
+its Task or Session view mounts, including promotion. Cold recovery's Show result
+uses the same completion owner after displaying the resource; Inspect retains
+unconfirmed launches or conversation changes. Failed removal repeats lookup and
+presentation. No local milestone ledger is stored.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans

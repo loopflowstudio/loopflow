@@ -46,7 +46,8 @@ anything: recovery never launches a second Graph when the first launch is
 unconfirmed. A receipt for a removed Task does not recreate it.
 
 Desktop saves and recovers these submissions automatically, including after it
-quits. See [Recover a submitted creation](server.md#recover-a-submitted-creation).
+quits. Showing the resulting Task clears its saved submission; promotion from a
+conversation follows the same path. See [Recover a submitted creation](server.md#recover-a-submitted-creation).
 
 ## Keep work already in progress
 

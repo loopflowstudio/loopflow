@@ -1435,44 +1435,35 @@ pub(crate) async fn new_thread(
         "session.new",
         request_id,
         &serde_json::json!({"id":id,"agent":agent}),
+        false,
     )?;
     let request = request_id.to_owned();
     let _creation_lock =
         crate::journal::request::spawn_blocking(move || crate::engine::creation::lock(&request))
             .await??;
     store.sqlite.check_creation(&identity)?;
+    // Serialize with other Session launches and new-thread requests.
+    let lock_id = id.to_string();
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
-        if receipt.milestone != "admitted" {
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
             return Err(crate::engine::creation::unknown(&receipt).into());
         }
         let next = store
             .session(id)
             .await?
             .ok_or_else(|| session_not_found(id))?;
-        if receipt.result.is_none() {
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
             // The input and receipt committed together, before filesystem publication.
             // Only that exact input may finish publishing; never replace a newer one.
             if next.artifact_key != receipt.artifact_key {
                 return Err(crate::engine::creation::unknown(&receipt).into());
             }
-            let next = publish_prepared_input(
-                &store.sqlite,
-                &next,
-                crate::session_record::SessionGraphMembership::Independent,
-            )?;
-            let result = surface(store, &next).await?;
-            store.sqlite.advance_creation(
-                request_id,
-                "admitted",
-                Some(&serde_json::to_value(result)?),
-            )?;
-            return Ok(next);
+            return finish_thread_creation(store, next, request_id).await;
         }
         return Ok(next);
     }
-    let lock_id = id.to_string();
-    let launch_lock =
-        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
         .session(id)
         .await?
@@ -1524,15 +1515,7 @@ pub(crate) async fn new_thread(
     if let Some(lineage) = lineage {
         store.sqlite.record_provider_lineage(&next, &lineage)?;
     }
-    let next = publish_prepared_input(
-        &store.sqlite,
-        &next,
-        crate::session_record::SessionGraphMembership::Independent,
-    )?;
-    let result = surface(store, &next).await?;
-    store
-        .sqlite
-        .advance_creation(request_id, "admitted", Some(&serde_json::to_value(result)?))?;
+    let next = finish_thread_creation(store, next, request_id).await?;
     crate::journal::request::diagnostic(format_args!(
         "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
@@ -1542,6 +1525,29 @@ pub(crate) async fn new_thread(
         drop(launch_lock);
         open_prepared(store, &next.id, json).await?;
     }
+    Ok(next)
+}
+
+// First submission and recovery finish the same input. Publication may already
+// have succeeded when the process exited before recording its result.
+async fn finish_thread_creation(
+    store: &SharedStore,
+    next: LfSession,
+    request_id: &str,
+) -> Result<LfSession> {
+    let next = if next.input_published {
+        next
+    } else {
+        publish_prepared_input(
+            &store.sqlite,
+            &next,
+            crate::session_record::SessionGraphMembership::Independent,
+        )?
+    };
+    let result = surface(store, &next).await?;
+    store
+        .sqlite
+        .advance_creation(request_id, "admitted", Some(&serde_json::to_value(result)?))?;
     Ok(next)
 }
 

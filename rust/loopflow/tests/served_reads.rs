@@ -2717,6 +2717,8 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .unwrap()
         .result;
     assert_eq!(found["result"], first);
+    assert_eq!(found["disposition"], "complete");
+    assert_eq!(found["explanation"], "Task created");
     let mut changed = change.clone();
     if let Write::TaskCreate { title, .. } = &mut changed {
         *title = Some("Different".into());
@@ -2750,7 +2752,30 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let fingerprint = hex::encode(Sha256::digest(
         serde_json::to_vec(&serde_json::to_value(&input).unwrap()).unwrap(),
     ));
-    conn.execute("UPDATE creation_receipts SET fingerprint=?1,milestone='run_requested' WHERE request_id='lost-answer'", [fingerprint]).unwrap();
+    conn.execute("UPDATE creation_receipts SET fingerprint=?1,run=1,milestone='filed' WHERE request_id='lost-answer'", [fingerprint]).unwrap();
+    let continuation = connection
+        .request(Operation::Read(Read::CreationReceipt {
+            request_id: "lost-answer".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(continuation["disposition"], "continue");
+    conn.execute(
+        "UPDATE creation_receipts SET milestone='run_requested' WHERE request_id='lost-answer'",
+        [],
+    )
+    .unwrap();
+    let interrupted = connection
+        .request(Operation::Read(Read::CreationReceipt {
+            request_id: "lost-answer".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(interrupted["disposition"], "inspect");
+    assert_eq!(
+        interrupted["explanation"],
+        "Task created; start unconfirmed"
+    );
     conn.execute(
         "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'demo',1)",
         rusqlite::params![
@@ -2766,7 +2791,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         *title = Some("One Task".into());
     }
     let unknown = connection
-        .request(Operation::Write(changed))
+        .request(Operation::Write(changed.clone()))
         .unwrap_err()
         .downcast::<loopflow::engine::Error>()
         .unwrap();
@@ -2777,6 +2802,30 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
             .get::<_, i64>(0))
             .unwrap(),
         1
+    );
+    conn.execute(
+        "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+        [first["task"]["id"].as_str().unwrap()],
+    )
+    .unwrap();
+    let removed = connection
+        .request(Operation::Read(Read::CreationReceipt {
+            request_id: "lost-answer".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(removed["disposition"], "inspect");
+    assert_eq!(removed["explanation"], "The created Task was removed");
+    assert_eq!(removed["result"], first);
+    assert!(connection.request(Operation::Write(changed)).is_err());
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM tasks WHERE planning_deleted_at IS NULL",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
     );
 }
 

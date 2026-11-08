@@ -13,7 +13,15 @@ enum RegistryQueryLocal {
     }, write: { change in
         switch change {
         case .taskCreate(_, let requestID, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
-            return try await CreationSubmissions.shared.submit(change, requestID: requestID)
+            let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
+            do {
+                switch change {
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
+                case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
+                default: break
+                }
+                return answer
+            } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
         default: return try await ServerClient.write(change)
         }
     }, watchFiles: { args, cwd in

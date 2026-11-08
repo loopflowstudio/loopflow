@@ -1380,6 +1380,7 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             "session.new",
             "interrupted",
             &serde_json::json!({"id":record.id,"agent":null}),
+            false,
         )
         .unwrap();
         let artifact = crate::session_record::new_artifact_key();
@@ -1387,6 +1388,16 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .sqlite
             .begin_thread_creation(&identity, &record.id, &artifact)
             .unwrap();
+        let stopped = store
+            .sqlite
+            .creation_receipt("interrupted")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stopped.disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+        );
+        assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
         let refused = super::new_thread(&store, &record.id, None, false, false, "interrupted")
             .await
@@ -1416,6 +1427,15 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .milestone,
             "admitted"
         );
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Continue
+        );
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
             .await
@@ -1430,6 +1450,15 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap()
             .result;
         assert!(result.is_some());
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Complete
+        );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
         let newer = super::append_input(&store, newer).await.unwrap();
@@ -1448,6 +1477,102 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
                 .unwrap()
                 .result,
             result
+        );
+
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "superseded",
+            &serde_json::json!({"id":record.id,"agent":null}),
+            false,
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        let mut pending = newer.clone();
+        pending.artifact_key = Some(artifact);
+        pending.input_published = false;
+        let pending = store
+            .replace_session_input(newer.captured, pending, Some("superseded".into()))
+            .await
+            .unwrap();
+        // A lookup can permit continuation, then newer input wins before retry.
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("superseded")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Continue
+        );
+        let newest = super::append_input(&store, pending).await.unwrap();
+        let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::OutcomeUnknown
+        );
+        let receipt = store
+            .sqlite
+            .creation_receipt("superseded")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Inspect
+        );
+        assert_eq!(
+            receipt.explanation,
+            "Newer conversation input replaced this change"
+        );
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            newest.captured
+        );
+
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "published",
+            &serde_json::json!({"id":record.id,"agent":null}),
+            false,
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        let mut pending = newest.clone();
+        pending.artifact_key = Some(artifact);
+        pending.input_published = false;
+        let pending = store
+            .replace_session_input(newest.captured, pending, Some("published".into()))
+            .await
+            .unwrap();
+        let published = super::publish_prepared_input(
+            &store.sqlite,
+            &pending,
+            crate::session_record::SessionGraphMembership::Independent,
+        )
+        .unwrap();
+        // Publication succeeded but the result was not recorded before exit.
+        let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
+            .await
+            .unwrap();
+        assert_eq!(recovered.captured, published.captured);
+        assert!(recovered.input_published);
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("published")
+                .unwrap()
+                .unwrap()
+                .disposition,
+            crate::store::sqlite::creation::RecoveryDisposition::Complete
         );
     });
 }

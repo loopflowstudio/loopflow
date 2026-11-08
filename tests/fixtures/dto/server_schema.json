@@ -2139,6 +2139,12 @@
           "format": "int64",
           "type": "integer"
         },
+        "disposition": {
+          "$ref": "#/$defs/RecoveryDisposition"
+        },
+        "explanation": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
@@ -2150,6 +2156,9 @@
           "type": "string"
         },
         "result": true,
+        "run": {
+          "type": "boolean"
+        },
         "session_id": {
           "type": [
             "string",
@@ -2168,6 +2177,9 @@
         }
       },
       "required": [
+        "disposition",
+        "explanation",
+        "run",
         "request_id",
         "kind",
         "milestone",
@@ -8666,6 +8678,14 @@
         "records"
       ],
       "type": "object"
+    },
+    "RecoveryDisposition": {
+      "enum": [
+        "complete",
+        "continue",
+        "inspect"
+      ],
+      "type": "string"
     },
     "Redemption": {
       "additionalProperties": false,

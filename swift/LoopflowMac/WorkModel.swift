@@ -2333,8 +2333,10 @@ final class WorkModel {
     /// request as the first turn; this window then shows that conversation.
     /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
+        let requestID = UUID().uuidString
         do {
-            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
+            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
             navigation.palette = nil
             await openTaskConversation(receipt.task.id)
             try? await confirmWorkUpdate()
@@ -2566,8 +2568,10 @@ final class WorkModel {
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
+            let requestID = UUID().uuidString
             let task = try await query.createTaskFromSession(
-                id: draft.sessionId, title: draft.taskTitle, cwd: repo)
+                id: draft.sessionId, title: draft.taskTitle, cwd: repo, requestID: requestID)
+            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(task.id))
             // Keep the selected Session, its retained terminal and composer.
             // Promotion changes its Work address, never its input attachment.
             supersedeSessions()

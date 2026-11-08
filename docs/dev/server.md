@@ -76,8 +76,9 @@ blocking work; the response trace correlates diagnostics and effects in
 `logs/lf.log`. It is neither an execution owner nor a durable retry receipt.
 Canceling releases the client's wait, but an admitted mutation may still complete.
 A lost reply means outcome unknown. For `task.create` and `session.new`, look up
-the durable creation receipt; only confirmed absence or a server-declared safe
-continuation permits resubmitting the identical request. For other writes,
+the durable creation receipt. Its derived `disposition` is `complete`, `continue`
+or `inspect`; only confirmed absence or `continue` permits resubmitting the
+identical request. The handler rechecks continuation under its request lock. For other writes,
 refresh authoritative state before another deliberate edit. The
 [client contract](../../rust/loopflow/src/server/README.md#client-contract)
 defines persistence, receipt lookup, admission budgets and recovery by error scope.

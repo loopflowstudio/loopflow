@@ -677,34 +677,20 @@ Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 ## Task files beside the conversation (2026-09-28)
 
-[Read and edit task files beside the conversation · LOO-327](https://linear.app/loopflow/issue/LOO-327/read-and-edit-task-files-beside-the-conversation)
-implements Jack Heart's minimal native browser. Jack approved the updated demo
-and authorized queue preparation, publication and landing in the
-[recorded approval](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-approval.md).
-That supersedes earlier publication holds; approval alone does not establish
-merge, Task completion or individual scenario coverage. The
-[design and evidence ledger](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser.md)
-and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-feedback.md)
-preserve the failed attempts and superseded proposals. Current usage lives in
-[the Mac README](../../../swift/README.md) and [CLI reference](../../../docs/lf.md).
+LOO-327's demo feedback, approval wording and original navigation design remain at
+`611ed031a031e6798652a15b5d250ba0f132a4e8:scratch/{file-browser-demo-approval,file-browser-demo-feedback,file-browser}.md`.
+The detailed implementation account is at
+`446c59eb0:.lf/wave/product/MEMORY.md`, this heading. Overall approval did not
+establish every scenario, merge or Task completion. Current usage lives in the
+Mac README and CLI reference.
 
-- **Task placement owns both surfaces.** The September 30 internal cut expands
-  the original `scratch/` and `diff` navigator to paged immediate directories,
-  with optional Changes over the same documents. It sits beside retained
-  Ghostty, with the recorded PR link above only navigation
-  and aligned headers. Task context shows its recorded worktree without an
-  independent selector. One document per Task/path in the window's existing
-  workspace registry shares draft, selection and Undo across both sources,
-  File/Diff, sheets and Sessions. LOO-497 now persists tool intent and file drafts
-  by Work; recovered text stays read-only until base/disk reconciliation. Mounted
-  relaunch acceptance remains unproved. File browsing, read and save do not require a PR
-  or hydrated Project; comparisons still require their recorded base.
-- **Comparison authority stays in `lf`.** Parent means the active Task PR's
-  recorded base, HEAD its resolved worktree commit. The exact SHA pins list and
-  patch reads; membership is net difference, including staged/untracked changes
-  and rename source paths. Read-only Diff includes the unsaved File draft without
-  modifying disk or index. Local reads use recorded placement directly, without
-  planning sync, Task reconciliation or Run creation.
+- Task placement owns Files and the retained conversation. One document per
+  Task/path shares draft, selection and Undo across File/Diff, sheets and Sessions.
+  LOO-497 persists tool intent and drafts; recovered text stays read-only until
+  disk reconciliation. Mounted relaunch remains unproved. Browsing/editing needs
+  no PR or hydrated Project; comparison uses its recorded base and exact SHA.
+  Changes include staged/untracked files and renames. Unsaved-draft comparison
+  changes neither disk nor index. Reading never syncs planning or launches Work.
 - **The filesystem is the shared editing protocol.** Jack chose autosave by
   default, an explicit-save option, and disk winning overlapping edits without
   a conflict dialog. Preserve disjoint local edits. Incoming revisions rebase
@@ -921,50 +907,47 @@ Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafab
 
 ## Swift data path — RegistryQuery is the single reader
 
-Jack Heart selected LOO-593's split November 4, 2026 (publication and interactive
-demo, no Auto-Ship): Machine owns execution destinations, server client access,
-installation registration/update and Desktop automation; native Read/Write/Subscription
-use the socket; Work FFI, Swift bridge and exclusive build wiring are deleted;
-Ghostty and execution owners stay separate.
+LOO-593 separates Machine installation/client access from shared Work operations;
+Desktop links no Work FFI. CLI and server share Rust dispatch, directory and I/O,
+including defaults, routing, output and errors. Requests create no Process.
+Attribution and diagnostics must reach nested blocking work; raw stderr from a
+shared operation otherwise escapes its request. Configuration/status need no
+registry. Binding changes primary/cwd without moving live execution.
 
-Jack's later November 4 decision replaces served-write CLI subprocesses with the one
-shared Rust mutation path (`2d9c295d8a`): defaults, routing, output and errors share
-dispatch (engine reuse alone allowed lfd drift); request spans use `logs/lf.log` and
-carry settings and diagnostics into nested blocking work; explicit directory/I/O
-replace global mutation; requests create no Process; an admitted write can finish
-after cancellation, and a lost reply stays unknown, never replayed.
+LOO-810 supersedes revision 2 with revision 3. Native local Work reads, writes
+and subscriptions use the socket, with terminal bridges on separate connections.
+Remote Machine adapters still use the CLI; local socket trust is no remote
+admission contract. LOO-718 owns that work. Historical decisions, revision-2
+migration and native trial limits:
+`446c59eb0:.lf/wave/product/MEMORY.md`, this heading.
 
-#1805 settings and #1807 Session adoption entered at `000c88709f`/`041ca8f1c5`.
-Configuration/status work without opening the registry; client settings ignore
-launcher overrides; explicit bind selects primary/cwd without moving live execution
-or attribution. Shared operations can introduce raw stderr beneath served dispatch
-(adoption's directory warning now uses scoped diagnostics). `b11d49d32f` routes
-non-launching adoption through the shared `task_from_session` write; parity covers
-prepared Session identity, repository-person claims and no fabricated Process/Graph,
-not provider continuity. Earlier passes do not establish merged-build acceptance.
+Creation recovery keeps only immutable submitted identity, original destination,
+exact versioned payload and submission time on the client. Server receipts own
+outcomes. Lookup failure is not absence; an interrupted launch never authorizes
+another launch. Receipt retention cannot make old identities reusable. Work
+readings, terminal recovery and provider conversation transitions remain separate.
+Displayed recovery never grants input, geometry or provider-launch authority.
 
-Protocol revision 2 (Task 4877de, November 5, after Jack asked to learn from Rex):
-one connection per client, `hello`/`welcome` negotiating
-the newest common revision, requests multiplexed by id; `attach` keeps its own
-connection so terminal bytes never share the control path's queue or fate; the
-one-byte revision-1 sniff is the whole compatibility layer and leaves with revision 1.
-Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
-leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
-a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
-resolves a harness it never starts, so fixtures name one. No local latency change was
-measured; the Desktop run awaits demo.
+Reservations must survive cancellation while blocking construction or mutations
+continue; counting queued bytes alone misses pending producers. LOO-810's
+64 MiB per connection and 256 MiB process budget count reservations/serialized
+answers, not RSS. Request IDs retire with final delivery, while late frames keep
+worker identity so cancellation/reuse cannot deliver an old answer to a new
+request. A subscription's acknowledgment does not release its identity.
 
-Registration migrates OS labels while retaining socket/lock identity and disabled
-choices. Readiness is consumed once even on failure; recovery only observes status;
-exact-owner recovery is in `server/README.md`. Native proof: `0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`, no final-build
-or speed/memory claim. LOO-718 owns remote
-admission/iOS; preserve wire identity/credentials; local trust cannot authenticate
-proxies; unattended hosting and phone takeover remain open. #1822 and LOO-724's contention repair prove no continuity, incident
-cause or configured recovery. Full text: `67a968bf84:.lf/wave/product/MEMORY.md`.
+Observed provider identity, not process reservation, establishes a transition.
+Attach may report the same process without replacing provider-change history.
+Fork-source liveness is historical and dated. Unknown lineage stays unknown.
+November 8 focused checks cover restart-safe creation, bounded output and native
+Codex `/new`/resume; complete terminal acceptance and physical sleep/wake plus
+cold-app review remain. No latency, RSS or sustained-use improvement is measured.
 
-LOO-500 removed the placeholder scan (surviving files revived retired Waves): writes
-register directories, reads list store rows, unknown status stays explicit.
-Transport history: `324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`, this heading.
+Registration/readiness and exact-owner recovery live in `server/README.md`.
+The November 5 native trial remains at
+`0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`; it proves no final-build
+continuity. LOO-724's contention repair proves no incident cause or configured
+recovery. LOO-500 removed placeholder scanning because surviving files revived
+retired Waves: writes register directories, reads list rows, unknown stays unknown.
 
 ## Performance — launch renders before any read (2026-10-04)
 

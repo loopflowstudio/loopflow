@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::{Error, ErrorCode};
 use crate::id::LfSessionId;
-use crate::store::sqlite::creation::{CreationIdentity, CreationReceipt};
+use crate::store::sqlite::creation::{CreationIdentity, CreationReceipt, RecoveryDisposition};
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 
@@ -40,6 +40,7 @@ pub(crate) fn identity(
     kind: &'static str,
     id: &str,
     payload: &impl Serialize,
+    run: bool,
 ) -> Result<CreationIdentity> {
     if id.is_empty() || id.len() > 128 {
         return Err(Error::new(
@@ -53,6 +54,7 @@ pub(crate) fn identity(
     Ok(CreationIdentity {
         request_id: id.into(),
         kind,
+        run,
         fingerprint: hex::encode(Sha256::digest(canonical)),
     })
 }
@@ -78,7 +80,7 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
 }
 
 pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
-    let identity = identity("task.create", id, &input)?;
+    let identity = identity("task.create", id, &input, input.run)?;
     let _lock = lock(id)?;
     let store = Arc::new(
         tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?,
@@ -121,40 +123,29 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
             .clone()
             .context("filed receipt has no result")?,
     )?;
-    // A receipt never restores a removed resource.
-    if store.sqlite.task(&receipt.task.id)?.is_none() {
-        return Err(Error::new(
-            ErrorCode::NotFound,
-            "the Task recorded by this creation request was removed",
-        )
-        .with(serde_json::json!({"request_id": id, "task_id": receipt.task.id}))
-        .into());
+    match recorded.disposition {
+        RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
+        RecoveryDisposition::Complete => return Ok(receipt),
+        RecoveryDisposition::Continue => {}
     }
-    if !input.run || receipt.milestone == "admitted" {
-        return Ok(receipt);
-    }
-    match recorded.milestone.as_str() {
-        "filed" => {
-            store.sqlite.advance_creation(id, "run_requested", None)?;
-            let mut args = Vec::new();
-            if input.approve {
-                args.push("--batch".into());
-            }
-            if let Some(agent) = &input.agent {
-                args.extend(["--agent".into(), agent.clone()]);
-            }
-            args.extend(["task".into(), "run".into(), receipt.task.identifier.clone()]);
-            args.extend(input.graph.iter().cloned());
-            args.push("--json".into());
-            let launched: super::task::TaskRun =
-                super::launch::start_creation(&input.directory, &args, id)?;
-            store
-                .sqlite
-                .record_creation_launch(id, &serde_json::to_value(launched)?)?;
+    // The projection permits either the first launch or finishing its result.
+    if recorded.milestone == "filed" {
+        store.sqlite.advance_creation(id, "run_requested", None)?;
+        let mut args = Vec::new();
+        if input.approve {
+            args.push("--batch".into());
         }
-        "run_requested" => return Err(unknown(&recorded).into()),
-        "started" | "admitted" => {}
-        _ => anyhow::bail!("invalid Task creation milestone {}", recorded.milestone),
+        if let Some(agent) = &input.agent {
+            args.extend(["--agent".into(), agent.clone()]);
+        }
+        args.extend(["task".into(), "run".into(), receipt.task.identifier.clone()]);
+        args.extend(input.graph.iter().cloned());
+        args.push("--json".into());
+        let launched: super::task::TaskRun =
+            super::launch::start_creation(&input.directory, &args, id)?;
+        store
+            .sqlite
+            .record_creation_launch(id, &serde_json::to_value(launched)?)?;
     }
     let graph = store
         .sqlite
@@ -188,6 +179,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
 }
 
 pub(crate) fn unknown(receipt: &CreationReceipt) -> Error {
-    Error::new(ErrorCode::OutcomeUnknown, "creation's external effect is unconfirmed; inspect the recorded resource")
+    Error::new(ErrorCode::OutcomeUnknown, &receipt.explanation)
         .with(serde_json::json!({"request_id":receipt.request_id,"milestone":receipt.milestone,"task_id":receipt.task_id,"session_id":receipt.session_id}))
 }

@@ -85,6 +85,8 @@ that history or a terminal screen grants no input control.
 Starting a new thread also uses
 [submitted-creation recovery](server.md#recover-a-submitted-creation). Returning
 after a lost reply does not stop a newer provider or append the same input again.
+An interrupted stop shows **Conversation change unconfirmed** and keeps Inspect
+available. A confirmed result clears its saved submission when it appears.
 
 ## After a crash or reboot
 

@@ -48,10 +48,11 @@ afterward.
 
 ## Recover a submitted creation
 
-Submit **New Task**, then quit Desktop before its answer arrives. On reopening,
-Desktop checks that submission on its original Machine and repository and shows
-the same Task. Switching repositories or opening another window does not submit
-it somewhere else.
+Submit once. When the Task or conversation appears, Desktop clears the saved
+submission. If Desktop closes before showing the result, reopening recovers it
+on the original Machine. **Show result** displays the recovered Task or Session
+and clears the submission after it appears. Switching repositories or opening
+another window does not submit it somewhere else.
 
 This recovery also covers **Create Task from this conversation** and starting a
 new thread in an existing Session. Desktop saves each submitted request on this
@@ -70,6 +71,11 @@ been confirmed. Open the Task and inspect its status and Graph history before
 starting anything. Desktop keeps this submission available for inspection and
 does not launch it again. Recovering a receipt for a removed Task does not
 recreate it.
+
+**Conversation change unconfirmed** means a new-thread request was interrupted
+while stopping the earlier provider. **Inspect** shows the conversation and its
+receipt; recovery does not repeat the stop. Newer input also prevents finishing
+an older unpublished conversation change.
 
 Other changes have no automatic retry contract. If their reply is lost, refresh
 the affected Work to see what happened before making another change.

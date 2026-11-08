@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-810 · Creation recovery concept review</title>
+<style>
+  :root { color-scheme: light dark; --ink: #242c30; --paper: #faf8f3; --muted: #59646a; --line: #c9cfce; --accent: #245f71; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #ecece7; --paper: #192025; --muted: #abb8bd; --line: #43535a; --accent: #9bd2df; } }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; padding: 32px 22px 56px; max-width: 800px; color: var(--ink); background: var(--paper); font: 17px/1.55 system-ui, sans-serif; }
+  header { color: var(--muted); font-size: 13px; }
+  h1 { font-size: clamp(27px, 5vw, 37px); line-height: 1.18; margin: 24px 0 16px; }
+  h2 { margin-top: 30px; font-size: 21px; }
+  a { color: var(--accent); }
+  code { font-size: .86em; overflow-wrap: anywhere; }
+  blockquote { margin: 18px 0; padding: 4px 18px; border-left: 3px solid var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 11px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  caption { text-align: left; font-weight: 650; margin-bottom: 7px; }
+  small { color: var(--muted); }
+  li { margin: 10px 0; }
+  @media (max-width: 480px) { body { padding: 22px 14px; } th, td { padding: 9px 4px; font-size: 13px; } }
+</style>
+<header>
+  LOO-810 · concept-review · 2026-11-08<br>
+  Built from <a href="loo-810-server-contracts.md">working design</a>,
+  <code>CreationSubmissions.swift</code>, <code>WorkModel.swift</code>,
+  <code>engine/creation.rs</code>, <code>ops/human_session.rs</code> and
+  <code>server/README.md</code>.
+</header>
+<h1>Finish recovery when the result is shown.</h1>
+<p><strong>Next step: iterate to implement.</strong> Keep immutable submissions;
+  have the server say what recovery may do. No open product choice.</p>
+<blockquote>
+  <strong>Biggest mismatch today:</strong> a successful creation leaves its saved
+  request behind. Desktop later calls it “Recovered” and requires Dismiss.
+  Swift also reconstructs the server’s continuation rules from milestones.
+</blockquote>
+<table>
+  <caption>Actions → concepts → APIs</caption>
+  <thead><tr><th>Action</th><th>Existing implementation</th><th>Proposed correction</th></tr></thead>
+  <tbody>
+    <tr><td>Submit and see the Task</td><td>Immutable request → creation result → later recovery notice</td><td>Same request and result → presentation retires the saved request</td></tr>
+    <tr><td>Reopen after a lost reply</td><td><code>creation.get</code> → client checks <code>run</code>, milestone and result presence</td><td><code>creation.get</code> → server-derived <code>complete | continue | inspect</code></td></tr>
+    <tr><td>Inspect an interrupted change</td><td>Launch and stop both say “start unconfirmed”</td><td>Name the actual uncertainty; Inspect reads existing Work and history</td></tr>
+  </tbody>
+</table>
+<h2>What appears after reopening</h2>
+<p><strong>Proposed — confirmed creation:</strong><br>
+  Recovered Task: Keep the terminal intact after sleep.<br>
+  Show its result; then clear this saved submission.</p>
+<p><strong>Proposed — launch uncertain:</strong><br>
+  Task created; start unconfirmed. <u>Inspect</u><br>
+  No second launch. Keep the original request.</p>
+<p><strong>Proposed — conversation stop uncertain:</strong><br>
+  Conversation change unconfirmed. <u>Inspect</u><br>
+  No second stop or duplicate input. Keep the original request.</p>
+<h2>One owner for each fact</h2>
+<p>The client retains request identity, original destination, exact versioned
+  payload and submission time. The server retains the receipt and derives its
+  recovery disposition. The presentation owner removes the client record only
+  after showing the result. Neither side gains another lifecycle ledger.</p>
+<p>A lookup stays read-only. A continuation rechecks the same request under its
+  existing lock. Failed lookup is not absence; a removed resource is not a new
+  creation. Work readings, exact-owner terminal recovery and provider history
+  remain separate. Showing any of them grants no launch, input or resize authority.</p>
+<h2>Next demo checks</h2>
+<ol>
+  <li>Does ordinary success finish without a recovery chore? Required: show the
+    result and remove only that submission.</li>
+  <li>Does quitting after the reply but before presentation recover the original?
+    Required: retain the request until its result is shown.</li>
+  <li>Do an interrupted launch and stop remain inspectable without another effect?
+    Required: truthful operation-specific text and no automatic replay.</li>
+</ol>
+<small>Source review only. Runtime, physical sleep/wake and cold-app acceptance
+  remain with implement, gate and demo. Decisions live in the working design.</small>
+</html>

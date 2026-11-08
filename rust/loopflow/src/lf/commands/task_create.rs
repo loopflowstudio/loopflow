@@ -7,7 +7,6 @@ use anyhow::{bail, Result};
 use super::mutation::CommandIo;
 use crate::engine::creation::{self, TaskCreation};
 use crate::lf::TaskCommand;
-use crate::work::task::Task;
 
 pub fn create(
     repo: &Path,
@@ -15,7 +14,7 @@ pub fn create(
     io: &mut CommandIo<'_>,
     approve: bool,
     agent: Option<&str>,
-) -> Result<Task> {
+) -> Result<()> {
     let TaskCommand::Create {
         session,
         worktree,
@@ -121,7 +120,7 @@ pub fn create(
             )?;
         }
     }
-    Ok(receipt.task)
+    Ok(())
 }
 
 pub fn read_report(input: &mut dyn std::io::Read) -> Result<Option<String>> {

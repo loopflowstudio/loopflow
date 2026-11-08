@@ -1,7 +1,8 @@
 # LOO-810: server recovery, mutation and provider-transition contracts
 
-Stacked on LOO-593 (#1813, revision 2). Five rows of the 2026-11-07 report card
-grade B. This plan closes each gap where the code lives, keeps the three
+Built on LOO-593 (#1813, revision 2); this change speaks revision 3 only.
+Five rows of the 2026-11-07 report card grade B. This plan closes each gap
+where the code lives, keeps the three
 recovery contracts separate (Work readings, terminal, provider conversation)
 and adds no event log, generic execution owner or byte-path role for `lf`.
 
@@ -21,7 +22,6 @@ not authorize another launch. No editable outbox or generic mutation queue.
 Keep the complete Work protocol cutover, one creation result shape for CLI and
 server, and the short provider-transition explanation plus history. The latter
 two are the proposed implementation defaults carried forward with this design.
-Implementation proceeds through the existing feature Graph's pursue step to demo.
 
 [The exploration](explore.html) retains the alternatives as background. Its
 interactions simulate failures and create no Work.
@@ -113,6 +113,99 @@ same Task from the submitted request and its receipt. An unconfirmed launch
 shows "Task created; start unconfirmed" and starts nothing again. Headless
 analog at gate: the acceptance checks below.
 
+## Current implementation and remaining work
+
+The five mechanisms are implemented: reserved output budgets; exact-owner terminal
+recovery; durable Task/Session creation receipts; immutable Desktop submissions
+and local Work protocol routing; observed provider transitions and presentation.
+The source contract is `rust/loopflow/src/server/README.md`. The details below
+state the intended behavior, not a claim that every acceptance check has run.
+
+The presentation lifecycle iteration is implemented: shared receipt dispositions,
+mounted Task/Session completion, promotion and cold recovery. The existing draft
+migration retains original run intent; lookup derives its decision from the
+receipt and current resource. A Session whose input published before the result
+was recorded can finish the receipt without republishing. Focused checks are
+below; gate and demo acceptance remain unchanged.
+
+Remaining acceptance belongs to gate and demo:
+
+- Run the complete terminal set listed under Checks, including production grace
+  expiry, plus merged-frontier migrations and the remaining CLI/server parity
+  cases. Focused component results do not establish the composed workflow.
+- Exercise Mac sleep/wake and quit/reopen with a real provider. Inspect the
+  recovered Task/Session, confirm one creation and no repeated input or launch,
+  and review the transition explanation with current viewer claims.
+- Budget constants remain provisional; no RSS or latency improvement is claimed.
+  No product decision is missing before those checks.
+
+### Concept review · 2026-11-08 · next implement direction
+
+Keep C's immutable records. Recovery is the unfinished part of presenting a
+submitted creation, not a second action required after every successful creation.
+This follows the stated direction that server receipts own outcomes and local
+records are removed after presenting the result; it adds no product choice.
+
+The normal interaction is **Submit → see the Task or Session**. Retire that
+request's saved record after its result is presented, including Session-to-Task
+promotion. Carry submission identity through the existing result/presentation
+path without changing the shared creation result into a client lifecycle record.
+Do not remove on socket success alone: decoding, navigation or app exit may still
+prevent presentation. Failed removal may repeat recovery safely. Cold startup
+uses the same completion path; unresolved effects retain Inspect.
+
+The largest mismatch in the current source is that `presented` is called only
+by recovery's Dismiss action. Ordinary success therefore leaves a submission
+that later appears as “Recovered … · admitted”. In addition, `reconcile` infers
+safe continuation from `run`, milestone strings and result presence, while
+`refresh` separately infers settlement. The shared operation should own that
+decision once.
+
+**Shared API:** `creation.get` returns a derived
+recovery disposition alongside its receipt: `complete`, `continue`, or
+`inspect`. `null` still means confirmed absence. Derive it in Rust from the
+operation's receipt and required current-resource checks; persist no new outcome
+column and no client outcome fields. If the original request's run intent is
+needed, retain that fact with the server receipt in the existing draft migration.
+The server's creation handler rechecks every continuation under its existing
+request lock; a lookup never grants permission to repeat an uncertain effect.
+Desktop sends the saved bytes only for confirmed absence or `continue`, presents
+`complete`, and retains `inspect`. Remove its milestone-based retry/settlement
+branches. Update the schema and Rust/Swift fixtures together.
+
+Expose the operation's meaning in recovery text: **Task created; start
+unconfirmed** for `run_requested`; **Conversation change unconfirmed** for an
+interrupted `session.new` stop. Do not describe stopping as an unconfirmed start,
+or show `filed`/`admitted` as the explanation. Keep raw receipt details available
+for inspection. A removed resource remains identifiable through its receipt;
+show its absence without recreating it. No new launch or takeover action belongs
+in this recovery surface.
+
+Proposed usage text for the existing creation-recovery docs:
+
+> Submit once. When the Task or conversation appears, the saved submission is
+> cleared. If Desktop closes before showing the result, reopening recovers it on
+> the original Machine. An unconfirmed change stays available to Inspect;
+> recovery does not repeat an uncertain launch or stop.
+
+Existing agent guidance to inspect uncertain writes remains sufficient; no new
+skill or generic retry instruction is needed. Work snapshots, terminal claims,
+provider transitions and output budgets retain their current design.
+
+Counterexamples for implement/gate: normal success must leave no redundant
+recovery notice; exit after a reply but before presentation must retain the
+request; failed removal may repeat only presentation/lookup for a complete
+receipt; failed lookup or another Machine never sends; a removed resource never
+returns to life; interrupted launch/stop stays inspectable; safe local
+continuation must reuse the exact request and stop if newer Session input has
+superseded it. Verify these through the presentation owner as well as the
+submission actor. No runtime checks ran in this concept review.
+
+Next show: ordinary New Task without a recovery chore, then quit-before-answer
+recovery and an interrupted conversation change with truthful Inspect text.
+Outcome for loop-or-next: **design changed; iterate to implement**. No open
+product choice.
+
 ## Implementation contract
 
 ### 1. Retained-work budget (structured-state recovery)
@@ -151,23 +244,20 @@ Per connection, in `service.rs`:
 
 ### 2. Terminal recovery
 
-Behavior is kept: exact-owner continuation, 1 MiB spool with 60 s grace,
-fresh-screen fallback, no input replay, owner-held geometry. Work is tests plus
-one fix, using the existing `transport_tests.rs` fixtures (proxy, observer,
-`Fixture::serve(true, …)`):
+Exact-owner continuation, the 1 MiB spool, 60 s grace, fresh-screen fallback,
+no input replay and owner-held geometry remain. The coverage is implemented in
+`transport_tests.rs`; the complete set still needs its gate run:
 
-| Case | Existing | Add |
-| --- | --- | --- |
-| (a) phone asleep while Desktop resizes and types | `server_reconnect_preserves_newer_viewers_input_and_geometry` :5988 | newer viewer resizes during the outage; read the PTY size back after recovery; check the terminal-mode screen shows the newer output |
-| (b) return after retention expired | `a_resume_past_the_spool_is_refused…` :4715, `server_reconnect_refreshes_expired_output…` :6196 | expiry by the production 60 s grace, no `Out` bytes before the refusal, snapshot content, terminal mode |
-| (c) old owner ends, Session gets a new owner | none | exact-owner attach answers `not_found {owner_lf_process_id, current_lf_process_id}`; attach by Session reaches the new owner; no provider launched by either |
-| (d) one viewer stops draining | `slow_observer_does_not_block_output…` :1354 | through the server bridge: one stalled bridge, one healthy bridge receiving, and the same client connection answering a read and a subscription checkpoint meanwhile |
-| (e) old socket finishes after a replacement | `server_move_lost_ack` :6051 | replacement that asked for free claims (no takeover); old controller's socket closes after; replacement keeps input and geometry |
+| Case | Test |
+| --- | --- |
+| phone asleep while Desktop resizes/types | `server_reconnect_preserves_newer_viewers_input_and_geometry` checks both modes, PTY size and newer output |
+| return after retention expired | `grace_expiry_refuses_bytes_before_repainting_the_terminal_screen` waits 61 s, checks refusal before bytes and the fresh snapshot |
+| Session gets a new owner | `exact_owner_refuses_a_replacement_while_session_attach_finds_it` checks exact-owner refusal, Session attachment and unchanged process count |
+| one viewer stops draining | `a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live` checks healthy output plus a read and checkpoint |
+| stale socket closes after replacement | `resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims` checks free claims and later old-socket closure; the lost-ack test covers newer takeover |
 
-Fix: a stream-mode resume carrying the viewer's own `reconnect` identity while
-that viewer's previous connection is still open at the owner supersedes the
-stale connection instead of being refused. It takes only claims that
-connection held, never another viewer's. Covered by a variant of (e).
+Stream resume now supersedes its own stale open connection. It retains only
+that viewer's claims and never takes a newer viewer's input or geometry.
 
 ### 3. Durable creation receipts (mutation intent)
 
@@ -178,7 +268,7 @@ Every other write keeps "admitted mutations finish; a lost answer is
 - **Wire:** `request_id` (required, 1–128 bytes, client-chosen; Desktop uses a
   UUID per sheet submission) on both. `Write::TaskFromSession` becomes
   `Write::TaskCreate {directory, request_id, title, request, wave, graph,
-  session, run}`, the full `lf task create` shape, so Desktop's New Task and
+  session, run}`, the served creation shape, so Desktop's New Task and
   "make this conversation a Task" are one served kind. `wave: null` is the
   repository, as Desktop's `--no-wave` today. The CLI mints a fresh
   `request_id` unless `--request-id` is given, so agents and scripts can retry
@@ -187,7 +277,7 @@ Every other write keeps "admitted mutations finish; a lost answer is
   both `run` values; the CLI prints the same. `milestone` is `filed`,
   `started` or `admitted`.
 - **Store:** one migration, `creation_receipts (request_id PRIMARY KEY, kind,
-  fingerprint, task_id, session_id, artifact_key, milestone, result, launch, created_at,
+  fingerprint, run, task_id, session_id, artifact_key, milestone, result, launch, created_at,
   updated_at)`. `fingerprint` is SHA-256 of the canonical operation JSON
   without `request_id`. The row is written, with the Task ID or the new
   thread's artifact key reserved, in the same transaction as the first
@@ -225,13 +315,14 @@ Every other write keeps "admitted mutations finish; a lost answer is
   after reconciliation is presented; failed removal repeats lookup safely.
   Multiple windows share one recovery owner. Storage failure keeps the form and
   reports the error before send. Delete `TaskCreateRunFailed` stdout parsing.
-- The shared functions own receipts (`ops/task.rs` `task_create`,
-  `human_session::new_thread`), so the CLI and server share one path;
+- The shared functions own receipts (`engine::creation::create`,
+  `ops::task::task_create` and `human_session::new_thread`), so the CLI and server
+  share one path;
   `service.rs` only passes the request through.
 
 ### 4. One client protocol
 
-- `server/README.md` gains **Client contract**: what a client may cache
+- `server/README.md` documents **Client contract**: what a client may cache
   (welcome's `instance` and limits; last readings as stale display only), what
   it re-reads on reconnect (every subscription, from a complete reading; every
   attach by exact owner), and recovery by error scope. Lost connections reconnect;
@@ -239,16 +330,21 @@ Every other write keeps "admitted mutations finish; a lost answer is
   subscription. `incompatible`, `invalid`, `not_found` and `conflict` require the
   corresponding correction, not blind reconnect. `outcome_unknown` means inspect
   a receipt when available, otherwise inspect the resource; never generic retry.
-- Desktop stops shelling out for Work: `task.create`, `task.run`, `task.ship`
-  move to served kinds this Task. `task.move --machine`, wave machine set,
-  `wave.remove`, `wave.rename` and process history also use served kinds. Done means `grep "await run(" swift/Loopflow/Services/RegistryQuery.swift`
-  finds no Work mutation. The same-user socket stays local; remote admission
-  is out of scope.
+- Local Desktop Work uses the shared protocol: `task.create`, `task.run`, `task.ship`
+  use served kinds on the local Machine. `task.move --machine`, wave machine set,
+  `wave.remove`, `wave.rename` and process history also use served kinds.
+  `RegistryQueryLocal` injects the shared socket path; creation alone adds the
+  submission store. `RegistryQuery` retains CLI adapters for remote Machines
+  and execution/location operations. The migrated Work methods call
+  `serve`/`write`, so a raw
+  `await run(` count is not an acceptance check. The same-user socket stays local;
+  remote admission is out of scope.
 
 ### 5. Provider transitions
 
 - **Type:** `ProviderTransition {kind, from_provider_session,
-  to_provider_session, from_agent_process, to_agent_process, original_running}`
+  to_provider_session, from_agent_process, to_agent_process, original_running,
+  seed, observed_at}`
   with `kind` one of:
   - `retained`: the same AgentProcess keeps serving (attach to a live owner).
   - `resumed`: a replacement AgentProcess on the same provider session ID
@@ -286,11 +382,12 @@ served one; `lf` in the provider byte path.
 
 ## Delete — do not maintain
 
-The unbounded message queue, adoption-only `Write::TaskFromSession`, Desktop
+The count-only message queue, adoption-only `Write::TaskFromSession`, Desktop
 `TaskCreateRunFailed` parsing and Work subprocess paths, provider-selection
 writer, and closed-socket resume precondition are removed. The remaining
 `agent_session_selected` reader translates released history only; runtime tests
-query `provider_transition`. No deletion targets remain.
+query `provider_transition`. The client milestone-based retry and settlement
+branches are also removed. No predecessor remains to cut over.
 
 Compression keeps request slots with their producer reservation through worker
 completion and delivery; task completion no longer returns an unused request ID.
@@ -298,9 +395,15 @@ Task creation decodes one recorded receipt, and provider lineage uses its typed
 record for both writing and reading. Desktop claims recovery before any await,
 so destination lookup cannot admit two recoveries for one submission.
 
+The presentation iteration shares Session publication/result recording between
+first submission and retry. Task creation acts on the shared disposition without
+a second milestone refusal table; its CLI renderer returns no unused Task.
+Cold recovery retires a request from the rendered successful detail, replacing
+the separate loaded flag and invisible completion view.
+
 The original baseline analysis and implementation slices are at
 `758309facbef6368627cc9cd2a426de9230e5fe0:scratch/loo-810-server-contracts.md`.
-The contract above and acceptance checks below remain current.
+The reconciled contract above and acceptance checks below remain current.
 
 ## Checks
 
@@ -348,6 +451,25 @@ Same environment and candidate CLI as above.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.
 - `uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --new-thread`: plain and wrapped native PTY cases passed; `/new` and resume selected the new conversation, with no live fixture providers remaining. First run saw one unsettled observer after renderer exit; both processes later completed. The check now waits up to five seconds for teardown. Passing artifacts: `/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-codex-terminal-4xv_2wcn`.
 
+### Realignment checks · 2026-11-08
+
+Upstream `f61c153eb40e2246b73a87b785dbf799cbc1e98d` (#1856) adds final-reply
+request-ID regression coverage. The merge keeps this branch's outbox, worker
+identity filtering and reservations; the upstream test holds a worker after its
+answer so reuse cannot accidentally depend on worker completion.
+
+- `cargo test -p loopflow --lib server::`: 29 passed after conflict resolution,
+  including answered-ID reuse, live subscription IDs and cancellation. macOS
+  `ld` warned that `__eh_frame` exceeded 16 MiB for compact unwind encoding;
+  linking and all tests completed.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.
+- `lf sync --manual` / `lf sync --continue`: completed against `f61c153eb`;
+  details remain in `loo-810-sync.md`.
+- `lf context`: Product memory 15,924/16,000 tokens and 75,277/131,072 bytes;
+  scratch within both limits after reconciliation. No child Wave directories
+  were present; Product GOAL and MEMORY were read in full.
+
 Gate owns affected suites and the complete terminal acceptance set:
 `server_reconnect_preserves_newer_viewers_input_and_geometry`,
 `grace_expiry_refuses_bytes_before_repainting_the_terminal_screen`,
@@ -372,3 +494,29 @@ Remote admission and pairing; delta subscriptions; structured chat; receipts
 for writes other than `task.create` and `session.new`; LOO-796's reconnect UX
 (reading, copying, drafts, focus); editable pending submissions, offline creation,
 attachment queues, cross-device submission sync and arbitrary mutation replay.
+
+### Presentation lifecycle checks · 2026-11-08
+
+All Rust/Swift commands used closed stdin and cleared inherited `LF_*`.
+
+- `cargo test -p loopflow --lib ops::human_session::tests::creation_retry_reconciles_publication`: passed, including newer input after a continue lookup and publication before result recording.
+- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection_and_server_restart`: passed, including run intent, derived dispositions and a removed Task staying removed.
+- `cargo test -p loopflow --test integration dto_fixtures::creation_recovery_dispositions_round_trip`: passed; fixture CLI pinned to `target/debug/lf`.
+- `cargo test -p loopflow --lib server::schema::tests::the_checked_in_schema_is_what_describe_prints`: passed after regenerating the schema from the branch CLI.
+- `scripts/test_desktop.sh --no-parallel --filter 'CreationSubmissionTests|SessionControlsTests/createOrBindConversation|WorkDestinationTests/newTaskSelectsTheTaskAndOpensItsConversation'`: 11 passed; mounted cleanup, cold recovery, failed removal/lookup, destination mismatch and unchanged submitted bytes. The initial run exposed omitted nulls in receipt encoding; explicit optional-field encoding repairs the round trip.
+- `scripts/test_desktop.sh --no-parallel --filter 'ServerProtocolTests|SessionsStoreTests/reset'`: 17 passed; reset carries submission identity, failed preparation keeps the current Session, and shared fixtures match the schema. The reset fixture now includes its request ID.
+- `cargo fmt`, `git diff --check`, and `LF_BIN=$PWD/target/debug/lf uv run python website/dev.py sync-docs`: passed; 33 documentation routes regenerated.
+
+Compression follow-up, same environment:
+
+- `cargo test -p loopflow --lib ops::human_session::tests::creation_retry_reconciles_publication`: passed after sharing publication/result recording; newer input and already-published input retain their behavior.
+- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection_and_server_restart`: passed after removing the duplicate milestone decision; retry, conflict, unknown launch and removed Task remain covered.
+- `cargo test -p loopflow --lib task_graph_launch_tests::task_create_run_starts_the_graph_and_admits_the_request_as_first_turn`: passed with the simplified handler and CLI return type; the existing macOS unwind-table linker warning remained.
+- `scripts/test_desktop.sh --no-parallel --filter 'CreationSubmissionTests|SessionControlsTests/createOrBindConversation|WorkDestinationTests/newTaskSelectsTheTaskAndOpensItsConversation|SessionsStoreTests/reset'`: 13 passed headlessly after tying cold cleanup to the rendered successful detail. Swift and CLI builds passed; existing Ghostty symbol warnings remained.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed with the built branch CLI.
+- `cargo fmt`, `git diff --check`, `lf context`: passed; memory and scratch remain within both token and byte targets.
+
+Gate retains the full terminal set, merged-frontier migration/parity suites and
+Clippy on this final tree. Physical sleep/wake and quit/reopen with a configured
+provider remain demo checks. Existing Product memory edits were not changed in
+this implementation iteration.

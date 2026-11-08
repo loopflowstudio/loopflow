@@ -449,20 +449,32 @@ A recovered admitted request returns its recorded Session without stopping
 anything again. An interrupted stop or input append must be reconciled against
 that attempt; it cannot stop a newer process or append duplicate input.
 
-Receipt lookup is read-only: it returns the recorded outcome or confirmed
-absence and starts no work. After reconnect or cold startup, look up the receipt
-first. Resubmit the identical creation only on confirmed absence or a
-server-declared safe continuation. Unavailable lookup stays unavailable;
-unknown effects remain inspectable. A removed resource's receipt never
-authorizes recreating it.
+`creation.get` is read-only. It returns the receipt with a derived `disposition`
+and human-readable `explanation`, or `null` for confirmed absence. `complete`
+means present the result; `continue` means the identical submitted request can
+finish local preparation or proceed to its first launch; `inspect` means retain
+it without resubmitting. The creation handler checks again under its request
+lock, so a lookup cannot authorize repeating an uncertain effect. The receipt
+retains original `run` intent; disposition is computed from the receipt and
+current resource, never persisted as another outcome.
+
+After reconnect or cold startup, look up the receipt first. Send the saved bytes
+only for confirmed absence or `continue`. Unavailable lookup stays unavailable.
+An interrupted launch says “Task created; start unconfirmed”; an interrupted
+Session stop says “Conversation change unconfirmed”. Removed resources remain
+identifiable through receipts and cannot be recreated. Newer Session input
+prevents continuation of an unpublished older change.
 
 Desktop persists only `{request_id, destination, payload, submitted_at}` before
 first send, with a versioned record and exact payload. The destination pins the
 original Machine and repository. Server receipts own outcomes; client records
 contain no milestone ledger. A single app recovery owner serves all windows.
-Storage failure keeps the form and reports an error before sending. Remove a
-record after presenting its reconciled result; failed removal repeats lookup
-safely. Retain unresolved outcomes for inspection. This is neither an editable
+Storage failure keeps the form and reports an error before sending. A mounted
+Task or Session result retires its submission, including Session promotion;
+a socket reply or navigation request alone does not. Cold recovery offers
+Show result and retires the request after displaying the recovered resource.
+Failed removal repeats lookup and presentation safely. Inspect retains unresolved
+outcomes and exposes the raw receipt. This is neither an editable
 outbox nor offline creation, cross-device submission sync or generic replay.
 
 ### Terminal and provider recovery

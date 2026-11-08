@@ -1336,3 +1336,14 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
     );
     assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }
+
+#[test]
+fn creation_recovery_dispositions_round_trip() {
+    let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
+    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+        serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

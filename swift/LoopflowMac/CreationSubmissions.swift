@@ -13,7 +13,15 @@ struct SubmittedCreation: Codable, Sendable, Identifiable {
     var id: String { requestID }
 }
 
-struct CreationLookup: Decodable, Sendable {
+struct CreationLookup: Codable, Sendable {
+    enum Disposition: String, Codable, Sendable { case complete, `continue`, inspect }
+    let disposition: Disposition
+    let explanation: String
+    let run: Bool
+    let artifactKey: String?
+    let launch: JSONValue?
+    let createdAt: Int64
+    let updatedAt: Int64
     let requestId: String
     let kind: String
     let milestone: String
@@ -21,8 +29,26 @@ struct CreationLookup: Decodable, Sendable {
     let taskId: String?
     let sessionId: String?
     enum CodingKeys: String, CodingKey {
-        case kind, milestone, result
+        case kind, milestone, result, disposition, explanation, run, launch
+        case artifactKey = "artifact_key", createdAt = "created_at", updatedAt = "updated_at"
         case requestId = "request_id", taskId = "task_id", sessionId = "session_id"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        try fields.encode(requestId, forKey: .requestId)
+        try fields.encode(kind, forKey: .kind)
+        try fields.encode(milestone, forKey: .milestone)
+        try fields.encode(disposition, forKey: .disposition)
+        try fields.encode(explanation, forKey: .explanation)
+        try fields.encode(run, forKey: .run)
+        try fields.encode(taskId, forKey: .taskId)
+        try fields.encode(sessionId, forKey: .sessionId)
+        try fields.encode(artifactKey, forKey: .artifactKey)
+        try fields.encode(result, forKey: .result)
+        try fields.encode(launch, forKey: .launch)
+        try fields.encode(createdAt, forKey: .createdAt)
+        try fields.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -78,7 +104,16 @@ actor CreationSubmissions {
             .sorted { $0.submittedAt < $1.submittedAt }
     }
 
-    func presented(_ id: String) throws { try FileManager.default.removeItem(at: url(id)) }
+    func presented(_ id: String) async throws {
+        let file = url(id)
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        let record = try JSONDecoder().decode(SubmittedCreation.self, from: Data(contentsOf: file))
+        guard try await currentMachine() == record.destination else {
+            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
+        }
+        try Task.checkCancellation()
+        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+    }
 
     static func machine() async throws -> String {
         struct Identity: Decodable { let id: String }
@@ -108,13 +143,7 @@ actor CreationSubmissions {
         }
         let data = Data(try await lookup(record.id).utf8)
         let receipt = try JSONDecoder().decode(CreationLookup?.self, from: data)
-        // Only absence or local milestones preceding/after an external effect
-        // permit continuation. run_requested/stopping are never resubmitted.
-        let payload = try? JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
-        let needsRun = payload?["run"] as? Bool == true
-        if receipt == nil || (receipt?.milestone == "filed" && needsRun)
-            || receipt?.milestone == "started"
-            || (receipt?.milestone == "admitted" && receipt?.result == nil) {
+        if receipt == nil || receipt?.disposition == .continue {
             _ = try await send(record.payload)
             return try JSONDecoder().decode(CreationLookup.self,
                 from: Data(try await lookup(record.id).utf8))
@@ -129,7 +158,7 @@ final class CreationRecovery {
     struct Item: Identifiable {
         let id: String
         let text: String
-        let settled: Bool
+        let complete: Bool
         let resource: Resource?
     }
     struct Resource {
@@ -137,8 +166,42 @@ final class CreationRecovery {
         let directory: String
         let task: String?
         let session: String?
+        let receipt: String
     }
+    enum Presentation: Hashable {
+        case task(String)
+        case session(String)
+    }
+    private let submissions: CreationSubmissions
+    private(set) var presentations: [String: Presentation] = [:]
     private(set) var items: [Item] = []
+
+    init(submissions: CreationSubmissions = .shared) { self.submissions = submissions }
+
+    func awaitingPresentation(_ id: String, of resource: Presentation) {
+        presentations[id] = resource
+        items.removeAll { $0.id == id }
+    }
+
+    func requests(for resource: Presentation) -> [String] {
+        presentations.filter { $0.value == resource }.keys.sorted()
+    }
+
+    func presented(_ ids: [String]) async {
+        for id in ids {
+            do {
+                try Task.checkCancellation()
+                try await submissions.presented(id)
+                presentations.removeValue(forKey: id)
+                items.removeAll { $0.id == id }
+            } catch is CancellationError { return }
+            catch {
+                presentations.removeValue(forKey: id)
+                items.removeAll { $0.id == id }
+                items.append(Item(id: id, text: error.localizedDescription, complete: false, resource: nil))
+            }
+        }
+    }
     private var refreshing = false
     private var observation: Task<Void, Never>?
 
@@ -157,35 +220,30 @@ final class CreationRecovery {
         refreshing = true
         defer { refreshing = false }
         do {
-            let records = try await CreationSubmissions.shared.pending()
+            let records = try await submissions.pending()
             var current: [Item] = []
             for record in records {
                 do {
-                    guard let receipt = try await CreationSubmissions.shared.reconcile(record) else { continue }
-                    let unknown = ["run_requested", "stopping"].contains(receipt.milestone)
-                    let subject = receipt.taskId ?? receipt.sessionId ?? record.id
+                    guard let receipt = try await submissions.reconcile(record) else { continue }
                     let payload = try JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
                     guard let directory = payload?["directory"] as? String else {
                         throw RegistryQueryError("The saved creation has no repository; its original request is retained.")
                     }
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                     let resource = Resource(destination: record.destination, directory: directory,
-                        task: receipt.taskId, session: receipt.sessionId)
-                    current.append(Item(id: record.id,
-                        text: unknown ? "\(subject): start unconfirmed. No second launch was requested." : "Recovered \(subject) · \(receipt.milestone)",
-                        settled: !unknown, resource: resource))
+                        task: receipt.taskId, session: receipt.sessionId,
+                        receipt: String(decoding: try encoder.encode(receipt), as: UTF8.self))
+                    current.append(Item(id: record.id, text: receipt.explanation,
+                        complete: receipt.disposition == .complete, resource: resource))
                 } catch {
-                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", settled: false, resource: nil))
+                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
                 }
             }
-            items = current
-        } catch { items = [Item(id: "storage", text: error.localizedDescription, settled: false, resource: nil)] }
-    }
-
-    func acknowledge(_ item: Item) async {
-        do {
-            try await CreationSubmissions.shared.presented(item.id)
-            items.removeAll { $0.id == item.id }
-        } catch { items = [Item(id: item.id, text: error.localizedDescription, settled: false, resource: nil)] }
+            // A mounted view may have retired a request while lookup awaited I/O.
+            let pending = Set(try await submissions.pending().map(\.id))
+            items = current.filter { pending.contains($0.id) }
+        } catch { items = [Item(id: "storage", text: error.localizedDescription, complete: false, resource: nil)] }
     }
 }
 
@@ -197,14 +255,15 @@ struct CreationRecoveryView: View {
             ForEach(recovery.items) { item in
                 HStack {
                     Text(item.text).textSelection(.enabled)
-                    if item.resource != nil { Button("Inspect") { inspecting = item } }
-                    if item.settled { Button("Dismiss") { Task { await recovery.acknowledge(item) } } }
+                    if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
                 }
             }
         }
         .padding(recovery.items.isEmpty ? 0 : 12)
         .sheet(item: $inspecting) { item in
-            if let resource = item.resource { RecoveredCreationInspector(resource: resource) }
+            if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
+                if item.complete { await recovery.presented([item.id]) }
+            }) }
         }
         .task { recovery.start() }
     }
@@ -212,14 +271,27 @@ struct CreationRecoveryView: View {
 
 private struct RecoveredCreationInspector: View {
     let resource: CreationRecovery.Resource
-    @State private var detail = "Reading current work…"
+    let presented: () async -> Void
+    @State private var detail: Result<String, Error>?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
-            ScrollView { Text(detail).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading) }
+            ScrollView {
+                Group {
+                    switch detail {
+                    case .success(let text): Text(text).task { await presented() }
+                    case .failure(let error): Text(error.localizedDescription)
+                    case nil: Text("Reading current work…")
+                    }
+                }
+                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            DisclosureGroup("Receipt") {
+                ScrollView { Text(resource.receipt).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            }
             Button("Done") { dismiss() }
         }
         .padding(20).frame(minWidth: 600, minHeight: 400)
@@ -242,11 +314,24 @@ private struct RecoveredCreationInspector: View {
                         lines.append(contentsOf: overview.sessions.map { "Conversation: \($0.title) (\($0.id))" })
                         lines.append(contentsOf: overview.graphProcesses.map { "Graph \($0.name): \($0.state.rawValue)" })
                     }
-                    detail = lines.filter { !$0.isEmpty }.joined(separator: "\n\n")
+                    detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 } else if let session = resource.session {
-                    detail = try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8))
+                    detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8)))
                 }
-            } catch { detail = error.localizedDescription }
+            } catch { detail = .failure(error) }
         }
+    }
+}
+
+// A mounted result retires the submitted request. Navigation and socket replies
+// alone cannot do so; a cancelled or failed presentation remains recoverable.
+struct CreationPresentation: ViewModifier {
+    let recovery: CreationRecovery
+    let resource: CreationRecovery.Presentation
+    var visible = true
+
+    func body(content: Content) -> some View {
+        let ids = visible ? recovery.requests(for: resource) : []
+        content.task(id: ids) { await recovery.presented(ids) }
     }
 }

@@ -1307,11 +1307,13 @@ final class SessionsStore {
         guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         let previous = sessions[index]
         // The same Session continues on a new thread; its old terminal ends.
+        let requestID = UUID().uuidString
         let restarted = try await query(for: previous.record).resetSession(
-            previous.record, agent: previous.record.provider, cwd: repoPath)
+            previous.record, agent: previous.record.provider, cwd: repoPath, requestID: requestID)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = restarted
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .session(restarted.id))
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
         startTerminal(id)
@@ -1796,6 +1798,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
+        .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil))
         .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
             if let completed { workspaces.updateCompletion(key, completed: completed) }
         }

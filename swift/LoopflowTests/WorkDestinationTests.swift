@@ -187,6 +187,8 @@ struct WorkDestinationTests {
         #expect(model.navigation.palette == nil)
         #expect(model.selection == .task(id: task.id))
         #expect(installedSession(model, registry)?.id == record.id)
+        #expect(CreationRecovery.shared.requests(for: .task(task.task.id)).contains(submitted[3]))
+        await CreationRecovery.shared.presented([submitted[3]])
     }
 
     @Test("New Task selects the new Task before the window's other readings confirm")

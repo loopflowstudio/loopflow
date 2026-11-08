@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SwiftUI
 import ViewInspector
 import Loopflow
 @testable import LoopflowMac
@@ -14,14 +15,18 @@ struct CreationSubmissionTests {
             let fields = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
             let id = try #require(fields["request_id"] as? String)
             submissions += 1
-            if receipts[id] == nil {
-                creations += 1
-                receipts[id] = #"{"request_id":"\#(id)","kind":"task.create","milestone":"admitted","task_id":"original","session_id":null,"result":{"task":{"id":"original"}}}"#
-            }
+            if receipts[id] == nil { creations += 1 }
+            receipts[id] = Self.receipt(id, disposition: "complete")
             return #"{"task":{"id":"original"}}"#
         }
+        static func receipt(_ id: String, disposition: String) -> String {
+            // Deliberately identical milestones: only the server's disposition
+            // determines whether the client continues.
+            #"{"request_id":"\#(id)","kind":"task.create","milestone":"run_requested","task_id":"original","session_id":null,"result":{"task":{"id":"original"}},"disposition":"\#(disposition)","explanation":"Server explanation","run":true,"artifact_key":null,"launch":null,"created_at":1,"updated_at":2}"#
+        }
+        func continuation(_ id: String) { receipts[id] = Self.receipt(id, disposition: "continue") }
         func unknown(_ id: String) {
-            receipts[id] = #"{"request_id":"\#(id)","kind":"task.create","milestone":"run_requested","task_id":"original","session_id":null,"result":null}"#
+            receipts[id] = Self.receipt(id, disposition: "inspect")
         }
     }
 
@@ -111,6 +116,82 @@ struct CreationSubmissionTests {
         #expect(await server.submissions == 1)
         #expect(try await unavailable.pending().count == 1)
     }
+    @Test func lookupDispositionsRoundTrip() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/creation_lookup.json")
+        let data = try Data(contentsOf: file)
+        let receipts = try JSONDecoder().decode([CreationLookup].self, from: data)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(receipts)) as? NSArray
+        #expect(encoded == (try JSONSerialization.jsonObject(with: data) as? NSArray))
+        #expect(receipts.map(\.disposition) == [.complete, .continue, .inspect, .inspect, .inspect, .inspect])
+    }
+
+    @Test func continuationUsesTheSavedPayloadWithoutInterpretingMilestones() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        await server.continuation("same")
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+        let record = SubmittedCreation(requestID: "same", destination: "machine",
+            payload: Data(#"{"kind":"task.create","request_id":"same","directory":"/repo"}"#.utf8),
+            version: ServerProtocol.revision, submittedAt: Date())
+        try await client.save(record)
+        #expect(try await client.reconcile(record)?.disposition == .complete)
+        #expect(await server.submissions == 1)
+        #expect(await server.creations == 0)
+        #expect(try await client.pending().first?.payload == record.payload)
+    }
+
+    @MainActor @Test(arguments: [CreationRecovery.Presentation.task("original"), .session("original")])
+    func mountedPresentationRetiresNormalAndPromotedResults(resource: CreationRecovery.Presentation) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+        _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
+            request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
+        let recovery = CreationRecovery(submissions: client)
+        recovery.awaitingPresentation("same", of: resource)
+        #expect(try await client.pending().count == 1) // reply and navigation aren't presentation
+        let hidden = Text("Result").modifier(CreationPresentation(recovery: recovery, resource: resource, visible: false))
+        try await hidden.inspect().modifier(CreationPresentation.self).viewModifierContent().callTask(id: [String]())
+        #expect(try await client.pending().count == 1)
+        let shown = Text("Result").modifier(CreationPresentation(recovery: recovery, resource: resource))
+        try await shown.inspect().modifier(CreationPresentation.self).viewModifierContent().callTask(id: ["same"])
+        #expect(try await client.pending().isEmpty)
+        await recovery.refresh()
+        #expect(recovery.items.isEmpty)
+        #expect(await server.submissions == 1)
+    }
+
+    @MainActor @Test func coldRecoveryAndFailedRemovalRepeatOnlyPresentationAndLookup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { await server.lookup($0) }, send: { try await server.send($0) })
+        _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
+            request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
+        let recovery = CreationRecovery(submissions: client)
+        await recovery.refresh()
+        let item = try #require(recovery.items.first)
+        #expect(item.complete)
+        #expect(item.text == "Server explanation")
+        // An immutable file fails actual removal on macOS, without mocking storage.
+        let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: file.path)
+        await recovery.presented([item.id])
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: file.path)
+        #expect(try await client.pending().count == 1)
+        await recovery.refresh()
+        #expect(recovery.items.first?.complete == true)
+        #expect(await server.submissions == 1)
+        await recovery.presented([item.id])
+        #expect(try await client.pending().isEmpty)
+    }
+
 }
 
 

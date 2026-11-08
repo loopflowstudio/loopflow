@@ -14,9 +14,8 @@ Carry forward one creation envelope for CLI/server and inline provider transitio
 explanations plus history. `started` covers history-less provider transitions.
 These are implementation defaults, not separate quoted choices.
 
-Budget constants remain provisional. Wave MEMORY.md is read-only from this Task.
-No unresolved product choice prevents pursuing the design. Demo remains the next
-interactive review; implementation direction does not authorize Auto-Ship.
+Budget constants remain provisional. No unresolved product choice prevents the
+gate checks and demo. Implementation direction does not authorize Auto-Ship.
 
 Implementation choice: use 64 MiB per connection (two maximum-size producers)
 and 256 MiB process-wide initially; 32 MiB would refuse ordinary paired reads
@@ -25,7 +24,7 @@ while either materializes. These count reservations and serialized output, not R
 The grace-expiry test waits 61 seconds against the production deadline instead
 of adding a test-only transport deadline. Gate owns this slower acceptance case.
 
-Context check, 2026-11-08: Wave memory is 16,417/16,000 tokens and
-77,072/131,072 bytes (417 tokens over); scratch is within both limits.
-The Task's work guidance makes `.lf/wave/` read-only, so memory curation remains
-with its Wave owner. Limits were not raised.
+Context check, 2026-11-08: the Graph's realign step trimmed Product memory from
+16,417 to 15,924/16,000 tokens (75,277/131,072 bytes). Scratch is within both
+limits. The earlier read-only note applied outside this memory-maintaining step;
+no limit was raised. Product has no immediate child Wave directories here.

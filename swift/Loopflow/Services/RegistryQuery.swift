@@ -1151,8 +1151,8 @@ public struct RegistryQuery: Sendable {
     /// New Task: Rust files the request in `wave` (nil files it in the
     /// repository), starts it as `lf task run` does and admits its conversation
     /// with the request as the first turn. Returns once the Graph registers.
-    public func createTask(request: String, wave: String?, graph: String?, cwd: String?) async throws -> TaskCreateReceipt {
-        try Self.decode(TaskCreateReceipt.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: UUID().uuidString,
+    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreateReceipt {
+        try Self.decode(TaskCreateReceipt.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
             title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
     }
 
@@ -1310,9 +1310,9 @@ public struct RegistryQuery: Sendable {
 
     /// Restart the conversation on a fresh provider thread seeded with what the
     /// last thread knew; the same Session keeps its history.
-    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
+    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionNew(directory: cwd ?? "/", requestID: UUID().uuidString, id: session.id, agent: agent)))
+            .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id, agent: agent)))
     }
 
     /// Move the open Sessions whose login cannot take their model now to
@@ -1324,9 +1324,9 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Create a Task around the selected conversation without launching work.
-    public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
+    public func createTaskFromSession(id: String, title: String, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreateReceipt.CreatedTask {
         try Self.decode(TaskCreateReceipt.self, from: await write(
-            .taskCreate(directory: cwd ?? "/", requestID: UUID().uuidString, title: title, request: nil, wave: nil, graph: nil, session: id, run: false))).task
+            .taskCreate(directory: cwd ?? "/", requestID: requestID, title: title, request: nil, wave: nil, graph: nil, session: id, run: false))).task
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {

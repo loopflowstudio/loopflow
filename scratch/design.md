@@ -27,7 +27,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8 implement check found:
+The November 8 implement retry reconfirmed the earlier implement and realign findings:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -36,8 +36,9 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-Graph decision finding: blocked on LOO-718 landing. Repeating implementation
-cannot resolve this external dependency; retain the checkout for continuation.
+LOO-718's authenticated transport is still absent from main. Implementation and
+authenticated connection checks remain dependent on it landing; the local
+UID-only store cannot exercise remote identity. No product decision is missing.
 
 ## Delete — do not maintain
 
@@ -59,6 +60,9 @@ and bridge connections during implementation, gate and QA. Reconcile PR #1812's
 tests while keeping bulk transfer behavior intact. Visual review remains for
 demo or QA; Desktop opening results are in `questions.md`.
 
-Compress removed repeated status and acceptance prose; no code changed.
-`git diff --check` — clean; `lf context` — within both scratch limits. No build
-or tests required for plan-only edits.
+After integration, update the docs' planned/local-only wording to match the
+implemented endpoint. Until then, the remote contract describes acceptance,
+not available behavior.
+
+`git diff --check` — clean; no code changed, so build and focused tests remain
+for implementation after the transport lands.

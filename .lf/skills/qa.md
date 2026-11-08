@@ -108,6 +108,23 @@ Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
 
+## Native account switching
+
+Use the branch CLI with private `LF_HOME` and `CLAUDE_CONFIG_DIR`, clearing
+inherited `LF_*`. On macOS a temporary config directory gets a scoped Keychain
+service; changing `HOME` alone does not isolate the login Keychain. Do not probe
+the unsuffixed service beside open production conversations.
+
+`tests/e2e/claude_shared_home.py` drives the real CLI, Keychain and Claude through
+`scripts/test_network.py`, with external egress denied. Its synthetic accounts
+and local inference response make it a supplemental boundary check, not live
+login acceptance. A disposable marker chmod 0400 exercises a real installation
+error; restore 0600, repeat the same account command, then inspect both items,
+marker time and hold. Seeded stale items show reconciliation, not a failed native
+Keychain write. Live refresh, running-client continuity and unsuffixed-service
+checks need disposable or idle provider logins and suitable OS-account isolation.
+Afterward verify the exact temporary service items and child processes are gone.
+
 ## Keep what you learned
 
 How to launch and drive this product belongs in this skill. When you had to work

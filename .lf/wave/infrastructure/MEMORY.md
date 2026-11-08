@@ -22,38 +22,39 @@ preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
 ## Limit recovery (LOO-747/811, reconciled 2026-11-08)
 
-LOO-747 (PR #1828, merge `90a82635fc`) recovers within the Graph step's
-Process without replaying done steps. Explicit models change accounts only;
-bare harnesses may fall back across models/providers, then wait by wall clock.
-Holds override scoped order until full or `use auto`. One shared home
-per provider means a login switch affects every open Session on that Machine.
+LOO-747 (#1828, `90a82635fc`) recovers inside the Graph step without replay.
+Explicit models change accounts only; bare harnesses may change models/providers,
+then wait by wall clock. Holds override scoped order until full or `use auto`.
+One shared provider home means switches affect every open Session on the Machine.
 
-Claude 2.1.318 reloads on `.credentials.json` mtime; activation touches it.
-Source restarts running Codex for `resume --account`, switches Claude before
-attaching, and defers busy Session moves to Stop. These running-client paths
-remain unobserved in LOO-811. Rentals receive laptop-refreshed Claude access
-tokens (~8h), resent every 2h; refresh invalidation of earlier tokens is unknown.
+Claude 2.1.318 reloads on `.credentials.json` mtime. Source restarts Codex for
+`resume --account`, switches Claude before attaching, and defers busy moves to
+Stop; these running-client paths remain unobserved. Rentals receive refreshed
+Claude access tokens (~8h) every 2h; earlier-token invalidation is unknown.
 
-Lessons: a thread without a transcript needs a seeded one; only failed-exit
-provider words cool accounts. Claude StopFailure calls every 429 `rate_limit`;
-the displayed line distinguishes spent quota/model, then polling supplies reset.
-A no-model spent line with every account-wide window below 100% could clear its
-own cooldown; live occurrence/retry remains unobserved. November 7 direction
-kept overage cooling and unbounded waits. Prompt-cache switch cost and LOO-435
-remain open. Earlier detail: `d4941f045600750beffbbfc73934bd4bbf9abfbb:.lf/wave/infrastructure/MEMORY.md`.
+Threads without transcripts need seeding. Only failed-exit provider words cool accounts.
+Claude StopFailure labels every 429 `rate_limit`; displayed text distinguishes
+spent quota/model, polling supplies reset. A no-model spent line with all
+account-wide windows below 100% could clear its own cooldown; live retry remains
+unobserved. November 7 direction kept overage cooling and unbounded waits.
+Prompt-cache switch cost and LOO-435 remain open. Earlier detail:
+`d4941f045600750beffbbfc73934bd4bbf9abfbb:.lf/wave/infrastructure/MEMORY.md`.
 
-November 8: installed lf 0.15.2+dad2621c1 / Claude 2.1.319 switched fresh clients
-and respected holds, but three A → B → A checks left legacy stale. Service-only
-lookup could select USER twice. Two repaired candidate runs passed both-item
-checks after every switch with synthetic logins and a temporary Keychain service;
-the third item stayed unchanged. Retain USER plus one distinct eligible account,
-selected by name, without service-wide synchronization. First-switch success and
-fixed lookup order had hidden the return-switch failure.
+November 8: installed lf 0.15.2+dad2621c1 / Claude 2.1.319 respected holds but
+three A → B → A checks left legacy stale: service-only lookup could select USER
+twice. Two synthetic-login native runs passed every switch on a temporary service;
+the third item stayed unchanged. USER plus one distinct eligible account remains
+the scope; lexical selection is a headless assumption.
 
-Candidate success proves no installed repair. Production unsuffixed service,
-running-client continuity, Codex refresh overwrite and rental-token invalidation
-remain unobserved. Shared production
-conversations preclude disruptive probes; full acceptance remains with demo/review.
+Same-login success also hid partial writes and skipped reload. Reconciliation now
+uses the current native credential under existing locks before success, including
+after save-back identifies a rotated login. Three command-installation tests passed
+with stand-ins: retry, rotation, marker recovery, repeats and service fallback.
+Native runs predate this repair. Writer tests missed activation's early returns.
+
+Native retry, installed repair, unsuffixed service, running-client continuity,
+Codex refresh overwrite and rental-token invalidation remain unobserved.
+Production conversations preclude disruptive probes; demo/review retains acceptance.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

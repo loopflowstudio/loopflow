@@ -10,6 +10,10 @@ or disruption to open conversations. Fixture success does not complete the Task.
 
 Still unobserved:
 
+- A partial native Keychain write followed by the same-command retry. The retry
+  repair has command-installation coverage with a Keychain stand-in. Native QA
+  below now covers seeded stale-item reconciliation and a real marker permission
+  failure/retry; it does not cause a native Keychain write rejection.
 - The repaired two-item switch through installed lf, including the default-home
   unsuffixed service in an isolated OS account. Candidate checks used a temporary
   scoped service; installed checks below predate the repair.
@@ -69,7 +73,7 @@ Earlier concept-review alternatives remain in
 `d4941f045600750beffbbfc73934bd4bbf9abfbb:scratch/live-recovery.md` and its
 `scratch/concept-review.html`. The current page reflects the review below.
 
-## Concept review — finish a partial switch
+## Finish a partial switch — implemented, verification remains
 
 **November 8 implementation: focused tests pass; gate and review remain.**
 A successful repeat of `lf account use claude=work@` finishes a partial
@@ -89,42 +93,36 @@ storage problem and repeat `lf account use claude=work@`. It finishes installing
 that login before reporting success.” Existing hold, routing, resume and
 shared-home guidance otherwise stays unchanged.
 
-Implementation direction (November 8):
+The implementation follows the iteration direction: "Reconcile USER plus the
+selected legacy item under existing locks using the newest native credential,
+retaining lexical selection and third-item scope from scratch/questions.md."
 
-### Delete — do not maintain
+Claude's same-login returns no longer bypass installation. The same-owner path
+after save-back writes and verifies the two selected items from the current
+native credential under the credential and refresh locks. Marker open/touch
+failures propagate; an absent marker remains valid because Claude reloads when
+it is absent. Codex's fast path, outgoing save-back and service fallback remain.
+No rollback or synchronization of every service item is promised.
 
-Completed: Claude's pre-lock and post-lock same-login returns and silent success
-on reload-marker open errors (except an absent file) are removed. The same-owner
-path reconciles native items. Codex's fast path, save-back, locks and the single
-Keychain selector/writer remain. No deletion targets remain.
+The three consolidated tests call the command's `install_login` through
+activation. They cover rejected writes and failed retries, access-only and
+both-token rotation, marker failure/recovery, complete repeats and normal
+switches. The retry/switch scenario runs against scoped and unsuffixed services;
+the third item and a history file remain unchanged. These are stand-in results,
+not an executable CLI/hold test or Session identity/input continuity observation.
 
-Compression keeps runtime setup inside the async test fixture. One retry scenario
-runs against scoped and unsuffixed services, replacing the separate default-home
-retry test while extending its rotation, repeat and normal-switch coverage.
+Remaining: gate runs affected provider_auth, activation/caller and account command
+suites, docs checks and clippy. Demo/review shows native retry alongside normal
+switches and retains every installed/running-client check above, including Session
+identity, history and continued input. No further product choice is needed for
+this repair; delivery remains review-only.
 
-### Required behavior
-
-- Keep provider identity separate from installation completeness. Keychain item
-  names are storage addresses, not extra managed accounts. Reconcile USER and
-  the one selected eligible legacy item before an already-active Claude activation
-  succeeds, including the same-owner return after save-back.
-- Derive completeness from the native items under the existing credential and
-  refresh locks; add no table, retry record or public API. Keep one service/item
-  selection and write/verification path. On a same-login retry, use the current
-  native credential, retaining any rotation, rather than reinstalling an older
-  stored profile. Successful recovery must also reach the reload marker update.
-- Preserve outgoing credentials, Session identity/history/input, scoped service
-  selection and the unsuffixed fallback. Keep the lexical headless choice and
-  third-item scope in questions.md. A failed partial installation must remain an
-  error; no rollback or all-service synchronization is implied.
-- Exercise the activation/command path through rejected legacy write → error →
-  storage restored → same-command success with both items current. Include a
-  newer native credential for the same login, marker recovery, an already-complete
-  repeat and A → B → A. Direct writer tests alone miss the early return.
-
-Next review shows that retry alongside the existing normal-switch checks. The
-installed and running-client observations listed above remain with demo/review;
-this refinement neither completes those checks nor changes delivery scope.
+Concept-review, November 8: no further design change or open product choice.
+Normal switching, partial-write retry and rotation fit one interaction: repeat
+the account command to finish installation. Keychain item names remain storage
+addresses, not managed accounts; completeness needs no persisted retry state.
+Advance to gate and demo with the remaining observations above. Existing usage
+guidance needs no further change, and no skill instruction changes are needed.
 
 `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null`
 (inherited LF_* unset) — 4 passed November 8: rejected-write retries, access-only
@@ -141,6 +139,34 @@ Compression recheck November 8: `cargo test -p loopflow --lib lf::commands::acco
 retry scenario in both scoped and unsuffixed homes; same `__eh_frame` warning.
 `cargo fmt --check`, `git diff --check`, `lf context` — passed; memory and scratch
 remain below both limits. Production code was unchanged in this compression pass.
+
+Realign November 8: reused those results; only the plan and Wave memory changed.
+`git diff --check` and `lf context` — passed; both context budgets remain satisfied.
+
+## QA — November 8
+
+Report: [qa.html](qa.html). Candidate `79053ecc7.dirty`, SHA256
+`edb2c714ba90a3d446aa0338ec759113dfdc71443d10d52bc5b36a78b8f704b9`;
+Claude 2.1.319. `cargo build -p loopflow --bin lf` passed with inherited LF_*
+unset. Fresh private-home CLI reads, unknown-login/provider errors and `use auto`
+passed without seeded data; the native home stayed empty.
+
+Supplemental native checks used synthetic stored accounts, scoped real Keychain
+items and a loopback inference refusal with external egress denied. Both items
+followed A → B → A and account-selected launches. Repeating B repaired a seeded
+stale legacy item and advanced the reload marker. An actual chmod-0400 marker
+made A installation and its first retry exit 1 with `Permission denied`; both
+Keychain items already held A while the previous B hold remained. Restoring 0600
+and repeating A succeeded and moved the hold to A. History bytes and the third
+item stayed unchanged. Hold/order/release and plain-Claude selection passed.
+
+Receipts: `.lf/tmp/loo-811-qa/{empty-cli.json,native/results.json,cleanup.json}`.
+Probe: `.lf/tmp/loo-811-qa/native_recovery.py`, a copy of the existing native
+fixture with these extra scenarios and command transcripts. Cleanup independently
+confirmed all three scoped items absent, the temporary home removed and zero
+processes referencing it. These fixture results do not complete live QA. No
+production defect surfaced; no runtime code changed. Gate checks and the live
+login/installed/running-client observations listed above remain outstanding.
 
 ## Native observations — November 8
 

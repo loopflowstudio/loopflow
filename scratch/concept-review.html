@@ -33,15 +33,16 @@
     provider_account/identity.rs, lf/commands/account.rs}; tests/e2e/claude_shared_home.py</header>
   <h1>Repeat the switch to finish it</h1>
   <div class="decision">
-    <p><strong>Implemented; review remains.</strong> The two-item requirement is settled for this iteration.
-    A retry must finish installing the login before reporting success. No new product choice is needed.</p>
+    <p><strong>Concept review: advance.</strong> No further design change or open product choice.
+    The implemented retry finishes installing the login before reporting success.
+    Gate and native demo remain; the Task is not complete.</p>
   </div>
   <h2>Action → concept → API</h2>
   <table>
     <thead><tr><th>Action</th><th>Concept</th><th>API / effect</th></tr></thead>
     <tbody>
-      <tr><td><code>lf account use claude=work@</code></td><td>One Machine login + hold</td><td><code>activation::activate</code> → install login → <code>hold::hold</code></td></tr>
-      <tr><td>Fix storage failure; repeat the command</td><td>Same login, incomplete installation</td><td>Reconcile the two items from the current native credential; update reload marker</td></tr>
+      <tr><td><code>lf account use claude=work@</code></td><td>One Machine login + hold</td><td><code>install_login</code> → <code>activation::activate</code> → <code>hold::hold</code> after success</td></tr>
+      <tr><td>Fix storage failure; repeat the command</td><td>Same login, incomplete installation</td><td><code>save_back</code> → <code>write_login</code>: verify both items from the current native credential; update reload marker</td></tr>
       <tr><td><code>lf account use auto</code></td><td>Release hold</td><td><code>hold::release</code>; normal routing resumes</td></tr>
     </tbody>
   </table>
@@ -64,11 +65,12 @@ Retry B, repaired          USER=B  legacy=B  → success</pre>
   <h2>Verification and remaining observations</h2>
   <ol>
     <li>Does failure → same-command retry repair both items and reach the reload marker?
-      <strong>Covered through command installation and activation with a Keychain stand-in.</strong></li>
+      <strong>Covered through command installation and activation with a Keychain stand-in;
+      native failure → retry remains unobserved.</strong></li>
     <li>Does retry retain a newer native credential for the same login, with normal switches and
       complete repeats still working? <strong>Covered for access-only and both-token rotation. Retry, repeats and normal switches cover scoped and unsuffixed services.</strong></li>
     <li>Does installed recovery keep live conversations working?
-      <strong>Still unobserved:</strong> unsuffixed service, resume/move/reload, Codex refresh overwrite,
+      <strong>Still unobserved:</strong> installed repair, native unsuffixed service, resume/move/reload, Codex refresh overwrite,
       contradictory usage reports and rental token invalidation. Demo/review retains these checks.</li>
   </ol>
 </main>

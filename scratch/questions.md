@@ -12,3 +12,8 @@ choice for services with more than two items: select the lexically first non-USE
 account, independent of native lookup order. Update at most two items; third-item
 behavior stays separate from the two-item guarantee. Existing unsafe account-name
 filtering in the stdin writer remains unchanged in this focused repair.
+
+2026-11-08 QA: exercise the repaired CLI with a temporary scoped Keychain service
+and a read-only reload marker. Use synthetic accounts for supplemental native
+checks; seeded partial state does not establish a rejected native write or live
+login acceptance. Keep the installed pair and production conversations untouched.

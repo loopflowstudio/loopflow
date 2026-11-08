@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-811 · Native recovery QA</title>
+<style>
+body{font:17px/1.55 system-ui,sans-serif;color:#17242b;background:#f5f3ee;margin:0 auto;padding:48px 24px;max-width:980px}
+h1{font-size:36px;line-height:1.15;margin:8px 0 20px}h2{font-size:23px;margin-top:36px}
+p{max-width:85ch}a{color:#155775}code,pre{font-family:ui-monospace,monospace;font-size:14px}
+pre{background:#17242b;color:#f2f5f7;padding:20px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:6px}
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:12px;border-bottom:1px solid #ccc;vertical-align:top}
+.status{border-left:5px solid #b87929;background:#fff9e9;padding:16px 20px}.meta{color:#53636b;font-size:14px}
+summary{cursor:pointer;font-weight:600;padding:10px 0}li{margin:8px 0}
+</style>
+<main>
+<p class="meta">LOO-811 · November 8, 2026 · macOS · headless QA</p>
+<h1>Native retry works in the scoped checks. Live-login acceptance remains open.</h1>
+<p class="status">No new runtime defect found. The fresh-home CLI checks passed.
+Supplemental synthetic-account checks passed against real Keychain and Claude 2.1.319.
+They do not establish the Task’s live usage-limit recovery outcome.</p>
+<p>Candidate: <code>lf 0.15.2+79053ecc7.dirty</code>, built in this checkout.
+SHA256: <code>edb2c714ba90a3d446aa0338ec759113dfdc71443d10d52bc5b36a78b8f704b9</code>.
+The installed application pair and production conversations were unchanged.</p>
+<h2>Still unchecked, most consequential first</h2>
+<ol>
+<li>A running Codex refresh after a shared-home switch: whether it overwrites the other login’s rotated token. No disposable or idle real-login setup was supplied; the known shared logins have open conversations.</li>
+<li>Claude’s no-model “You've hit your limit” paired with account-wide windows below 100%, including subsequent retry selection. This needs a naturally observed provider failure; no quota was exhausted.</li>
+<li>Running-client <code>resume --account</code>, <code>session move</code>, credential reload and continued input with the same identity/history. The native launches here were fresh clients, and the local endpoint refused inference.</li>
+<li>A native Keychain write rejection followed by the same-command retry. This run recreated stale persisted state; the actual induced failure was opening the reload marker.</li>
+<li>The repaired installed CLI, the default-home unsuffixed Keychain service in an isolated OS account, and whether Claude refresh invalidates earlier rental tokens. These need an isolated installation/login environment. Branch binaries and synthetic tokens cannot establish them.</li>
+</ol>
+<h2>1 · Arrive with an empty Machine</h2>
+<p>Created a fresh Git repository, private HOME/LF_HOME and empty scoped Claude directory.
+Used the branch executable directly, stdin closed, external egress denied. No accounts or database rows were seeded.</p>
+<p><code>account next --json</code> reported ambient routing for both providers.
+An unknown login exited 2 with a useful next command; an unknown provider exited 1.
+<code>account use auto</code> succeeded quietly. Routing was unchanged and the Claude home remained empty.</p>
+<details><summary>Exact CLI transcript</summary><pre>$ lf --version
+lf 0.15.2+79053ecc7.dirty (dirty build 79053ecc7 on v0.15.2)
+[exit 0]
+
+$ lf help account use
+Switch this Machine to a login and keep launches there until it fills up; `auto` hands them back to routing. Exits 2 when the login has no room or names nothing stored, 3 when it needs a login
+
+Usage: lf account use [OPTIONS] &lt;LOGIN&gt;
+
+Arguments:
+  &lt;LOGIN&gt;  
+
+Options:
+  -a, --agent &lt;AGENT&gt;       Select this conversation or all agent steps of this Graph (harness[:model])
+      --setting &lt;SETTINGS&gt;  Override a typed preference for this invocation (KEY=YAML); repeatable
+  -v, --verbose             Show context accounting and diagnostic logs
+  -h, --help                Print help
+
+lf account use work@          # every launch takes work@ until it is full
+lf account use auto           # back to the login with the most to spend
+lf account use codex=auto     # one provider
+[exit 0]
+
+$ lf account next --json
+[
+  {
+    &quot;provider&quot;: &quot;claude&quot;,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ambient&quot;,
+    &quot;account_id&quot;: null,
+    &quot;login&quot;: null,
+    &quot;reason&quot;: &quot;no stored login; launches use claude&#x27;s own&quot;,
+    &quot;without_order&quot;: null
+  },
+  {
+    &quot;provider&quot;: &quot;codex&quot;,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ambient&quot;,
+    &quot;account_id&quot;: null,
+    &quot;login&quot;: null,
+    &quot;reason&quot;: &quot;no stored login; launches use codex&#x27;s own&quot;,
+    &quot;without_order&quot;: null
+  }
+]
+[exit 0]
+
+$ lf account use claude=missing@example.test
+no stored login matches &#x27;missing@example.test&#x27;; lf account lists them
+[exit 2]
+
+$ lf account use bogus=missing@example.test
+Error: unknown provider: bogus
+[exit 1]
+
+$ lf account use auto
+[exit 0]
+
+$ lf account next --json
+[
+  {
+    &quot;provider&quot;: &quot;claude&quot;,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ambient&quot;,
+    &quot;account_id&quot;: null,
+    &quot;login&quot;: null,
+    &quot;reason&quot;: &quot;no stored login; launches use claude&#x27;s own&quot;,
+    &quot;without_order&quot;: null
+  },
+  {
+    &quot;provider&quot;: &quot;codex&quot;,
+    &quot;scope&quot;: &quot;automatic&quot;,
+    &quot;outcome&quot;: &quot;ambient&quot;,
+    &quot;account_id&quot;: null,
+    &quot;login&quot;: null,
+    &quot;reason&quot;: &quot;no stored login; launches use codex&#x27;s own&quot;,
+    &quot;without_order&quot;: null
+  }
+]
+[exit 0]
+</pre></details>
+<h2>2 · Return to stored accounts and switch A → B → A</h2>
+<p><strong>Supplemental fixture check.</strong> Started from synthetic stored logins and two real
+Keychain items under a service unique to a temporary Claude directory. The existing native fixture
+was copied locally and extended for recovery checks. A real Claude sent its selected synthetic
+bearer to a loopback endpoint that refused inference; no provider model request was allowed.</p>
+<p>Both USER and legacy followed every switch. A repeated selection succeeded. Fresh plain Claude
+followed each selection. With a third item present, USER and legacy followed the switch while the third
+item stayed unchanged. This establishes the scoped two-item behavior, not service-wide synchronization.</p>
+<h2>3 · Repeat a selection with a stale legacy item</h2>
+<p>After selecting B, restored only the temporary legacy item to A, leaving USER=B.
+Created an old empty JSON reload marker and a history sentinel. Repeating
+<code>lf account use claude=second@example.com</code> exited 0, reconciled both items to B,
+advanced marker mtime and retained history bytes. The command said “already signed in”.
+The stale item was seeded; no native write failed in this scenario.</p>
+<h2>4 · Hit a real filesystem failure, then repeat</h2>
+<p>Changed the temporary marker to mode 0400 and selected A. Both Keychain items became A,
+but opening the marker failed with <code>Permission denied (os error 13)</code> and exit 1.
+Repeating A while permissions were still wrong failed again. The previous B hold remained
+through both failures; neither command printed successful completion.</p>
+<p>Restoring mode 0600 and repeating A exited 0, reported A already signed in and set the hold to A.
+The marker contents, history sentinel and third item remained unchanged. A subsequent unknown-login
+request exited 2 and left both selected items and the hold intact. Sentinel preservation is not
+Session-history continuity.</p>
+<details open><summary>Exact selection and recovery transcript</summary><pre>$ lf account use claude=first@example.com
+claude is already signed in as first@example.com
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=second@example.com
+claude is now signed in as second@example.com; open Sessions follow at their next request
+claude stays on second@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=first@example.com
+claude is now signed in as first@example.com; open Sessions follow at their next request
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=first@example.com
+claude is already signed in as first@example.com
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=second@example.com
+claude is now signed in as second@example.com; open Sessions follow at their next request
+claude stays on second@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=first@example.com
+claude is now signed in as first@example.com; open Sessions follow at their next request
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=second@example.com
+claude is now signed in as second@example.com; open Sessions follow at their next request
+claude stays on second@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=second@example.com
+claude is already signed in as second@example.com
+claude stays on second@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=first@example.com
+Error: provider account filesystem failed: open /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-shared-6utly5ql/native-claude/.credentials.json: Permission denied (os error 13)
+[exit 1]
+
+$ lf account use claude=first@example.com
+Error: provider account filesystem failed: open /private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-shared-6utly5ql/native-claude/.credentials.json: Permission denied (os error 13)
+[exit 1]
+
+$ lf account use claude=first@example.com
+claude is already signed in as first@example.com
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+
+$ lf account use claude=missing@example.com
+no stored login matches &#x27;missing@example.com&#x27;; lf account lists them
+[exit 2]
+
+$ lf account use auto
+claude launches go to the login with the most to spend again
+[exit 0]
+
+$ lf account use claude=first@example.com
+claude is already signed in as first@example.com
+claude stays on first@example.com until it fills up, or lf account use auto
+[exit 0]
+</pre></details>
+<h2>5 · Read routing and start fresh clients</h2>
+<p>The held login beat a repository order selecting the other login. <code>account use auto</code>
+released the hold and routing selected the repository’s login. Default and same-account launches
+kept the shared provider home and passed no credential environment override; selecting another
+account moved both selected Keychain items and plain Claude followed. These fixture launches
+ended on a local inference refusal and did not demonstrate successful conversation turns.</p>
+<details><summary>Structured native results</summary><table><thead><tr><th>Observation</th><th>Result</th></tr></thead><tbody><tr><td>two_keychain_items_follow_every_switch</td><td>True</td></tr><tr><td>store</td><td>keychain</td></tr><tr><td>plain_claude_follows_switch</td><td>True</td></tr><tr><td>third_keychain_item_updated</td><td>False</td></tr><tr><td>claude_follows_switch_with_three_keychain_items</td><td>True</td></tr><tr><td>native_stale_legacy_reconciled</td><td>True</td></tr><tr><td>native_marker_failure_and_retry</td><td>True</td></tr><tr><td>failed_install_keeps_previous_hold</td><td>True</td></tr><tr><td>history_unchanged</td><td>True</td></tr><tr><td>unknown_login_keeps_selection</td><td>True</td></tr><tr><td>hold_beats_repository_order</td><td>True</td></tr><tr><td>shared_launch</td><td>True</td></tr><tr><td>launch_switches_home</td><td>True</td></tr></tbody></table></details>
+<h2>6 · Inspect what remained</h2>
+<p>The probe shut down its local endpoint and removed its temporary home and exact service items.
+Independent readback confirmed all three items absent (security exit 44), the directory absent,
+and zero processes referencing that temporary home. The fresh-home probe also removed its directory.</p>
+<pre>{
+  &quot;temporary_home_removed&quot;: true,
+  &quot;keychain_items_removed&quot;: {
+    &quot;fixture-current&quot;: true,
+    &quot;fixture-legacy&quot;: true,
+    &quot;fixture-third&quot;: true
+  },
+  &quot;remaining_processes_for_temporary_home&quot;: 0
+}</pre>
+<h2>Changes and repeatability</h2>
+<p>No runtime repair was needed. Updated the repository QA skill with native-account isolation,
+marker failure/retry and cleanup instructions; recorded the remaining limits in the recovery plan.</p>
+<p><code>cargo build -p loopflow --bin lf</code> passed with inherited LF_* unset.
+The supplemental probe ran through:</p>
+<pre>uv run python scripts/test_network.py uv run --script .lf/tmp/loo-811-qa/native_recovery.py   --claude /Users/jack/.local/bin/claude --lf target/debug/lf   --output .lf/tmp/loo-811-qa/native &lt; /dev/null</pre>
+<p>Local raw receipts: <code>.lf/tmp/loo-811-qa/empty-cli.json</code>,
+<code>native/results.json</code> and <code>cleanup.json</code>. The extended probe is
+<code>.lf/tmp/loo-811-qa/native_recovery.py</code>; its baseline is
+<code>tests/e2e/claude_shared_home.py</code>. These local probe files are ignored by Git;
+this report retains their observations and command transcripts.</p>
+<p>Affected gate suites and clippy remain with gate. Nothing was published, installed or landed.
+What works here: fresh-home CLI behavior, scoped native reconciliation and marker failure/retry.
+What remains: the real-login and installed/running-client scenarios above. No additional runtime
+failure was observed within the reachable checks.</p>
+</main></html>

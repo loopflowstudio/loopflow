@@ -404,6 +404,18 @@ impl SqliteStore {
         self.save_scope_steer(("session", session), author, text)
     }
 
+    /// The steer `source` at `revision` derived, whichever scope owns it.
+    pub fn steer_by_source(&self, source: &str, revision: &str) -> StoreResult<Option<Steer>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM steers p WHERE p.source=?1 AND p.revision=?2"
+        ))?;
+        let steer = stmt
+            .query_row(params![source, revision], read_steer)
+            .optional()?;
+        Ok(steer)
+    }
+
     fn save_scope_steer(
         &self,
         owner: (&str, &str),

@@ -23,7 +23,7 @@ fn lifecycle_error(message: impl ToString) -> OpsError {
 }
 
 /// What happened to the authored files on the main checkout.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum AuthoredFiles {
     Committed { commit: String },
@@ -34,7 +34,7 @@ pub enum AuthoredFiles {
 /// `lf wave add --json`: the receipt Desktop and the CLI both show. `summary`
 /// holds what is left to do after the add, one sentence per line; empty when
 /// nothing is.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveAdded {
     pub id: WaveId,
     pub name: String,

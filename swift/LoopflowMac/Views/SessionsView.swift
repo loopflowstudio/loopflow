@@ -15,6 +15,8 @@ struct ConsoleCommandActions {
     let toggleSidebar: () -> Void
     let focusSidebar: () -> Void
     let focusTerminal: (() -> Void)?
+    /// Ask where the open Sessions whose login cannot take their model should continue.
+    let moveBlockedSessions: () -> Void
     /// The focused window's action context, read when a menu item is chosen.
     let context: @MainActor () -> DesktopActionContext
     let failed: @MainActor (Error) -> Void
@@ -51,6 +53,7 @@ struct ConsoleCommands: Commands {
             action("next")
             action("previous")
             Menu("Go to Task") { action("goto") }
+            Button("Move Blocked Sessions…") { actions?.moveBlockedSessions() }.disabled(actions == nil)
             action("toggle-shell")
             action("toggle-browser")
             action("page-back")
@@ -277,7 +280,7 @@ final class SessionsWorkspace {
             task = recorded
         } else { task = key.id }
         return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
-         "--repository", key.repository, "desktop", "shell", task,
+         "--repo-id", key.repository, "desktop", "shell", task,
          "--checkout", identity.worktree, "--id", tab.id]
     }
 
@@ -1478,6 +1481,24 @@ private struct SessionsReconciler: View {
     }
 }
 
+/// Asks which agent the open Sessions whose login cannot take their model move to.
+private struct BlockedSessionsAlert: ViewModifier {
+    @Binding var presented: Bool
+    @Binding var target: String
+    let move: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Move blocked Sessions", isPresented: $presented) {
+            TextField("harness[:model], such as claude:opus", text: $target)
+            Button("Move") { move(target) }
+                .disabled(target.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Open Sessions whose login cannot take their model now continue on this agent: idle ones at their next open, busy ones after their turn. Nothing is written to your preferences.")
+        }
+    }
+}
+
 struct SessionsContentView: View {
     @Environment(\.theme) private var theme
     let machineId: String
@@ -1499,6 +1520,8 @@ struct SessionsContentView: View {
     @State private var launchError: String?
     @State private var launchErrorTitle = "Could not start conversation"
     @State private var actionTaskID: String?
+    @State private var movingBlockedSessions = false
+    @State private var blockedSessionsTarget = ""
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
@@ -1592,7 +1615,10 @@ struct SessionsContentView: View {
             navigate: { navigation.palette = .search }, toggleSidebar: { navigation.toggleNavigator() },
             focusSidebar: { navigation.showsNavigator = true; navigation.sidebarFocusRequested = true },
             focusTerminal: multiplexer.focusedPane.terminal.map { terminal in { workspaces.surfaces.focus(terminal) } },
+            moveBlockedSessions: { movingBlockedSessions = true },
             context: { actionContext }, failed: { actionFailed($0) }))
+        .modifier(BlockedSessionsAlert(presented: $movingBlockedSessions, target: $blockedSessionsTarget,
+            move: moveBlockedSessions))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
                 .keyboardShortcut("/", modifiers: .command)
@@ -1678,6 +1704,21 @@ struct SessionsContentView: View {
             Button("OK") { launchError = nil }
         } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
+    }
+
+    /// `lf session move --blocked -a <agent>` for every repository, reported in place.
+    private func moveBlockedSessions(to agent: String) {
+        let agent = agent.trimmingCharacters(in: .whitespaces)
+        Task {
+            do {
+                let report = try await query.moveBlockedSessions(agent: agent, cwd: store.repoPath)
+                launchErrorTitle = "Blocked Sessions"
+                launchError = report.summary
+            } catch {
+                launchErrorTitle = "Could not move blocked Sessions"
+                launchError = error.localizedDescription
+            }
+        }
     }
 
     private func focusPane(_ pane: String, session: String?, in workspace: SessionsWorkspace) {

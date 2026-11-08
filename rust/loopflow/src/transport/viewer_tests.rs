@@ -125,7 +125,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&owner, None, preview, true).unwrap();
+    attach_with_terminal(&owner, None, None, preview, true).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -257,6 +257,8 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     let mut child = ViewerProcess(
         Command::new(std::env::current_exe().unwrap())
             .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", "/usr/bin:/bin")
             .env("LF_HOME", home.path())
             .env("LOOPFLOW_TEST_LF", binary)
             .env("LOOPFLOW_VIEWER_FIXTURE", case)

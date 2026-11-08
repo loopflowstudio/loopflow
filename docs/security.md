@@ -75,7 +75,7 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf submit` leaves the exact-head merge to a person;
+is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
 `land` requests GitHub auto-merge. GitHub remains authoritative for
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
@@ -113,10 +113,12 @@ are installed atomically with owner-only permissions. The target and other code
 running as that OS user can read them, just as after a normal login. Trust the
 remote OS account with the account's refresh authority.
 
-SSH provider launches use isolated account homes under
-`~/.lf/accounts/<provider>/<account-id>`. They keep file-backed credentials even
-on a Mac without an unlocked login Keychain. Provider-owned refresh continues on
-the target; it does not depend on an origin broker or SSH-forwarded socket.
+SSH provider launches run in the target's shared provider home, switched to the
+selected stored login; without a Keychain login there, Claude keeps it in a
+file. An owned target refreshes its own login. A rental holds only a Claude
+access token, which the laptop refreshes from a login it keeps for rentals and
+sends again before it expires, never while a Session runs. Neither depends on
+an origin broker or SSH-forwarded socket.
 Local shared-account behavior remains described in [subscriptions](subscriptions.md).
 
 Linear credentials in SQLite are encrypted. The encryption key lives in an
@@ -129,6 +131,19 @@ own file key without an unlocked Keychain.
 SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`. Arbitrary
 Doppler secret exports and automatic ambient-token forwarding are removed. Set up
 other services on the target explicitly. No Doppler master credential is sent.
+
+## Keep client access separate from Machine logins
+
+The local Loopflow server accepts the same OS user through a private Unix socket.
+It exposes existing Work operations and bridges Session owners; those owners
+still grant input control. A connection or reconnect does not give a viewer the
+right to replace another viewer's claim.
+
+Do not expose this socket through a network proxy: the proxy's local identity
+cannot authenticate a remote client. Authenticated phone access is separate
+work, with its own client credentials. Adding an SSH Machine grants an execution
+destination, independently of client access. Installation owns server registration
+and respects disabled background items. See [Connect clients](server.md).
 
 ## Account for stored and transmitted data
 

@@ -29,6 +29,13 @@ impl Stream {
         let output = socket.try_clone()?;
         Self::new(OwnedFd::from(socket).into(), OwnedFd::from(output).into())
     }
+
+    /// Close a socket for both directions while this viewer holds it. Pipes
+    /// are not sockets and stay as they are.
+    pub fn shutdown(&self) {
+        // SAFETY: shutdown only reads the live descriptor this value owns.
+        unsafe { libc::shutdown(self.input.as_raw_fd(), libc::SHUT_RDWR) };
+    }
 }
 
 impl Read for Stream {

@@ -37,7 +37,8 @@ private func state(of node: GraphNode, latest: GraphProcessDetail?) -> GraphNode
     let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
         switch latest.presentation.execution {
-        case .running, .starting: return .running
+        // A waiting step still holds the Graph here; its chip says why.
+        case .running, .starting, .waiting: return .running
         case .blocked: return .blocked
         case .stalled: return .stalled
         case .idle: return .stopped

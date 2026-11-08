@@ -3,8 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::watch::{Subscription, Transport};
-use super::waves::Shape;
+use super::subscribe::{Subscription, Transport};
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -529,7 +528,7 @@ enum DesktopViewResult<'a> {
 /// `layout` reads and writes a Work's pane intent or a Dashboard's slot layout.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopLayoutRecord<'a> {
+pub(crate) enum DesktopLayoutRecord<'a> {
     Work(&'a Option<crate::work::selection::WorkPaneLayout>),
     /// Its `slots`; null is the default layout.
     Dashboard(&'a crate::work::selection::Dashboard),
@@ -566,7 +565,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
 
 /// One exit status for every `lf desktop` command: 2 bad arguments, 3 missing or
 /// ambiguous target, 4 Desktop unreachable, otherwise 1. Clap exits 2 and Ctrl-C 130.
-fn exit_status(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn exit_status(error: anyhow::Error) -> anyhow::Error {
     use crate::work::selection::SelectionError;
     let selection = error
         .chain()
@@ -623,18 +622,21 @@ fn repository_in(
         .context("repository has no recorded Work identity")
 }
 
-/// `lf desktop task`: what the Task pane shows, from the same reading as
+/// `lf task show`: what the Task pane shows, from the same reading as
 /// `lf task status`.
-fn task_pane(issue: &str, watch: bool) -> Result<()> {
-    if watch {
-        return watch_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
+pub fn task_pane(issue: &str, subscribe: bool) -> Result<()> {
+    if subscribe {
+        return subscribe_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
     }
     let pane = read_task_pane(&std::env::current_dir()?, issue)?;
-    println!("{}", serde_json::to_string(&pane)?);
+    println!(
+        "{}",
+        serde_json::to_string(&super::subscribe::selected_answer(&pane)?)?
+    );
     Ok(())
 }
 
-/// What `lf desktop task <issue> --json` prints from `directory`.
+/// What `lf task show <issue> --json` prints from `directory`.
 pub(crate) fn read_task_pane(
     directory: &std::path::Path,
     issue: &str,
@@ -643,38 +645,50 @@ pub(crate) fn read_task_pane(
         &crate::repo::working_directory_in(directory)?,
         Some(issue),
     )?;
-    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    // A read reads what the store records; `wave.sync` exchanges planning.
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
+        let status = crate::ops::task::read_task_status(&store, &repo, issue).await?;
         super::waves::task_pane(&store, status).await
     })
 }
 
-/// `lf desktop task --watch` for the Task `issue` names from `directory`.
-pub(crate) fn watch_task_pane(
+/// `lf task show --subscribe` for the Task `issue` names from `directory`.
+pub(crate) fn subscribe_task_pane(
     directory: &std::path::Path,
     issue: &str,
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = crate::ops::task::task_repository(directory, Some(issue))?;
-    let status = crate::ops::task::task_status(&repo, Some(issue))?;
-    let task = status
-        .task
-        .context("only a registered Task can be watched")?;
-    super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop, transport)
+    let identifier = tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .context("no Loopflow store exists on this Machine")?;
+        let status = crate::ops::task::read_task_status(&store, &repo, issue).await?;
+        anyhow::Ok(
+            status
+                .task
+                .context("only a registered Task can be subscribed")?
+                .identifier,
+        )
+    })?;
+    super::waves::subscribe_task_pane(&repo, identifier, transport)
 }
 
-/// `lf desktop plans`: every plan a repository window shows, the default and
-/// each saved Dashboard, as Desktop reads them.
-fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
-    if !watch {
+/// `lf desktop view list`: every plan a repository window shows, the default
+/// and each saved Dashboard, as Desktop reads them.
+fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
+    if !subscribe {
         let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
-        println!("{}", serde_json::to_string(&plans)?);
+        println!(
+            "{}",
+            serde_json::to_string(&super::subscribe::selected_answer(&plans)?)?
+        );
         return Ok(());
     }
-    watch_plans(
+    subscribe_plans(
         cli.repository.clone(),
         std::env::current_dir()?,
         Transport::Stdio,
@@ -682,7 +696,7 @@ fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     .map(drop)
 }
 
-/// What `lf desktop plans --json` prints for `--repository`, else the
+/// What `lf desktop view list --json` prints for `--repository`, else the
 /// repository containing `directory`.
 pub(crate) fn read_plans(
     selected: Option<&crate::durable::RepositoryId>,
@@ -695,16 +709,16 @@ pub(crate) fn read_plans(
     Ok(store.sqlite.selection_plans(&repository)?)
 }
 
-/// `lf desktop plans --watch` for `--repository`, else the repository
+/// `lf desktop view list --subscribe` for `--repository`, else the repository
 /// containing `directory`.
-pub(crate) fn watch_plans(
+pub(crate) fn subscribe_plans(
     selected: Option<crate::durable::RepositoryId>,
     directory: std::path::PathBuf,
     transport: Transport,
 ) -> Result<Option<Subscription>> {
-    super::watch::start(
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)
@@ -719,7 +733,7 @@ pub(crate) fn watch_plans(
     )
 }
 
-/// `lf desktop view [expression] --plan`: what a view shows, in `selected`
+/// `lf desktop view show [expression]`: what a view shows, in `selected`
 /// or the repository containing `directory`.
 pub fn plan_view(
     selected: Option<&crate::durable::RepositoryId>,
@@ -851,53 +865,75 @@ pub fn saved_layout(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::work::selection::DashboardId;
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
     Ok(match work.strip_prefix("query:") {
-        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+        Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
             &reader
                 .sqlite
                 .read_dashboard(&repository, &DashboardId(id.into()))?
                 .ok_or(crate::store::StoreError::NotFound)?
                 .saved,
         ))?,
-        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+        None => serde_json::to_value(DesktopLayoutRecord::Work(
             &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
         ))?,
     })
 }
 
-/// `lf desktop query|pin|unpin|rename|layout --save` and a saved tile's
-/// `hide|show|move|resize -p <board>/<tile>`: save the arrangement in
-/// `selected` or the repository containing `directory`, reading a layout from
-/// `input`, and return what the command prints. Renaming a Task is a Work
-/// change; the rest are arrangement and record no Process.
+/// `lf desktop dashboard <verb>` and `lf desktop layout --save`: save the
+/// arrangement in `selected` or the repository containing `directory`,
+/// reading a layout or slots from `input`, and return what the command
+/// prints. Renaming a Task is a Work change; the rest are arrangement and
+/// record no Process.
 pub fn save_arrangement(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     use crate::lf::DesktopCommand;
-    if let DesktopCommand::Query { .. }
-    | DesktopCommand::Pin { .. }
-    | DesktopCommand::Unpin { .. }
-    | DesktopCommand::Rename { .. }
-    | DesktopCommand::Layout { save: true, .. } = command
-    {
-        return saved_intent(selected, directory, command, input);
-    }
-    let verb = Verb::parse(command)?;
-    if let VerbKind::Action { name, args } = &verb.kind {
-        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            return edit_saved_tile(selected, directory, board, tile, name, args);
+    match command {
+        DesktopCommand::Dashboard { cmd } => match cmd.tile_verb() {
+            Some((verb, tile, args)) => {
+                let (board, member) = tile.split_once('/').ok_or_else(|| {
+                    DesktopError::Argument(format!(
+                        "`{tile}` names no saved board tile; use query:ID/<tile> or working-tasks/<tile>."
+                    ))
+                })?;
+                save_tile(selected, directory, board, member, verb, &args)
+            }
+            None => saved_intent(selected, directory, command, input),
+        },
+        DesktopCommand::Layout { save: true, .. } => {
+            saved_intent(selected, directory, command, input)
         }
+        _ => bail!("not a saved arrangement"),
     }
-    bail!("not a saved arrangement: name a tile as -p <board>/<tile>")
+}
+
+/// `lf desktop dashboard <verb> <board>/<tile>` on a saved board, without
+/// Desktop: `hide`, `show`, `move` (with `destination`) or `resize`. Returns
+/// the record it wrote.
+pub(crate) fn save_tile(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    board: &str,
+    tile: &str,
+    verb: &str,
+    args: &std::collections::BTreeMap<String, String>,
+) -> Result<serde_json::Value> {
+    let path = format!("{board}/{tile}");
+    let (board, tile) = saved_tile(verb, Some(&path)).ok_or_else(|| {
+        DesktopError::Argument(format!(
+            "`{verb}` names no saved board in {path}; nothing changed."
+        ))
+    })?;
+    edit_saved_tile(selected, directory, board, tile, verb, args)
 }
 
 fn saved_intent(
@@ -905,10 +941,13 @@ fn saved_intent(
     directory: &std::path::Path,
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
-) -> Result<String> {
-    use crate::lf::DesktopCommand;
+) -> Result<serde_json::Value> {
+    use crate::lf::{DashboardCommand, DesktopCommand};
     use crate::work::selection::{DashboardId, WorkPaneLayout};
-    if let DesktopCommand::Query { expression, .. } = command {
+    if let DesktopCommand::Dashboard {
+        cmd: DashboardCommand::Query { expression, .. },
+    } = command
+    {
         crate::work::selection::Selection::parse(expression, None)?;
     }
     let reader = crate::store::read_existing_registry()?
@@ -919,89 +958,88 @@ fn saved_intent(
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
     let result = match command {
-        DesktopCommand::Query {
-            container,
-            expression,
-            revision,
-            ..
-        } => serde_json::to_value(store.edit_dashboard(
-            &repository,
-            &dashboard_id(container),
-            expression,
-            *revision,
-        )?)?,
-        DesktopCommand::Pin {
-            query, revision, ..
-        }
-        | DesktopCommand::Unpin {
-            query, revision, ..
-        } => serde_json::to_value(store.set_dashboard_metadata(
-            &repository,
-            &dashboard_id(query),
-            *revision,
-            None,
-            Some(matches!(command, DesktopCommand::Pin { .. })),
-        )?)?,
-        DesktopCommand::Rename {
-            target,
-            name,
-            revision,
-            ..
-        } => {
-            if let Some(task) = target.strip_prefix("task:") {
-                let key = work_key(&repository, target)?;
-                // The shared reader checks repository ownership before the Task writer runs.
-                let resolved = store.resolve_selection(
+        DesktopCommand::Dashboard { cmd } => match cmd {
+            DashboardCommand::Query {
+                container,
+                expression,
+                revision,
+                ..
+            } => serde_json::to_value(store.edit_dashboard(
+                &repository,
+                &dashboard_id(container),
+                expression,
+                *revision,
+            )?)?,
+            DashboardCommand::Pin {
+                query, revision, ..
+            }
+            | DashboardCommand::Unpin {
+                query, revision, ..
+            } => serde_json::to_value(store.set_dashboard_metadata(
+                &repository,
+                &dashboard_id(query),
+                *revision,
+                None,
+                Some(matches!(cmd, DashboardCommand::Pin { .. })),
+            )?)?,
+            DashboardCommand::Slots { query, revision } => {
+                let slots: Option<crate::work::selection::SlotLayout> =
+                    serde_json::from_reader(&mut *input)?;
+                serde_json::to_value(store.set_dashboard_slots(
                     &repository,
-                    &crate::work::selection::Selection {
-                        id: crate::work::selection::SelectionId("rename-target".into()),
-                        expression: crate::work::selection::SelectionExpression::Work { work: key },
-                    },
-                )?;
-                if resolved.members.is_empty() {
-                    return Err(crate::store::StoreError::NotFound.into());
-                }
-                serde_json::to_value(store.edit_task(
-                    &crate::durable::TaskId::parse(task)?,
+                    &dashboard_id(query),
                     *revision,
-                    &crate::work::task::TaskUpdate {
-                        title: Some(name.clone()),
-                        ..Default::default()
-                    },
-                )?)?
-            } else {
-                serde_json::to_value(store.set_dashboard_metadata(
-                    &repository,
-                    &dashboard_id(target),
-                    i64::try_from(*revision)?,
-                    Some(name),
-                    None,
+                    slots.as_ref(),
                 )?)?
             }
-        }
-        DesktopCommand::Layout {
-            work,
-            save: true,
-            revision,
-        } if work.starts_with("query:") => {
-            let revision = revision.ok_or_else(|| {
-                DesktopError::Argument(
-                    "Saving a Dashboard's slots needs --revision from its last read; nothing changed."
-                        .into(),
-                )
-            })?;
-            let slots: Option<crate::work::selection::SlotLayout> =
-                serde_json::from_reader(&mut *input)?;
-            serde_json::to_value(store.set_dashboard_slots(
-                &repository,
-                &dashboard_id(work),
+            DashboardCommand::Rename {
+                target,
+                name,
                 revision,
-                slots.as_ref(),
-            )?)?
+                ..
+            } => {
+                if let Some(task) = target.strip_prefix("task:") {
+                    let key = work_key(&repository, target)?;
+                    // The shared reader checks repository ownership before the Task writer runs.
+                    let resolved = store.resolve_selection(
+                        &repository,
+                        &crate::work::selection::Selection {
+                            id: crate::work::selection::SelectionId("rename-target".into()),
+                            expression: crate::work::selection::SelectionExpression::Work {
+                                work: key,
+                            },
+                        },
+                    )?;
+                    if resolved.members.is_empty() {
+                        return Err(crate::store::StoreError::NotFound.into());
+                    }
+                    serde_json::to_value(store.edit_task(
+                        &crate::durable::TaskId::parse(task)?,
+                        *revision,
+                        &crate::work::task::TaskUpdate {
+                            title: Some(name.clone()),
+                            ..Default::default()
+                        },
+                    )?)?
+                } else {
+                    serde_json::to_value(store.set_dashboard_metadata(
+                        &repository,
+                        &dashboard_id(target),
+                        i64::try_from(*revision)?,
+                        Some(name),
+                        None,
+                    )?)?
+                }
+            }
+            DashboardCommand::Hide { .. }
+            | DashboardCommand::Show { .. }
+            | DashboardCommand::Move { .. }
+            | DashboardCommand::Resize { .. } => unreachable!("tile verbs edit saved tiles"),
+        },
+        DesktopCommand::Layout { work, save: true } if work.starts_with("query:") => {
+            bail!("a Dashboard's slots are saved with `lf desktop dashboard slots {work} --revision <revision>`")
         }
-        DesktopCommand::Layout {
-            work, save: true, ..
-        } => {
+        DesktopCommand::Layout { work, save: true } => {
             let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
             if layout.work != work_key(&repository, work)? {
                 bail!("layout belongs to different Work");
@@ -1010,7 +1048,7 @@ fn saved_intent(
         }
         _ => unreachable!("saved intent command"),
     };
-    Ok(serde_json::to_string(&result)?)
+    Ok(result)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -1065,7 +1103,7 @@ pub(super) fn present_files(
 }
 
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
-    use crate::lf::DesktopCommand;
+    use crate::lf::{DesktopCommand, DesktopViewCommand};
     match command {
         DesktopCommand::Shell { .. } => {
             unreachable!("shell runtime dispatch precedes Desktop control")
@@ -1077,89 +1115,26 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             println!("{record}");
             return Ok(());
         }
-        DesktopCommand::Query { .. }
-        | DesktopCommand::Pin { .. }
-        | DesktopCommand::Unpin { .. }
-        | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => {
-            let saved = save_arrangement(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                command,
-                &mut std::io::stdin().lock(),
-            )?;
-            println!("{saved}");
-            return Ok(());
-        }
+        DesktopCommand::View {
+            cmd: Some(DesktopViewCommand::List { subscribe, .. }),
+            ..
+        } => return plans(cli, *subscribe),
+        DesktopCommand::View {
+            cmd: Some(DesktopViewCommand::Show { expression, json }),
+            ..
+        } => return view_plan(cli, expression.as_deref(), true, *json || cli.json),
         DesktopCommand::View {
             expression,
-            plan,
             json,
-        } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
-        DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
-        DesktopCommand::Plan {
-            wave,
-            task,
-            all,
-            watch,
-            ..
-        } => {
-            return if *watch {
-                super::waves::watch_show(
-                    std::env::current_dir()?,
-                    wave.clone(),
-                    task.clone(),
-                    *all,
-                    Shape::Desktop,
-                    Transport::Stdio,
-                )
-                .map(drop)
-            } else {
-                super::waves::show(wave.as_deref(), task.as_deref(), true, *all, Shape::Desktop)
-            };
+            cmd: None,
+        } => return view_plan(cli, expression.as_deref(), false, *json || cli.json),
+        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. } => {
+            unreachable!("shared mutation dispatch precedes this command")
         }
-        DesktopCommand::Done {
-            wave,
-            since,
-            after,
-            limit,
-            ..
-        } => {
-            return super::waves::list_closed_tasks(
-                &crate::repo::working_directory()?,
-                wave.as_deref(),
-                since.as_deref(),
-                after.as_deref(),
-                *limit,
-                true,
-                Shape::Desktop,
-            );
-        }
-        DesktopCommand::Wave { wave, .. } => {
-            return super::waves::status(wave.as_deref(), true, Shape::Desktop);
-        }
-        DesktopCommand::Sessions { list } => {
-            return super::session::list_sessions(list, Shape::Desktop);
-        }
-        DesktopCommand::Task { issue, watch, .. } => return task_pane(issue, *watch),
         _ => {}
     }
     // Arguments are checked before Desktop is contacted.
     let verb = Verb::parse(command)?;
-    if let VerbKind::Action { name, args } = &verb.kind {
-        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            let record = edit_saved_tile(
-                cli.repository.as_ref(),
-                &std::env::current_dir()?,
-                board,
-                tile,
-                name,
-                args,
-            )?;
-            println!("{record}");
-            return Ok(());
-        }
-    }
     require_supported()?;
     let json = cli.json || verb.target.json;
     let mut desktop = DesktopConnection::open()?;
@@ -1592,16 +1567,8 @@ impl Verb {
             }
             DesktopCommand::Shell { .. }
             | DesktopCommand::View { .. }
-            | DesktopCommand::Plans { .. }
-            | DesktopCommand::Plan { .. }
-            | DesktopCommand::Done { .. }
-            | DesktopCommand::Wave { .. }
-            | DesktopCommand::Sessions { .. }
-            | DesktopCommand::Task { .. }
-            | DesktopCommand::Query { .. }
-            | DesktopCommand::Pin { .. }
-            | DesktopCommand::Unpin { .. }
-            | DesktopCommand::Rename { .. }
+            | DesktopCommand::Dashboard { .. }
+            | DesktopCommand::Portfolio { .. }
             | DesktopCommand::Layout { .. } => unreachable!("saved intent is not a live verb"),
         };
         Ok(Self { kind, target })
@@ -1749,7 +1716,7 @@ impl TileEdit {
 /// A tile verb's output: Desktop-free edits print the record they wrote.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum DesktopTileRecord {
+pub(crate) enum DesktopTileRecord {
     Dashboard(Box<crate::work::selection::Dashboard>),
     /// The repository's Task order.
     Tasks(Vec<String>),
@@ -1769,34 +1736,21 @@ struct TileRequest {
     edit: TileEdit,
 }
 
-/// Commands that never contact the app: saved intent, view plans, saved tile
-/// verbs and the Desktop shell runtime on its execution Machine.
+/// Commands that never contact the app: saved intent, view plans, the
+/// portfolio and the Desktop shell runtime on its execution Machine.
 pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
-    match command {
+    matches!(
+        command,
         DesktopCommand::Shell { .. }
-        | DesktopCommand::View { .. }
-        | DesktopCommand::Plans { .. }
-        | DesktopCommand::Plan { .. }
-        | DesktopCommand::Done { .. }
-        | DesktopCommand::Wave { .. }
-        | DesktopCommand::Sessions { .. }
-        | DesktopCommand::Task { .. }
-        | DesktopCommand::Query { .. }
-        | DesktopCommand::Pin { .. }
-        | DesktopCommand::Unpin { .. }
-        | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => true,
-        _ => Verb::parse(command).is_ok_and(|verb| match &verb.kind {
-            VerbKind::Action { name, .. } => {
-                saved_tile(name, verb.target.pane.as_deref()).is_some()
-            }
-            _ => false,
-        }),
-    }
+            | DesktopCommand::View { .. }
+            | DesktopCommand::Dashboard { .. }
+            | DesktopCommand::Portfolio { .. }
+            | DesktopCommand::Layout { .. }
+    )
 }
 
-/// `-p query:ID/TILE` or `-p working-tasks/TILE`: a saved record's tile by Work key.
+/// `query:ID/TILE` or `working-tasks/TILE`: a saved record's tile by Work key.
 fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p str)> {
     if !TILE_VERBS.contains(&name) {
         return None;
@@ -1812,7 +1766,7 @@ fn edit_saved_tile(
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<String> {
+) -> Result<serde_json::Value> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
@@ -1826,7 +1780,7 @@ fn edit_saved_tile(
         edit: TileEdit::parse(name, args, key)?,
     };
     let record = edit_tiles(&repository, &request)?;
-    Ok(serde_json::to_string(&DesktopTileOutput::Record(&record))?)
+    Ok(serde_json::to_value(DesktopTileOutput::Record(&record))?)
 }
 
 fn edit_shown_tile(
@@ -1997,7 +1951,7 @@ fn edit_tiles(
 fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     use std::io::Write;
     let mut events = desktop.events()?;
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = std::io::stdout();
     while let Some(change) = events.next(None)? {
         if json {
             writeln!(stdout, "{}", serde_json::to_string(&change)?)?;
@@ -2019,7 +1973,7 @@ fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// What `wait` watches, by full ID so a later reading cannot retarget it.
+/// What `wait` subscriptions, by full ID so a later reading cannot retarget it.
 #[derive(Debug, Clone, PartialEq)]
 struct WaitTarget {
     window: String,
@@ -2028,7 +1982,7 @@ struct WaitTarget {
     tab: Option<String>,
 }
 
-/// One observation of the watched target.
+/// One observation of the subscribed target.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WaitState {
     /// Not there yet, or a terminal without a running surface.
@@ -3327,6 +3281,16 @@ impl DesktopTextUnavailable {
     }
 }
 
+pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
+    use crate::lf::DesktopCommand;
+    matches!(
+        command,
+        DesktopCommand::Dashboard { .. }
+            | DesktopCommand::Portfolio { .. }
+            | DesktopCommand::Layout { save: true, .. }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -3684,14 +3648,12 @@ mod tests {
             .collect::<Vec<_>>();
         let cli = <crate::lf::Cli as clap::CommandFactory>::command();
         let desktop = cli.find_subcommand("desktop").unwrap();
-        let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
-        let work_reads = ["plans", "plan", "done", "wave", "sessions", "task"];
+        let saved = ["view", "dashboard", "layout", "portfolio"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
             // The shell runtime never contacts the GUI; `do` names its own action.
             if verb == "shell"
                 || verb == "do"
                 || saved.contains(&verb)
-                || work_reads.contains(&verb)
                 || super::READING_VERBS.contains(&verb)
             {
                 continue;

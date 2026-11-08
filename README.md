@@ -13,6 +13,13 @@ work its own defaults. It works with Claude Code, Codex, OpenCode and Pi, on you
 existing subscriptions, inside whatever terminal, multiplexer and tracker you
 already use.
 
+**Your agent can drive it.** The last install line teaches your own coding agent
+to use `lf`, so you can just ask it: *"Split the auth cleanup into Tasks and run
+them with lf."* [What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
+
+Run Tasks in parallel, each in its own worktree and branch. Nothing is hosted:
+conversations stay on your machine, and only the plan travels.
+
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
@@ -34,15 +41,11 @@ Each Task has:
 - **Its history.** Every conversation, Graph run and step, and what each cost.
 
 ```bash
-lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
+lf task steer <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
-lf history usage --task <ID>                   # what it cost
+lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
-
-The last install line teaches your own coding agent to do all of this, so you
-can just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
-[What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
 
 **2. Write down how work runs.** A Task's workflow is a Graph: a YAML list of
 Skills, and a Skill is a Markdown file, both in your repository and reviewed like
@@ -111,17 +114,19 @@ You want to do something; here's how through `lf`.
 
 | You want to… | |
 |---|---|
-| use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
+| run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
+| use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
+| open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
+| keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
+| land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
+| see what agents cost, by Task, Wave or week | `lf session usage --weekly` |
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
-| land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
-| see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
-| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf history linear` |
-| open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |
-| cut a release | `lf release run <version>` |
+| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf session history linear` |
+| cut a release | `lf repo release run <version>` |
 
 ## Needs
 
@@ -149,10 +154,11 @@ created with `git worktree remove`.
 
 Each page picks up where the last one stops:
 [Get started](docs/getting-started.md) → [Work](docs/work.md) →
-[Sessions](docs/sessions.md) → [Ops](docs/ops.md) → [Surfaces](docs/surfaces.md) →
+[Sessions](docs/sessions.md) → [PRs, checkouts, machines and accounts](docs/ops.md) → [Surfaces](docs/surfaces.md) →
 [Telemetry](docs/telemetry.md) → [Orchestration](docs/orchestration.md).
 When something breaks: [Troubleshooting](docs/troubleshooting.md). Everything else:
 [For agents](docs/agent-api.md) · [`lf` reference](docs/lf-reference.md).
+Questions, ideas, or something broke: [Discord](https://discord.gg/j57B5vyXNJ).
 
 Agents can read [llms.txt](https://loopflow.studio/llms.txt) or any page as
 Markdown at its `.md` URL.

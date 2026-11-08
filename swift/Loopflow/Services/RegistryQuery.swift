@@ -1,10 +1,10 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by the same reads `--watch` streams, one served watch per part.
+// current by the same reads `--subscribe` streams, one served subscription per part.
 //
-// On macOS the Work watches, `ServedRead` reads and `ServedWrite` writes run
-// inside the app through Loopflow's Rust library; other commands run the `lf`
+// On macOS the Work subscriptions, `ServedRead` reads and `ServedWrite` writes run
+// through the local server; other commands run the `lf`
 // shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -48,7 +48,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 
 /// A read Loopflow serves inside the app, encoded as its Rust `Read`: what
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
-/// `--watch` is also served as that watch.
+/// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
     case monitorPs
     case desktopPlans(directory: String)
@@ -82,24 +82,42 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
-    case bindPreview(session: String, task: String)
+    /// How failed CI was detected, repaired and landed on this Machine since
+    /// `since` (`7d`, `24h` or an RFC 3339 instant).
+    case ci(since: String, wave: String?, repo: String?)
+    /// Every login's state on this Machine; `cached` skips the providers.
+    case accountList(target: String?, cached: Bool)
+    /// How the repository selects an account for each provider.
+    case accountNext(directory: String, repo: String?, default: Bool)
+    /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
+    case skillList(directory: String, path: [String])
+    /// The branch's check report as the provider prints it, with its state.
+    case prChecks(directory: String, required: Bool)
+    /// Requested reviews and review submissions, each with its commit.
+    case prReviews(directory: String, pr: String?)
+    /// The Task now and whether it reached `until` (`submitted` or
+    /// `terminal`); subscribed, it ends after the reading that reached it.
+    case taskWait(issue: String, until: String)
 
-    /// `lf desktop plan --all`: every repository's Waves and Tasks.
+    /// Rows in one `sessionPage`.
+    static let sessionPageLimit = 100
+
+    /// `lf plan list --all`: every repository's Waves and Tasks.
     public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
         case .monitorPs:
-            return ["monitor", "ps", "--json"]
+            return ["process", "list", "--json"]
         case .desktopPlans:
-            return ["desktop", "plans", "--json"]
+            return ["desktop", "view", "list", "--json"]
         case .desktopSessions(_, let headless):
-            return ["desktop", "sessions"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
+            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
         case .desktopTask(_, let issue):
-            return ["desktop", "task", issue, "--json"]
+            return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base, let head):
-            return ["task", "diff", issue, "--files", "--base", base, "--json"] + (head.map { ["--head", $0] } ?? [])
+            return ["task", "changes", issue, "--base", base, "--json"] + (head.map { ["--head", $0] } ?? [])
         case .taskDiff(let issue, let path, let base, let head, let draft):
             return ["task", "diff", issue] + (path.map { [$0] } ?? []) + ["--base", base, "--json"]
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
@@ -108,60 +126,73 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .waves:
             return ["wave", "list", "--all", "--json"]
         case .machineId:
-            return ["machine", "id", "--json"]
+            return ["machine", "self", "--json"]
         case .portfolio:
-            return ["portfolio", "--json"]
+            return ["desktop", "portfolio", "--json"]
         case .settings(_, let wave, let skill, let graph, let step):
-            return ["config", "show", "--json"] + (wave.map { ["--wave", $0] } ?? [])
+            return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
         case .paneLayout(_, let work):
             return ["desktop", "layout", work]
         case .people:
-            return ["ops", "people", "--json"]
+            return ["repo", "people", "--json"]
         case .graphs:
             return ["graph", "list", "--json"]
         case .viewPlan(_, let expression):
-            return ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
+            return ["desktop", "view", "show"] + (expression.map { [$0] } ?? []) + ["--json"]
         case .graphProcesses(_, let task, let after):
-            return ["graph", "list", "--processes", "--for-task", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
+            return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
         case .graphProcess(let id):
-            return ["graph", "show", id, "--processes", "--json"]
+            return ["process", "show", id, "--json"]
         case .usage(let days, let wave, let project, let task):
-            return ["usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
+            return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
-            return ["usage", "--days", "0", "--task", task, "--context", "--json"]
+            return ["task", "context", task, "--json"]
         case .waveDetail(_, let wave):
-            return ["desktop", "wave", wave, "--json"]
+            return ["wave", "plan", wave, "--json"]
         case .closedTasks(_, let wave, let after):
-            return ["desktop", "done", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+            return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
         case .machines:
             return ["machine", "list", "--json"]
         case .history(let since, let limit, let wave, let project, let task):
-            return ["history", "--since", since, "--limit", String(limit)]
+            return ["session", "history", "--since", since, "--limit", String(limit)]
                 + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .roadmap(_, let wave, let task, let all):
-            return ["desktop", "plan"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
+            return ["plan", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
         case .planningStatus:
-            return ["config", "planning", "status", "--json"]
+            return ["repo", "plan", "--json"]
         case .workLink(_, let url):
             return ["open", url, "--link", "--json"]
         case .repositoryPath(let id):
-            return ["--repository", id, "config", "repository", "--path"]
+            return ["--repo-id", id, "repo", "path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
         case .sessionPage(_, let headless, let after):
-            return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
-                + ["--limit", "100"] + (after.map { ["--after", $0] } ?? [])
+            return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+                + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
         case .tokens(_, let days):
-            return ["ops", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
+            return ["repo", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
         case .retention:
-            return ["history", "retention", "--json"]
+            return ["session", "retention", "--json"]
         case .doctor:
-            return ["doctor", "--json"]
-        case .bindPreview(let session, let task):
-            return ["session", "bind", "--dry-run", "--json", "--task", task, "--", session]
+            return ["machine", "doctor", "--json"]
+        case .ci(let since, let wave, let repo):
+            return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
+        case .accountList(let target, let cached):
+            return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
+                + ["--json"]
+        case .accountNext(_, let repo, let `default`):
+            return ["account", "next"] + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
+        case .skillList(_, let path):
+            return ["list"] + path + ["--json"]
+        case .prChecks(_, let required):
+            return ["pr", "checks"] + (required ? ["--required"] : []) + ["--json"]
+        case .prReviews(_, let pr):
+            return ["pr", "reviews"] + argument(nil, pr) + ["--json"]
+        case .taskWait(let issue, let until):
+            return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         }
     }
 
@@ -182,87 +213,151 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .monitorPs: TaggedFields("monitor_ps")
-        case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
+        case .monitorPs: TaggedFields("process.list")
+        case .desktopPlans(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .desktopSessions(let directory, let headless):
-            TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": nil, "limit": nil])
         case .desktopTask(let directory, let issue):
-            TaggedFields("desktop_task", ["directory": directory, "issue": issue])
+            TaggedFields("task.get", ["directory": directory, "issue": issue])
         case .taskChanges(let issue, let base, let head):
-            TaggedFields("task_changes", ["issue": issue, "base": base, "head": head])
+            TaggedFields("task.changes", ["issue": issue, "base": base, "head": head])
         case .taskDiff(let issue, let path, let base, let head, let draft):
-            TaggedFields("task_diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
+            TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path):
-            TaggedFields("task_file", ["issue": issue, "path": path])
-        case .waves: TaggedFields("waves")
-        case .machineId: TaggedFields("machine_id")
-        case .portfolio: TaggedFields("portfolio")
+            TaggedFields("task.file", ["issue": issue, "path": path])
+        case .waves: TaggedFields("wave.list")
+        case .machineId: TaggedFields("machine.self")
+        case .portfolio: TaggedFields("desktop.portfolio")
         case .settings(let directory, let wave, let skill, let graph, let step):
-            TaggedFields("settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
+            TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .paneLayout(let directory, let work):
-            TaggedFields("pane_layout", ["directory": directory, "work": work])
-        case .people(let directory): TaggedFields("people", ["directory": directory])
-        case .graphs(let directory): TaggedFields("graphs", ["directory": directory])
+            TaggedFields("desktop.layout", ["directory": directory, "work": work])
+        case .people(let directory): TaggedFields("repo.people", ["directory": directory])
+        case .graphs(let directory): TaggedFields("graph.list", ["directory": directory])
         case .viewPlan(let directory, let expression):
-            TaggedFields("view_plan", ["directory": directory, "expression": expression])
+            TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
         case .graphProcesses(let directory, let task, let after):
-            TaggedFields("graph_processes", ["directory": directory, "task": task, "after": after])
-        case .graphProcess(let id): TaggedFields("graph_process", ["id": id])
+            TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
+        case .graphProcess(let id): TaggedFields("process.get", ["id": id])
         case .usage(let days, let wave, let project, let task):
-            TaggedFields("usage", ["days": days, "wave": wave, "project": project, "task": task])
-        case .taskContext(let task): TaggedFields("task_context", ["task": task])
+            TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
+        case .taskContext(let task): TaggedFields("task.context", ["task": task])
         case .waveDetail(let directory, let wave):
-            TaggedFields("wave_detail", ["directory": directory, "wave": wave])
+            TaggedFields("wave.plan", ["directory": directory, "wave": wave])
         case .closedTasks(let directory, let wave, let after):
-            TaggedFields("closed_tasks", ["directory": directory, "wave": wave, "after": after])
-        case .machines: TaggedFields("machines")
+            TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
+        case .machines: TaggedFields("machine.list")
         case .history(let since, let limit, let wave, let project, let task):
-            TaggedFields("history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
+            TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .roadmap(let directory, let wave, let task, let all):
-            TaggedFields("roadmap", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .planningStatus(let directory): TaggedFields("planning_status", ["directory": directory])
+            TaggedFields("plan.list", ["directory": directory, "wave": wave, "task": task, "all": all])
+        case .planningStatus(let directory): TaggedFields("repo.plan", ["directory": directory])
         case .workLink(let directory, let url):
-            TaggedFields("work_link", ["directory": directory, "url": url])
-        case .repositoryPath(let id): TaggedFields("repository_path", ["id": id])
+            TaggedFields("work.resolve", ["directory": directory, "url": url])
+        case .repositoryPath(let id): TaggedFields("repo.path", ["id": id])
         case .waveGraph(let directory, let wave):
-            TaggedFields("wave_graph", ["directory": directory, "wave": wave])
+            TaggedFields("wave.graph", ["directory": directory, "wave": wave])
         case .sessionPage(let directory, let headless, let after):
-            TaggedFields("session_page", ["directory": directory, "headless": headless, "after": after])
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after,
+                                          "limit": Self.sessionPageLimit])
         case .tokens(let directory, let days):
-            TaggedFields("tokens", ["directory": directory, "days": days])
-        case .retention: TaggedFields("retention")
-        case .doctor: TaggedFields("doctor")
-        case .bindPreview(let session, let task):
-            TaggedFields("bind_preview", ["session": session, "task": task])
+            TaggedFields("repo.tokens", ["directory": directory, "days": days])
+        case .retention: TaggedFields("session.retention")
+        case .doctor: TaggedFields("machine.doctor")
+        case .ci(let since, let wave, let repo):
+            TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
+        case .accountList(let target, let cached):
+            TaggedFields("account.list", ["target": target, "cached": cached])
+        case .accountNext(let directory, let repo, let `default`):
+            TaggedFields("account.next", ["directory": directory, "repo": repo, "default": `default`])
+        case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
+        case .prChecks(let directory, let required):
+            TaggedFields("pr.checks", ["directory": directory, "required": required])
+        case .prReviews(let directory, let pr): TaggedFields("pr.reviews", ["directory": directory, "pr": pr])
+        case .taskWait(let issue, let until): TaggedFields("task.wait", ["issue": issue, "until": until])
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
-        try tagged.encode(to: encoder, tag: "read")
+        try tagged.encode(to: encoder, tag: "kind")
     }
 }
 
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
-/// `argv` does in `cwd`, given `input` on stdin. A Work change records its
-/// Process as that `lf` command would.
+/// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
+/// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
+    case taskFromSession(directory: String, id: String, title: String)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
     case taskNotes(directory: String, issue: String, notes: String)
     case taskOwnership(directory: String, issue: String, claimed: Bool)
-    case shipStop(directory: String, issue: String)
+    /// Start the Task's run detached; `approve` runs every step headless to
+    /// `end` and approves Auto-Ship, as `-b` does.
+    case taskRun(directory: String, issue: String, from: String?, agent: String?, approve: Bool)
+    case taskShip(directory: String, issue: String)
+    case taskHold(directory: String, issue: String)
+    case taskSteer(directory: String, issue: String, message: String)
+    case taskReport(directory: String, issue: String, message: String)
+    case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
+    /// A steer one Session, every Session of the Wave or, with neither, every
+    /// Session of the repository reads at its next boundary.
+    case sessionSteer(directory: String, session: String?, wave: String?, message: String)
     case sessionRename(directory: String, id: String, name: String)
-    case sessionBind(directory: String, id: String, task: String)
+    /// With `preview`, the Task a bind would assign, assigning nothing.
+    case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, id: String, agent: String?)
+    /// Move the open Sessions the selector names to an agent.
+    case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)
-    case newChapter(directory: String, name: String, plan: String, preview: Bool)
+    case wavePlanningBind(directory: String, wave: String, project: String)
+    case wavePlanningConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
+    /// Without `apply`, the plan: nothing moves.
+    case wavePlanningReteam(directory: String, apply: Bool)
     case graphCustomize(directory: String, name: String)
+    /// Started detached: the Process carrying the release.
+    case repositoryRelease(directory: String, version: String?, target: String?)
+    case checkoutCommit(directory: String, message: String?, push: Bool, noAdd: Bool, paths: [String], agent: String?)
+    /// The plan with `preview`, a finished `continueSync` or `abort`, or the
+    /// Process carrying a sync started detached.
+    case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
+                      adopt: Bool)
+    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
+    /// Run from `/`: the Machine's logins, not a repository's.
+    case accountDisconnect(provider: String, email: String?)
+    /// Served, no browser profile is chosen interactively.
+    case accountConnect(provider: String, email: String?, chromeProfile: String?, import: Bool, apiKey: Bool)
+    case accountSet(provider: String, email: String?, loginEmail: String?, plan: String?,
+                    clearPlan: Bool, paidThrough: String?, clearPaidThrough: Bool, clearCooldown: Bool,
+                    chromeProfiles: [String], clearChromeProfiles: Bool)
+    /// `file` is a path on the Machine; the token never travels in the request.
+    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, creditId: String?)
+    case accountUse(login: String)
+    case accountPause(login: String)
+    case accountUnpause(login: String)
+    /// Started detached and headless; the result is the Process carrying the run.
+    case graphRun(directory: String, name: String, message: String?, agent: String?)
+    /// Started detached and headless; the result is the Process carrying the run.
+    case skillRun(directory: String, name: String, message: String?, agent: String?)
+    case prPublish(directory: String, title: String?, body: String?, agent: String?)
+    /// Served, no review surface opens.
+    case prOpen(directory: String, title: String?, body: String?, agent: String?)
+    case prSubmit(directory: String, strict: Bool, worktree: String?, message: String?, title: String?, body: String?,
+                  agent: String?)
+    case prArm(directory: String, strict: Bool, local: Bool, worktree: String?, message: String?, title: String?,
+               body: String?, agent: String?)
+    /// Started detached; the result is the Process carrying the landing.
+    case prLand(directory: String, waitAndFix: Bool, strict: Bool, local: Bool, worktree: String?, message: String?,
+                title: String?, body: String?, agent: String?)
+    case prAbandon(directory: String, branch: String?, force: Bool)
+    case prReconcile(directory: String)
+    case prRequestReview(directory: String, pr: String?, reviewers: [String])
     /// Run from `/`, as the app's `lf` ran it.
     case portfolio(change: [String])
     case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
@@ -276,44 +371,96 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
-        case .taskComplete(_, let issue): ["task", "complete", issue]
-        case .taskReopen(_, let issue): ["task", "reopen", issue]
-        case .taskAbandon(_, let issue): ["task", "abandon", issue]
-        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
-        case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
-        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop"]
+        case .prPublish, .prOpen, .prSubmit, .prArm, .prLand, .prAbandon, .prReconcile, .prRequestReview: return prArgv
+        case .accountDisconnect, .accountConnect, .accountSet, .accountRedeemReset, .accountUse, .accountPause, .accountUnpause:
+            return accountArgv
+        case .graphRun(_, let name, let message, let agent):
+            return ["--batch"] + Self.option("--agent", agent) + ["graph", name] + argument(nil, message)
+        case .skillRun(_, let name, let message, let agent):
+            return ["--batch"] + Self.option("--agent", agent) + ["skill", name] + argument(nil, message)
+        case .taskFromSession(_, let id, let title): return ["task", "create", "--session", id, "--title", title, "--json"]
+        case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
+        case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
+        case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
+        case .taskNotes(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
+        case .taskOwnership(_, let issue, let claimed): return ["task", claimed ? "claim" : "unassign", issue, "--json"]
+        case .taskRun(_, let issue, let from, let agent, let approve):
+            return (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
+                + Self.option("--from", from) + ["--json"]
+        case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
+        case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
+        case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
+        case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
+        case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave):
-            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+            return ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"]) + ["--json"]
         case .taskSave(_, let issue, let path, let revision, _):
-            ["task", "save", issue, path, "--revision", revision, "--json"]
-        case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
-        case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+            return ["task", "save", issue, path, "--revision", revision, "--json"]
+        case .sessionSteer(_, let session, let wave, let message):
+            return Self.option("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
+        case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
+        case .sessionBind(_, let id, let task, let preview):
+            return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
-            Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
+            return Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
                 + Self.option("--task", task) + Self.option("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
-            Self.prepared(agent, ["session", "new", id], repo: nil)
-        case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
-        case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
-        case .newChapter(_, let name, _, let preview):
-            ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
-        case .graphCustomize(_, let name): ["graph", "customize", name]
-        case .portfolio(let change): ["portfolio"] + change + ["--json"]
+            return Self.prepared(agent, ["session", "new", id], repo: nil)
+        case .sessionMove(_, let blocked, let on, let agent):
+            return ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
+                + Self.option("--on", on) + ["--json"]
+        case .waveAdd(_, let wave, let objective): return ["wave", "create", wave] + Self.option("--objective", objective) + ["--json"]
+        case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
+        case .wavePlanningBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
+        case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
+            return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
+                + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
+        case .wavePlanningReteam(_, let apply): return ["wave", "plan", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
+        case .graphCustomize(_, let name): return ["graph", "customize", name, "--json"]
+        case .repositoryRelease(_, let version, let target):
+            return ["repo", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
+        case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
+            var argv = Self.option("--agent", agent) + ["commit"] + Self.option("--message", message)
+            argv += Self.flags([("--push", push), ("--no-add", noAdd)])
+            return argv + paths + ["--json"]
+        case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
+            var argv = ["sync"] + argument(nil, onto)
+            argv += Self.flags([("--plan", preview), ("--manual", manual), ("--continue", continueSync)])
+            argv += Self.flags([("--abort", abort), ("--adopt", adopt)])
+            return argv + ["--json"]
+        case .checkoutCreate(_, let name, let preview, let persistent):
+            return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
+        case .portfolio(let change): return ["desktop", "portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
-            ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
+            return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
         case .dashboardPin(_, let id, let pinned, let revision):
-            ["desktop", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
+            return ["desktop", "dashboard", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
         case .dashboardRename(_, let id, let name, let revision):
-            ["desktop", "rename", "--revision=\(revision)", "--", "query:" + id, name]
+            return ["desktop", "dashboard", "rename", "--revision=\(revision)", "--", "query:" + id, name]
         case .dashboardTile(_, let id, let member, let hidden):
-            ["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member)"]
+            return ["desktop", "dashboard", hidden ? "hide" : "show", "query:\(id)/\(member)"]
         case .dashboardSlots(_, let id, let revision, _):
-            ["desktop", "layout", "query:" + id, "--save", "--revision=\(revision)"]
+            return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .tileMove(_, let board, let member, let destination):
-            ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
-        case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
+            return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
+        case .paneLayout(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
+    }
+
+    /// `lf desktop portfolio <change>`'s words as Rust's `PortfolioCommand`, tagged by
+    /// `action`: `folder [path]`, `manual`, `add|import <paths…>`, `remove <path>`.
+    private static func portfolioChange(_ words: [String]) -> JSONValue {
+        let action = words.first ?? ""
+        let rest = Array(words.dropFirst())
+        var fields: [String: JSONValue] = ["action": .string(action)]
+        switch action {
+        case "folder": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        case "add", "import": fields["paths"] = .array(rest.map(JSONValue.string))
+        case "remove": fields["path"] = rest.first.map(JSONValue.string) ?? .null
+        default: break
+        }
+        return .object(fields)
     }
 
     /// `lf [--repo <repo>] [--agent <agent>] <command> --prepare --json`.
@@ -321,8 +468,82 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         option("--repo", repo) + option("--agent", agent) + command + ["--prepare", "--json"]
     }
 
+    /// The `pr` namespace's spellings.
+    private var prArgv: [String] {
+        switch self {
+        case .prPublish(_, let title, let body, let agent):
+            return Self.prArgv("publish", agent: agent, flags: [], worktree: nil, message: nil, title: title, body: body)
+        case .prOpen(_, let title, let body, let agent):
+            return Self.prArgv("open", agent: agent, flags: [], worktree: nil, message: nil, title: title, body: body)
+        case .prSubmit(_, let strict, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("submit", agent: agent, flags: [("--strict", strict)], worktree: worktree, message: message,
+                        title: title, body: body)
+        case .prArm(_, let strict, let local, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("arm", agent: agent, flags: [("--strict", strict), ("--local", local)], worktree: worktree,
+                        message: message, title: title, body: body)
+        case .prLand(_, let waitAndFix, let strict, let local, let worktree, let message, let title, let body, let agent):
+            return Self.prArgv("land", agent: agent, flags: [("--wait-and-fix", waitAndFix), ("--strict", strict), ("--local", local)],
+                        worktree: worktree, message: message, title: title, body: body)
+        case .prAbandon(_, let branch, let force):
+            var argv = ["pr", "abandon"] + argument(nil, branch)
+            if force { argv.append("--force") }
+            return argv + ["--json"]
+        case .prReconcile: return ["pr", "reconcile", "--json"]
+        case .prRequestReview(_, let pr, let reviewers):
+            var argv = ["pr", "request-review"] + argument(nil, pr)
+            for reviewer in reviewers { argv += ["-r", reviewer] }
+            return argv + ["--json"]
+        default: return []
+        }
+    }
+
+    private static func accountTarget(_ provider: String, _ email: String?) -> String {
+        email.map { "\(provider)=\($0)" } ?? provider
+    }
+
+    /// The `account` namespace's spellings.
+    private var accountArgv: [String] {
+        switch self {
+        case .accountDisconnect(let provider, let email):
+            return ["account", "disconnect", Self.accountTarget(provider, email)]
+        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
+            var argv = ["account", "connect", Self.accountTarget(provider, email)] + argument("--chrome-profile", chromeProfile)
+            return argv + Self.flags([("--import", `import`), ("--api-key", apiKey)])
+        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
+                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
+            var argv = ["account", "set", Self.accountTarget(provider, email)]
+            argv += argument("--login-email", loginEmail) + argument("--plan", plan)
+            argv += argument("--paid-through", paidThrough)
+            argv += Self.flags([("--clear-plan", clearPlan), ("--clear-paid-through", clearPaidThrough),
+                                ("--clear-cooldown", clearCooldown), ("--clear-chrome-profiles", clearChromeProfiles)])
+            for profile in chromeProfiles { argv += ["--chrome-profile", profile] }
+            return argv
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+            return ["account", "redeem-reset", Self.accountTarget(provider, email)] + argument("--idempotency-key", idempotencyKey)
+                + argument("--credit-id", creditId) + ["--json"]
+        case .accountUse(let login): return ["account", "use", login]
+        case .accountPause(let login): return ["account", "pause", login]
+        case .accountUnpause(let login): return ["account", "unpause", login]
+        default: return []
+        }
+    }
+
     private static func option(_ flag: String, _ value: String?) -> [String] {
-        value.map { [flag, $0] } ?? []
+        argument(flag, value)
+    }
+
+    /// The flags that are on, in order.
+    private static func flags(_ flags: [(String, Bool)]) -> [String] {
+        flags.filter(\.1).map(\.0)
+    }
+
+    /// `lf [--agent] pr <verb> <flags> [--worktree] [--message] [--title] [--body] --json`.
+    private static func prArgv(_ verb: String, agent: String?, flags: [(String, Bool)], worktree: String?,
+                               message: String?, title: String?, body: String?) -> [String] {
+        var argv = option("--agent", agent) + ["pr", verb] + Self.flags(flags)
+        argv += option("--worktree", worktree) + option("--message", message)
+        argv += option("--title", title) + option("--body", body)
+        return argv + ["--json"]
     }
 
     /// The directory `argv` runs in; Rust's `--cwd`.
@@ -333,7 +554,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
-        case .newChapter(_, _, let plan, _): plan
         case .dashboardSlots(_, _, _, let slots): slots
         case .paneLayout(_, _, let layout): layout
         default: nil
@@ -342,63 +562,140 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .taskFromSession(let directory, let id, let title):
+            TaggedFields("task.create", ["directory": directory, "id": id, "title": title])
         case .taskComplete(let directory, let issue):
-            TaggedFields("task_complete", ["directory": directory, "issue": issue])
+            TaggedFields("task.complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
-            TaggedFields("task_reopen", ["directory": directory, "issue": issue])
+            TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
-            TaggedFields("task_abandon", ["directory": directory, "issue": issue])
+            TaggedFields("task.abandon", ["directory": directory, "issue": issue])
         case .taskNotes(let directory, let issue, let notes):
-            TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
+            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
         case .taskOwnership(let directory, let issue, let claimed):
-            TaggedFields("task_ownership", ["directory": directory, "issue": issue, "claimed": claimed])
-        case .shipStop(let directory, let issue):
-            TaggedFields("ship_stop", ["directory": directory, "issue": issue])
+            TaggedFields(claimed ? "task.claim" : "task.unassign", ["directory": directory, "issue": issue])
+        case .taskRun(let directory, let issue, let from, let agent, let approve):
+            TaggedFields("task.run", ["directory": directory, "issue": issue, "from": from, "agent": agent,
+                                      "approve": approve])
+        case .taskShip(let directory, let issue):
+            TaggedFields("task.ship", ["directory": directory, "issue": issue])
+        case .taskHold(let directory, let issue):
+            TaggedFields("task.hold", ["directory": directory, "issue": issue])
+        case .taskSteer(let directory, let issue, let message):
+            TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
+        case .taskReport(let directory, let issue, let message):
+            TaggedFields("task.report", ["directory": directory, "issue": issue, "message": message])
+        case .taskInterrupt(let directory, let issue):
+            TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave):
-            TaggedFields("task_move", ["directory": directory, "issue": issue, "wave": wave])
+            TaggedFields("task.move", ["directory": directory, "issue": issue, "wave": wave])
         case .taskSave(let directory, let issue, let path, let revision, let content):
-            TaggedFields("task_save", ["directory": directory, "issue": issue, "path": path,
+            TaggedFields("task.save", ["directory": directory, "issue": issue, "path": path,
                                        "revision": revision, "content": content])
+        case .sessionSteer(let directory, let session, let wave, let message):
+            TaggedFields("session.steer", ["directory": directory, "session": session, "wave": wave, "message": message])
         case .sessionRename(let directory, let id, let name):
-            TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
-        case .sessionBind(let directory, let id, let task):
-            TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+            TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
+        case .sessionBind(let directory, let id, let task, let preview):
+            TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
-            TaggedFields("session_resume", ["directory": directory, "id": id, "task": task, "wave": wave,
+            TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent, "intent": intent.rawValue])
         case .sessionNew(let directory, let id, let agent):
-            TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
+            TaggedFields("session.new", ["directory": directory, "id": id, "agent": agent])
+        case .sessionMove(let directory, let blocked, let on, let agent):
+            TaggedFields("session.move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
         case .waveAdd(let directory, let wave, let objective):
-            TaggedFields("wave_add", ["directory": directory, "wave": wave, "objective": objective])
+            TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .planningRefresh(let directory, let wave):
-            TaggedFields("planning_refresh", ["directory": directory, "wave": wave])
-        case .newChapter(let directory, let name, let plan, let preview):
-            TaggedFields("new_chapter", ["directory": directory, "name": name, "plan": plan, "preview": preview])
+            TaggedFields("wave.sync", ["directory": directory, "wave": wave])
+        case .wavePlanningBind(let directory, let wave, let project):
+            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project])
+        case .wavePlanningConnect(let directory, let wave, let all, let teamKey, let teamName):
+            TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
+                                                   "team_key": teamKey, "team_name": teamName])
+        case .wavePlanningReteam(let directory, let apply):
+            TaggedFields("wave.plan.reteam", ["directory": directory, "apply": apply])
         case .graphCustomize(let directory, let name):
-            TaggedFields("graph_customize", ["directory": directory, "name": name])
+            TaggedFields("graph.customize", ["directory": directory, "name": name])
+        case .repositoryRelease(let directory, let version, let target):
+            TaggedFields("repo.release", ["directory": directory, "version": version, "target": target])
+        case .checkoutCommit(let directory, let message, let push, let noAdd, let paths, let agent):
+            TaggedFields("checkout.commit", ["directory": directory, "message": message, "push": push, "no_add": noAdd,
+                                             "paths": paths, "agent": agent])
+        case .checkoutSync(let directory, let onto, let preview, let manual, let continueSync, let abort, let adopt):
+            TaggedFields("checkout.sync", ["directory": directory, "onto": onto, "preview": preview, "manual": manual,
+                                           "continue": continueSync, "abort": abort, "adopt": adopt])
+        case .checkoutCreate(let directory, let name, let preview, let persistent):
+            TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
+                                             "persistent": persistent])
+        case .accountDisconnect(let provider, let email):
+            TaggedFields("account.disconnect", ["provider": provider, "email": email])
+        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
+            TaggedFields("account.connect", ["provider": provider, "email": email, "chrome_profile": chromeProfile,
+                                             "import": `import`, "api_key": apiKey])
+        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
+                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
+            TaggedFields("account.set", ["provider": provider, "email": email, "login_email": loginEmail,
+                                         "plan": plan, "clear_plan": clearPlan,
+                                         "paid_through": paidThrough, "clear_paid_through": clearPaidThrough,
+                                         "clear_cooldown": clearCooldown, "chrome_profiles": chromeProfiles,
+                                         "clear_chrome_profiles": clearChromeProfiles])
+        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
+            TaggedFields("account.redeem_reset", ["provider": provider, "email": email,
+                                                  "idempotency_key": idempotencyKey, "credit_id": creditId])
+        case .accountUse(let login): TaggedFields("account.use", ["login": login])
+        case .accountPause(let login): TaggedFields("account.pause", ["login": login])
+        case .accountUnpause(let login): TaggedFields("account.unpause", ["login": login])
+        case .graphRun(let directory, let name, let message, let agent):
+            TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
+        case .skillRun(let directory, let name, let message, let agent):
+            TaggedFields("skill.run", ["directory": directory, "name": name, "message": message, "agent": agent])
+        case .prPublish(let directory, let title, let body, let agent):
+            TaggedFields("pr.publish", ["directory": directory, "title": title, "body": body, "agent": agent])
+        case .prOpen(let directory, let title, let body, let agent):
+            TaggedFields("pr.open", ["directory": directory, "title": title, "body": body, "agent": agent])
+        case .prSubmit(let directory, let strict, let worktree, let message, let title, let body, let agent):
+            TaggedFields("pr.submit", ["directory": directory, "strict": strict, "worktree": worktree,
+                                       "message": message, "title": title, "body": body, "agent": agent])
+        case .prArm(let directory, let strict, let local, let worktree, let message, let title, let body, let agent):
+            TaggedFields("pr.arm", ["directory": directory, "strict": strict, "local": local, "worktree": worktree,
+                                    "message": message, "title": title, "body": body, "agent": agent])
+        case .prLand(let directory, let waitAndFix, let strict, let local, let worktree, let message, let title,
+                     let body, let agent):
+            TaggedFields("pr.land", ["directory": directory, "wait_and_fix": waitAndFix, "strict": strict,
+                                     "local": local, "worktree": worktree, "message": message, "title": title,
+                                     "body": body, "agent": agent])
+        case .prAbandon(let directory, let branch, let force):
+            TaggedFields("pr.abandon", ["directory": directory, "branch": branch, "force": force])
+        case .prReconcile(let directory): TaggedFields("pr.reconcile", ["directory": directory])
+        case .prRequestReview(let directory, let pr, let reviewers):
+            TaggedFields("pr.request_review", ["directory": directory, "pr": pr, "reviewers": reviewers])
         case .portfolio(let change):
-            TaggedFields("portfolio", ["change": change])
+            TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
         case .dashboardQuery(let directory, let id, let expression, let revision):
-            TaggedFields("dashboard_query", ["directory": directory, "id": id, "expression": expression,
+            TaggedFields("desktop.dashboard.query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])
         case .dashboardPin(let directory, let id, let pinned, let revision):
-            TaggedFields("dashboard_pin", ["directory": directory, "id": id, "pinned": pinned, "revision": revision])
+            TaggedFields(pinned ? "desktop.dashboard.pin" : "desktop.dashboard.unpin",
+                         ["directory": directory, "id": id, "revision": revision])
         case .dashboardRename(let directory, let id, let name, let revision):
-            TaggedFields("dashboard_rename", ["directory": directory, "id": id, "name": name, "revision": revision])
+            TaggedFields("desktop.dashboard.rename", ["directory": directory, "id": id, "name": name, "revision": revision])
         case .dashboardTile(let directory, let id, let member, let hidden):
-            TaggedFields("dashboard_tile", ["directory": directory, "id": id, "member": member, "hidden": hidden])
+            TaggedFields(hidden ? "desktop.dashboard.hide" : "desktop.dashboard.show",
+                         ["directory": directory, "id": id, "member": member])
         case .dashboardSlots(let directory, let id, let revision, let slots):
-            TaggedFields("dashboard_slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
+            TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
         case .tileMove(let directory, let board, let member, let destination):
-            TaggedFields("tile_move", ["directory": directory, "board": board, "member": member,
+            TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
         case .paneLayout(let directory, let work, let layout):
-            TaggedFields("pane_layout", ["directory": directory, "work": work, "layout": layout])
+            TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
-        try tagged.encode(to: encoder, tag: "write")
+        try tagged.encode(to: encoder, tag: "kind")
     }
 }
 
@@ -445,7 +742,7 @@ public struct RegistryQuery: Sendable {
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
-    private var observeRead: (@Sendable ([String], String?) async throws -> LineWatch)?
+    private var observeRead: (@Sendable ([String], String?) async throws -> LineSubscription)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
@@ -455,8 +752,8 @@ public struct RegistryQuery: Sendable {
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
-        watchRead: (@Sendable ([String], String?) async throws -> LineWatch)? = nil,
-        watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
+        subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
+        subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
@@ -470,8 +767,8 @@ public struct RegistryQuery: Sendable {
         }
         self.run = run
         self.observeFiles = watchFiles
-        self.observeWork = watchWork
-        self.observeRead = watchRead
+        self.observeWork = subscribeWork
+        self.observeRead = subscribeRead
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
@@ -537,13 +834,13 @@ public struct RegistryQuery: Sendable {
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
     /// connection identity, repository lookup and every operation on that Machine.
     public func onMachine(_ machine: String, repository: String) -> RegistryQuery {
-        let prefix = ["--machine", machine, "--repository", repository]
+        let prefix = ["--machine", machine, "--repo-id", repository]
         var query = RegistryQuery(runWithInput: { [runWithInput] args, _, input in
             try await runWithInput(prefix + args, nil, input)
         }, watchFiles: { [observeFiles] args, _ in
             guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
             return try await observeFiles(prefix + args, nil)
-        }, watchRead: { [observeRead] args, _ in
+        }, subscribeRead: { [observeRead] args, _ in
             guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
             return try await observeRead(prefix + args, nil)
         }) { [run] args, _ in
@@ -597,22 +894,22 @@ public struct RegistryQuery: Sendable {
         if let observeRead {
             query.observeRead = { args, cwd in
                 try await validate()
-                let watch = try await observeRead(args, cwd)
+                let subscription = try await observeRead(args, cwd)
                 let lines = AsyncThrowingStream<Data, any Error> { continuation in
                     let reader = Task {
                         do {
-                            for try await line in watch.lines {
+                            for try await line in subscription.lines {
                                 try await validate()
                                 try Task.checkCancellation()
                                 continuation.yield(line)
                             }
                             continuation.finish()
                         } catch { continuation.finish(throwing: error) }
-                        await watch.cancel()
+                        await subscription.cancel()
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineWatch(lines: lines, send: watch.send, cancel: watch.cancel)
+                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
             }
         }
         return query
@@ -657,9 +954,9 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
-    /// Registration writes the store, so `lf` runs it, not the app's library.
+    /// Registration runs the complete CLI command.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
+        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repo", "--json"], cwd))
     }
 
     public func repositoryPath(id: String) async throws -> String {
@@ -694,7 +991,7 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.planningRefresh(directory: cwd, wave: wave))
     }
 
-    /// `lf wave add`: registers the Wave, commits its files on the main checkout and
+    /// `lf wave create`: registers the Wave, commits its files on the main checkout and
     /// ensures its first Project. Adding an existing Wave changes nothing, so this
     /// is also the explicit opening/retry operation; periodic reads stay observational.
     /// The receipt's `summary` names anything left to finish.
@@ -715,11 +1012,6 @@ public struct RegistryQuery: Sendable {
         var args = ["wave", "remove", name, "--json"]
         if preview { args.append("--preview") }
         return try Self.decode(WaveRemoval.self, from: await run(args, cwd))
-    }
-
-    public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
-        try Self.decode(ProjectRotationPreview.self, from: await write(
-            .newChapter(directory: cwd, name: name, plan: plan, preview: preview)))
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
@@ -757,7 +1049,7 @@ public struct RegistryQuery: Sendable {
     /// a caller reads once and shows that reading until it asks again.
     public var streamsWork: Bool { observeWork != nil }
 
-    public func watchWork() async throws -> WorkObservation {
+    public func subscribeWork() async throws -> WorkObservation {
         guard let observeWork else {
             throw RegistryQueryError("Work observation is unavailable on this transport")
         }
@@ -788,14 +1080,14 @@ public struct RegistryQuery: Sendable {
     }
 
     public func processHistory(id: String) async throws -> String {
-        try await run(["history", "show", id], nil)
+        try await run(["session", "history", "show", id], nil)
     }
 
     /// One store-driven reading keeps position, readiness and run history together.
-    public func watchTask(task: String) async throws -> LineWatch {
+    public func subscribeTask(task: String) async throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
         let read = ServedRead.desktopTask(directory: "/", issue: task)
-        return try await observeRead(read.argv + ["--watch"], read.cwd)
+        return try await observeRead(read.argv + ["--subscribe"], read.cwd)
     }
 
     /// Every selectable Graph with the topology it would capture, via the shared loader.
@@ -813,7 +1105,8 @@ public struct RegistryQuery: Sendable {
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         // Without a repository it customizes from `/`, where the app runs.
-        try await write(.graphCustomize(directory: cwd ?? "/", name: name)).trimmingCharacters(in: .whitespacesAndNewlines)
+        struct Customized: Decodable { let path: String }
+        return try Self.decode(Customized.self, from: await write(.graphCustomize(directory: cwd ?? "/", name: name))).path
     }
 
     /// Run the Task's graph until its next interactive step; returns once it
@@ -856,7 +1149,7 @@ public struct RegistryQuery: Sendable {
     /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.shipStop(directory: cwd ?? "/", issue: issue))
+        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
@@ -1001,18 +1294,26 @@ public struct RegistryQuery: Sendable {
             .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
     }
 
+    /// Move the open Sessions whose login cannot take their model now to
+    /// `agent` (`harness[:model]`) or `account`: idle ones at their next open,
+    /// busy ones after their turn. The report says which went where.
+    public func moveBlockedSessions(agent: String, cwd: String?) async throws -> SessionMoveReport {
+        try Self.decode(SessionMoveReport.self, from: await write(
+            .sessionMove(directory: cwd ?? "/", blocked: true, on: nil, agent: agent)))
+    }
+
     /// Create a Task around the selected conversation without launching work.
     public func createTaskFromSession(id: String, title: String, cwd: String?) async throws -> TaskCreateReceipt.CreatedTask {
-        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await run(
-            ["task", "create", "--session", id, "--title", title, "--json"], cwd))
+        try Self.decode(TaskCreateReceipt.CreatedTask.self, from: await write(
+            .taskFromSession(directory: cwd ?? "/", id: id, title: title)))
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
-        try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
+        try Self.decode(SessionBindingPreview.self, from: await write(.sessionBind(directory: "/", id: id, task: task, preview: true)))
     }
 
     public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await write(.sessionBind(directory: cwd ?? "/", id: id, task: taskId))
+        let stdout = try await write(.sessionBind(directory: cwd ?? "/", id: id, task: taskId, preview: false))
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -1664,37 +1965,6 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let tokens: Int
 }
 
-/// Display projection of the rotation report; provider bodies stay owned by Rust.
-public struct ProjectRotationPreview: Decodable, Sendable {
-    public let name: String
-    public let waves: [WaveRotation]
-
-    public struct WaveRotation: Decodable, Sendable {
-        public let wave: String
-        public let successor_id: String
-        public let predecessor: Project?
-        public let successor: Project?
-        public let tasks: [Task]
-    }
-
-    public struct Project: Decodable, Sendable {
-        public let id: String
-        public let name: String
-    }
-
-    public struct Task: Decodable, Sendable {
-        public let task: Issue
-        public let disposition: String
-        public let reason: String
-    }
-
-    public struct Issue: Decodable, Sendable {
-        public let id: String
-        public let identifier: String
-        public let title: String
-    }
-}
-
 public struct ProjectReadiness: Decodable, Sendable, Hashable {
     public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
     public let state: State
@@ -1716,4 +1986,10 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
         case state, activation
         case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
     }
+}
+
+/// `[flag, value]` for a present value, the bare value with no flag, nothing when absent.
+private func argument(_ flag: String?, _ value: String?) -> [String] {
+    guard let value else { return [] }
+    return (flag.map { [$0] } ?? []) + [value]
 }

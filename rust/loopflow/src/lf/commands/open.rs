@@ -94,7 +94,9 @@ pub struct WorkLink {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkLinkTarget {
     pub kind: WorkWorkspaceKind,
+    #[serde(rename = "repo_path")]
     pub repository_path: String,
+    #[serde(rename = "repo_id")]
     pub repository_id: Option<String>,
     /// The Task's readable identifier, such as LOO-507.
     pub task: Option<String>,
@@ -692,6 +694,8 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let records = runtime.block_on(crate::ops::human_session::list(
         &store,
         &crate::session::SessionFilter {
+            blocked: false,
+            on: None,
             orphan: false,
             repo: if scoped {
                 crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())

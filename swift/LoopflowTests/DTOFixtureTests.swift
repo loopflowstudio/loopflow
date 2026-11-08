@@ -773,6 +773,15 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
     }
 
+    @Test("A Session move report round-trips and summarizes every outcome")
+    func sessionMoveReportFixture() throws {
+        let report = try JSONDecoder().decode(SessionMoveReport.self, from: loadFixtureData("session_move_report.json"))
+        #expect(report.moved.count == 1)
+        #expect(report.pending.first?.how == "continues on claude:opus after its turn")
+        #expect(report.summary.contains("Release notes: skipped, its transcript is missing"))
+        #expect(try JSONDecoder().decode(SessionMoveReport.self, from: JSONEncoder().encode(report)) == report)
+    }
+
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(
@@ -928,8 +937,8 @@ struct DTOFixtureTests {
     }
 
     @Test("Watch frames decode through their part and keep the wire text a saved workspace needs")
-    func watchFramesDecode() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    func subscribeFramesDecode() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
                               activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
@@ -1057,7 +1066,7 @@ func sessionInputHistoryFixture() throws {
 // Written by the Rust composed lifecycle test from one disposable Home.
 struct TaskLifecycleCapture {
     let row: RoadmapTask
-    /// `lf task status FIX-1 --json` as its watch would carry it.
+    /// `lf task status FIX-1 --json` as its subscription would carry it.
     let status: [String: Any]
 
     static func load(_ data: Data) throws -> [String: TaskLifecycleCapture] {

@@ -136,7 +136,7 @@ When a Task you own is heading the wrong way, `lf task interrupt <issue>` stops
 it; discuss the new direction in the Task conversation. The stopped Graph stays
 as history; Task, worktree and PR are unchanged.
 
-## Diagnose execution and auth
+## Diagnose execution and accounts
 
 When work looks stuck, run `lf top` before guessing (`lf ps --json` for a
 snapshot). It shows live call trees, output rates, tokens, age, idle time,

@@ -354,7 +354,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&wait.stderr)
     );
     let wait: serde_json::Value = serde_json::from_slice(&wait.stdout).expect("wait JSON");
-    assert_eq!(wait["actions"], status["actions"]);
+    assert_eq!(wait["task"]["actions"], status["actions"]);
 
     let roadmap = run_lf(&["desktop", "plan", "task-pr-tests", "--json"]);
     assert!(

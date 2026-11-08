@@ -74,7 +74,7 @@ pub(crate) async fn ensure_task(
         // Opening a conversation does not invent a checkout or start a Graph.
         let repo = repo.to_path_buf();
         let id = task.id.to_string();
-        tokio::task::spawn_blocking(move || {
+        crate::journal::request::spawn_blocking(move || {
             crate::ops::task::task_checkout(&repo, &id, Default::default())
         })
         .await??;
@@ -294,7 +294,7 @@ pub(crate) async fn admit_workspace(store: &SharedStore, session: LfSession) -> 
                     .as_deref()
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| session.cwd.clone());
-                tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf> {
+                crate::journal::request::spawn_blocking(move || -> Result<std::path::PathBuf> {
                     let task = crate::ops::task::task_checkout(&repo, &task, Default::default())?;
                     Ok(task.worktree()?.clone())
                 })
@@ -335,7 +335,8 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
 /// Prepare the workspace; connecting owns input reservation and provider launch.
 async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
     let lock_id = id.to_string();
-    let _launch = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let _launch =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
         .session(id)
         .await?
@@ -374,7 +375,7 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
         PrimaryScope::Task(task) => format!("primary:task:{task}"),
     };
-    tokio::task::spawn_blocking(move || lock_session_process(&key))
+    crate::journal::request::spawn_blocking(move || lock_session_process(&key))
         .await
         .context("lock primary Session scope")?
 }

@@ -15,16 +15,17 @@ use crate::store::sqlite::SqliteStore;
 
 const MAX_LIMIT: usize = 200;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkActivitySnapshot {
     /// More Session records exist in the window than `--limit` returned.
     pub truncated: bool,
     pub items: Vec<WorkActivityEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkActivityEntry {
     pub id: String,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub recorded_at: OffsetDateTime,
     pub summary: String,
@@ -34,7 +35,7 @@ pub struct WorkActivityEntry {
     pub fact: WorkActivityFact,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     InputCaptured {
@@ -55,9 +56,9 @@ pub enum WorkActivityFact {
     },
 }
 
-/// What `lf history` reads; the flags of the same name, which a `--watch`
+/// What `lf history` reads; the flags of the same name, which a `--subscribe`
 /// request can replace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HistoryWindow {
     pub since: String,
@@ -71,6 +72,7 @@ impl HistoryWindow {
     /// The `lf history` flags that read this window.
     pub(crate) fn argv(&self) -> Vec<String> {
         let mut argv = vec![
+            "session".into(),
             "history".into(),
             "--since".into(),
             self.since.clone(),
@@ -90,15 +92,15 @@ impl HistoryWindow {
     }
 }
 
-/// `lf history --watch`. History is committed facts only; the clock just ages
+/// `lf history --subscribe`. History is committed facts only; the clock just ages
 /// the window.
-pub(crate) fn watch(
+pub(crate) fn subscribe(
     window: HistoryWindow,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Subscription>> {
-    super::watch::start(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         window,
-        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
     )
@@ -112,12 +114,15 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         project: options.project.clone(),
         task: options.task.clone(),
     };
-    if options.watch {
-        return watch(window, super::watch::Transport::Stdio).map(drop);
+    if options.subscribe {
+        return subscribe(window, super::subscribe::Transport::Stdio).map(drop);
     }
     let snapshot = snapshot(&window)?;
     if options.json {
-        println!("{}", serde_json::to_string(&snapshot)?);
+        println!(
+            "{}",
+            serde_json::to_string(&super::subscribe::selected_answer(&snapshot)?)?
+        );
     } else {
         print_snapshot(&snapshot);
     }

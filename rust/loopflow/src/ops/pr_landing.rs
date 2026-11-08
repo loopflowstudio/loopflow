@@ -1288,7 +1288,9 @@ pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) ->
         .any(|(_, process)| repair_live(store, Some(process))))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct DeliveryCheck {
     pub checked_at: i64,
     pub errors: Vec<String>,

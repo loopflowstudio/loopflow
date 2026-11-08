@@ -15,7 +15,7 @@ use crate::store::sqlite::SqliteStore;
 /// How long GitHub knowing no user for an email stands before it is asked again.
 const MISS_RETRY_SECS: i64 = 24 * 60 * 60;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GithubPerson {
     pub login: String,
     pub name: Option<String>,
@@ -23,7 +23,7 @@ pub struct GithubPerson {
 }
 
 /// A Task owner: their claim's email and name, and who they are on GitHub.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoPerson {
     pub email: String,
     pub name: Option<String>,

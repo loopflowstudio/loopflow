@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
   "rust/loopflow",
-  "rust/loopflow-ffi",
   "rust/loopflow-test-support",
 ]
 

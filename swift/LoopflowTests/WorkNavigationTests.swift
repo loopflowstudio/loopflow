@@ -811,8 +811,8 @@ struct WorkNavigationTests {
         let gate = PlanningGate()
         let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": await gate.wait(); return snapshot
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(records),"next":null}"#
+            case "plan" where args.dropFirst().first == "list": await gate.wait(); return snapshot
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             default: return #"{"truncated":false,"items":[]}"#
             }
@@ -1187,7 +1187,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
+         "ready_summary":null,"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
         """.utf8))
     }
 }
@@ -1220,10 +1220,10 @@ private actor ReadingSource {
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
-        case "desktop" where args.dropFirst().first == "plan": return roadmap
-        case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessions),"next":null}"#
+        case "plan" where args.dropFirst().first == "list": return roadmap
+        case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
-        case "history": return #"{"truncated":false,"items":[]}"#
+        case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

@@ -228,124 +228,6 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
 }
 
 #[test]
-fn stored_rotation_commits_all_waves_and_serializes_new_work() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let mut entries = Vec::new();
-    let mut predecessors = Vec::new();
-    let successor = uuid::Uuid::new_v4().to_string();
-    for name in ["first", "second"] {
-        lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
-        let wave = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "status", name, "--json"],
-        );
-        predecessors.push(
-            wave["projects"]["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|project| project["current"] == true)
-                .unwrap()
-                .clone(),
-        );
-        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}));
-    }
-    let path = home.path().join("rotation.json");
-    let args = [
-        "wave",
-        "new-chapter",
-        "--all",
-        "Next",
-        "--plan",
-        path.to_str().unwrap(),
-        "--json",
-    ];
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&serde_json::json!({"name":"Next","waves":entries})).unwrap(),
-    )
-    .unwrap();
-    let failed = command(repo.path(), home.path(), &args).output().unwrap();
-    assert!(!failed.status.success());
-    for (i, name) in ["first", "second"].iter().enumerate() {
-        let wave = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "status", name, "--json"],
-        );
-        assert!(predecessors[i].is_object(), "{wave}");
-        assert_eq!(
-            wave["projects"]["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|project| project["current"] == true)
-                .unwrap(),
-            &predecessors[i]
-        );
-    }
-    entries[1]["successor_id"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&serde_json::json!({"name":"Next","waves":entries})).unwrap(),
-    )
-    .unwrap();
-    let children: Vec<_> = (0..3)
-        .map(|_| {
-            command(
-                repo.path(),
-                home.path(),
-                &[
-                    "task",
-                    "create",
-                    "--wave",
-                    "first",
-                    "--title",
-                    "Concurrent work",
-                    "--json",
-                ],
-            )
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap()
-        })
-        .collect();
-    lf(repo.path(), home.path(), &args);
-    let current = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "status", "first", "--json"],
-    );
-    let destination = &current["projects"]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|project| project["current"] == true)
-        .unwrap()["id"];
-    assert_ne!(destination, &predecessors[0]["id"]);
-    let mut identities = std::collections::HashSet::new();
-    for child in children {
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let created: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let id = created["id"].as_str().unwrap();
-        assert!(identities.insert(id.to_string()));
-        let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        let project = &status["project"]["id"];
-        assert!(project == destination || project == &predecessors[0]["id"]);
-        assert!(status["execution"]["worktree"].is_null());
-    }
-    assert!(repo.path().join(".lf/wave").exists());
-}
-
-#[test]
 fn public_local_plan_matches_desktop() {
     let repo = TestRepo::new();
     repo.create_file(".lf/config.yaml", "default_agent: codex\n");
@@ -367,13 +249,7 @@ fn public_local_plan_matches_desktop() {
     let comments = lf(
         repo.path(),
         home.path(),
-        &[
-            "task",
-            "comment",
-            id,
-            "Preserve the escaped quote",
-            "--json",
-        ],
+        &["task", "report", id, "Preserve the escaped quote", "--json"],
     );
     assert!(uuid::Uuid::parse_str(comments["comments"][0]["id"].as_str().unwrap()).is_ok());
     assert!(time::OffsetDateTime::parse(
@@ -396,7 +272,7 @@ fn public_local_plan_matches_desktop() {
         .as_str()
         .unwrap()
         .to_string();
-    task["task"]["repository_id"] = serde_json::json!("repo_00000000000040008000000000000001");
+    task["task"]["repo_id"] = serde_json::json!("repo_00000000000040008000000000000001");
     task["task"]["repo"] = serde_json::json!("/repo");
     let proof = serde_json::json!({"task":task,"comments":comments});
     let canonical = serde_json::to_string(&proof)
@@ -610,7 +486,7 @@ fn nested_waves_create_files_and_store_project_identity() {
         home.path(),
         &["wave", "status", "instruments/parser", "--json"],
     );
-    assert_eq!(renamed["tasks"]["items"][0]["id"], created["id"]);
+    assert_eq!(renamed["tasks"]["items"][0]["task"]["id"], created["id"]);
     lf(
         repo.path(),
         home.path(),
@@ -785,7 +661,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "task",
-            "comment",
+            "report",
             identity.as_str(),
             "Preserve the escaped quote",
             "--json",
@@ -802,7 +678,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     assert!(status["execution"]["issue_id"].is_null());
     assert!(status["execution"]["worktree"].is_null());
     assert!(status["execution"]["pr"].is_null());
-    assert!(status["planning_error"].is_null());
+    assert!(status["plan_error"].is_null());
     let wave = lf(
         repo.path(),
         home.path(),
@@ -864,8 +740,9 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let read_comments = lf(
         repo.path(),
         home.path(),
-        &["task", "comment", identity.as_str(), "--json"],
-    );
+        &["task", "show", identity.as_str(), "--json"],
+    )["comments"]
+        .clone();
     assert_eq!(read_comments, comments);
     assert_eq!(
         read_comments["comments"][0]["author"]["name"],
@@ -927,7 +804,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["desktop", "task", other_id, "--json"],
     );
     assert_eq!(retained["execution"]["status"], "abandoned");
-    assert_eq!(retained["planning_state"], "removed");
+    assert_eq!(retained["plan_state"], "removed");
     assert_eq!(
         retained["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -1038,7 +915,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
-    assert!(status["planning_error"].is_null());
+    assert!(status["plan_error"].is_null());
     let landing = command(Path::new(worktree), home.path(), &["--task", id, "land"])
         .output()
         .unwrap();
@@ -1060,48 +937,6 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "Later work",
             "--json",
         ],
-    );
-    let wave = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "status", "inbox", "--json"],
-    );
-    let successor = uuid::Uuid::new_v4();
-    let plan_file = home.path().join("rotation.json");
-    std::fs::write(&plan_file,serde_json::to_vec(&serde_json::json!({"name":"Next", "waves":[{"wave_id":wave["wave"]["id"],"successor_id":successor.to_string(),"create":true,"project_name":"Next","metric_targets":[],"krs":[{"text":"Retain active work","holds":false}]}]})).unwrap()).unwrap();
-    let rotate = [
-        "wave",
-        "new-chapter",
-        "inbox",
-        "Next",
-        "--plan",
-        plan_file.to_str().unwrap(),
-        "--json",
-    ];
-    let rotation = lf(repo.path(), home.path(), &rotate);
-    assert_eq!(rotation["waves"][0]["successor"]["status"], "started");
-    lf(repo.path(), home.path(), &rotate);
-    let original_plan = std::fs::read_to_string(&plan_file).unwrap();
-    std::fs::write(
-        &plan_file,
-        original_plan.replace("Retain active work", "Conflicting retry"),
-    )
-    .unwrap();
-    let conflict = command(repo.path(), home.path(), &rotate).output().unwrap();
-    assert!(!conflict.status.success());
-    std::fs::write(&plan_file, original_plan).unwrap();
-    let moved = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-    assert_eq!(
-        moved["project"]["id"],
-        format!("proj_{}", successor.simple())
-    );
-    assert_eq!(
-        moved["execution"]["worktree"],
-        status["execution"]["worktree"]
-    );
-    assert_eq!(
-        moved["execution"]["work"]["graph"],
-        status["execution"]["work"]["graph"]
     );
     let retained = lf(
         repo.path(),
@@ -2127,402 +1962,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
 }
 
 #[test]
-fn rotation_saves_membership_and_pending_effects_offline() {
-    use crate::test_linear_input::InventoryFixture;
-    use loopflow::durable::TaskId;
-    use loopflow::work::task::NewTask;
-
-    for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
-        let repo = TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        if connected {
-            repo.create_file(
-                ".lf/config.yaml",
-                "planning:\n  provider: linear\n  team: fixture-team\n",
-            );
-        }
-        let path = home.path().join("loopflow.db");
-        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
-        let wave = loopflow::work::wave::Wave::new(
-            loopflow::id::WaveId::new(),
-            "product".into(),
-            canonical.to_string(),
-        );
-        store.create_wave(&wave).unwrap();
-        lf(
-            repo.path(),
-            home.path(),
-            &["wave", "add", "product", "--json"],
-        );
-        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
-        let db = rusqlite::Connection::open(&path).unwrap();
-        if mapped {
-            db.execute("UPDATE projects SET external_project_id='provider-project',planning_teams='[\"fixture-team\"]',planning_initiatives='[\"initiative\"]' WHERE id=?1", [project.id.as_str()]).unwrap();
-        }
-        let active = store
-            .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
-                due_date: Some("2026-12-31".into()),
-                id: TaskId::new(),
-                project_id: Some(project.id.clone()),
-                title: "Started work".into(),
-                description: "Retain description".into(),
-            })
-            .unwrap();
-        let backlog = store
-            .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
-                    .unwrap(),
-                due_date: None,
-                id: TaskId::new(),
-                project_id: Some(project.id.clone()),
-                title: "Unreviewed backlog".into(),
-                description: "".into(),
-            })
-            .unwrap();
-        db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [active.id.as_str()]).unwrap();
-        db.execute(
-            "INSERT INTO task_ownership(id,task_id,kind,at,ordered_at,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',17,17000,1)",
-            [active.id.as_str()],
-        )
-        .unwrap();
-        if mapped {
-            db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [active.id.as_str()]).unwrap();
-        }
-        let observed_project = loopflow::linear::LinearProject {
-            id: "provider-project".into(),
-            slug: project.slug.clone(),
-            name: project.name.clone(),
-            summary: project.summary.clone(),
-            description: Some(project.description.clone()),
-            status: project.status,
-            krs: project.krs.clone(),
-            metric_targets: project.metric_targets.clone(),
-            initiative_ids: vec!["initiative".into()],
-            team_ids: vec!["fixture-team".into()],
-            revision: None,
-        };
-        let mut snapshot = crate::test_linear_input::Inventory {
-            projects: vec![observed_project.clone()],
-            items: vec![observed_issue(
-                "provider-issue",
-                "provider-project",
-                "Started work",
-                "Retain description",
-            )],
-        };
-        snapshot.items[0].due_date.clone_from(&active.due_date);
-        if mapped {
-            store
-                .seed_inventory(&InventoryFixture {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative".into(),
-                    synced_at: 20,
-                    snapshot: snapshot.clone(),
-                })
-                .unwrap();
-        }
-        db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-        db.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'review','{\"index\":1}','11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
-        let retained_execution = || {
-            [
-                ("task_graphs", "task_id", active.id.as_str()),
-                ("processes", "id", "11111111-1111-4111-8111-111111111111"),
-            ]
-            .map(|(table, key, id)| {
-                let mut query = db
-                    .prepare(&format!("SELECT * FROM {table} WHERE {key}=?1"))
-                    .unwrap();
-                let columns = query.column_count();
-                query
-                    .query_row([id], |row| {
-                        (0..columns)
-                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .unwrap()
-            })
-        };
-        let execution = retained_execution();
-        let successor = loopflow::durable::ProjectId::new();
-        let file = home.path().join("rotation.json");
-        // Backlog may be newer than started work; rotation does not depend on display order.
-        db.execute(
-            "UPDATE tasks SET updated_at=updated_at+60 WHERE id=?1",
-            [backlog.id.as_str()],
-        )
-        .unwrap();
-        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
-        std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
-        let args = [
-            "wave",
-            "new-chapter",
-            "product",
-            "Next",
-            "--plan",
-            file.to_str().unwrap(),
-            "--json",
-        ];
-        let preview = lf(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "new-chapter",
-                "product",
-                "Next",
-                "--plan",
-                file.to_str().unwrap(),
-                "--dry-run",
-                "--json",
-            ],
-        );
-        let preview_decision = preview["waves"][0]["tasks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|decision| decision["task"]["id"] == active.id.as_str())
-            .unwrap();
-        assert_eq!(preview_decision["disposition"], "move");
-        let expected = store.task(&active.id).unwrap().unwrap();
-        let preview_task = &preview_decision["task"];
-        assert_eq!(preview_task, &serde_json::to_value(&expected).unwrap());
-        assert_eq!(preview_task["id"], active.id.as_str());
-        assert_eq!(preview_task["due_date"], "2026-12-31");
-        assert_eq!(preview_task["description"], "Retain description");
-        assert_eq!(
-            store.task(&active.id).unwrap().unwrap().project_id,
-            Some(project.id.clone())
-        );
-        let revision = || {
-            db.query_row(
-                "SELECT revision FROM store_revisions WHERE domain='planning'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap()
-        };
-        let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_rotation BEFORE UPDATE OF current_project_id ON waves BEGIN SELECT RAISE(ABORT,'injected rotation failure'); END;").unwrap();
-        assert!(!command(repo.path(), home.path(), &args)
-            .output()
-            .unwrap()
-            .status
-            .success());
-        db.execute_batch("DROP TRIGGER fail_rotation").unwrap();
-        assert!(store.project(&successor).unwrap().is_none());
-        assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
-        assert!(store
-            .pending_project_changes(&project.id)
-            .unwrap()
-            .is_empty());
-        assert_eq!(revision(), before);
-        let applied = lf(repo.path(), home.path(), &args);
-        let moved = store.task(&active.id).unwrap().unwrap();
-        let applied_decision = applied["waves"][0]["tasks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|decision| decision["task"]["id"] == active.id.as_str())
-            .unwrap();
-        assert_eq!(
-            applied_decision["task"],
-            serde_json::to_value(&moved).unwrap()
-        );
-        assert_eq!(moved.project_id, Some(successor.clone()));
-        assert_eq!(
-            db.query_row(
-                "SELECT max(at) FROM task_ownership WHERE task_id=?1",
-                [active.id.as_str()],
-                |r| r.get::<_, Option<i64>>(0)
-            )
-            .unwrap(),
-            Some(17)
-        );
-        assert_eq!(
-            store.task(&backlog.id).unwrap().unwrap().project_id,
-            Some(project.id.clone())
-        );
-        let changes = store.pending_task_changes(&active.id).unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].value.field(), "task_project");
-        assert_eq!(
-            changes[0].value,
-            WorkValue::TaskProject(Some(successor.to_string()))
-        );
-        let status = store.pending_project_changes(&project.id).unwrap();
-        assert_eq!(
-            status[0].value,
-            WorkValue::ProjectStatus(ProjectStatus::Completed)
-        );
-        // Released receipts nest content and preserve their original JSON bytes/order.
-        let retained = format!(
-            r#"{{"wave_id":"{}","successor_id":"{}","create":true,"project_name":"Next","content":{{"metric_targets":[],"krs":[{{"text":"Preserve work","holds":false}}]}}}}"#,
-            wave.id(),
-            successor,
-        );
-        db.execute("UPDATE project_transitions SET local_plan_json=?1 WHERE wave_id=?2 AND successor_id=?3",
-            rusqlite::params![retained, wave.id(), successor.as_str()]).unwrap();
-        let settled_revision = revision();
-        lf(repo.path(), home.path(), &args);
-        let saved: String = db.query_row("SELECT local_plan_json FROM project_transitions WHERE wave_id=?1 AND successor_id=?2",
-            rusqlite::params![wave.id(), successor.as_str()], |row| row.get(0)).unwrap();
-        assert_eq!(saved, retained);
-        let mut conflicting = plan.clone();
-        conflicting["waves"][0]["krs"][0]["text"] = serde_json::json!("Changed request");
-        std::fs::write(&file, serde_json::to_vec(&conflicting).unwrap()).unwrap();
-        let rejected = command(repo.path(), home.path(), &args).output().unwrap();
-        assert!(!rejected.status.success());
-        assert!(
-            String::from_utf8_lossy(&rejected.stderr).contains("original rotation request changed")
-        );
-        std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
-        assert_eq!(revision(), settled_revision);
-        assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
-        assert_eq!(store.pending_project_changes(&project.id).unwrap(), status);
-        if mapped {
-            snapshot.items[0].description = "Incoming unrelated edit".into();
-            snapshot.items[0].revision = Some("2026-10-08T12:00:00Z".into());
-            store
-                .seed_inventory(&InventoryFixture {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative".into(),
-                    synced_at: 21,
-                    snapshot,
-                })
-                .unwrap();
-            let retained = store.task(&active.id).unwrap().unwrap();
-            assert_eq!(retained.project_id, Some(successor.clone()));
-            assert_eq!(retained.description, "Incoming unrelated edit");
-            assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
-            assert_eq!(
-                store.project(&project.id).unwrap().unwrap().status,
-                loopflow::work::project::ProjectStatus::Completed
-            );
-        }
-        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
-        assert_eq!(
-            reopened.task(&active.id).unwrap().unwrap().project_id,
-            Some(successor.clone())
-        );
-        assert_eq!(reopened.pending_task_changes(&active.id).unwrap(), changes);
-        if mapped {
-            db.execute(
-                "UPDATE projects SET external_project_id='exported-successor' WHERE id=?1",
-                [successor.as_str()],
-            )
-            .unwrap();
-            let mut echo: crate::test_linear_input::IssueFixture =
-                loopflow_test_support::retained_task_input(
-                    &home.path().join("loopflow.db"),
-                    &canonical.to_string(),
-                    "provider-issue",
-                );
-            let successor_plan = store.project(&successor).unwrap().unwrap();
-            let project = echo.project.as_mut().unwrap();
-            project.id = "exported-successor".into();
-            project.name = successor_plan.name;
-            project.slug = successor_plan.slug;
-            project.status = successor_plan.status;
-            project.summary = successor_plan.summary;
-            project.description = Some(successor_plan.description);
-            project.krs = successor_plan.krs;
-            project.metric_targets = successor_plan.metric_targets;
-            echo.item.project_id = Some(project.id.clone());
-            echo.item.revision = Some("2026-10-08T12:30:00Z".into());
-            echo.observed_at = 22;
-            store
-                .seed_issue(
-                    &canonical.to_string(),
-                    "linear",
-                    &echo,
-                    Some((wave.id(), "initiative")),
-                )
-                .unwrap();
-            assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
-            assert_eq!(
-                store.task(&active.id).unwrap().unwrap().project_id,
-                Some(successor.clone())
-            );
-        }
-        // Select an already stored destination using its provider alias when present.
-        let mut existing = project.clone();
-        existing.id = loopflow::durable::ProjectId::new();
-        existing.name = "Future".into();
-        existing.slug = "future".into();
-        existing.status = loopflow::work::project::ProjectStatus::Planned;
-        existing.linear_id =
-            mapped.then(|| loopflow::linear::LinearProjectId::new("future-provider").unwrap());
-        store.insert_project(&existing).unwrap();
-        let mut next = plan.clone();
-        next["waves"][0]["successor_id"] = serde_json::json!(existing
-            .linear_id
-            .as_ref()
-            .map(|id| id.as_str())
-            .unwrap_or(existing.id.as_str()));
-        next["waves"][0]["create"] = serde_json::json!(false);
-        std::fs::write(&file, serde_json::to_vec(&next).unwrap()).unwrap();
-        lf(repo.path(), home.path(), &args);
-        assert_eq!(
-            store.task(&active.id).unwrap().unwrap().project_id,
-            Some(existing.id.clone())
-        );
-        assert_eq!(store.project(&existing.id).unwrap().unwrap().name, "Next");
-        let pending = store.pending_project_changes(&existing.id).unwrap();
-        assert!(pending
-            .iter()
-            .any(|c| c.value == WorkValue::ProjectStatus(ProjectStatus::Started)));
-        assert!(pending.iter().any(|c| c.value.field() == "krs"));
-        lf(repo.path(), home.path(), &args);
-        assert_eq!(
-            store.pending_project_changes(&existing.id).unwrap(),
-            pending
-        );
-        if mapped {
-            let mut remote: crate::test_linear_input::IssueFixture =
-                loopflow_test_support::retained_task_input(
-                    &home.path().join("loopflow.db"),
-                    &canonical.to_string(),
-                    "provider-issue",
-                );
-            let project = remote.project.as_mut().unwrap();
-            project.id = "third-provider-project".into();
-            project.name = "Another plan".into();
-            project.slug = "another-plan".into();
-            project.initiative_ids = vec!["initiative".into()];
-            project.team_ids = vec!["fixture-team".into()];
-            remote.item.project_id = Some(project.id.clone());
-            remote.item.revision = Some("2026-10-08T13:00:00Z".into());
-            remote.observed_at = 22;
-            let moved = store.task(&active.id).unwrap().unwrap().project_id;
-            store
-                .seed_issue(
-                    &canonical.to_string(),
-                    "linear",
-                    &remote,
-                    Some((wave.id(), "initiative")),
-                )
-                .unwrap();
-            // The unsent move is sent after Linear's and wins.
-            assert_eq!(store.task(&active.id).unwrap().unwrap().project_id, moved);
-            assert!(!store.pending_task_changes(&active.id).unwrap().is_empty());
-            assert_eq!(
-                store.task_acquisition(&active.id).unwrap().state,
-                loopflow::store::PlanningState::Available
-            );
-        }
-        assert_eq!(retained_execution(), execution);
-        assert!(repo.path().join(".lf/wave").exists());
-    }
-}
-
-#[test]
 fn moving_saves_membership_offline_and_retains_inbound_changes() {
     use loopflow::durable::TaskId;
     use loopflow::work::task::NewTask;
@@ -2890,7 +2329,7 @@ fn wave_documents_and_graphs_follow_files() {
             &["wave", "status", "instruments/parser", "--json"],
         );
         assert_eq!(status["wave"]["goal"], "");
-        assert_eq!(status["tasks"]["items"][0]["id"], task_id);
+        assert_eq!(status["tasks"]["items"][0]["task"]["id"], task_id);
         assert!(!repo.path().join(".lf/wave").exists());
         assert_eq!(
             std::fs::read_to_string(repo.path().join("authored-wave/tools/GOAL.md")).unwrap(),
@@ -2951,7 +2390,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         assert_eq!(removed.linear_id, before.linear_id);
         assert_eq!(removed.revision, before.revision + 1);
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        assert_eq!(status["planning_state"], "removed");
+        assert_eq!(status["plan_state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
         let reopened =
@@ -3010,12 +2449,15 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     }
     // Exact identity remains constrained to the selected repository.
     let foreign = tasks[1]["id"].as_str().unwrap();
-    let status = lf(
+    let foreign_read = command(
         first.path(),
         home.path(),
-        &["desktop", "task", foreign, "--json"],
-    );
-    assert!(status["task"].is_null());
+        &["task", "show", foreign, "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!foreign_read.status.success());
+    assert!(String::from_utf8_lossy(&foreign_read.stderr).contains("is not registered"));
     let rejected = command(
         first.path(),
         home.path(),
@@ -3041,14 +2483,15 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         &["desktop", "task", "DUP-1", "--json"],
     );
     assert_eq!(status["task"]["title"], "First only");
-    let missing = lf(
+    let missing = command(
         first.path(),
         home.path(),
-        &["desktop", "task", "MISSING-1", "--json"],
-    );
-    assert!(missing["task"].is_null());
-    assert_eq!(missing["planning_state"], "unavailable");
-    assert!(missing["planning_error"].is_null());
+        &["task", "show", "MISSING-1", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("is not registered"));
 }
 
 #[test]
@@ -3149,7 +2592,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let comments = lf(
         repo.path(),
         home.path(),
-        &["task", "comment", id, "Local comment", "--json"],
+        &["task", "report", id, "Local comment", "--json"],
     );
     assert_eq!(comments["pending_sync"].as_array().unwrap().len(), 1);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -3251,7 +2694,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     assert_eq!(disconnected["connected"], false);
     assert_eq!(disconnected["changes"], settled["changes"]);
     assert!(
-        lf(repo.path(), home.path(), &["task", "comment", id, "--json"])["pending_sync"]
+        lf(repo.path(), home.path(), &["task", "show", id, "--json"])["comments"]["pending_sync"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -3646,7 +3089,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     ] {
         db.execute_batch(statement).unwrap();
         let status = read();
-        assert_eq!(status["planning_state"], state);
+        assert_eq!(status["plan_state"], state);
         assert_eq!(status["observed_at"], 17);
         assert_eq!(status["task"]["id"], id.as_str());
         assert_eq!(status["task"]["title"], "Saved locally");
@@ -3678,12 +3121,12 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     }
     // A pending membership save explains the difference without replacing content.
     db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
-    assert_eq!(read()["planning_state"], "available");
+    assert_eq!(read()["plan_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)
         .unwrap();
     let removed = read();
-    assert_eq!(removed["planning_state"], "removed");
+    assert_eq!(removed["plan_state"], "removed");
     assert_eq!(removed["observed_at"], 17);
     assert_eq!(removed["execution"]["work"], initial["execution"]["work"]);
     assert_eq!(
@@ -3855,17 +3298,17 @@ fn waveless_task_lifecycle() {
         ],
     );
     let id = created["id"].as_str().unwrap();
-    assert!(created["repository_id"].is_string());
+    assert!(created["repo_id"].is_string());
     assert!(created["project_id"].is_null());
     assert!(created["wave_id"].is_null());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let counts: (u32, u32, u32) = db.query_row("SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM waves),(SELECT count(*) FROM projects)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
     assert_eq!(counts, (1, 0, 0));
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(listed[0]["id"], id);
-    assert_eq!(listed[0]["graph"]["name"], "proof");
+    assert_eq!(listed[0]["task"]["id"], id);
+    assert_eq!(listed[0]["graph_name"], "proof");
     let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
-    assert_eq!(inventory["tasks"]["items"][0]["id"], id);
+    assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
     let before = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(before["position"]["step"], "review");
@@ -3886,8 +3329,8 @@ fn waveless_task_lifecycle() {
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     let detached = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(detached[0]["id"], id);
-    assert!(detached[0]["wave"].is_null());
+    assert_eq!(detached[0]["task"]["id"], id);
+    assert!(detached[0]["task"]["wave_id"].is_null());
     lf(repo.path(), home.path(), &["task", "complete", id]);
     assert_eq!(
         lf(repo.path(), home.path(), &["desktop", "task", id, "--json"])["execution"]["status"],
@@ -3936,7 +3379,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     );
     let id = created["id"].as_str().unwrap();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(listed[0]["graph"]["name"], "code");
+    assert_eq!(listed[0]["graph_name"], "code");
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
     assert_eq!(shown["position"]["step"], "demo");
@@ -3990,9 +3433,9 @@ fn your_graph_for_a_wave_selects_the_builtin_auto() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|task| task["id"] == created["id"])
+        .find(|task| task["task"]["id"] == created["id"])
         .unwrap();
-    assert_eq!(task["graph"]["name"], "auto");
+    assert_eq!(task["graph_name"], "auto");
 }
 
 #[test]
@@ -4138,7 +3581,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
                 String::from_utf8_lossy(&output.stderr)
             );
             let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(task["repository_id"], parent["repository_id"]);
+            assert_eq!(task["repo_id"], parent["repo_id"]);
             if flags.first() == Some(&"--wave") {
                 assert_eq!(task["wave_id"], parent["wave_id"]);
                 assert_eq!(task["project_id"], parent["project_id"]);

@@ -95,27 +95,28 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     runtime
         .block_on(store.observe_pm_issue_change("uncached-removal", None, true))
         .unwrap();
-    for (selector, expected, state, error) in [
-        ("FIX-1", Some(&record), PlanningState::Available, false),
-        ("issue-1", Some(&record), PlanningState::Available, false),
-        ("FIX-2", Some(&stale), PlanningState::Available, false),
-        ("FIX-3", Some(&invalid), PlanningState::Invalid, false),
-        ("FIX-4", Some(&removed), PlanningState::Removed, false),
-        ("uncached-removal", None, PlanningState::Removed, false),
-        ("UNKNOWN", None, PlanningState::Unavailable, true),
-    ] {
+    let lf = |args: &[&str]| {
         let mut command = Command::new(loopflow_test_support::lf_binary());
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("LF_") {
                 command.env_remove(name);
             }
         }
-        let output = command
+        command
             .current_dir(repo.path())
-            .args(["desktop", "task", selector, "--json"])
+            .args(args)
             .env("LF_HOME", home.path())
             .output()
-            .unwrap();
+            .unwrap()
+    };
+    for (selector, expected, state) in [
+        ("FIX-1", Some(&record), PlanningState::Available),
+        ("issue-1", Some(&record), PlanningState::Available),
+        ("FIX-2", Some(&stale), PlanningState::Available),
+        ("FIX-3", Some(&invalid), PlanningState::Invalid),
+        ("FIX-4", Some(&removed), PlanningState::Removed),
+    ] {
+        let output = lf(&["task", "show", selector, "--json"]);
         assert!(
             output.status.success(),
             "{}",
@@ -135,12 +136,29 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             assert!(execution.work.sessions.is_empty());
             assert!(execution.work.graph_processes.is_empty());
         }
-        assert_eq!(status.planning_error.is_some(), error, "{selector}");
+        assert!(status.planning_error.is_none(), "{selector}");
         assert_eq!(
             status.planning_stale,
             state != PlanningState::Available || selector == "FIX-2",
             "{selector}"
         );
+    }
+    // Only the exchanging read reports on a selector with no saved Task.
+    for (selector, evidence, error) in [
+        ("uncached-removal", "removed", false),
+        ("UNKNOWN", "unavailable", true),
+    ] {
+        assert!(!lf(&["task", "show", selector, "--json"]).status.success());
+        let output = lf(&["task", "status", selector]);
+        assert!(output.status.success(), "{selector}");
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            text.contains(&format!("Planning evidence: {evidence}")),
+            "{text}"
+        );
+        assert!(text.contains("No saved Task"), "{text}");
+        assert!(text.contains("No execution allocated."), "{text}");
+        assert_eq!(text.contains("\nPlanning: "), error, "{text}");
     }
     assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 3);
     assert!(runtime

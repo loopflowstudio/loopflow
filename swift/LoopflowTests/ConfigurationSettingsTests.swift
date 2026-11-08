@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Loopflow
 import Testing
 @testable import LoopflowMac
 
@@ -19,13 +20,15 @@ struct ConfigurationSettingsTests {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let fixture = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/configuration_destinations.json"))
-        let expected = try JSONSerialization.jsonObject(with: fixture) as! [[String: String]]
+        let expected = try JSONDecoder().decode([JSONValue].self, from: fixture)
         let actual = ConfigurationDestination.allCases.map {
-            $0.address(repository: "/project/task", wave: "product") as! [String: String]
+            $0.address(repository: "/project/task", wave: "product")
         }
         #expect(actual == expected)
-        #expect(ConfigurationDestination.personalGlobal.address(repository: "/stale", wave: "stale").count == 1)
-        #expect(ConfigurationDestination.personalRepository.address(repository: "/project", wave: "stale")["wave"] == nil)
+        #expect(ConfigurationDestination.personalGlobal.address(repository: "/stale", wave: "stale")
+            == .object(["kind": .string("personal_global")]))
+        #expect(ConfigurationDestination.personalRepository.address(repository: "/project", wave: "stale")
+            == .object(["kind": .string("personal_repo"), "repo": .string("/project")]))
     }
 }
 #endif

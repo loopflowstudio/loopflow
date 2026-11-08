@@ -36,12 +36,7 @@ pub(super) async fn human_input_times<'a>(
         let Some(reference) = store.sqlite.input_provider_session(key)? else {
             continue;
         };
-        let Some(home) = conversation_home(
-            &store.sqlite,
-            provider,
-            &reference.agent_session,
-            reference.account_id.as_ref(),
-        )?
+        let Some(home) = conversation_home(&store.sqlite, provider, &reference.agent_session)?
         else {
             continue;
         };
@@ -135,13 +130,18 @@ struct NativeConversation {
 
 /// Admit the conversation a provider started on its own, attributed to no
 /// Task. `None` when no provider home holds a conversation with this id.
-pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
+pub(crate) async fn admit(
+    store: &SharedStore,
+    id: &str,
+    directory: &Path,
+) -> Result<Option<LfSession>> {
     // Provider conversation ids are UUIDs; nothing else names a transcript.
     if uuid::Uuid::parse_str(id).is_err() {
         return Ok(None);
     }
     let lock_id = format!("provider-conversation:{id}");
-    let _admission = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let _admission =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(session) = recorded(store, id).await? {
         return Ok(Some(session));
     }
@@ -160,7 +160,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
     };
     let cwd = match conversation.cwd.clone().filter(|cwd| cwd.is_dir()) {
         Some(cwd) => cwd,
-        None => crate::repo::working_directory()?,
+        None => crate::repo::working_directory_in(directory)?,
     };
     let session = store
         .create_session(LfSession {
@@ -224,9 +224,18 @@ pub(crate) async fn select(
         .ok_or_else(|| anyhow!("Session {} has an invalid capture reference", session.id))?;
     crate::session_record::write_provider_session(&dir, &id.into(), account.cloned())?;
     if let Some(account) = account {
-        // It resumes in the account home that holds its history.
+        // Found in an account's own home: it resumes in the shared home, so
+        // its history moves there first.
+        let home = store
+            .get_provider_account(provider.as_str(), account)
+            .await?
+            .and_then(|account| account.home)
+            .ok_or_else(|| anyhow!("{provider} account {account} has no home"))?;
+        let harness = HarnessKind::parse(provider.as_str())
+            .expect("conversations are found only for agent providers");
+        crate::transcript::copy_between(harness, id, &home, &native_home(provider, None))?;
         store
-            .pin_provider_session_route(provider, &id.into(), account, true)
+            .pin_provider_session_route(provider, &id.into(), account)
             .await?;
     }
     Ok(session)
@@ -270,7 +279,6 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
 #[cfg(test)]
 mod tests {
     use super::recorded;
-    use crate::provider_auth::Provider;
     use crate::session::LfSession;
     use crate::store::SharedStore;
     use std::fs;
@@ -308,10 +316,12 @@ mod tests {
             updated_at: 1,
         };
         store.upsert_provider_account(&account).await.unwrap();
-        store
-            .pin_provider_session_route(Provider::Codex, &ID.into(), &account.account_id, true)
-            .await
-            .unwrap();
+        // It ran in the account's own home, before every launch shared one.
+        store.sqlite.record_account_home_conversation(
+            crate::provider_auth::Provider::Codex,
+            ID,
+            account.account_id.as_str(),
+        );
         let home = account.home.as_ref().unwrap();
         fs::create_dir(home).unwrap();
         fs::write(

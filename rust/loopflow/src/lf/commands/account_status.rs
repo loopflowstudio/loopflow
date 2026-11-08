@@ -401,20 +401,8 @@ async fn managed_rows(
                             usage.identity.credential_digest.as_deref(),
                         )
                         .await?;
-                    store
-                        .upsert_provider_account_limits(
-                            &account.provider,
-                            &account.account_id,
-                            &usage.windows,
-                            "poll",
-                        )
-                        .await?;
-                    if crate::provider_account::clear_refuted_cooldown(
-                        store,
-                        account,
-                        &usage.windows,
-                    )
-                    .await?
+                    if crate::provider_account::save_polled_usage(store, account, &usage.windows)
+                        .await?
                     {
                         cooldown_until = None;
                     }

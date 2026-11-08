@@ -685,8 +685,7 @@ async fn redeem_reset(
         }
     }
     for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
-        store
-            .upsert_provider_account_limits("codex", &account.account_id, &usage.windows, "poll")
+        crate::provider_account::save_polled_usage(&store, account, &usage.windows)
             .await
             .with_context(|| {
                 format!(
@@ -851,14 +850,7 @@ async fn read_first_usage(
         .context("connected account disappeared")?;
     match crate::subscription::poll_account(&account).await {
         Ok(usage) => {
-            store
-                .upsert_provider_account_limits(
-                    provider.as_str(),
-                    account_id,
-                    &usage.windows,
-                    "poll",
-                )
-                .await?;
+            crate::provider_account::save_polled_usage(store, &account, &usage.windows).await?;
         }
         Err(error) => println!("Usage not read yet ({error}); `lf account` reads it"),
     }

@@ -851,29 +851,33 @@ async fn record_stated_limit(
         return Ok(());
     };
     if let Ok(usage) = crate::subscription::poll_account(&account).await {
-        store
-            .upsert_provider_account_limits(provider.as_str(), account_id, &usage.windows, "poll")
-            .await?;
+        save_polled_usage(store, &account, &usage.windows).await?;
     }
     Ok(())
 }
 
-/// Clear `account`'s cooldown when a fresh usage reading leaves no
-/// account-wide window spent. Only a rejection sets that cooldown, and a
-/// rejection can be about something the account still has room for; a spent
-/// model's window holds that model by itself. Returns whether it cleared.
-pub(crate) async fn clear_refuted_cooldown(
+/// Save a usage reading of `account`, clearing its cooldown when the reading
+/// has account-wide windows and none is spent. Only a rejection sets that cooldown,
+/// and a rejection can be about something the account still has room for; a
+/// spent model's window holds that model by itself. Returns whether it cleared.
+pub(crate) async fn save_polled_usage(
     store: &SharedStore,
     account: &ProviderAccount,
     polled: &[crate::store::AccountLimitWindow],
 ) -> Result<bool, ProviderAccountError> {
+    store
+        .upsert_provider_account_limits(&account.provider, &account.account_id, polled, "poll")
+        .await?;
     let cooling = account
         .cooldown_until
         .is_some_and(|until| until > now_unix());
-    let spent = polled
+    let mut account_wide = polled
         .iter()
-        .any(|window| window.model.is_none() && window.used_percent >= 100);
-    if !cooling || spent {
+        .filter(|window| window.model.is_none())
+        .peekable();
+    let read = account_wide.peek().is_some();
+    let spent = account_wide.any(|window| window.used_percent >= 100);
+    if !cooling || !read || spent {
         return Ok(false);
     }
     store
@@ -2476,17 +2480,15 @@ mod tests {
                 limited_until: None,
             };
 
+        // A reading without account-wide windows says nothing.
+        assert!(!save_polled_usage(&store, &account, &[]).await.unwrap());
         let spent = [window("weekly", 100, None)];
-        assert!(!clear_refuted_cooldown(&store, &account, &spent)
-            .await
-            .unwrap());
+        assert!(!save_polled_usage(&store, &account, &spent).await.unwrap());
         let room = [
             window("weekly", 93, None),
             window("weekly:fable", 100, Some("fable")),
         ];
-        assert!(clear_refuted_cooldown(&store, &account, &room)
-            .await
-            .unwrap());
+        assert!(save_polled_usage(&store, &account, &room).await.unwrap());
         let stored = store
             .get_provider_account("claude", &account.account_id)
             .await
@@ -4349,6 +4351,49 @@ mod account_first_tests {
         let after_default = now_unix() + DEFAULT_COOLDOWN_SECS + 60;
         assert!(held_back(&store, "first", None, after_default).await);
         assert!(!held_back(&store, "first", None, reset + RESET_GRACE_SECS + 1).await);
+    }
+
+    /// The poll right after a stated limit is the reading that refutes it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_stated_limit_whose_poll_reads_room_leaves_the_account_routable() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, _native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let (endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (
+                    200,
+                    serde_json::json!({"limits": [
+                        {"group": "session", "percent": 40},
+                        {"group": "weekly", "percent": 93},
+                    ]})
+                    .to_string(),
+                ),
+                (
+                    200,
+                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
+                        .to_string(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+
+        record_stated_limit(
+            &store,
+            Provider::Claude,
+            &parse_account_id("first").unwrap(),
+            stated(SPENT_LINE),
+            None,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+        drop(endpoints);
+
+        assert!(!held_back(&store, "first", None, now_unix()).await);
     }
 
     #[allow(clippy::await_holding_lock)]

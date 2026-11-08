@@ -30,14 +30,7 @@ Launch the normal code graph, using current resolved agent preferences. Stop at 
 # Design (November 5, 2026; built, awaiting demo/review)
 
 ## Inventory, revalidated against 3b07e13404
-- Limit observation: decoders emit `RateLimitSignal`; `FactWriter` → `route.record_rate_limit` → `record_rate_limit_signal` writes `provider_accounts.cooldown_until` + windows. One writer; keep it. Terminal Claude emits no stream, so lf never observes its limits today.
-- Classifier: harness turns a limited signal into Error `provider_rate_limited: rejected: <type>`; `_classify_agent_failure` re-read that text, missed the subscription patterns and matched `rate_limit` → generic `RateLimit`. The Nov 2 defect was live at the base; decision 1 removes it.
-- Retry: `_run_with_transient_retries` keeps the thread on RateLimit; `_run_harness_once` re-selects; `retry_agent_process` bails when account changed with a thread. Failover drops the thread instead (conversation lost). Failover shares the transient budget.
-- Selection: `select_route`; failure is `NoEligibleAccount` (string only, no reset time). `pin_provider_account_id_blocking` fails before the retry loop when everything is cooling.
-- Early association: `resolve_provider_account_exact` → `adopt` → `pin_session` wrote `provider_session_accounts` during selection. Lead confirmed at the base; decision 8 removes it.
-- `adopt` already moves transcripts between homes, so same-Machine native thread reuse across accounts is supported (LOO-324's Codex-history import stays separate).
-- Graph: a failed step fails the Graph; `lf task run` restarts from where the run began (replays completed steps), 3 attempts. `lf ship` restarts later with backoff.
-- Shared mode (Jack's Machine): running Claude follows the native login, so one activation moves every open Claude Session. Codex keeps its login until resumed.
+Full inventory in git (`git show d8d6b33eb:scratch/c0b373-recover-sessions-and.md`). What still matters: the Nov 2 classifier defect (subscription limit read as generic `RateLimit`) and early `provider_session_accounts` association were both live at the base and are removed by decisions 1 and 8; in shared mode one activation moves every open Claude Session, Codex keeps its login until resumed.
 
 ## Decisions
 Routine choices are Jack's to overturn at review; 6 and 7 are user-facing policy and the ones to look at first, with `scratch/questions.md`.
@@ -160,10 +153,11 @@ Fixes 1–4, built November 7:
 1. `RateLimitSignal.credits` / `SpentLimit.credits` (overage types; "out of usage credits"). `record_rate_limit_signal` scopes a credits limit to the route's launched model (`ProviderAccountRoute::launching`), else `CLAUDE_DEFAULT_MODEL_FAMILY`; no account cooldown. Test: `a_credits_rejection_holds_the_launched_model_and_never_the_account`.
 2. The branch's invariant already ignores model; `session_record::retry_keeps_its_thread` names it. `a_credits_limit_goes_on_with_another_model_in_the_same_thread` runs the live sequence through the step loop.
 3. Steps already wait on a known reset (`CapacityWait`). Restarts no longer start into one: `restart_ships` skips a run whose `waiting_on_limit` reset is ahead, and `run_task_graph_for` stops relaunching such a run and leaves it to the sweep.
-4. `provider_account::clear_refuted_cooldown` on the `lf account` refresh: no account-wide polled window spent clears the cooldown; scoped holds stay.
+4. A fresh reading refutes a rejection's cooldown wherever one is saved: `provider_account::save_polled_usage` is the only `"poll"` write (`lf account` refresh, `record_stated_limit`, connect, Codex reset). It clears the account cooldown when the reading has account-wide windows and none is spent; a reading with none says nothing. Tests: `a_fresh_reading_with_room_clears_a_cooldown_a_rejection_set`, `a_stated_limit_whose_poll_reads_room_leaves_the_account_routable`.
+5. Two Keychain items for one service (this Mac: acct "unknown", 2026-10-18; acct "jack", 2026-11-06) failed a Nov 7 switch with "the item did not take the login". Claude 2.1.319 reads `security find-generic-password -a "$USER" -w -s <service>` (`USER` if it matches `^[a-zA-Z0-9._-]+$`, else `claude-code-user`). `claude_keychain_account` names that; reads and the write's check go by it, and the write also updates the first other item `-s` finds. Test: `a_keychain_write_lands_on_the_item_claude_reads_when_a_service_holds_two` (fake `security`).
 
 ## Remaining
-- Concept review after fixes 1–4 (headless, November 7): a fresh poll refutes a rejection's account cooldown only in `lf account` (`clear_refuted_cooldown` in `account_status.rs`); `record_stated_limit` polls right after a limit and stores the windows without that check. One owner would be the poll's own write: clear a refuted cooldown wherever `upsert_provider_account_limits(.., "poll")` runs. Not built (single pass); a non-credits rejection on a step still cools the account until someone runs `lf account`.
+- A third Keychain item for one service stays stale (only the first other item is rewritten); Claude reads by account, so it is unread. Fix 5 is unshown on the real Keychain: demo with a fake login.
 - Credits limits share one window key (`seven_day_overage_included`), so a credits rejection on a second model moves the hold to it. Only Fable needs credits today.
 - `ops::task::tests::{nonresumable_execution_blocker_remains_a_launch_refusal, a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout, task_workspace_context_covers_committed_staged_unstaged_and_untracked_bytes}` fail here with "claiming needs your Git user.email" even with a global identity in the test HOME; not reached by this pass's diff, not checked on origin/main.
 - Single-pass review, November 7: the old-spelling correction treats any leading target as a provider. `lf account alice@ use bob@` suggests `lf account use alice@=bob@`, which cannot resolve as a provider. Keep for verify; the intended `lf account claude use bob@` correction works.
@@ -192,7 +186,7 @@ Still true from the first pass:
 Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gives one rental its own Claude login, which renewal leaves alone; `StopFailure` recording runs in its own OS session.
 
 ## Concept review (November 7, 2026, headless, after items 6–7), built
-8. **A dead parked login is out of rotation before a switch.** `identity::check_routable_identity` (from `select_route`, `held_login`, `ordered_selected_candidates`) refreshes a Connected parked login whose token is due: `NeedsLogin` → `Missing`, `Unavailable` skips it this launch, success records the identity, so a parked login pays once per ~8h. The active login is never refreshed here (`observe_active_account` runs first), and the refresh holds the native refresh lock so `activate` cannot install the bytes it spends.
+8. **A dead parked login is out of rotation before a switch.** `identity::check_routable_identity` refreshes a Connected parked login whose token is due (`NeedsLogin` → `Missing`, `Unavailable` skips this launch), holding the native refresh lock; the active login is never refreshed there.
 9. **Fix-it text parses.** Every printed `lf account connect|disconnect|set|use` is `provider=login`. `account_commands_printed_by_errors_parse` scans the sources that print them and runs each through `normalize_args` and Clap. `docs/subscriptions.md` corrected.
 
 ## Concept review (November 7, 2026, headless, after item 9), built
@@ -202,7 +196,7 @@ Proposed for Wave memory: a restarted wait keeps its recorded `-a`; `--owned` gi
 Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --shared-provider-home`, `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`.
 
 ## Concept review (November 7, 2026, headless, after #1842), built
-12. **Only spent quota moves the login, in terminals as in Graph steps.** `StopFailure`'s `rate_limit` covers every 429; its input carries `error`, `error_details` (unset on a spent window) and `last_assistant_message` (read in the 2.1.319 source, not seen live). The hook starts the recorder only when `agent::subscription_limit_text` reads that line as spent; the matcher takes "You've hit your", "You've reached your" and "You're out of usage credits" from Claude's `xAo` list, not `Fable 5 requires usage credits` or the seat-type lines. The displayed reset is not parsed (a person's time format); item 14 polls instead.
+12. **Only spent quota moves the login, in terminals as in Graph steps.** `StopFailure`'s `rate_limit` covers every 429 (input fields read in the 2.1.319 source, not seen live). The hook records only when `agent::subscription_limit_text` reads `last_assistant_message` as spent: "You've hit your", "You've reached your", "You're out of usage credits" (Claude's `xAo` list), not `Fable 5 requires usage credits` or seat-type lines.
 
 ## Concept review (November 7, 2026, headless, after item 12), built
 13. **A spent line naming a model scopes its limit.** `subscription_limit_text` returns `SpentLimit { reason, model }` (`opus|sonnet|haiku|fable` between "your" and "limit"); `stated` carries it. The terminal recorder still moves the login: a no-model `select_route` is held by every scope.
@@ -211,4 +205,4 @@ Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --s
 ## Concept review (November 7, 2026, headless, after item 14), built
 15. **A capacity 429 retries, in steps as in terminals.** Claude's `Request rejected (429) · this may be a temporary capacity issue` classified as nothing and failed the Graph Blocked; "capacity issue" now reads as `AgentFailure::Capacity` (43c2d6a69). The open doubt here, whether "You're out of usage credits" is the account's line or Fable's, was settled live on November 7: Fable's (five whys, fix 1).
 
-Check, November 7 (five-whys pass; empty cwd, temp HOME, CARGO_HOME kept, LF_* unset, stdin closed): lib `provider_account::` 67, `agent::tests::` 39, `claude_decode::` 32, `subscription::` 12, `lf::commands::account` 35, `lf::commands::graph` 6, `ops::task::ship::` 3, `session_record::tests::a_retry` 1 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` pass; again after compress. Live spent limits: demo.
+Check, November 7 (fixes 4–5; empty cwd, temp HOME, CARGO_HOME kept, LF_* unset, stdin closed): lib `provider_account::`, `provider_auth::`, `lf::commands::account`, `subscription::` 199 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` pass. Live spent limits: demo.

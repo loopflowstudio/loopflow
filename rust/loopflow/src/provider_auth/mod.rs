@@ -2478,8 +2478,10 @@ pub(crate) fn write_claude_login(
 
 /// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
 /// it: `security add-generic-password -U`, fed on stdin so the login never
-/// appears in a process listing.
-#[cfg(all(target_os = "macos", not(test)))]
+/// appears in a process listing. Claude reads the item under its own account
+/// name (`claude_keychain_account`); a service can hold more than one item, so
+/// the first other item `security` finds gets the same login.
+#[cfg(target_os = "macos")]
 fn write_claude_keychain_credential(
     config_dir: &Path,
     credential: &SecretString,
@@ -2489,23 +2491,19 @@ fn write_claude_keychain_credential(
             "Claude credential has an unknown format".to_string(),
         ));
     }
+    let account = claude_keychain_account();
     let scoped = claude_keychain_service(config_dir);
     // The default home's item carries no suffix unless Claude already keeps a
     // suffixed one for it.
-    let (service, existing) = match read_claude_keychain_account_with_security(&scoped)? {
-        Some(account) => (scoped, Some(account)),
-        None if config_dir == home_dir_or_cwd().join(".claude") => (
-            LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string(),
-            read_claude_keychain_account_with_security(LEGACY_CLAUDE_KEYCHAIN_SERVICE)?,
-        ),
-        None => (scoped, None),
+    let service = if config_dir == home_dir_or_cwd().join(".claude")
+        && read_claude_keychain_account_with_security(&scoped)?.is_none()
+    {
+        LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string()
+    } else {
+        scoped
     };
-    let account = existing
-        .or_else(|| std::env::var("USER").ok())
-        .filter(|account| !account.is_empty() && !account.contains(['"', '\\', '\n']))
-        .ok_or_else(|| {
-            AuthError::Filesystem("no usable account name for the Claude Keychain item".to_string())
-        })?;
+    let other = read_claude_keychain_account_with_security(&service)?
+        .filter(|other| *other != account && !other.contains(['"', '\\', '\n']));
     let failed = |error: std::io::Error| {
         AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
     };
@@ -2516,10 +2514,11 @@ fn write_claude_keychain_credential(
         .stderr(Stdio::null())
         .spawn()
         .map_err(failed)?;
-    let script = format!(
-        "add-generic-password -U -a \"{account}\" -s \"{service}\" -X {}\n",
-        hex::encode(credential.expose_secret().as_bytes())
-    );
+    let hex = hex::encode(credential.expose_secret().as_bytes());
+    let script: String = std::iter::once(account.as_str())
+        .chain(other.as_deref())
+        .map(|item| format!("add-generic-password -U -a \"{item}\" -s \"{service}\" -X {hex}\n"))
+        .collect();
     security
         .stdin
         .take()
@@ -2528,13 +2527,30 @@ fn write_claude_keychain_credential(
         .map_err(failed)?;
     let status = security.wait().map_err(failed)?;
     // `security -i` reports a failed command only through what it stored.
-    let stored = read_claude_keychain_blob_with_security(&service).ok();
-    if !status.success() || stored.as_deref() != Some(credential.expose_secret().as_bytes()) {
-        return Err(AuthError::Filesystem(
-            "write Claude Keychain credential: the item did not take the login".to_string(),
-        ));
+    let stored = read_claude_keychain_blob_with_security(&service, &account).ok();
+    if !status.success()
+        || stored.as_ref().and_then(Option::as_deref) != Some(credential.expose_secret().as_bytes())
+    {
+        return Err(AuthError::Filesystem(format!(
+            "write Claude Keychain credential: the item for account \"{account}\" did not take the login"
+        )));
     }
     Ok(())
+}
+
+/// The account name Claude files its Keychain login under: `USER`, or
+/// `claude-code-user` when that is not a plain name (Claude 2.1.319).
+#[cfg(target_os = "macos")]
+fn claude_keychain_account() -> String {
+    std::env::var("USER")
+        .ok()
+        .filter(|user| {
+            !user.is_empty()
+                && user
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        })
+        .unwrap_or_else(|| "claude-code-user".to_string())
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -2688,12 +2704,14 @@ pub(crate) fn write_claude_profile_credentials(
 fn read_claude_keychain_credential(
     service: &str,
 ) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
-    let Some(account) = read_claude_keychain_account_with_security(service)? else {
+    let account = claude_keychain_account();
+    let Some(blob) =
+        read_claude_keychain_blob_with_security(service, &account).map_err(|error| {
+            AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
+        })?
+    else {
         return Ok(None);
     };
-    let blob = read_claude_keychain_blob_with_security(service).map_err(|error| {
-        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-    })?;
     let blob = String::from_utf8(blob).map_err(|_| {
         AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
     })?;
@@ -2761,15 +2779,21 @@ fn parse_security_keychain_account(metadata: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_blob_with_security(service: &str) -> Result<Vec<u8>, String> {
+fn read_claude_keychain_blob_with_security(
+    service: &str,
+    account: &str,
+) -> Result<Option<Vec<u8>>, String> {
     let output = ProcessCommand::new("security")
-        .args(["find-generic-password", "-s", service, "-w"])
+        .args(["find-generic-password", "-a", account, "-s", service, "-w"])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
+        if security_item_not_found(&output) {
+            return Ok(None);
+        }
         return Err(format!("security exited with {}", output.status));
     }
-    Ok(trim_security_password_output(output.stdout))
+    Ok(Some(trim_security_password_output(output.stdout)))
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -4449,6 +4473,85 @@ attributes:
             parse_security_keychain_account(metadata).as_deref(),
             Some("operator")
         );
+    }
+
+    /// A `security` that keeps each item as `keychain/<service>/<account>`,
+    /// finding them by `-s` alone in `.order`, as the real one finds the oldest.
+    #[cfg(target_os = "macos")]
+    const FAKE_SECURITY: &str = r#"#!/bin/sh
+dir="$(dirname "$0")/../keychain"
+if [ "$1" = "-i" ]; then
+  while IFS= read -r line; do
+    acct=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)" -s .*/\1/p')
+    svc=$(printf '%s' "$line" | sed -n 's/.* -s "\([^"]*\)" -X .*/\1/p')
+    mkdir -p "$dir/$svc"
+    printf '%s' "${line##* -X }" | xxd -r -p > "$dir/$svc/$acct"
+    grep -qx "$acct" "$dir/$svc/.order" 2>/dev/null || echo "$acct" >> "$dir/$svc/.order"
+  done
+  exit 0
+fi
+shift
+acct=; svc=; w=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -a) acct=$2; shift ;;
+    -s) svc=$2; shift ;;
+    -w) w=1 ;;
+  esac
+  shift
+done
+[ -n "$acct" ] || acct=$(head -n 1 "$dir/$svc/.order" 2>/dev/null)
+if [ -z "$acct" ] || [ ! -f "$dir/$svc/$acct" ]; then
+  echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2
+  exit 44
+fi
+if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=\"$acct\""; fi
+"#;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_keychain_write_lands_on_the_item_claude_reads_when_a_service_holds_two() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = crate::journal::test_env_lock();
+        let root = tempdir().unwrap();
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("security"), FAKE_SECURITY).unwrap();
+        fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
+        let config_dir = root.path().join("native");
+        let service = claude_keychain_service(&config_dir);
+        // An older item under another account name comes back first from `-s`.
+        let items = root.path().join("keychain").join(&service);
+        fs::create_dir_all(&items).unwrap();
+        let stale = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-stale"}}"#;
+        fs::write(items.join("unknown"), stale).unwrap();
+        fs::write(items.join("jack"), stale).unwrap();
+        fs::write(items.join(".order"), "unknown\njack\n").unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let user = std::env::var_os("USER");
+        let mut search = std::ffi::OsString::from(&bin);
+        search.push(":");
+        search.push(&path);
+        std::env::set_var("PATH", search);
+        std::env::set_var("USER", "jack");
+
+        let fresh = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fresh"}}"#;
+        let written =
+            write_claude_keychain_credential(&config_dir, &SecretString::new(fresh.to_string()));
+        let read = read_claude_keychain_credential(&service);
+
+        std::env::set_var("PATH", path);
+        match user {
+            Some(user) => std::env::set_var("USER", user),
+            None => std::env::remove_var("USER"),
+        }
+        written.unwrap();
+        let read = read.unwrap().unwrap();
+        assert_eq!(read.account, "jack");
+        assert_eq!(read.blob.expose_secret(), fresh);
+        assert_eq!(fs::read_to_string(items.join("jack")).unwrap(), fresh);
+        assert_eq!(fs::read_to_string(items.join("unknown")).unwrap(), fresh);
     }
 
     #[test]

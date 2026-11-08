@@ -133,6 +133,22 @@ def test_resource_check_requires_a_rendered_snapshot(tmp_path: Path, unsigned_ch
     assert build_bundle.is_dir()
 
 
+def test_resource_check_reports_a_hung_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unsigned_check: None
+) -> None:
+    build_dir = tmp_path / "build"
+    (build_dir / "LoopflowSwift_Loopflow.bundle").mkdir(parents=True)
+    app_path = tmp_path / "Loopflow.app"
+    _write_test_app(app_path, "echo window opened\nsleep 60 &\nwait\n")
+    monkeypatch.setattr(release_loopflow, "RESOURCE_CHECK_TIMEOUT", 1)
+
+    with pytest.raises(RuntimeError, match="did not exit within 1s") as failure:
+        _check(app_path, build_dir)
+
+    assert "window opened" in str(failure.value)
+    assert (build_dir / "LoopflowSwift_Loopflow.bundle").is_dir()
+
+
 def test_release_command_reports_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

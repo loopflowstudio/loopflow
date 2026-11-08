@@ -1,1 +1,0 @@
-- `cargo test -p loopflow --test transport_tests desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets -- --exact` (inherited `LF_*` unset, stdin closed): passed after sync at `082df0435`; 1 passed in 50.44s. Gate/CI owns broader checks.

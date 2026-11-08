@@ -346,7 +346,15 @@ fn session_list_task_status_and_top_subscribe_answer_requests() {
 fn world_sessions_resume_live_through_the_stub_provider() {
     let built = Built::new("one-task");
     let sessions = built.lf(&["session", "list", "--json", "--all"]);
-    let id = sessions[0]["id"].as_str().unwrap();
+    // The checkout also started the Task's own conversation; resume the recorded one.
+    let id = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["title"] == "Design transcript search")
+        .unwrap_or_else(|| panic!("{sessions}"))["id"]
+        .as_str()
+        .unwrap();
     let mut connect = built
         .command(&["session", "resume", id])
         .stdin(Stdio::piped())

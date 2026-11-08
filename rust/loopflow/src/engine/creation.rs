@@ -128,6 +128,22 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
         RecoveryDisposition::Complete => return Ok(receipt),
         RecoveryDisposition::Continue => {}
     }
+    // Save the first turn before task run can start the conversation beside its Graph.
+    let session_id = if input.approve {
+        None
+    } else {
+        Some(
+            tokio::runtime::Runtime::new()?
+                .block_on(crate::ops::human_session::primary::ensure_task(
+                    &store,
+                    &input.directory,
+                    &receipt.task.identifier,
+                    input.request.clone(),
+                ))?
+                .0
+                .id,
+        )
+    };
     // The projection permits either the first launch or finishing its result.
     if recorded.milestone == "filed" {
         store.sqlite.advance_creation(id, "run_requested", None)?;
@@ -152,21 +168,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
         .task_graph(&receipt.task.id)?
         .context("the run did not take up a Graph")?
         .name;
-    let session_id = if input.approve {
-        None
-    } else {
-        Some(
-            tokio::runtime::Runtime::new()?
-                .block_on(crate::ops::human_session::primary::ensure_task(
-                    &store,
-                    &input.directory,
-                    &receipt.task.identifier,
-                    input.request.clone(),
-                ))?
-                .0
-                .id,
-        )
-    };
     receipt.graph = Some(graph);
     receipt.session_id = session_id;
     receipt.milestone = if input.approve { "started" } else { "admitted" }.into();

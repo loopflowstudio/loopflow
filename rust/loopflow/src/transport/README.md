@@ -50,6 +50,13 @@ A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn, pending request
 or running Graph keeps its owner and restarts the grace; finished Graphs do not.
+A Task conversation also stays while its Task's Graph runs, so it is there to
+talk to when you come back. `lf task run`, `lf ship`, and explicit checkout start
+an unopened conversation detached beside the Graph; `lf resume` in the worktree
+reattaches it. Preparation alone does not launch it. Background starts require
+a configured, installed agent and stop at sixteen running Task conversations;
+past that, `lf resume` starts one as before. Abandon stops an unviewed Task
+conversation, including an active turn; a conversation being viewed stays open.
 Native Claude prompt/stop hooks preserve silent waits, background tasks and
 scheduled wakeups until Claude reports settlement. Terminal status counts only
 while a viewer is attached to refresh it; an idle prompt cannot settle an

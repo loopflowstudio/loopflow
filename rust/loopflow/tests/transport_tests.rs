@@ -6467,7 +6467,7 @@ fn server_continuity(supervised: bool, takeover: bool) {
     let path = fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
+stty echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
 printf 'server-proof-provider-ready\n'
 read -r answer < /dev/tty
@@ -6493,6 +6493,9 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let first_instance = service.ready();
     let mut viewer = service.viewer(&owner);
     viewer.input("draft");
+    // Observe delivery before disconnecting: bytes still in the bridge are
+    // uncertain input, not a draft the provider has received.
+    until_out(&mut viewer, "draft");
     drop(viewer); // Desktop quit: the owner keeps its native editor.
     let (command, status) = service.relay_command(&owner);
     let mut relay = Terminal::spawn(command);

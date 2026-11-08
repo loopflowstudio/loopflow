@@ -931,6 +931,9 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 The [server boundary](../../../docs/dev/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
 composed test must continue to prove both with existing execution owners live.
+Draft-preservation fixtures observe terminal echo or provider acknowledgement
+before disconnecting a viewer. A socket write alone does not establish delivery;
+reconnection must never replay uncertain input to make such a test pass.
 
 ```bash
 cargo test -p loopflow --lib server::

@@ -2553,6 +2553,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                     recover_from: recover_from.clone(),
                 },
             )?;
+            loopflow::ops::task::start_conversation_beside(&task);
             print_task(&task, *json)
         });
     }

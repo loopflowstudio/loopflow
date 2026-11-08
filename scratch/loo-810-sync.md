@@ -17,3 +17,12 @@ The `server/service.rs` conflict kept the bounded outbox and incorporated the
 upstream request-ID regression tests. The 29 server tests, 4 documented-command
 tests and `cargo clippy --all-targets -- -D warnings` passed on the merged tree.
 The branch remains local; sync neither published nor moved the Task's Graph.
+
+2026-11-08 conflict recovery: `lf sync --continue` completed onto
+`da7e82310348683c3f11d16cb64e7876d1d54236` as merge `ce571a5a4`.
+Kept the shared creation receipt path and moved first-turn preparation before
+launch, matching main's background Task conversation startup.
+`cargo test -p loopflow --lib task_create_run_starts_the_graph_and_admits_the_request_as_first_turn`
+(with inherited LF variables unset and stdin closed): 1 passed; linker warned
+that the unwind table exceeds 16 MiB. Full checks remain with gate/CI.
+No push from the conflict resolver; the waiting sync owns publication.

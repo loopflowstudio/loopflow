@@ -12,6 +12,12 @@ memory advances before best-effort history writes, so a recording failure cannot
 change which account or thread a retry continues. A later observation retries an
 unrecorded identity; successful repeated observations add no duplicate facts.
 
+The shared state lives in `session_record/runtime.rs`: it owns the current
+provider, account, thread and attachment. Its `SessionRecorder` keeps manifests,
+receipts and history in `session_record.rs`, with no attachment or process-control
+operations. Both remain under the same lock so launch, retry and settlement stay
+serialized.
+
 ## lf never breaks the conversation
 
 lf is a session manager, context adder and hook interjector on top of a harness,

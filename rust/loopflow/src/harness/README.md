@@ -22,6 +22,10 @@ directory. Completion runs attachment cleanup before recording its receipt.
 A failed receipt write remains a caller error; retrying can record the same
 outcome but cannot reopen the execution or change its result.
 
+Harness input and shutdown retain the store and attachment selected at launch.
+Claude gets a new attachment through `AgentExecution` when it respawns; readers
+and pending operations keep their previous snapshots.
+
 ## lf never breaks the conversation
 
 lf is a session manager, context adder and hook interjector on top of a harness,

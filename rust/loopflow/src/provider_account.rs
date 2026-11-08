@@ -823,7 +823,7 @@ fn launched_model_family(model: Option<&str>) -> String {
     crate::config::CLAUDE_MODEL_FAMILIES
         .into_iter()
         .find(|family| model.contains(family))
-        .map_or(model.clone(), str::to_owned)
+        .map_or(model, str::to_owned)
 }
 
 /// Record a limit the provider stated in words, which carries no reset time.

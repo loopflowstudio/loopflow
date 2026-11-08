@@ -1441,7 +1441,7 @@ fn _limited_model(text: &str) -> Option<String> {
     let named = text.split_once("your ")?.1.split_once("limit")?.0;
     named
         .split(|character: char| !character.is_ascii_alphanumeric())
-        .find(|word| matches!(*word, "opus" | "sonnet" | "haiku" | "fable"))
+        .find(|word| crate::config::CLAUDE_MODEL_FAMILIES.contains(word))
         .map(str::to_string)
 }
 

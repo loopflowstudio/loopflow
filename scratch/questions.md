@@ -28,3 +28,9 @@ Context check, 2026-11-08: the Graph's realign step trimmed Product memory from
 16,417 to 15,924/16,000 tokens (75,277/131,072 bytes). Scratch is within both
 limits. The earlier read-only note applied outside this memory-maintaining step;
 no limit was raised. Product has no immediate child Wave directories here.
+
+QA, 2026-11-08: use a disposable local repository and private Machine for creation
+and a real shell for terminal recovery. The isolated Machine has no configured
+provider account. Native builds ran, but computer use returned `cgWindowNotFound`
+and the final Desktop state had no windows; physical sleep/wake, provider
+continuation and mounted creation recovery remain for the native demo.

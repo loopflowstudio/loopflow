@@ -207,6 +207,8 @@ ends; a resume asks for them again. If the viewer's previous socket is still
 connected, resume replaces that socket and takes only its own prior claims.
 Another viewer's input or geometry claim survives. Closing the stale socket
 later cannot revoke the replacement connection's claims.
+On resume, either `own` value requests free ownership; taking another viewer's
+geometry requires a separate `own` request or fresh explicit attachment.
 
 Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
 who receives `owner` with `held: false` and stays attached; `own: "request"`

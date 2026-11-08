@@ -26,6 +26,29 @@ record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
 run-debug` builds and launches the development app; use `lf desktop state --json`
 and the commands in `docs/surfaces.md` to inspect and drive it.
 
+For live server QA, build `cargo build -p loopflow --bin lf`, then use a fresh
+Git repository with a local Git identity and a private `LF_HOME`. Use that built
+binary for every command below. Unset inherited
+`LF_*`; close CLI stdin. A private Machine initializes through ordinary commands:
+`lf task create --title 'Recover a report' --request-id qa-report --json`.
+Run `lf server run` in the foreground and read its socket from `lf server status`;
+the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
+newline JSON protocol, disconnect before an answer, then look up
+`lf server receipt qa-report --json` before retrying identical content.
+Stop every server and terminal owner launched for the walkthrough.
+`lf session serve --terminal -- /bin/sh` prints its owner ID and keeps running;
+the first line is readiness, not process exit. Attach with `lf session attach
+<owner-id>`. Use a real shell for input and resize checks without provider login.
+
+A packaged Desktop must use its signed bundled `lf` for the QA server too:
+signing the bundle changes the CLI hash. Set `LF_DESKTOP` to the QA bundle ID
+when using `lf desktop state`; otherwise it addresses the installed app.
+Keep the private Machine and provider homes separate from normal Work. Record
+window-access failures separately from successful CLI or protocol checks.
+Desktop readiness may register a private launchd server. After quitting the QA
+app, boot out only the label in that private Machine's `server.plist`; killing
+its PID alone lets launchd restart it. Unregister temporary QA app bundles too.
+
 Getting there is your job. Build it, start its services, create accounts and
 realistic data, sign in, set up whatever state a real user would already have.
 When no route exists, make one. Hand back only what truly needs a person, such

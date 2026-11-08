@@ -1,0 +1,929 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-810 · QA</title><style>
+:root{color-scheme:light dark;--bg:#faf8f3;--ink:#242b29;--muted:#58635e;--line:#d7ded6;--good:#25664f;--warn:#97491d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:44px 24px 72px}h1{font-size:38px;line-height:1.1;margin:8px 0 18px}h2{font-size:23px;margin-top:36px}p{max-width:85ch}.eyebrow{letter-spacing:.12em;font-size:12px;text-transform:uppercase;color:var(--muted)}.callout{border-left:4px solid var(--warn);padding:8px 20px;background:#f5e9d7}.pass{color:var(--good);font-weight:700;white-space:nowrap}.open{color:var(--warn);font-weight:700}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;padding:15px 10px;border-bottom:1px solid var(--line)}th{width:22%}code,pre{font-family:ui-monospace,monospace;font-size:12px}pre{padding:16px;overflow:auto;background:#eaf0e9;border-radius:6px;max-height:520px}li{margin:14px 0}details{border-bottom:1px solid var(--line);padding:12px 0}summary{cursor:pointer;font-weight:600}.meta{color:var(--muted);font-size:13px;overflow-wrap:anywhere}@media(prefers-color-scheme:dark){:root{--bg:#1c2421;--ink:#edf1e9;--muted:#b2bdb5;--line:#45524a;--good:#9cd8b7;--warn:#f4bf86}.callout{background:#362d22}pre{background:#111a15}}@media(max-width:650px){main{padding:24px 14px}h1{font-size:30px}th,td{padding:12px 5px;font-size:12px}}
+</style><main><div class="eyebrow">LOO-810 · 8 November 2026 · real CLI, server and terminal</div><h1>Recovery worked. Reconnect could steal geometry.</h1>
+<p>The live walkthrough found and repaired one terminal defect. Creation receipts, duplicate suppression, server restart, admission refusals and terminal recovery passed through production binaries. Native presentation remains unverified.</p>
+<div class="callout"><strong>Still open, worst first</strong><ol><li>A native QA window could not be reached: computer use returned <code>cgWindowNotFound</code>, and the app’s final control reading had no windows. The cause was not isolated. Ordinary New Task, promotion, quit-before-presentation recovery and truthful Inspect text still need a visible native walkthrough.</li><li>No real provider was run in the private Machine. Physical Mac sleep/wake, provider retained/resumed/forked presentation, and end-to-end Session creation/change recovery remain unchecked.</li><li>The live terminal walkthrough used the owner socket and a real shell. It does not establish all five composed server-bridge cases, including a stalled bridged viewer and Session owner replacement. The broader gate remains necessary.</li></ol></div>
+<h2>What changed</h2><p>In <code>transport.rs</code>, a resume now treats either requested ownership mode as a non-replacing request. Taking geometry remains an explicit action outside reconnect. The existing regression exercises both <code>request</code> and <code>take</code>, including a superseded socket closing after its replacement. The transport contract and repository QA launch instructions were updated.</p>
+<h2>Live scenarios</h2><table><thead><tr><th>Scenario</th><td>Result</td><td>What happened</td></tr></thead><tbody><tr><th>Fresh repository and returning CLI</th><td class="pass">PASS</td><td>Created a Task in a private Machine with a local Git identity. Repeated the identical CLI request: the same task_33ff6936… and filed receipt returned.</td></tr><tr><th>Lost answer and server restart</th><td class="pass">PASS</td><td>Sent task.create, closed the socket without reading its answer, looked up its receipt, then retried. The original task_7cfde884… survived both reconnect and a server restart. Server incarnation changed; Task identity did not.</td></tr><tr><th>Two submissions at once</th><td class="pass">PASS</td><td>Two real clients submitted the same request concurrently. Both received task_a4806078…. The final inventory contained exactly three Tasks for three request identities.</td></tr><tr><th>Wrong input and older client</th><td class="pass">PASS</td><td>Changed content under qa-first returned conflict. An unknown operation returned invalid without closing the connection. Revision 2 returned incompatible with update: client.</td></tr><tr><th>Empty Work and checkpoints</th><td class="pass">PASS</td><td>session.list acknowledged its subscription, returned a complete empty reading, then answered checkpoint 17 with that complete reading.</td></tr><tr><th>Admission pressure</th><td class="pass">PASS</td><td>A burst of 100 real machine.self requests returned two answers and 98 busy refusals naming retained_bytes. After draining: open=0, retained_bytes=0. This measures protocol accounting, not peak RSS.</td></tr><tr><th>Reconnect with newer viewer</th><td class="pass">FIXED → PASS</td><td>Before the repair, resume with own: take changed the newer viewer’s 31×99 PTY to 24×80. Resume now requests ownership without replacing another viewer. The rebuilt CLI retained 31×99 and rejected the recovered observer’s attempted input.</td></tr><tr><th>Fresh terminal screen</th><td class="pass">PASS</td><td>Attached an observer to the actual running shell. Its screen contained RECEIVED:still-newer and its input token was null.</td></tr><tr><th>Expired terminal retention</th><td class="pass">PASS</td><td>Left an observer disconnected for 61.4 seconds while keeping the controlling viewer healthy. Resume returned reconnect_required before any replay bytes. Fresh attachment recovered current output without control.</td></tr><tr><th>Input and process aftermath</th><td class="pass">PASS</td><td>The shell wrote exactly before-disconnect, newer-viewer, still-newer, quit. No must-not-arrive input, duplicate input or provider launch. Owner exited 0 and its socket disappeared.</td></tr><tr><th>Native app launch and presentation</th><td class="open">UNCHECKED</td><td>Built and packaged the real app, using a separate bundle ID, private Machine and provider homes. Corrected the initial signing/hash mismatch by running its signed bundled CLI. Direct and LaunchServices launches still produced cgWindowNotFound; final lf desktop state returned windows: [], openings: []. No visible New Task, promotion, Show result or Inspect walkthrough was established.</td></tr></tbody></table>
+<h2>Terminal transcript</h2><pre>Before: newer viewer = 31×99
+Resume: control=true, own="take", rows=24, cols=80
+Observed before repair: control=false, PTY=24×80
+
+After repair: control=false, PTY=31×99
+Actual shell inputs: before-disconnect → newer-viewer → still-newer → quit
+Expired resume after 61.4s: reconnect_required, 0 replay bytes
+Fresh screen: latest output present, control=false
+Owner exit: 0; endpoint removed</pre>
+<h2>Supplementary checks</h2><p>These checks cover paths that the native walkthrough could not reach. They are not a substitute for seeing the app recover.</p><ul><li><code>cargo build -p loopflow --bin lf</code><br>passed; rebuilt after the geometry repair</li><li><code>cargo test -p loopflow --test transport_tests resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims</code><br>1 passed, with both request and take ownership variants</li><li><code>cargo test -p loopflow --test integration documented_commands::</code><br>4 passed before the geometry-only repair</li><li><code>swift build --build-tests --package-path swift</code><br>passed; existing Ghostty missing-symbol and Swift test warnings</li><li><code>swift_test_limit.py → test_network.py --desktop → swift test --skip-build --disable-sandbox --no-parallel --filter CreationSubmissionTests|WorkObservationRetryTests|SessionControlsTests/createOrBindConversation|WorkDestinationTests/newTaskSelectsTheTaskAndOpensItsConversation|SessionsStoreTests/reset</code><br>19 tests in 6 suites passed, WindowServer and external network denied</li><li><code>LF_BIN=$PWD/target/debug/lf uv run python website/dev.py sync-docs</code><br>33 routes regenerated</li><li><code>cargo fmt; cargo clippy --all-targets -- -D warnings; git diff --check</code><br>passed</li></ul>
+<h2>Recorded exchanges</h2><p>Full local protocol transcripts follow. No screenshots were captured because the native window was unavailable.</p><details><summary>Creation, reconnect, concurrency, protocol errors and budgeting</summary><pre>[
+  {
+    &quot;scenario&quot;: &quot;hello&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;welcome&quot;,
+      &quot;client_id&quot;: &quot;60b40019-4ccf-488a-92fd-50dd7a6ce7d7&quot;,
+      &quot;revision&quot;: 3,
+      &quot;server_revision&quot;: 3,
+      &quot;min_revision&quot;: 3,
+      &quot;instance&quot;: &quot;ccc07148-c403-4394-bd2b-87a5125787fc&quot;,
+      &quot;build&quot;: &quot;0.15.2+bef66a193.dirty&quot;,
+      &quot;executable_sha256&quot;: &quot;d21d550b1a9245a9989cd050819ecf9fce0d6c512fc471223b7096f773b2efc2&quot;,
+      &quot;machine&quot;: {
+        &quot;created_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;id&quot;: &quot;home_24d2d2d60a62d315dee056a58a3ad0c8&quot;,
+        &quot;label&quot;: null,
+        &quot;observed_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;route&quot;: &quot;local&quot;
+      },
+      &quot;limits&quot;: {
+        &quot;max_message&quot;: 33554432,
+        &quot;max_connections&quot;: 64,
+        &quot;max_open&quot;: 256,
+        &quot;max_retained_bytes&quot;: 67108864
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;missing receipt&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;e9111c47-c02b-4ba8-ae60-c1db10008512&quot;,
+      &quot;result&quot;: null
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;CLI retry&quot;,
+    &quot;observed&quot;: {
+      &quot;task&quot;: &quot;task_33ff6936c5e540cc8bb54a84bbe6990f&quot;,
+      &quot;milestone&quot;: &quot;filed&quot;
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;CLI receipt&quot;,
+    &quot;observed&quot;: {
+      &quot;disposition&quot;: &quot;complete&quot;,
+      &quot;explanation&quot;: &quot;Task created&quot;,
+      &quot;run&quot;: false,
+      &quot;request_id&quot;: &quot;qa-first&quot;,
+      &quot;kind&quot;: &quot;task.create&quot;,
+      &quot;milestone&quot;: &quot;filed&quot;,
+      &quot;task_id&quot;: &quot;task_33ff6936c5e540cc8bb54a84bbe6990f&quot;,
+      &quot;session_id&quot;: null,
+      &quot;artifact_key&quot;: null,
+      &quot;result&quot;: {
+        &quot;graph&quot;: null,
+        &quot;milestone&quot;: &quot;filed&quot;,
+        &quot;session_id&quot;: null,
+        &quot;task&quot;: {
+          &quot;assignee&quot;: null,
+          &quot;base_commit&quot;: &quot;&quot;,
+          &quot;branch&quot;: &quot;&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;created_at&quot;: &quot;2026-11-08T13:29:55Z&quot;,
+          &quot;description&quot;: &quot;Keep exactly one report after reconnect.&quot;,
+          &quot;due_date&quot;: null,
+          &quot;id&quot;: &quot;task_33ff6936c5e540cc8bb54a84bbe6990f&quot;,
+          &quot;identifier&quot;: &quot;33ff69&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;parent_pr_id&quot;: null,
+          &quot;pm_snapshot_synced_at&quot;: null,
+          &quot;pm_writeback&quot;: {
+            &quot;state&quot;: &quot;current&quot;
+          },
+          &quot;project_id&quot;: null,
+          &quot;rank&quot;: 0,
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;revision&quot;: 1,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;title&quot;: &quot;Recover a submitted report&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:29:55Z&quot;,
+          &quot;wave_id&quot;: null,
+          &quot;workspace_slug&quot;: &quot;&quot;,
+          &quot;worktree&quot;: null
+        }
+      },
+      &quot;launch&quot;: null,
+      &quot;created_at&quot;: 1794144595,
+      &quot;updated_at&quot;: 1794144595
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;changed content refused&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;code&quot;: &quot;conflict&quot;,
+      &quot;message&quot;: &quot;creation request qa-first has different content&quot;,
+      &quot;data&quot;: {
+        &quot;request_id&quot;: &quot;qa-first&quot;
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;unknown operation&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;code&quot;: &quot;invalid&quot;,
+      &quot;message&quot;: &quot;this server has no operation `qa.unknown`; update the selected installation&quot;,
+      &quot;data&quot;: {
+        &quot;kind&quot;: &quot;qa.unknown&quot;
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;same connection after error&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;1c477ef1-70e2-4bd1-ae90-5722de2d67d2&quot;,
+      &quot;result&quot;: {
+        &quot;created_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;id&quot;: &quot;home_24d2d2d60a62d315dee056a58a3ad0c8&quot;,
+        &quot;label&quot;: null,
+        &quot;observed_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;route&quot;: &quot;local&quot;
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;revision 2 rejected&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: null,
+      &quot;code&quot;: &quot;incompatible&quot;,
+      &quot;message&quot;: &quot;Server speaks protocol revisions 3\u20133; the client speaks 2\u20132; update the client&quot;,
+      &quot;data&quot;: {
+        &quot;server&quot;: {
+          &quot;min_revision&quot;: 3,
+          &quot;revision&quot;: 3
+        },
+        &quot;update&quot;: &quot;client&quot;
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;lost-answer receipt&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;418e3aa0-8942-46a5-8529-5218e4c727bb&quot;,
+      &quot;result&quot;: {
+        &quot;artifact_key&quot;: null,
+        &quot;created_at&quot;: 1794144656,
+        &quot;disposition&quot;: &quot;complete&quot;,
+        &quot;explanation&quot;: &quot;Task created&quot;,
+        &quot;kind&quot;: &quot;task.create&quot;,
+        &quot;launch&quot;: null,
+        &quot;milestone&quot;: &quot;filed&quot;,
+        &quot;request_id&quot;: &quot;qa-lost&quot;,
+        &quot;result&quot;: {
+          &quot;graph&quot;: null,
+          &quot;milestone&quot;: &quot;filed&quot;,
+          &quot;session_id&quot;: null,
+          &quot;task&quot;: {
+            &quot;assignee&quot;: null,
+            &quot;base_commit&quot;: &quot;&quot;,
+            &quot;branch&quot;: &quot;&quot;,
+            &quot;completed_at&quot;: null,
+            &quot;created_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+            &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+            &quot;due_date&quot;: null,
+            &quot;id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+            &quot;identifier&quot;: &quot;7cfde8&quot;,
+            &quot;linear_id&quot;: null,
+            &quot;parent_pr_id&quot;: null,
+            &quot;pm_snapshot_synced_at&quot;: null,
+            &quot;pm_writeback&quot;: {
+              &quot;state&quot;: &quot;current&quot;
+            },
+            &quot;project_id&quot;: null,
+            &quot;rank&quot;: 1,
+            &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+            &quot;revision&quot;: 1,
+            &quot;state&quot;: &quot;unstarted&quot;,
+            &quot;title&quot;: &quot;Recover socket submission&quot;,
+            &quot;updated_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+            &quot;wave_id&quot;: null,
+            &quot;workspace_slug&quot;: &quot;&quot;,
+            &quot;worktree&quot;: null
+          }
+        },
+        &quot;run&quot;: false,
+        &quot;session_id&quot;: null,
+        &quot;task_id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+        &quot;updated_at&quot;: 1794144656
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;lost-answer retry&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;c4bc1c30-c2d3-4221-8858-0e3b767b06c9&quot;,
+      &quot;result&quot;: {
+        &quot;graph&quot;: null,
+        &quot;milestone&quot;: &quot;filed&quot;,
+        &quot;session_id&quot;: null,
+        &quot;task&quot;: {
+          &quot;assignee&quot;: null,
+          &quot;base_commit&quot;: &quot;&quot;,
+          &quot;branch&quot;: &quot;&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;created_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+          &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+          &quot;due_date&quot;: null,
+          &quot;id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+          &quot;identifier&quot;: &quot;7cfde8&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;parent_pr_id&quot;: null,
+          &quot;pm_snapshot_synced_at&quot;: null,
+          &quot;pm_writeback&quot;: {
+            &quot;state&quot;: &quot;current&quot;
+          },
+          &quot;project_id&quot;: null,
+          &quot;rank&quot;: 1,
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;revision&quot;: 1,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;title&quot;: &quot;Recover socket submission&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+          &quot;wave_id&quot;: null,
+          &quot;workspace_slug&quot;: &quot;&quot;,
+          &quot;worktree&quot;: null
+        }
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;two simultaneous identical submissions&quot;,
+    &quot;observed&quot;: [
+      {
+        &quot;type&quot;: &quot;response&quot;,
+        &quot;id&quot;: &quot;r&quot;,
+        &quot;trace_id&quot;: &quot;64dbf7a8-0083-457e-961e-697adc025404&quot;,
+        &quot;result&quot;: {
+          &quot;graph&quot;: null,
+          &quot;milestone&quot;: &quot;filed&quot;,
+          &quot;session_id&quot;: null,
+          &quot;task&quot;: {
+            &quot;assignee&quot;: null,
+            &quot;base_commit&quot;: &quot;&quot;,
+            &quot;branch&quot;: &quot;&quot;,
+            &quot;completed_at&quot;: null,
+            &quot;created_at&quot;: &quot;2026-11-08T13:30:56Z&quot;,
+            &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+            &quot;due_date&quot;: null,
+            &quot;id&quot;: &quot;task_a4806078dd9b46ffa16a91f3ab8ced21&quot;,
+            &quot;identifier&quot;: &quot;a48060&quot;,
+            &quot;linear_id&quot;: null,
+            &quot;parent_pr_id&quot;: null,
+            &quot;pm_snapshot_synced_at&quot;: null,
+            &quot;pm_writeback&quot;: {
+              &quot;state&quot;: &quot;current&quot;
+            },
+            &quot;project_id&quot;: null,
+            &quot;rank&quot;: 2,
+            &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+            &quot;revision&quot;: 1,
+            &quot;state&quot;: &quot;unstarted&quot;,
+            &quot;title&quot;: &quot;Recover socket submission&quot;,
+            &quot;updated_at&quot;: &quot;2026-11-08T13:30:56Z&quot;,
+            &quot;wave_id&quot;: null,
+            &quot;workspace_slug&quot;: &quot;&quot;,
+            &quot;worktree&quot;: null
+          }
+        }
+      },
+      {
+        &quot;type&quot;: &quot;response&quot;,
+        &quot;id&quot;: &quot;r&quot;,
+        &quot;trace_id&quot;: &quot;32c4afe5-2c0e-46b0-a19a-59c780e67c61&quot;,
+        &quot;result&quot;: {
+          &quot;graph&quot;: null,
+          &quot;milestone&quot;: &quot;filed&quot;,
+          &quot;session_id&quot;: null,
+          &quot;task&quot;: {
+            &quot;assignee&quot;: null,
+            &quot;base_commit&quot;: &quot;&quot;,
+            &quot;branch&quot;: &quot;&quot;,
+            &quot;completed_at&quot;: null,
+            &quot;created_at&quot;: &quot;2026-11-08T13:30:56Z&quot;,
+            &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+            &quot;due_date&quot;: null,
+            &quot;id&quot;: &quot;task_a4806078dd9b46ffa16a91f3ab8ced21&quot;,
+            &quot;identifier&quot;: &quot;a48060&quot;,
+            &quot;linear_id&quot;: null,
+            &quot;parent_pr_id&quot;: null,
+            &quot;pm_snapshot_synced_at&quot;: null,
+            &quot;pm_writeback&quot;: {
+              &quot;state&quot;: &quot;current&quot;
+            },
+            &quot;project_id&quot;: null,
+            &quot;rank&quot;: 2,
+            &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+            &quot;revision&quot;: 1,
+            &quot;state&quot;: &quot;unstarted&quot;,
+            &quot;title&quot;: &quot;Recover socket submission&quot;,
+            &quot;updated_at&quot;: &quot;2026-11-08T13:30:56Z&quot;,
+            &quot;wave_id&quot;: null,
+            &quot;workspace_slug&quot;: &quot;&quot;,
+            &quot;worktree&quot;: null
+          }
+        }
+      }
+    ]
+  },
+  {
+    &quot;scenario&quot;: &quot;restart hello&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;welcome&quot;,
+      &quot;client_id&quot;: &quot;7916106c-3887-4ab3-bd5d-96555259c8d0&quot;,
+      &quot;revision&quot;: 3,
+      &quot;server_revision&quot;: 3,
+      &quot;min_revision&quot;: 3,
+      &quot;instance&quot;: &quot;6ab6c97d-1378-4955-82ea-b92e43ae5610&quot;,
+      &quot;build&quot;: &quot;0.15.2+bef66a193.dirty&quot;,
+      &quot;executable_sha256&quot;: &quot;d21d550b1a9245a9989cd050819ecf9fce0d6c512fc471223b7096f773b2efc2&quot;,
+      &quot;machine&quot;: {
+        &quot;created_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;id&quot;: &quot;home_24d2d2d60a62d315dee056a58a3ad0c8&quot;,
+        &quot;label&quot;: null,
+        &quot;observed_at&quot;: &quot;2026-11-08T13:29:54Z&quot;,
+        &quot;route&quot;: &quot;local&quot;
+      },
+      &quot;limits&quot;: {
+        &quot;max_message&quot;: 33554432,
+        &quot;max_connections&quot;: 64,
+        &quot;max_open&quot;: 256,
+        &quot;max_retained_bytes&quot;: 67108864
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;restart receipt&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;7fcac347-2df1-4671-9819-01b74d116d8c&quot;,
+      &quot;result&quot;: {
+        &quot;artifact_key&quot;: null,
+        &quot;created_at&quot;: 1794144656,
+        &quot;disposition&quot;: &quot;complete&quot;,
+        &quot;explanation&quot;: &quot;Task created&quot;,
+        &quot;kind&quot;: &quot;task.create&quot;,
+        &quot;launch&quot;: null,
+        &quot;milestone&quot;: &quot;filed&quot;,
+        &quot;request_id&quot;: &quot;qa-lost&quot;,
+        &quot;result&quot;: {
+          &quot;graph&quot;: null,
+          &quot;milestone&quot;: &quot;filed&quot;,
+          &quot;session_id&quot;: null,
+          &quot;task&quot;: {
+            &quot;assignee&quot;: null,
+            &quot;base_commit&quot;: &quot;&quot;,
+            &quot;branch&quot;: &quot;&quot;,
+            &quot;completed_at&quot;: null,
+            &quot;created_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+            &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+            &quot;due_date&quot;: null,
+            &quot;id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+            &quot;identifier&quot;: &quot;7cfde8&quot;,
+            &quot;linear_id&quot;: null,
+            &quot;parent_pr_id&quot;: null,
+            &quot;pm_snapshot_synced_at&quot;: null,
+            &quot;pm_writeback&quot;: {
+              &quot;state&quot;: &quot;current&quot;
+            },
+            &quot;project_id&quot;: null,
+            &quot;rank&quot;: 1,
+            &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+            &quot;revision&quot;: 1,
+            &quot;state&quot;: &quot;unstarted&quot;,
+            &quot;title&quot;: &quot;Recover socket submission&quot;,
+            &quot;updated_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+            &quot;wave_id&quot;: null,
+            &quot;workspace_slug&quot;: &quot;&quot;,
+            &quot;worktree&quot;: null
+          }
+        },
+        &quot;run&quot;: false,
+        &quot;session_id&quot;: null,
+        &quot;task_id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+        &quot;updated_at&quot;: 1794144656
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;restart retry&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;r&quot;,
+      &quot;trace_id&quot;: &quot;002d302a-13e6-4275-a460-5bbe13c87c10&quot;,
+      &quot;result&quot;: {
+        &quot;graph&quot;: null,
+        &quot;milestone&quot;: &quot;filed&quot;,
+        &quot;session_id&quot;: null,
+        &quot;task&quot;: {
+          &quot;assignee&quot;: null,
+          &quot;base_commit&quot;: &quot;&quot;,
+          &quot;branch&quot;: &quot;&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;created_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+          &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+          &quot;due_date&quot;: null,
+          &quot;id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+          &quot;identifier&quot;: &quot;7cfde8&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;parent_pr_id&quot;: null,
+          &quot;pm_snapshot_synced_at&quot;: null,
+          &quot;pm_writeback&quot;: {
+            &quot;state&quot;: &quot;current&quot;
+          },
+          &quot;project_id&quot;: null,
+          &quot;rank&quot;: 1,
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;revision&quot;: 1,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;title&quot;: &quot;Recover socket submission&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+          &quot;wave_id&quot;: null,
+          &quot;workspace_slug&quot;: &quot;&quot;,
+          &quot;worktree&quot;: null
+        }
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;task inventory&quot;,
+    &quot;observed&quot;: [
+      {
+        &quot;task&quot;: {
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;repo&quot;: &quot;/private/tmp/lf810-qee2nvem/repo&quot;,
+          &quot;project_id&quot;: null,
+          &quot;wave_id&quot;: null,
+          &quot;acquisition&quot;: {
+            &quot;state&quot;: &quot;available&quot;,
+            &quot;observed_at&quot;: null
+          },
+          &quot;sync&quot;: {
+            &quot;connected&quot;: false,
+            &quot;changes&quot;: []
+          },
+          &quot;id&quot;: &quot;task_33ff6936c5e540cc8bb54a84bbe6990f&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;identifier&quot;: &quot;33ff69&quot;,
+          &quot;name&quot;: &quot;Recover a submitted report&quot;,
+          &quot;description&quot;: &quot;Keep exactly one report after reconnect.&quot;,
+          &quot;rank&quot;: 0,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;due_date&quot;: null,
+          &quot;assignee&quot;: null
+        },
+        &quot;reference&quot;: {
+          &quot;issue_url&quot;: null,
+          &quot;workspace&quot;: null
+        },
+        &quot;runtime&quot;: {
+          &quot;work_id&quot;: &quot;task_33ff6936c5e540cc8bb54a84bbe6990f&quot;,
+          &quot;status&quot;: &quot;unstarted&quot;,
+          &quot;completion_pending&quot;: null,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:29:55Z&quot;,
+          &quot;provider&quot;: null,
+          &quot;owner&quot;: null
+        },
+        &quot;next_move&quot;: {
+          &quot;owner&quot;: &quot;wave&quot;,
+          &quot;reason&quot;: &quot;ready&quot;
+        },
+        &quot;condition&quot;: {
+          &quot;state&quot;: &quot;waiting&quot;,
+          &quot;reason&quot;: &quot;ready&quot;,
+          &quot;observed_at&quot;: &quot;2026-11-08T13:30:56.844542Z&quot;,
+          &quot;evidence_age_secs&quot;: 61,
+          &quot;local_progress&quot;: {
+            &quot;state&quot;: &quot;not_applicable&quot;,
+            &quot;unsettled&quot;: false,
+            &quot;dirty&quot;: null,
+            &quot;authored_commits&quot;: null,
+            &quot;recovery_required&quot;: null,
+            &quot;reason&quot;: null
+          },
+          &quot;unresolved_execution&quot;: false
+        },
+        &quot;actions&quot;: {
+          &quot;recommended&quot;: &quot;run&quot;,
+          &quot;reason&quot;: &quot;run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first&quot;
+        },
+        &quot;graph_name&quot;: &quot;code&quot;,
+        &quot;graph_source&quot;: &quot;builtin&quot;,
+        &quot;latest_graph_process&quot;: null,
+        &quot;execution&quot;: {
+          &quot;state&quot;: &quot;idle&quot;,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;step&quot;: null,
+          &quot;captured&quot;: null
+        },
+        &quot;run_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;ship_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;shipping&quot;: null,
+        &quot;pr&quot;: null,
+        &quot;section&quot;: &quot;backlog&quot;
+      },
+      {
+        &quot;task&quot;: {
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;repo&quot;: &quot;/private/tmp/lf810-qee2nvem/repo&quot;,
+          &quot;project_id&quot;: null,
+          &quot;wave_id&quot;: null,
+          &quot;acquisition&quot;: {
+            &quot;state&quot;: &quot;available&quot;,
+            &quot;observed_at&quot;: null
+          },
+          &quot;sync&quot;: {
+            &quot;connected&quot;: false,
+            &quot;changes&quot;: []
+          },
+          &quot;id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;identifier&quot;: &quot;7cfde8&quot;,
+          &quot;name&quot;: &quot;Recover socket submission&quot;,
+          &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+          &quot;rank&quot;: 1,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;due_date&quot;: null,
+          &quot;assignee&quot;: null
+        },
+        &quot;reference&quot;: {
+          &quot;issue_url&quot;: null,
+          &quot;workspace&quot;: null
+        },
+        &quot;runtime&quot;: {
+          &quot;work_id&quot;: &quot;task_7cfde884e66f423ca88364dc77a15149&quot;,
+          &quot;status&quot;: &quot;unstarted&quot;,
+          &quot;completion_pending&quot;: null,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:30:55Z&quot;,
+          &quot;provider&quot;: null,
+          &quot;owner&quot;: null
+        },
+        &quot;next_move&quot;: {
+          &quot;owner&quot;: &quot;wave&quot;,
+          &quot;reason&quot;: &quot;ready&quot;
+        },
+        &quot;condition&quot;: {
+          &quot;state&quot;: &quot;waiting&quot;,
+          &quot;reason&quot;: &quot;ready&quot;,
+          &quot;observed_at&quot;: &quot;2026-11-08T13:30:56.844543Z&quot;,
+          &quot;evidence_age_secs&quot;: 1,
+          &quot;local_progress&quot;: {
+            &quot;state&quot;: &quot;not_applicable&quot;,
+            &quot;unsettled&quot;: false,
+            &quot;dirty&quot;: null,
+            &quot;authored_commits&quot;: null,
+            &quot;recovery_required&quot;: null,
+            &quot;reason&quot;: null
+          },
+          &quot;unresolved_execution&quot;: false
+        },
+        &quot;actions&quot;: {
+          &quot;recommended&quot;: &quot;run&quot;,
+          &quot;reason&quot;: &quot;run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first&quot;
+        },
+        &quot;graph_name&quot;: &quot;code&quot;,
+        &quot;graph_source&quot;: &quot;builtin&quot;,
+        &quot;latest_graph_process&quot;: null,
+        &quot;execution&quot;: {
+          &quot;state&quot;: &quot;idle&quot;,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;step&quot;: null,
+          &quot;captured&quot;: null
+        },
+        &quot;run_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;ship_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;shipping&quot;: null,
+        &quot;pr&quot;: null,
+        &quot;section&quot;: &quot;backlog&quot;
+      },
+      {
+        &quot;task&quot;: {
+          &quot;repo_id&quot;: &quot;repo_fe32f81675fc4b859268e7f6114fef5d&quot;,
+          &quot;repo&quot;: &quot;/private/tmp/lf810-qee2nvem/repo&quot;,
+          &quot;project_id&quot;: null,
+          &quot;wave_id&quot;: null,
+          &quot;acquisition&quot;: {
+            &quot;state&quot;: &quot;available&quot;,
+            &quot;observed_at&quot;: null
+          },
+          &quot;sync&quot;: {
+            &quot;connected&quot;: false,
+            &quot;changes&quot;: []
+          },
+          &quot;id&quot;: &quot;task_a4806078dd9b46ffa16a91f3ab8ced21&quot;,
+          &quot;linear_id&quot;: null,
+          &quot;identifier&quot;: &quot;a48060&quot;,
+          &quot;name&quot;: &quot;Recover socket submission&quot;,
+          &quot;description&quot;: &quot;One task survives a lost answer.&quot;,
+          &quot;rank&quot;: 2,
+          &quot;state&quot;: &quot;unstarted&quot;,
+          &quot;completed_at&quot;: null,
+          &quot;due_date&quot;: null,
+          &quot;assignee&quot;: null
+        },
+        &quot;reference&quot;: {
+          &quot;issue_url&quot;: null,
+          &quot;workspace&quot;: null
+        },
+        &quot;runtime&quot;: {
+          &quot;work_id&quot;: &quot;task_a4806078dd9b46ffa16a91f3ab8ced21&quot;,
+          &quot;status&quot;: &quot;unstarted&quot;,
+          &quot;completion_pending&quot;: null,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;updated_at&quot;: &quot;2026-11-08T13:30:56Z&quot;,
+          &quot;provider&quot;: null,
+          &quot;owner&quot;: null
+        },
+        &quot;next_move&quot;: {
+          &quot;owner&quot;: &quot;wave&quot;,
+          &quot;reason&quot;: &quot;ready&quot;
+        },
+        &quot;condition&quot;: {
+          &quot;state&quot;: &quot;waiting&quot;,
+          &quot;reason&quot;: &quot;ready&quot;,
+          &quot;observed_at&quot;: &quot;2026-11-08T13:30:56.844543Z&quot;,
+          &quot;evidence_age_secs&quot;: 0,
+          &quot;local_progress&quot;: {
+            &quot;state&quot;: &quot;not_applicable&quot;,
+            &quot;unsettled&quot;: false,
+            &quot;dirty&quot;: null,
+            &quot;authored_commits&quot;: null,
+            &quot;recovery_required&quot;: null,
+            &quot;reason&quot;: null
+          },
+          &quot;unresolved_execution&quot;: false
+        },
+        &quot;actions&quot;: {
+          &quot;recommended&quot;: &quot;run&quot;,
+          &quot;reason&quot;: &quot;run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first&quot;
+        },
+        &quot;graph_name&quot;: &quot;code&quot;,
+        &quot;graph_source&quot;: &quot;builtin&quot;,
+        &quot;latest_graph_process&quot;: null,
+        &quot;execution&quot;: {
+          &quot;state&quot;: &quot;idle&quot;,
+          &quot;reason&quot;: &quot;No Task Graph has run; independent Sessions may still be active&quot;,
+          &quot;step&quot;: null,
+          &quot;captured&quot;: null
+        },
+        &quot;run_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;ship_control&quot;: {
+          &quot;unavailable&quot;: null
+        },
+        &quot;shipping&quot;: null,
+        &quot;pr&quot;: null,
+        &quot;section&quot;: &quot;backlog&quot;
+      }
+    ]
+  },
+  {
+    &quot;scenario&quot;: &quot;subscription acknowledgement&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;response&quot;,
+      &quot;id&quot;: &quot;sessions&quot;,
+      &quot;trace_id&quot;: &quot;f50244cc-64eb-4df1-93f4-b41a7bce5311&quot;,
+      &quot;result&quot;: null
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;complete reading&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;reading&quot;,
+      &quot;id&quot;: &quot;sessions&quot;,
+      &quot;frame&quot;: {
+        &quot;answers&quot;: null,
+        &quot;body&quot;: [],
+        &quot;unavailable&quot;: null
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;checkpoint&quot;,
+    &quot;observed&quot;: {
+      &quot;type&quot;: &quot;reading&quot;,
+      &quot;id&quot;: &quot;sessions&quot;,
+      &quot;frame&quot;: {
+        &quot;answers&quot;: 17,
+        &quot;body&quot;: [],
+        &quot;unavailable&quot;: null
+      }
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;burst admission&quot;,
+    &quot;observed&quot;: {
+      &quot;responses&quot;: 2,
+      &quot;errors&quot;: [
+        {
+          &quot;type&quot;: &quot;error&quot;,
+          &quot;id&quot;: &quot;2&quot;,
+          &quot;code&quot;: &quot;busy&quot;,
+          &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+          &quot;data&quot;: {
+            &quot;limit&quot;: &quot;retained_bytes&quot;,
+            &quot;max&quot;: 67108864
+          }
+        },
+        {
+          &quot;type&quot;: &quot;error&quot;,
+          &quot;id&quot;: &quot;3&quot;,
+          &quot;code&quot;: &quot;busy&quot;,
+          &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+          &quot;data&quot;: {
+            &quot;limit&quot;: &quot;retained_bytes&quot;,
+            &quot;max&quot;: 67108864
+          }
+        },
+        {
+          &quot;type&quot;: &quot;error&quot;,
+          &quot;id&quot;: &quot;4&quot;,
+          &quot;code&quot;: &quot;busy&quot;,
+          &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+          &quot;data&quot;: {
+            &quot;limit&quot;: &quot;retained_bytes&quot;,
+            &quot;max&quot;: 67108864
+          }
+        }
+      ],
+      &quot;total&quot;: 100
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;status after drain&quot;,
+    &quot;observed&quot;: {
+      &quot;socket&quot;: &quot;/private/tmp/lf-501-0b4c385a31dbc84b/machine.sock&quot;,
+      &quot;ready&quot;: true,
+      &quot;listening&quot;: true,
+      &quot;instance&quot;: &quot;6ab6c97d-1378-4955-82ea-b92e43ae5610&quot;,
+      &quot;revision&quot;: 3,
+      &quot;clients&quot;: [
+        {
+          &quot;id&quot;: &quot;f9f92d9b-127e-4a33-a450-27c4b8012eff&quot;,
+          &quot;client&quot;: {
+            &quot;kind&quot;: &quot;qa&quot;,
+            &quot;platform&quot;: &quot;macos&quot;,
+            &quot;name&quot;: &quot;LOO-810 live QA&quot;,
+            &quot;version&quot;: &quot;0.15.2&quot;
+          },
+          &quot;connected_at&quot;: &quot;2026-11-08T13:30:56.87615Z&quot;,
+          &quot;requests&quot;: 100,
+          &quot;open&quot;: 0,
+          &quot;retained_bytes&quot;: 0
+        }
+      ],
+      &quot;error&quot;: null
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;cleanup&quot;,
+    &quot;observed&quot;: {
+      &quot;server_returncode&quot;: 130,
+      &quot;private_root&quot;: &quot;/tmp/lf810-qee2nvem&quot;
+    }
+  }
+]</pre></details><details><summary>Terminal failure before repair</summary><pre>[
+  {
+    &quot;scenario&quot;: &quot;terminal owner launched&quot;,
+    &quot;observed&quot;: {
+      &quot;owner&quot;: &quot;4a0c15fc-86ed-487d-a12a-2263584768b5&quot;,
+      &quot;pid&quot;: 94682
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;first viewer&quot;,
+    &quot;observed&quot;: {
+      &quot;terminal&quot;: true,
+      &quot;controls&quot;: true,
+      &quot;grace_ms&quot;: 60000
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;reconnected older viewer&quot;,
+    &quot;observed&quot;: {
+      &quot;kind&quot;: &quot;attached&quot;,
+      &quot;controls&quot;: false,
+      &quot;owner&quot;: &quot;53a04f589d8d&quot;,
+      &quot;viewer&quot;: &quot;53a04f589d8d&quot;
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;input and geometry&quot;,
+    &quot;observed&quot;: {
+      &quot;inputs&quot;: [
+        &quot;before-disconnect&quot;,
+        &quot;newer-viewer&quot;,
+        &quot;still-newer&quot;
+      ],
+      &quot;size&quot;: &quot;24 80&quot;
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;owner cleanup&quot;,
+    &quot;observed&quot;: {
+      &quot;exit_requested&quot;: true,
+      &quot;owner_exit&quot;: 130,
+      &quot;endpoint_present&quot;: false
+    }
+  }
+]</pre></details><details><summary>Terminal walkthrough after repair</summary><pre>[
+  {
+    &quot;scenario&quot;: &quot;terminal owner launched&quot;,
+    &quot;observed&quot;: {
+      &quot;owner&quot;: &quot;a1fbb75d-27e8-4910-a92f-8ec113246e0a&quot;,
+      &quot;pid&quot;: 88075
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;first viewer&quot;,
+    &quot;observed&quot;: {
+      &quot;terminal&quot;: true,
+      &quot;controls&quot;: true,
+      &quot;grace_ms&quot;: 60000
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;reconnected older viewer&quot;,
+    &quot;observed&quot;: {
+      &quot;kind&quot;: &quot;attached&quot;,
+      &quot;controls&quot;: false,
+      &quot;owner&quot;: &quot;70e2b2ac41e1&quot;,
+      &quot;viewer&quot;: &quot;c11bad07e217&quot;
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;input and geometry&quot;,
+    &quot;observed&quot;: {
+      &quot;inputs&quot;: [
+        &quot;before-disconnect&quot;,
+        &quot;newer-viewer&quot;,
+        &quot;still-newer&quot;
+      ],
+      &quot;size&quot;: &quot;31 99&quot;
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;fresh screen&quot;,
+    &quot;observed&quot;: {
+      &quot;contains_latest_output&quot;: true,
+      &quot;controls&quot;: false
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;retention grace expired&quot;,
+    &quot;observed&quot;: {
+      &quot;elapsed_seconds&quot;: 61.4,
+      &quot;resume&quot;: &quot;reconnect_required&quot;,
+      &quot;replayed_bytes_before_refusal&quot;: 0,
+      &quot;fresh_screen_contains_latest&quot;: true,
+      &quot;controls&quot;: false
+    }
+  },
+  {
+    &quot;scenario&quot;: &quot;final input log&quot;,
+    &quot;observed&quot;: [
+      &quot;before-disconnect&quot;,
+      &quot;newer-viewer&quot;,
+      &quot;still-newer&quot;,
+      &quot;quit&quot;
+    ]
+  },
+  {
+    &quot;scenario&quot;: &quot;owner cleanup&quot;,
+    &quot;observed&quot;: {
+      &quot;exit_requested&quot;: true,
+      &quot;owner_exit&quot;: 0,
+      &quot;endpoint_present&quot;: false
+    }
+  }
+]</pre></details><details><summary>Final native app state</summary><pre>{
+  &quot;observed_at&quot;: 1794144950,
+  &quot;windows&quot;: [],
+  &quot;openings&quot;: []
+}</pre></details>
+<h2>Cleanup and remaining use</h2><p>The QA app, foreground servers and terminal owners were stopped. Its automatically registered private launchd service was booted out; both temporary app registrations were removed, and the installed QA bundle was removed. Disposable repository/data remain at <code>/tmp/lf810-qee2nvem</code>. No PR was published or landed and no Graph step was selected.</p>
+<p>What works now: one Task per submitted creation identity across lost answers and server restart; bounded admission with recoverable errors; terminal replay or fresh-screen recovery without replacing a newer viewer’s input or geometry. The native and provider gaps above remain open.</p>
+<p class="meta">Checkout: /Users/jack/src/loopflow.loo-810-raise-the-loopflow<br>Base HEAD: bef66a1932d0b09af2d637a8be616d7786068285 plus QA repair<br>Rebuilt CLI: /Users/jack/src/loopflow.loo-810-raise-the-loopflow/target/debug/lf<br>SHA-256: 8d5d3af30e65e3f33ab721056a6d83be7b1e86c1d4884c4585f852467279ed4f</p></main></html>

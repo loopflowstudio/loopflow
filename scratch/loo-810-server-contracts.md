@@ -172,6 +172,28 @@ conversation change with truthful Inspect text. No product choice is open.
 The original review and implementation direction remain at
 `ce571a5a4:scratch/loo-810-server-contracts.md`, **Concept review**.
 
+### Concept review · after presentation realignment · 2026-11-08
+
+No further design change or open product choice. The interaction remains
+**Submit → see the result**; after a lost answer, **Show result** or **Inspect**
+on the original Machine. Immutable submissions remember what was sent, server
+receipts determine what may happen next, and mounted presentation retires the
+client record. Work refresh, terminal attachment and provider continuation keep
+their separate meanings and authorities.
+
+Counterexamples retained for gate/demo: a reply without presentation must leave
+the submission; failed lookup must send nothing; failed removal may repeat
+presentation but not creation; a removed Task must stay removed; newer Session
+input must prevent an older unpublished change from continuing. An interrupted
+stop or launch remains inspectable without another effect. These fit the current
+model without another queue, lifecycle or product decision.
+
+This pass inspected source and existing checks; it did not rerun them or establish
+the composed native experience. Next show ordinary creation and promotion with
+no recovery chore, quit-before-presentation recovery, and truthful interrupted
+conversation inspection alongside sleep/wake. The review page now marks the
+previous corrections as implemented. **Loop-or-next: advance.**
+
 ### Upstream integration · 2026-11-08
 
 Main's Task conversation startup (`da7e82310`, #1844) starts the conversation

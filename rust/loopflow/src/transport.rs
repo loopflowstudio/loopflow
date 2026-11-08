@@ -1204,7 +1204,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 viewer.token = Some(token);
                 hint_due = true;
             }
-            owner_change |= ownership.claim(resume.own, viewer);
+            // Recovery can reclaim free geometry, never displace a newer viewer.
+            owner_change |= ownership.claim(resume.own.map(|_| Own::Request), viewer);
             viewer.resume(socket, answers, resume.received, ownership.id(), terminal);
         }
         viewers.retain(|viewer| !viewer.leaving);

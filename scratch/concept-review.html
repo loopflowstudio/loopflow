@@ -28,17 +28,18 @@
   <code>engine/creation.rs</code>, <code>ops/human_session.rs</code> and
   <code>server/README.md</code>.
 </header>
-<h1>Finish recovery when the result is shown.</h1>
-<p><strong>Next step: iterate to implement.</strong> Keep immutable submissions;
-  have the server say what recovery may do. No open product choice.</p>
+<h1>Advance to validation of the recovery experience.</h1>
+<p><strong>No further design change or open product choice.</strong> The previous
+  corrections are implemented; gate and the native demo remain outstanding.</p>
 <blockquote>
-  <strong>Biggest mismatch today:</strong> a successful creation leaves its saved
-  request behind. Desktop later calls it “Recovered” and requires Dismiss.
-  Swift also reconstructs the server’s continuation rules from milestones.
+  <strong>Previous mismatch, now addressed:</strong> successful creation used to
+  leave a recovery chore behind. A mounted result now retires its saved request,
+  and the server owns the recovery decision. The remaining question is whether
+  the composed native workflow behaves as the component checks describe.
 </blockquote>
 <table>
   <caption>Actions → concepts → APIs</caption>
-  <thead><tr><th>Action</th><th>Existing implementation</th><th>Proposed correction</th></tr></thead>
+  <thead><tr><th>Action</th><th>Before the iteration</th><th>Implemented now</th></tr></thead>
   <tbody>
     <tr><td>Submit and see the Task</td><td>Immutable request → creation result → later recovery notice</td><td>Same request and result → presentation retires the saved request</td></tr>
     <tr><td>Reopen after a lost reply</td><td><code>creation.get</code> → client checks <code>run</code>, milestone and result presence</td><td><code>creation.get</code> → server-derived <code>complete | continue | inspect</code></td></tr>
@@ -46,13 +47,13 @@
   </tbody>
 </table>
 <h2>What appears after reopening</h2>
-<p><strong>Proposed — confirmed creation:</strong><br>
-  Recovered Task: Keep the terminal intact after sleep.<br>
-  Show its result; then clear this saved submission.</p>
-<p><strong>Proposed — launch uncertain:</strong><br>
+<p><strong>Implemented — confirmed creation:</strong><br>
+  Task created. <u>Show result</u><br>
+  Display the original Task; then clear this saved submission.</p>
+<p><strong>Implemented — launch uncertain:</strong><br>
   Task created; start unconfirmed. <u>Inspect</u><br>
   No second launch. Keep the original request.</p>
-<p><strong>Proposed — conversation stop uncertain:</strong><br>
+<p><strong>Implemented — conversation stop uncertain:</strong><br>
   Conversation change unconfirmed. <u>Inspect</u><br>
   No second stop or duplicate input. Keep the original request.</p>
 <h2>One owner for each fact</h2>
@@ -64,15 +65,21 @@
   existing lock. Failed lookup is not absence; a removed resource is not a new
   creation. Work readings, exact-owner terminal recovery and provider history
   remain separate. Showing any of them grants no launch, input or resize authority.</p>
+<p><strong>Counterexamples to retain:</strong> failed removal repeats presentation
+  safely; newer Session input prevents an older unpublished change from continuing;
+  another viewer keeps its input and geometry when a sleeping viewer returns.</p>
 <h2>Next demo checks</h2>
 <ol>
-  <li>Does ordinary success finish without a recovery chore? Required: show the
-    result and remove only that submission.</li>
+  <li>Do ordinary creation and promotion finish without a recovery chore?
+    Required: show the result and remove only that submission.</li>
   <li>Does quitting after the reply but before presentation recover the original?
     Required: retain the request until its result is shown.</li>
   <li>Do an interrupted launch and stop remain inspectable without another effect?
     Required: truthful operation-specific text and no automatic replay.</li>
+  <li>Does sleep/wake recover the original terminal without repeated input or
+    changed claims? Required: keep display recovery separate from provider launch.</li>
 </ol>
 <small>Source review only. Runtime, physical sleep/wake and cold-app acceptance
-  remain with implement, gate and demo. Decisions live in the working design.</small>
+  remain with gate and demo. No new behavior is proposed. Decisions live in the
+  working design.</small>
 </html>

@@ -18,6 +18,15 @@ A Task adopts existing work or gets its own worktree beside your repository, its
 most one pull request. A stacked Task forks from its parent's PR; `lf sync`
 carries the child through the parent's updates and squash merge.
 
+`lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
+conversation in the background when an agent is configured and installed.
+An in-place `lf -i task run` uses its current terminal instead.
+`lf resume` in its worktree reattaches to it. Previously opened conversations
+stay as they are, and starting stops at sixteen running Task conversations.
+A running Graph keeps its conversation alive; abandoning the Task stops its
+unviewed conversation. A conversation you are viewing stays open.
+Preparing a conversation, including Desktop's preload, does not launch an agent.
+
 Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.

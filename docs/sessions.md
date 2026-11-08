@@ -36,7 +36,7 @@ scope's operating instructions.
 An unviewed, settled conversation ends its processes after two minutes of quiet;
 `session.end_detached_after` changes the grace or disables it with `off`.
 Returning paints its saved screen while the provider reopens its history, without
-replaying input. Active turns, watches, running Graphs, drafts and pending requests
+replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
 Edited, pasted or unacknowledged native input can retain the owner until the
 provider exits; saved history and screens cannot restore an editor or request.

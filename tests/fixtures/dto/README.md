@@ -13,9 +13,9 @@ print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 for available, unavailable, invalid, removed and absent planning, with the Task's
 overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
 overview, Graph processes, comments and recorded work from
-`lf task show --watch` (`watch_frames.json`). These cases have no execution.
+`lf task show --subscribe` (`subscribe_frames.json`). These cases have no execution.
 
-`watch_frames.json` pins one `--watch` frame per read a window runs:
+`subscribe_frames.json` pins one `--subscribe` frame per read a window runs:
 `{answers, unavailable, body}`, where `body` is what the
 read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
 against its read's type; Swift decodes each through its part.
@@ -122,7 +122,7 @@ it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
-Rust round-trips it; Swift decodes the same plan directly and from `lf desktop view list --watch` in `watch_frames.json`.
+Rust round-trips it; Swift decodes the same plan directly and from `lf desktop view list --subscribe` in `subscribe_frames.json`.
 
 `pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
 members, two Shell tabs, two Files tabs, selected-tab identities and file-draft

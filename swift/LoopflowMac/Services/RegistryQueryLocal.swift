@@ -1,4 +1,4 @@
-// Native Work reads, writes and watches use the local server.
+// Native Work reads, writes and subscriptions use the local server.
 // Execution launches and remote file streams retain their CLI transports.
 
 #if os(macOS)
@@ -25,7 +25,7 @@ enum RegistryQueryLocal {
                 decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
             return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
         }.value
-    }, watchRead: { args, cwd in
+    }, subscribeRead: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
@@ -35,10 +35,10 @@ enum RegistryQueryLocal {
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
                 decode: { $0 })
-            return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
+            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
-    }, watchWork: {
-        try WorkWatches.observe { ServerClient.watch($0) }
+    }, subscribeWork: {
+        try WorkSubscriptions.observe { ServerClient.subscribe($0) }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

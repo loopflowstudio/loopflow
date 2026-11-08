@@ -243,17 +243,17 @@ fn task_list_query_finds_open_tasks_only() {
 }
 
 #[test]
-fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
+fn task_list_subscribe_sends_a_frame_only_when_the_list_changes() {
     let built = Built::new("lifecycle");
     let issue = built.issue_named("Standalone fix");
-    let mut watch = built
-        .command(&["task", "list", "--watch"])
+    let mut subscription = built
+        .command(&["task", "list", "--subscribe"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let stdout = watch.stdout.take().unwrap();
+    let stdout = subscription.stdout.take().unwrap();
     let (sender, frames) = std::sync::mpsc::channel::<Value>();
     std::thread::spawn(move || {
         for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)) {
@@ -303,35 +303,35 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
     assert_eq!(title, Some("Standalone fix, renamed".into()), "{renamed}");
 
     // A request replaces the arguments and is always answered.
-    let stdin = watch.stdin.as_mut().unwrap();
+    let stdin = subscription.stdin.as_mut().unwrap();
     std::io::Write::write_all(stdin, b"{\"id\":1,\"args\":{\"query\":\"standalone\"}}\n").unwrap();
     let narrowed = next();
     assert_eq!(narrowed["answers"], 1);
     assert_eq!(narrowed["body"].as_array().unwrap().len(), 2, "{narrowed}");
 
-    drop(watch.stdin.take());
-    assert!(watch.wait().unwrap().success());
+    drop(subscription.stdin.take());
+    assert!(subscription.wait().unwrap().success());
 }
 
 #[test]
-fn session_list_task_status_and_top_watch_answer_requests() {
+fn session_list_task_status_and_top_subscribe_answer_requests() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     for args in [
-        vec!["session", "list", "--all", "--watch"],
-        vec!["task", "status", issue.as_str(), "--watch"],
-        vec!["monitor", "ps", "--json", "--watch"],
+        vec!["session", "list", "--all", "--subscribe"],
+        vec!["task", "status", issue.as_str(), "--subscribe"],
+        vec!["monitor", "ps", "--json", "--subscribe"],
     ] {
-        let mut watch = built
+        let mut subscription = built
             .command(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        std::io::Write::write_all(watch.stdin.as_mut().unwrap(), b"{\"id\":7}\n").unwrap();
-        drop(watch.stdin.take());
-        let output = success(watch.wait_with_output().unwrap());
+        std::io::Write::write_all(subscription.stdin.as_mut().unwrap(), b"{\"id\":7}\n").unwrap();
+        drop(subscription.stdin.take());
+        let output = success(subscription.wait_with_output().unwrap());
         let frames: Vec<Value> = output
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())

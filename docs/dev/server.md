@@ -43,7 +43,7 @@ owners. An API connection introduces no new retention authority.
 Desktop ── private Unix socket ── server
 phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 
-server read/watch ─ shared Rust readers
+server read/subscription ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
 server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
@@ -61,7 +61,7 @@ attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
-Every shared native Work read, write and watch uses this server. Desktop
+Every shared native Work read, write and subscription uses this server. Desktop
 links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
 the same shared Rust functions, which return typed values: `Write::run`
 (`lf/commands/write.rs`) returns the value as the response, and the CLI
@@ -144,7 +144,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `config.theme` | none; Appearance's theme file | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
-| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--watch`), `reviews` |
+| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
 | `account.list`, `.route` | `lf account [<provider>]`, `lf account route` | read; `engine::account::list`, `route` |
 | `account.connect`, `.disconnect`, `.set`, `.token`, `.use`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `token`, `lf account <provider> use`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `token`, `activate`, `redeem_reset` (none prompts) |

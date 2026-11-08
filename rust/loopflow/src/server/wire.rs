@@ -4,7 +4,7 @@
 //! carries one JSON object per line.
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, watch::WatchFrame, write::Write};
+use crate::lf::commands::{read::Read, subscribe::SubscriptionFrame, write::Write};
 use crate::server::schema::Untyped;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -34,13 +34,13 @@ pub enum ClientMessage {
     Attach { ticket: String },
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
     Request { id: String, operation: Operation },
-    /// A read with a watch; answers a null `response`, then `reading` messages
+    /// A read with a subscription; answers a null `response`, then `reading` messages
     /// until cancelled. The id follows the same rules as a request's.
-    Watch { id: String, operation: Read },
-    /// Ask the live watch `id` for a reading now; the next reading's
+    Subscribe { id: String, operation: Read },
+    /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     Checkpoint { id: String, checkpoint: u64 },
-    /// Forget a request's answer, or end a watch.
+    /// Forget a request's answer, or end a subscription.
     Cancel { id: String },
 }
 
@@ -111,7 +111,7 @@ pub enum ServerMessage {
     Welcome(Welcome),
     Status(Status),
     /// What the request returned: the value its operation's `x-result` names,
-    /// null once a watch is confirmed. `trace_id` correlates the server's
+    /// null once a subscription is confirmed. `trace_id` correlates the server's
     /// diagnostics for it.
     Response {
         id: String,
@@ -123,18 +123,18 @@ pub enum ServerMessage {
     Bridged {
         owner_lf_process_id: LfProcessId,
     },
-    /// One watch line; its `body` has the shape of the read's `x-result`.
+    /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
         id: String,
-        #[schemars(with = "WatchFrame<'static, Untyped>")]
+        #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
-    /// The watch's last reading was its answer (`task.wait` reached
+    /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     Ended {
         id: String,
     },
-    /// `id` is null before a request exists. An error for a watch ends it.
+    /// `id` is null before a request exists. An error for a subscription ends it.
     Error {
         id: Option<String>,
         code: ErrorCode,
@@ -182,7 +182,7 @@ pub struct ConnectedClient {
     pub client: ClientIdentity,
     /// RFC 3339.
     pub connected_at: String,
-    /// Requests the connection has sent, watches included.
+    /// Requests the connection has sent, subscriptions included.
     pub requests: u64,
 }
 
@@ -214,7 +214,7 @@ mod tests {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/hello.json"),
             include_str!("../../../../tests/fixtures/dto/server/status_request.json"),
-            include_str!("../../../../tests/fixtures/dto/server/watch.json"),
+            include_str!("../../../../tests/fixtures/dto/server/subscribe.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkpoint.json"),
             include_str!("../../../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../../../tests/fixtures/dto/server/attach.json"),

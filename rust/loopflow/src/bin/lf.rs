@@ -774,8 +774,12 @@ fn print_task_control(
 fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyhow::Result<()> {
     use loopflow::lf::RepoCommand;
     match cmd {
-        RepoCommand::Plan { cmd, json, watch } => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *watch)
+        RepoCommand::Plan {
+            cmd,
+            json,
+            subscribe,
+        } => in_directory_runtime(args, |_| {
+            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *subscribe)
         }),
         RepoCommand::Path => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, true, false)
@@ -983,10 +987,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             since,
             after,
             limit,
-            watch,
+            subscribe,
         } => {
             use loopflow::lf::commands::waves::{
-                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs,
+                list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
             let args = TaskListArgs {
                 query: query.clone(),
@@ -994,8 +998,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 project: project.clone(),
                 state: state.clone(),
             };
-            if *watch {
-                watch_tasks(repo, args)
+            if *subscribe {
+                subscribe_tasks(repo, args)
             } else if *closed {
                 list_closed_tasks(
                     repo,
@@ -1011,9 +1015,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
-        TaskCommand::Show { issue, watch, .. } => {
-            loopflow::lf::commands::desktop::task_pane(issue, *watch)
-        }
+        TaskCommand::Show {
+            issue, subscribe, ..
+        } => loopflow::lf::commands::desktop::task_pane(issue, *subscribe),
         TaskCommand::Context { issue, json } => {
             loopflow::lf::commands::usage::run(true, *json, 0, None, None, Some(issue), None)
         }
@@ -1066,16 +1070,20 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::View { issue, once } => {
             loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
         }
-        TaskCommand::Status { issue, json, watch } => {
+        TaskCommand::Status {
+            issue,
+            json,
+            subscribe,
+        } => {
             let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
-            if *watch {
+            if *subscribe {
                 let task = status
                     .task
-                    .context("only a registered Task can be watched")?;
-                return loopflow::lf::commands::waves::watch_task_status(
+                    .context("only a registered Task can be subscribed")?;
+                return loopflow::lf::commands::waves::subscribe_task_status(
                     repo,
                     task.identifier,
-                    loopflow::lf::commands::watch::Transport::Stdio,
+                    loopflow::lf::commands::subscribe::Transport::Stdio,
                 )
                 .map(drop);
             }
@@ -2914,10 +2922,13 @@ fn execute_command(
             cmd: WaveCommand::List { json, all },
         }) => loopflow::lf::commands::waves::ls(*json, *all),
         Some(Commands::Wave {
-            cmd: WaveCommand::Status {
-                wave, watch: true, ..
-            },
-        }) => loopflow::lf::commands::waves::watch_status(wave.clone()),
+            cmd:
+                WaveCommand::Status {
+                    wave,
+                    subscribe: true,
+                    ..
+                },
+        }) => loopflow::lf::commands::waves::subscribe_status(wave.clone()),
         Some(Commands::Wave {
             cmd: WaveCommand::Status { wave, json, .. },
         }) => loopflow::lf::commands::waves::status(wave.as_deref(), *json, true),
@@ -2945,17 +2956,17 @@ fn execute_command(
                     wave,
                     task,
                     all,
-                    watch,
+                    subscribe,
                     ..
                 },
         }) => {
-            if *watch {
-                loopflow::lf::commands::waves::watch_show(
+            if *subscribe {
+                loopflow::lf::commands::waves::subscribe_show(
                     std::env::current_dir()?,
                     wave.clone(),
                     task.clone(),
                     *all,
-                    loopflow::lf::commands::watch::Transport::Stdio,
+                    loopflow::lf::commands::subscribe::Transport::Stdio,
                 )
                 .map(drop)
             } else {
@@ -2985,18 +2996,18 @@ fn execute_command(
                     wave,
                     task,
                     all,
-                    watch: true,
+                    subscribe: true,
                     ..
                 },
         }) => std::env::current_dir()
             .map_err(anyhow::Error::from)
             .and_then(|directory| {
-                loopflow::lf::commands::waves::watch_show(
+                loopflow::lf::commands::waves::subscribe_show(
                     directory,
                     wave.clone(),
                     task.clone(),
                     *all,
-                    loopflow::lf::commands::watch::Transport::Stdio,
+                    loopflow::lf::commands::subscribe::Transport::Stdio,
                 )
             })
             .map(drop),

@@ -3470,14 +3470,14 @@ hook("UserPromptSubmit")
 hook("Stop", agent_id="child")
 if background:
     hook("Stop", background_tasks=[dict(id="watch", type="shell", status="running")], session_crons=[])
-    # Missing registry evidence and child completion cannot settle that watch.
+    # Missing registry evidence and child completion cannot settle that subscription.
     hook("Stop")
     hook("Stop", agent_id="child", background_tasks=[], session_crons=[])
 (home / (name + "-started")).write_text("started")
 while not (home / (name + "-settle")).exists():
     time.sleep(0.05)
 if background:
-    # The shell watch finished, but a scheduled wakeup still owns work.
+    # The shell subscription finished, but a scheduled wakeup still owns work.
     hook("Stop", background_tasks=[], session_crons=[dict(id="poll", schedule="* * * * *", recurring=True)])
     (home / (name + "-scheduled")).write_text("scheduled")
     while not (home / (name + "-unschedule")).exists():
@@ -5915,23 +5915,25 @@ fn an_attach_ticket_opens_one_bridge_from_any_connection_of_its_user() {
 }
 
 #[test]
-fn server_watches_refresh_work_and_resolve_primary_session() {
+fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
     let query = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
-    let mut watch = service.connect();
-    let tasks = watch.watch(serde_json::from_value(query).unwrap()).unwrap();
-    let initial = watch.reading(&tasks).unwrap().expect("a reading");
+    let mut subscription = service.connect();
+    let tasks = subscription
+        .subscribe(serde_json::from_value(query).unwrap())
+        .unwrap();
+    let initial = subscription.reading(&tasks).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
-    watch.checkpoint(&tasks, 17).unwrap();
-    let confirmed = watch.reading(&tasks).unwrap().expect("a reading");
+    subscription.checkpoint(&tasks, 17).unwrap();
+    let confirmed = subscription.reading(&tasks).unwrap().expect("a reading");
     assert_eq!(confirmed["answers"], 17);
 
     // Write parity, concurrent traces and no request Process rows are covered
-    // by served_reads. This proof owns live watch invalidation.
+    // by served_reads. This proof owns live subscription invalidation.
     // A changed Task reading uses the shared invalidation path, with no polling
     // projection or shadow Task store in the service.
     let registered = support::register_task_with_pr(
@@ -5946,8 +5948,8 @@ fn server_watches_refresh_work_and_resolve_primary_session() {
         rusqlite::params![registered.task.id.as_str(), session],
     )
     .unwrap();
-    // The read shares the watch's connection.
-    let socket_plan = watch
+    // The read shares the subscription's connection.
+    let socket_plan = subscription
         .request(
             serde_json::from_value(json!({"kind":"desktop.view.get","directory":fixture.repo.path(),"expression":"task:INF-123"}))
                 .unwrap(),
@@ -5966,15 +5968,15 @@ fn server_watches_refresh_work_and_resolve_primary_session() {
     let cli_plan: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(socket_plan, cli_plan);
     assert_eq!(socket_plan["contents"][0]["primary_session"], session);
-    watch.checkpoint(&tasks, 18).unwrap();
+    subscription.checkpoint(&tasks, 18).unwrap();
     loop {
-        let changed = watch.reading(&tasks).unwrap().expect("a reading");
+        let changed = subscription.reading(&tasks).unwrap().expect("a reading");
         if changed["answers"] == 18 {
             assert!(changed["body"].to_string().contains("INF-123"), "{changed}");
             break;
         }
     }
-    drop(watch);
+    drop(subscription);
 }
 
 #[test]

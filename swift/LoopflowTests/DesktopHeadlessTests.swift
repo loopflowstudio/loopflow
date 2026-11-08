@@ -162,7 +162,7 @@ struct DesktopHeadlessTests {
 
         let calls = Recorder()
         let feed = Feed()
-        let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let model = WorkModel(query: RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             await calls.add(args)
             return ""
         })
@@ -235,7 +235,7 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
-        // The watch updates normally; command confirmation is separate.
+        // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.startTask(nil, from: "demo", task: task) }
         try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["graph"] as? [String: Any])

@@ -8,10 +8,10 @@ use crate::lf::RepoPlanCommand as PlanCommand;
 use crate::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
-pub fn run(cmd: Option<&PlanCommand>, json: bool, watch: bool) -> Result<()> {
+pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
-    if cmd.is_none() && watch {
-        return watch_status(&repo, super::watch::Transport::Stdio).map(drop);
+    if cmd.is_none() && subscribe {
+        return subscribe_status(&repo, super::subscribe::Transport::Stdio).map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd, json))
@@ -103,17 +103,17 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
 /// Transport selection lives in config, so it changes without a store write.
 const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// `lf planning status --watch`: `lf planning status --json` now and each time
-/// it changes. The watch reads stored status; `lf wave status --sync` and
+/// `lf planning status --subscribe`: `lf planning status --json` now and each time
+/// it changes. The subscription reads stored status; `lf wave status --sync` and
 /// foreground providers exchange planning.
-pub(crate) fn watch_status(
+pub(crate) fn subscribe_status(
     repo: &Path,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Watch>> {
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
-    super::watch::start(
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(STATUS_CLOCK),
+        super::subscribe::Wake::every(STATUS_CLOCK),
         move |store, ()| {
             let repo_key = repo_key.clone();
             async move { Ok(status(store.as_deref(), &repo_key).await?.report()) }
@@ -182,7 +182,7 @@ async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
 }
 
 /// The command binds the configured destination first, so a changed
-/// selection shows at once; the in-app read and the watch show stored status.
+/// selection shows at once; the in-app read and the subscription show stored status.
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     crate::ops::planning_sync::configured_destination(store, repo).await?;
     let status = status(Some(store), repo).await?;

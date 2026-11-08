@@ -56,7 +56,7 @@ pub enum WorkActivityFact {
     },
 }
 
-/// What `lf history` reads; the flags of the same name, which a `--watch`
+/// What `lf history` reads; the flags of the same name, which a `--subscribe`
 /// request can replace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -92,15 +92,15 @@ impl HistoryWindow {
     }
 }
 
-/// `lf history --watch`. History is committed facts only; the clock just ages
+/// `lf history --subscribe`. History is committed facts only; the clock just ages
 /// the window.
-pub(crate) fn watch(
+pub(crate) fn subscribe(
     window: HistoryWindow,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Watch>> {
-    super::watch::start(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         window,
-        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
     )
@@ -114,8 +114,8 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         project: options.project.clone(),
         task: options.task.clone(),
     };
-    if options.watch {
-        return watch(window, super::watch::Transport::Stdio).map(drop);
+    if options.subscribe {
+        return subscribe(window, super::subscribe::Transport::Stdio).map(drop);
     }
     let snapshot = snapshot(&window)?;
     if options.json {

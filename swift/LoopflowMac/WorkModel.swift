@@ -1161,9 +1161,9 @@ final class WorkModel {
             }
         }
     }
-    /// The latest row from a Task's own watch, current after the Task leaves
+    /// The latest row from a Task's own subscription, current after the Task leaves
     /// the plan (completed, canceled).
-    private var watchedTaskRow: RoadmapTask?
+    private var subscribedTaskRow: RoadmapTask?
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1371,7 +1371,7 @@ final class WorkModel {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
     }
 
-    /// One Wave's detail, from the planning reading the window already watches.
+    /// One Wave's detail, from the planning reading the window already subscriptions.
     func waveDetail(id: String) -> StreamedWaveDetail? {
         guard !roadmap.isLoading else { return nil }
         let wave = roadmap.value?.waves.first { $0.wave.id == id }
@@ -1466,7 +1466,7 @@ final class WorkModel {
         while !Task.isCancelled {
             var observation: WorkObservation?
             do {
-                let opened = try await query.watchWork()
+                let opened = try await query.subscribeWork()
                 observation = opened
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
@@ -1549,7 +1549,7 @@ final class WorkModel {
         }
     }
 
-    /// Confirmation follows the command's commit. Watches choose what
+    /// Confirmation follows the command's commit. Subscriptions choose what
     /// to read; an unrelated frame cannot confirm a saved draft.
     func confirmWorkUpdate(after home: String? = nil) async throws {
         if let home, home != workDataDirectory {
@@ -1557,7 +1557,7 @@ final class WorkModel {
         }
         guard workObservation != nil else {
             if query.streamsWork { throw RegistryQueryError("Update accepted; Work observation is unavailable") }
-            // One-shot transports have no watch to deliver their writes.
+            // One-shot transports have no subscription to deliver their writes.
             await refresh()
             if let reason = roadmap.errorMessage { throw RegistryQueryError(reason) }
             return
@@ -1654,8 +1654,8 @@ final class WorkModel {
             }
         case .task(let body):
             // A frame about its own Task stays true after the selection moves on.
-            if let body, let row = body.row, row.task.identifier == body.task, watchedTaskRow != row {
-                watchedTaskRow = row
+            if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
+                subscribedTaskRow = row
             }
             guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
@@ -1756,7 +1756,7 @@ final class WorkModel {
         graphProcesses = [:]
     }
 
-    /// Explicit Retry/recovery, or a one-shot transport without watches.
+    /// Explicit Retry/recovery, or a one-shot transport without subscriptions.
     func refresh() async {
         if workObservation != nil {
             // Frames read before this request may predate the caller's write.
@@ -2300,7 +2300,7 @@ final class WorkModel {
         return URL(fileURLWithPath: path)
     }
 
-    /// Run the Task's Workflow through `lf task run`, then confirm its watch
+    /// Run the Task's Workflow through `lf task run`, then confirm its subscription
     /// update. `graph` takes up that graph; `from` starts at that step, and an
     /// interactive `from` only puts the Task there. Without either, Rust continues
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
@@ -2359,7 +2359,7 @@ final class WorkModel {
         navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)
     }
 
-    /// Ship the Task, then confirm its watch update; it moves to Shipping
+    /// Ship the Task, then confirm its subscription update; it moves to Shipping
     /// and the window's ship toast offers Undo.
     func shipTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
@@ -2671,7 +2671,7 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let row = watchedTaskRow, row.id == id || row.runtime?.workId == id {
+        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id {
             return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }

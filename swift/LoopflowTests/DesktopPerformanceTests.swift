@@ -81,8 +81,8 @@ struct DesktopPerformanceTests {
         let store = PerformanceStore(database: home + "/loopflow.db")
         let server = LocalServerFixture(try BuiltLf(home: URL(fileURLWithPath: home)))
         let location = server.location()
-        let query = RegistryQuery(watchWork: {
-            try WorkWatches.observe { ServerClient.watch($0, location: location) }
+        let query = RegistryQuery(subscribeWork: {
+            try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -1015,7 +1015,7 @@ struct DesktopPerformanceTests {
         let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("graph_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
-        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await reader.open() }) { args, _ in
             await planning.count(args)
             switch args.first {
             case "machine" where args.dropFirst().first == "self": return "{\"id\":\"\(fixtureMachineId)\"}"
@@ -1140,7 +1140,7 @@ private final class PerformanceReader {
             """#)
     }
 
-    /// One watch line, as `lf … --json --watch` prints it for this scope.
+    /// One subscription line, as `lf … --json --subscribe` prints it for this scope.
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
         let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
         sequence += 1

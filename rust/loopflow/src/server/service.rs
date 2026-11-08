@@ -22,7 +22,7 @@ use super::wire::{
 };
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, watch::Watch};
+use crate::lf::commands::{read::Read, subscribe::Subscription};
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -30,7 +30,7 @@ const FIRST_MESSAGE: Duration = Duration::from_secs(5);
 const SEND: Duration = Duration::from_secs(5);
 /// Answers waiting for one connection's socket.
 const QUEUE: usize = 64;
-/// Checkpoints one watch may have waiting.
+/// Checkpoints one subscription may have waiting.
 const CHECKPOINTS: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -426,7 +426,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
     Ok(())
 }
 
-/// A request's task and, for a watch, where its checkpoints go.
+/// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
     checkpoints: Option<mpsc::Sender<u64>>,
@@ -453,7 +453,7 @@ async fn session(
                     Ok(message) => message,
                     Err(parse) => match refused_operation(&line) {
                         // A well-formed request this build cannot run fails alone,
-                        // so a newer client keeps its other requests and watches.
+                        // so a newer client keeps its other requests and subscriptions.
                         Some((id, refusal)) => {
                             send(&mut lines, &ServerMessage::error(Some(id), refusal)).await?;
                             continue;
@@ -467,18 +467,18 @@ async fn session(
                 };
                 let (id, admission) = match message {
                     ClientMessage::Request { id, operation } => (id, Admission::Request(operation)),
-                    ClientMessage::Watch { id, operation } => (id, Admission::Watch(operation)),
+                    ClientMessage::Subscribe { id, operation } => (id, Admission::Subscribe(operation)),
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
                                 if checkpoints.try_send(checkpoint).is_err() {
-                                    // Ending the watch tells the client to reopen it
+                                    // Ending the subscription tells the client to reopen it
                                     // for a complete reading rather than drop a checkpoint.
                                     if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "watch fell behind its checkpoints; watch again")).await?;
+                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
                                 }
                             }
-                            None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live watch has this ID").with(serde_json::json!({ "id": id })))).await?,
+                            None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
                         }
                         continue;
                     }
@@ -529,9 +529,9 @@ async fn session(
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
                         continue;
                     }
-                    Admission::Watch(query) => {
+                    Admission::Subscribe(query) => {
                         let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(watching(id.clone(), query, outgoing.clone(), inbox));
+                        let task = tasks.spawn(subscribing(id.clone(), query, outgoing.clone(), inbox));
                         Inflight { task, checkpoints: Some(checkpoints) }
                     }
                     Admission::Request(operation) => {
@@ -558,10 +558,10 @@ async fn session(
     }
 }
 
-/// What a request or watch asks the session to start.
+/// What a request or subscription asks the session to start.
 enum Admission {
     Request(Operation),
-    Watch(Read),
+    Subscribe(Read),
 }
 
 /// The owner `session.attach` reaches: the Session's current owner Process,
@@ -609,13 +609,13 @@ async fn attached_owner(
     }
 }
 
-/// A `request` or `watch` whose envelope parses but whose operation this
+/// A `request` or `subscription` whose envelope parses but whose operation this
 /// build does not accept: its id and why. An unknown kind is `invalid` with
 /// `data.kind`; a known kind names the argument it refused.
 fn refused_operation(line: &str) -> Option<(String, Error)> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let kind_of = value.get("type")?.as_str()?;
-    if !matches!(kind_of, "request" | "watch") {
+    if !matches!(kind_of, "request" | "subscribe") {
         return None;
     }
     let id = value.get("id")?.as_str()?.to_owned();
@@ -624,14 +624,14 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
     }
     let operation = value.get("operation")?;
     let kind = operation.get("kind")?.as_str()?.to_owned();
-    // A `watch` reaches here for any kind that is not a read.
-    if kind_of == "watch"
+    // A `subscription` reaches here for any kind that is not a read.
+    if kind_of == "subscribe"
         && (serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).is_ok()
             || serde_json::from_value::<ServerOperation>(operation.clone()).is_ok())
     {
         let refusal = Error::new(
             ErrorCode::Invalid,
-            format!("`{kind}` is not a read, so it has no watch; send it as a request"),
+            format!("`{kind}` is not a read, so it has no subscription; send it as a request"),
         );
         return Some((id, refusal.with(serde_json::json!({ "kind": kind }))));
     }
@@ -768,14 +768,14 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-async fn watching(
+async fn subscribing(
     id: String,
     query: Read,
     outgoing: mpsc::Sender<ServerMessage>,
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
-    if let Err(failure) = watch(&id, query, &outgoing, checkpoints).await {
-        // The error ends the watch for the client; a watch that
+    if let Err(failure) = subscribe(&id, query, &outgoing, checkpoints).await {
+        // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
         let _ = outgoing
             .send(ServerMessage::error(Some(id.clone()), unavailable(failure)))
@@ -784,26 +784,28 @@ async fn watching(
     id
 }
 
-/// The shared watch owns a blocking runtime, which cannot be dropped on an
-/// async worker. However its task ends, the watch leaves through a blocking one.
-struct Held(Option<Arc<Watch>>);
+/// The shared subscription owns a blocking runtime, which cannot be dropped on an
+/// async worker. However its task ends, the subscription leaves through a blocking one.
+struct Held(Option<Arc<Subscription>>);
 
 impl std::ops::Deref for Held {
-    type Target = Arc<Watch>;
+    type Target = Arc<Subscription>;
 
-    fn deref(&self) -> &Arc<Watch> {
-        self.0.as_ref().expect("the watch is held until drop")
+    fn deref(&self) -> &Arc<Subscription> {
+        self.0
+            .as_ref()
+            .expect("the subscription is held until drop")
     }
 }
 
 impl Drop for Held {
     fn drop(&mut self) {
-        let watch = self.0.take();
-        tokio::task::spawn_blocking(move || drop(watch));
+        let subscription = self.0.take();
+        tokio::task::spawn_blocking(move || drop(subscription));
     }
 }
 
-async fn watch(
+async fn subscribe(
     id: &str,
     query: Read,
     outgoing: &mpsc::Sender<ServerMessage>,
@@ -812,9 +814,9 @@ async fn watch(
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
-    let watch = Held(Some(Arc::new(
+    let subscription = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.watch(move || wake.notify_one()))
+            crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
         })
         .await??,
     )));
@@ -831,10 +833,10 @@ async fn watch(
         tokio::select! {
             checkpoint = checkpoints.recv() => {
                 let Some(checkpoint) = checkpoint else { return Ok(()) };
-                watch.checkpoint(checkpoint);
+                subscription.checkpoint(checkpoint);
             }
             () = notify.notified() => {
-                let pull = Arc::clone(&watch);
+                let pull = Arc::clone(&subscription);
                 let frame = tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| pull.pull())).await?;
                 let mut reason = None;
                 if let Some(frame) = frame {
@@ -846,8 +848,8 @@ async fn watch(
                         return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
                     }
                 }
-                if watch.ended() {
-                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the watch ended".into()));
+                if subscription.ended() {
+                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
                 }
             }
         }
@@ -1141,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_ends_a_watch_while_a_sibling_request_answers() {
+    fn cancel_ends_a_subscription_while_a_sibling_request_answers() {
         with_empty_home(async {
             let mut client = Client::connect();
             assert!(matches!(
@@ -1150,7 +1152,7 @@ mod tests {
             ));
             // Live processes need no Machine registry: an empty activity reading.
             client
-                .send(&ClientMessage::Watch {
+                .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::MonitorPs,
                 })
@@ -1188,7 +1190,7 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "after"
             ));
-            // A cancelled watch takes no more checkpoints.
+            // A cancelled subscription takes no more checkpoints.
             client
                 .send(&ClientMessage::Checkpoint {
                     id: "ps".into(),
@@ -1254,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn watching_to_a_write_says_it_has_no_watch() {
+    fn subscribing_to_a_write_says_it_has_no_subscription() {
         with_empty_home(async {
             let mut client = Client::connect();
             assert!(matches!(
@@ -1263,7 +1265,7 @@ mod tests {
             ));
             client
                 .writer
-                .write_all(b"{\"type\":\"watch\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
+                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {
@@ -1274,7 +1276,7 @@ mod tests {
             };
             assert_eq!(id.as_deref(), Some("w"));
             assert_eq!(code, ErrorCode::Invalid);
-            assert!(message.contains("no watch"), "{message}");
+            assert!(message.contains("no subscription"), "{message}");
         });
     }
 

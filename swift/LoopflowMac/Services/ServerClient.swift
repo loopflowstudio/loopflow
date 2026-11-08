@@ -35,21 +35,21 @@ enum ServerClient {
         return try await link.request(operation)
     }
 
-    /// A watch on the location's connection; `send` carries checkpoints,
-    /// `cancel` ends it. The watch fails when the server ends it or disconnects.
-    static func watch(_ query: ServedRead, location: ServerLocation = .shared) -> LineWatch {
+    /// A subscription on the location's connection; `send` carries checkpoints,
+    /// `cancel` ends it. The subscription fails when the server ends it or disconnects.
+    static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
         // Never drop a checkpoint silently. A slow consumer reconnects with a
         // fresh reading, using the existing WorkObservation recovery path.
         let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
-        let watch = ServerWatch(continuation)
+        let subscription = ServerSubscription(continuation)
         Task {
             do {
                 try Task.checkCancellation()
                 let link = try await links.link(for: location)
-                try watch.start(on: link, query: query)
-            } catch { watch.finish(throwing: error) }
+                try subscription.start(on: link, query: query)
+            } catch { subscription.finish(throwing: error) }
         }
-        return LineWatch(lines: lines, send: watch.send, cancel: watch.cancel)
+        return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
     }
 
     private static let links = ServerLinks()
@@ -139,16 +139,16 @@ actor ServerLocation {
     }
 }
 
-/// One server connection: hello and welcome once, then requests, watches
+/// One server connection: hello and welcome once, then requests, subscriptions
 /// and cancels by id. One reader thread demultiplexes answers; writes serialize.
-/// Losing the connection fails every pending request and watch.
+/// Losing the connection fails every pending request and subscription.
 final class ServerLink: @unchecked Sendable {
     let welcome: ServerWelcome
     private let fd: Int32
     private let state = NSLock()
     private let writes = NSLock()
     private var pending: [String: CheckedContinuation<JSONValue, any Error>] = [:]
-    private var watches: [String: ServerWatch] = [:]
+    private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
     private var unansweredReads = 0
     private var reader: LineReader
@@ -200,7 +200,7 @@ final class ServerLink: @unchecked Sendable {
 
     /// `request` within `deadline`. The server may hang on one read and serve
     /// the rest; only `stalledReads` in a row end the connection, which fails
-    /// its watches too, so a stalled server shows as unavailable, not as current.
+    /// its subscriptions too, so a stalled server shows as unavailable, not as current.
     func read(_ operation: ServerOperation, deadline: Duration) async throws -> JSONValue {
         struct Expired: Error {}
         do {
@@ -250,22 +250,22 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    fileprivate func watch(_ watch: ServerWatch, query: ServedRead) throws {
+    fileprivate func subscribe(_ subscription: ServerSubscription, query: ServedRead) throws {
         let refused: (any Error)? = state.withLock {
             if let failure { return failure }
-            watches[watch.id] = watch
+            subscriptions[subscription.id] = subscription
             return nil
         }
         if let refused { throw refused }
-        do { try send(.watch(id: watch.id, operation: query)) } catch {
-            _ = state.withLock { watches.removeValue(forKey: watch.id) }
+        do { try send(.subscribe(id: subscription.id, operation: query)) } catch {
+            _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }
     }
 
-    fileprivate func unwatch(_ id: String) {
+    fileprivate func unsubscribe(_ id: String) {
         let alive = state.withLock {
-            watches.removeValue(forKey: id)
+            subscriptions.removeValue(forKey: id)
             return failure == nil
         }
         if alive { try? send(.cancel(id: id)) }
@@ -296,16 +296,16 @@ final class ServerLink: @unchecked Sendable {
         switch try JSONDecoder().decode(ServerMessage.self, from: line) {
         case .response(let id, _, let result):
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
-            // A null result confirms a registered watch; anything else is
+            // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
         case .reading(let id, let frame):
-            state.withLock { watches[id] }?.receive(frame)
+            state.withLock { subscriptions[id] }?.receive(frame)
         case .ended(let id):
-            state.withLock { watches.removeValue(forKey: id) }?.end()
+            state.withLock { subscriptions.removeValue(forKey: id) }?.end()
         case .error(let id?, let code, let message, _):
             let refusal = RegistryQueryError("\(code): \(message)")
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: refusal); return }
-            state.withLock { watches.removeValue(forKey: id) }?.finish(throwing: refusal)
+            state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: refusal)
         case .error(nil, let code, let message, _):
             throw RegistryQueryError("\(code): \(message)")
         case .welcome, .status, .bridged:
@@ -315,13 +315,13 @@ final class ServerLink: @unchecked Sendable {
     }
 
     private func fail(_ error: any Error) {
-        let (waiting, watching) = state.withLock {
+        let (waiting, subscribing) = state.withLock {
             failure = error
-            defer { pending = [:]; watches = [:] }
-            return (Array(pending.values), Array(watches.values))
+            defer { pending = [:]; subscriptions = [:] }
+            return (Array(pending.values), Array(subscriptions.values))
         }
         for continuation in waiting { continuation.resume(throwing: RegistryQueryError(Self.disconnected)) }
-        for watch in watching { watch.finish(throwing: error) }
+        for subscription in subscribing { subscription.finish(throwing: error) }
         writes.withLock { Darwin.close(fd) }
     }
 
@@ -419,8 +419,8 @@ private struct LineReader {
     }
 }
 
-/// One watch's frames; checkpoints before the connection is ready wait.
-private final class ServerWatch: @unchecked Sendable {
+/// One subscription's frames; checkpoints before the connection is ready wait.
+private final class ServerSubscription: @unchecked Sendable {
     let id = UUID().uuidString
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
@@ -435,26 +435,26 @@ private final class ServerWatch: @unchecked Sendable {
 
     func start(on link: ServerLink, query: ServedRead) throws {
         guard !lock.withLock({ stopped }) else { return }
-        try link.watch(self, query: query)
+        try link.subscribe(self, query: query)
         let queued: [UInt64]? = lock.withLock {
             guard !stopped else { return nil }
             self.link = link
             defer { self.queued = [] }
             return self.queued
         }
-        // Stopped while watching: `stop` found no link to cancel through.
-        guard let queued else { link.unwatch(id); return }
+        // Stopped while subscribing: `stop` found no link to cancel through.
+        guard let queued else { link.unsubscribe(id); return }
         for checkpoint in queued {
             do { try link.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error); return }
         }
     }
 
-    /// A watch's stdin line, `{"id": n}`: a checkpoint. A watch's
-    /// arguments are fixed; new arguments are a new watch.
+    /// A subscription's stdin line, `{"id": n}`: a checkpoint. A subscription's
+    /// arguments are fixed; new arguments are a new subscription.
     func send(_ line: Data) {
         let checkpoint: UInt64
         do { checkpoint = try JSONDecoder().decode(Checkpoint.self, from: line).id } catch {
-            finish(throwing: RegistryQueryError("Invalid watch request: \(error.localizedDescription)"))
+            finish(throwing: RegistryQueryError("Invalid subscription request: \(error.localizedDescription)"))
             return
         }
         let (target, overflow): (ServerLink?, Bool) = lock.withLock {
@@ -477,7 +477,7 @@ private final class ServerWatch: @unchecked Sendable {
         init(from decoder: Decoder) throws {
             let box = try decoder.container(keyedBy: Keys.self)
             guard box.allKeys == [.id] else {
-                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a watch takes only checkpoints"))
+                throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
             }
             id = try box.decode(UInt64.self, forKey: .id)
         }
@@ -488,15 +488,15 @@ private final class ServerWatch: @unchecked Sendable {
     func receive(_ frame: JSONValue) {
         do {
             if case .dropped = continuation.yield(try JSONEncoder().encode(frame)) {
-                finish(throwing: RegistryQueryError("Server watch fell behind; reconnect for current Work"))
+                finish(throwing: RegistryQueryError("Server subscription fell behind; reconnect for current Work"))
             }
         } catch { finish(throwing: error) }
     }
 
-    /// The server ended this watch, or the connection failed.
+    /// The server ended this subscription, or the connection failed.
     func finish(throwing error: any Error) { stop(error) }
 
-    /// The server sent this watch's last reading.
+    /// The server sent this subscription's last reading.
     func end() { stop(nil) }
 
     func cancel() async { stop(nil) }
@@ -508,7 +508,7 @@ private final class ServerWatch: @unchecked Sendable {
             return (!stopped, self.link)
         }
         guard first else { return }
-        link?.unwatch(id)
+        link?.unsubscribe(id)
         continuation.finish(throwing: error)
     }
 }

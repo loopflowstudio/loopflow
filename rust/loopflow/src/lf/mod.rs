@@ -666,7 +666,7 @@ pub enum Commands {
         #[arg(long, requires = "lifeline")]
         provider_pid: Option<u32>,
     },
-    /// Watch a Codex conversation beside its native client. Started by the
+    /// Subscription a Codex conversation beside its native client. Started by the
     /// launcher, which sends the launch on stdin.
     #[command(name = "__codex-observe", hide = true)]
     CodexObserve,
@@ -688,8 +688,8 @@ pub enum RepoCommand {
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
+        #[arg(short = 's', long, requires = "json")]
+        subscribe: bool,
     },
     /// Print the selected repository's checkout on this Machine
     Path,
@@ -1005,8 +1005,8 @@ pub enum DesktopViewCommand {
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes
-        #[arg(long)]
-        watch: bool,
+        #[arg(short = 's', long)]
+        subscribe: bool,
     },
     /// Print what a view shows as JSON, without opening Desktop or starting a provider
     Show {
@@ -1129,7 +1129,7 @@ impl DashboardCommand {
 
 // ── Which commands change state ─────────────────────────────────────────────
 // Only a command that changes state records a Process. A read (status, list,
-// show, diff, file, every `--watch` reader) records none, so it never wakes a
+// show, diff, file, every `--subscribe` reader) records none, so it never wakes a
 // Work reader or joins a Task's work. Every match below is exhaustive: a new
 // command chooses here.
 
@@ -1708,8 +1708,8 @@ pub struct SessionListArgs {
     #[arg(long)]
     pub search: Option<String>,
     /// Print a JSON line now and each time the list changes, until stdin closes
-    #[arg(long)]
-    pub watch: bool,
+    #[arg(short = 's', long)]
+    pub subscribe: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1881,8 +1881,8 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
         /// Print a JSON line now and each time the plan changes, until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
+        #[arg(short = 's', long, requires = "json")]
+        subscribe: bool,
     },
     /// Show the graph the Wave's Tasks take up by default
     Graph {
@@ -1962,8 +1962,8 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
+        #[arg(short = 's', long, requires = "json")]
+        subscribe: bool,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
     /// chapters and Sessions keep their identity
@@ -2080,8 +2080,8 @@ pub enum TaskCommand {
         #[arg(long, requires = "closed", default_value_t = commands::waves::CLOSED_TASK_PAGE)]
         limit: usize,
         /// Print a JSON line now and each time the list changes, until stdin closes
-        #[arg(long, conflicts_with = "closed")]
-        watch: bool,
+        #[arg(short = 's', long, conflicts_with = "closed")]
+        subscribe: bool,
     },
     /// Print one Task as Desktop's Task pane shows it, as JSON
     Show {
@@ -2089,8 +2089,8 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the Task changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
+        #[arg(short = 's', long)]
+        subscribe: bool,
     },
 
     /// Synchronize a Task with its tracker; the change sent last wins
@@ -2256,8 +2256,8 @@ until `lf ship`."
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
+        #[arg(short = 's', long)]
+        subscribe: bool,
     },
     /// Browse the Task brief, workflow and recorded runs without starting work
     View {
@@ -2685,7 +2685,7 @@ pub enum PrCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Prepare a PR, request exact-head auto-merge, and return without watching.
+    /// Prepare a PR, request exact-head auto-merge, and return without subscribing.
     Arm {
         #[arg(long)]
         strict: bool,
@@ -2748,8 +2748,8 @@ pub enum PlanCommand {
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plan changes, until stdin closes
-        #[arg(long)]
-        watch: bool,
+        #[arg(short = 's', long)]
+        subscribe: bool,
     },
 }
 

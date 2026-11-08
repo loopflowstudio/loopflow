@@ -105,7 +105,7 @@ fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_clos
         .unwrap();
     assert!(initialized.status.success(), "{initialized:?}");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published) VALUES(?1,'Watch','generated',1577836800,'cat','fixture-thread',?2,1)", rusqlite::params![id,home.path().to_str().unwrap()]).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published) VALUES(?1,'Subscription','generated',1577836800,'cat','fixture-thread',?2,1)", rusqlite::params![id,home.path().to_str().unwrap()]).unwrap();
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?1,1577836800,?2)", rusqlite::params![id,serde_json::json!({"artifact_key":id,"cwd":home.path(),"provider":"cat"}).to_string()]).unwrap();
     db.execute(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
@@ -126,12 +126,12 @@ fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_clos
         rusqlite::params![id, agent],
     )
     .unwrap();
-    let mut watch = Owned(
-        command(home.path(), &["session", "list", "--all", "--watch"])
+    let mut subscription = Owned(
+        command(home.path(), &["session", "list", "--all", "--subscribe"])
             .spawn()
             .unwrap(),
     );
-    let stdout = watch.0.stdout.take().unwrap();
+    let stdout = subscription.0.stdout.take().unwrap();
     let (sender, frames) = mpsc::channel();
     let output = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
@@ -150,7 +150,7 @@ fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_clos
     .unwrap();
     // The ordinary cadence must observe the recorded exit without a UI request.
     next_state(&frames, id, &["closed"]);
-    watch
+    subscription
         .0
         .stdin
         .as_mut()
@@ -158,13 +158,13 @@ fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_clos
         .write_all(b"{\"id\":1}\n")
         .unwrap();
     next_state(&frames, id, &["closed"]);
-    drop(watch.0.stdin.take());
-    exited(&mut watch.0);
+    drop(subscription.0.stdin.take());
+    exited(&mut subscription.0);
     output.join().unwrap();
     assert!(client.0.try_wait().unwrap().is_none());
 
     let mut broken = Owned(
-        command(home.path(), &["session", "list", "--all", "--watch"])
+        command(home.path(), &["session", "list", "--all", "--subscribe"])
             .spawn()
             .unwrap(),
     );

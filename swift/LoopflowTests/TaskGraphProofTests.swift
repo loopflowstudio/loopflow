@@ -209,7 +209,7 @@ struct TaskGraphTests {
                                     work: work, runs: [run])
         let calls = CallLog()
         let roadmapJSON = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
             case ("session", "resume") where args.contains("--task"):
@@ -316,7 +316,7 @@ private actor CallLog {
     func add(_ args: [String]) { calls.append(args) }
 }
 
-/// Scripted watches: every request is answered with the plan, Sessions and
+/// Scripted subscriptions: every request is answered with the plan, Sessions and
 /// Task status as they stand.
 @MainActor
 private final class ScriptedReader {

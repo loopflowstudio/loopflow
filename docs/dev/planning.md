@@ -250,7 +250,7 @@ Failed checks keep the prior watermark and local planning.
 
 Teams without live Tasks are not checked. Locally finished/abandoned identities
 are excluded from acquisition. Explicit detail reads remain available. Desktop and
-`--watch` alone own a clock: 30–60 seconds initially, backing off to four minutes
+`--subscribe` alone own a clock: 30–60 seconds initially, backing off to four minutes
 while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Git exchange retains its foreground lifetime.
 Projection functions remain local; command boundaries acquire before projecting.
 
@@ -306,7 +306,7 @@ Mapped status receipts use foreground delivery;
 a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates; status and `plan list` never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf wave show --watch --json`. Committed selection,
+`project_readiness` through `lf wave show --subscribe --json`. Committed selection,
 accepted facts, transitions and exact activation Process outcomes invalidate that reading.
 A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.
@@ -631,7 +631,7 @@ conflict adopts Linear’s body, author and time while the receipt retains both
 complete comments; no replacement comment is created. Connected repositories show
 pending sync, including comments on unmapped Tasks. Saves and on-demand boundaries
 attempt delivery; team checks acquire incoming comments independently. Desktop and
-`--watch` continue checks while open. Lost replies are resolved by exact UUID,
+`--subscribe` continue checks while open. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved steers. Comments and adopted definition revisions save immutable
 steers. Each Session selects steers from checkout/explicit Task associations, Wave

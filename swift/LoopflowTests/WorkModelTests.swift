@@ -702,7 +702,7 @@ struct WorkModelStreamTests {
             }
         }
         let catalog = Catalog(original)
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["graph", "list"]) else {
                 throw RegistryQueryError("unexpected catalogue operation")
             }
@@ -763,7 +763,7 @@ struct WorkModelStreamTests {
     func mutationConfirmation() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["task", "unassign"]) else {
                 throw RegistryQueryError("unexpected read: \(args)")
             }
@@ -795,7 +795,7 @@ struct WorkModelStreamTests {
     func taskConfirmationDeadline() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
-        let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             guard args.starts(with: ["task", "complete"]) else { throw RegistryQueryError("unexpected command") }
             try await Task.sleep(for: .milliseconds(100))
             return ""
@@ -1074,14 +1074,14 @@ private struct WorkTestFixture {
     }
 
     func streaming(_ feed: WorkFeed) -> RegistryQuery {
-        RegistryQuery(watchWork: { await feed.open() }) { args, _ in
+        RegistryQuery(subscribeWork: { await feed.open() }) { args, _ in
             throw RegistryQueryError("a streamed window ran lf \(args.joined(separator: " "))")
         }
     }
 
     static let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil)
 
-    /// One line of `part`'s watch, as the transport hands it to the window.
+    /// One line of `part`'s subscription, as the transport hands it to the window.
     func frame(
         _ part: String, sequence: Int, answers: Int?, scope: WorkScope = Self.scope, body: String
     ) throws -> WorkFrame {

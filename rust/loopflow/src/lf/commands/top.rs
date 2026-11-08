@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf monitor ps` once or `--watch`ed, `lf monitor top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once or `--subscribe`ed, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -141,10 +141,12 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees: Process rows change with the store, liveness and
 /// activity state only on the clock.
-pub fn watch_ps(transport: super::watch::Transport) -> Result<Option<super::watch::Watch>> {
-    super::watch::start(
+pub fn subscribe_ps(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         {
             let mut reader = ActivityReader::default();
             move |_, ()| {
@@ -936,7 +938,7 @@ mod tests {
         assert_eq!(after.unwrap(), before);
     }
 
-    /// A watch shows new rows and exits as they commit, and reads a row proven
+    /// A subscription shows new rows and exits as they commit, and reads a row proven
     /// dead only once: its receipt and PID are never read again.
     #[test]
     #[cfg(unix)]

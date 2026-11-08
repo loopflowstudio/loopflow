@@ -31,8 +31,8 @@ struct WorkSelectionTests {
         #expect(states.contains(.working) && states.contains(.autonomous))
     }
 
-    @Test func queryPlansArriveFromTheirWatch() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    @Test func queryPlansArriveFromTheirSubscription() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let entry = try #require(entries.first { $0["part"] as? String == "selections" })
         let frame = try WorkFrame.decode(

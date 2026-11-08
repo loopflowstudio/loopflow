@@ -1691,7 +1691,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "A read with a watch; answers a null `response`, then `reading` messages\nuntil cancelled. The id follows the same rules as a request's.",
+          "description": "A read with a subscription; answers a null `response`, then `reading` messages\nuntil cancelled. The id follows the same rules as a request's.",
           "properties": {
             "id": {
               "type": "string"
@@ -1700,7 +1700,7 @@
               "$ref": "#/$defs/Read"
             },
             "type": {
-              "const": "watch",
+              "const": "subscribe",
               "type": "string"
             }
           },
@@ -1713,7 +1713,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Ask the live watch `id` for a reading now; the next reading's\n`answers` carries `checkpoint`, changed or not.",
+          "description": "Ask the live subscription `id` for a reading now; the next reading's\n`answers` carries `checkpoint`, changed or not.",
           "properties": {
             "checkpoint": {
               "format": "uint64",
@@ -1737,7 +1737,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Forget a request's answer, or end a watch.",
+          "description": "Forget a request's answer, or end a subscription.",
           "properties": {
             "id": {
               "type": "string"
@@ -1977,7 +1977,7 @@
           "type": "string"
         },
         "requests": {
-          "description": "Requests the connection has sent, watches included.",
+          "description": "Requests the connection has sent, subscriptions included.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
@@ -6900,7 +6900,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> session list`, with `--interactive all`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a watch.",
+          "description": "`lf --cwd <directory> session list`, with `--interactive all`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
           "properties": {
             "after": {
               "type": [
@@ -7620,7 +7620,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> plan list [wave] [--task <task>] [--all]`:\nWaves and Tasks. Read once, it first asks the tracker about each\nrepository read; its watch reads the store.",
+          "description": "`lf --cwd <directory> plan list [wave] [--task <task>] [--all]`:\nWaves and Tasks. Read once, it first asks the tracker about each\nrepository read; its subscription reads the store.",
           "properties": {
             "all": {
               "type": "boolean"
@@ -7659,7 +7659,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its watch exchanges it while it runs.",
+          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
           "properties": {
             "directory": {
               "type": "string"
@@ -8233,7 +8233,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task wait <issue> --until <until> --timeout 0s --json`: the Task now\nand whether it reached `until`. Watched, it reads on each change and\nends after the reading that reached it.",
+          "description": "`lf task wait <issue> --until <until> --timeout 0s --json`: the Task now\nand whether it reached `until`. Wake, it reads on each change and\nends after the reading that reached it.",
           "properties": {
             "issue": {
               "type": "string"
@@ -9309,7 +9309,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "What the request returned: the value its operation's `x-result` names,\nnull once a watch is confirmed. `trace_id` correlates the server's\ndiagnostics for it.",
+          "description": "What the request returned: the value its operation's `x-result` names,\nnull once a subscription is confirmed. `trace_id` correlates the server's\ndiagnostics for it.",
           "properties": {
             "id": {
               "type": "string"
@@ -9351,10 +9351,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "One watch line; its `body` has the shape of the read's `x-result`.",
+          "description": "One subscription line; its `body` has the shape of the read's `x-result`.",
           "properties": {
             "frame": {
-              "$ref": "#/$defs/WatchFrame"
+              "$ref": "#/$defs/SubscriptionFrame"
             },
             "id": {
               "type": "string"
@@ -9373,7 +9373,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "The watch's last reading was its answer (`task.wait` reached\nits state); nothing follows for `id`.",
+          "description": "The subscription's last reading was its answer (`task.wait` reached\nits state); nothing follows for `id`.",
           "properties": {
             "id": {
               "type": "string"
@@ -9391,7 +9391,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`id` is null before a request exists. An error for a watch ends it.",
+          "description": "`id` is null before a request exists. An error for a subscription ends it.",
           "properties": {
             "code": {
               "$ref": "#/$defs/ErrorCode"
@@ -10825,6 +10825,43 @@
         "latest_known_migration",
         "latest_applied_migration",
         "migration_error"
+      ],
+      "type": "object"
+    },
+    "SubscriptionFrame": {
+      "description": "One line of a subscription.",
+      "properties": {
+        "answers": {
+          "description": "The newest request this reading began after.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Untyped"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailable": {
+          "description": "Why the read failed. `body` is then `null`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "answers",
+        "unavailable",
+        "body"
       ],
       "type": "object"
     },
@@ -13779,43 +13816,6 @@
       "required": [
         "reached",
         "task"
-      ],
-      "type": "object"
-    },
-    "WatchFrame": {
-      "description": "One line of a watch.",
-      "properties": {
-        "answers": {
-          "description": "The newest request this reading began after.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "body": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Untyped"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "unavailable": {
-          "description": "Why the read failed. `body` is then `null`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "answers",
-        "unavailable",
-        "body"
       ],
       "type": "object"
     },

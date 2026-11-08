@@ -130,18 +130,18 @@ real shell tab, so the tab outlives the command.
 ## Build your own view
 
 A herdr, tmux or other GUI pane uses the reads below. Each streams with
-`--watch --json`: one JSON line now, another each time its answer changes,
+`--subscribe --json`: one JSON line now, another each time its answer changes,
 until stdin closes.
 
 ```bash
-lf wave show --all --watch --json         # every Wave's plan and Tasks
-lf task list --watch --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and thread
-lf session list --watch --json            # conversations, with which ones are available for you
-lf session history --since 7d --watch --json   # what Sessions did, tagged with their Task and Wave
-lf process list --watch --json                      # live lf call trees
-lf repo plan --watch --json         # planning sync; keeps it exchanged while it runs
-lf desktop view list --watch --json           # every plan a repository window shows
+lf wave show --all --subscribe --json         # every Wave's plan and Tasks
+lf task list --subscribe --json               # open Tasks, as your sidebar would list them
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf session list --subscribe --json            # conversations, with which ones are available for you
+lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
+lf process list --subscribe --json                      # live lf call trees
+lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
+lf desktop view list --subscribe --json           # every plan a repository window shows
 ```
 
 ```json
@@ -180,7 +180,7 @@ turn and `null` while it works. `lf resume <id>` opens it.
 
 Desktop reads the same records through `lf plan list`, `lf task show`,
 `lf wave plan`, `lf task list --closed` and `lf session list`, with the
-same `--watch`. `lf wave status` and `lf wave show` exchange planning with the
+same `--subscribe`. `lf wave status` and `lf wave show` exchange planning with the
 tracker first; `lf wave plan` and `lf plan list` read what the store
 records, and `lf wave sync` refreshes it.
 

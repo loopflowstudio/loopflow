@@ -44,12 +44,12 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
     case request(id: String, operation: ServerOperation)
-    /// A read with a watch: a null `response`, then readings until cancelled.
-    case watch(id: String, operation: ServedRead)
-    /// Ask the live watch `id` for a reading now; the next reading's
+    /// A read with a subscription: a null `response`, then readings until cancelled.
+    case subscribe(id: String, operation: ServedRead)
+    /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     case checkpoint(id: String, checkpoint: UInt64)
-    /// Forget a request's answer, or end a watch.
+    /// Forget a request's answer, or end a subscription.
     case cancel(id: String)
     /// A bridge's first and only message: the ticket `session.attach` issued.
     /// The server answers `bridged`, and the connection then speaks the owner protocol.
@@ -69,8 +69,8 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
-        case .watch(let id, let operation):
-            try box.encode("watch", forKey: .type)
+        case .subscribe(let id, let operation):
+            try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
         case .checkpoint(let id, let checkpoint):
@@ -157,15 +157,15 @@ public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
     /// What the request returned: a read's or write's value, or the ticket for
-    /// `session.attach`; null once a watch is confirmed.
+    /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
     /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
     case bridged(ownerLfProcessID: String)
     case reading(id: String, frame: JSONValue)
-    /// The watch's last reading was its answer (`task.wait` reached
+    /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     case ended(id: String)
-    /// `id` is nil before a request exists. An error for a watch ends it.
+    /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
     /// structured detail, `.null` when there is none.
@@ -242,7 +242,7 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
     public let client: ServerClientIdentity
     /// RFC 3339.
     public let connectedAt: String
-    /// Requests the connection has sent, watches included.
+    /// Requests the connection has sent, subscriptions included.
     public let requests: UInt64
 
     private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }

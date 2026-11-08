@@ -1,6 +1,6 @@
 [
   {
-    "read": "lf desktop plan --all --json --watch",
+    "read": "lf desktop plan --all --json --subscribe",
     "part": "planning",
     "frame": {
       "answers": null,
@@ -17,7 +17,7 @@
     }
   },
   {
-    "read": "lf desktop plans --json --watch",
+    "read": "lf desktop plans --json --subscribe",
     "part": "selections",
     "frame": {
       "answers": null,
@@ -202,7 +202,7 @@
     }
   },
   {
-    "read": "lf desktop sessions --json --watch",
+    "read": "lf desktop sessions --json --subscribe",
     "part": "sessions",
     "frame": {
       "answers": 7,
@@ -211,7 +211,7 @@
     }
   },
   {
-    "read": "lf desktop task LOO-1 --json --watch",
+    "read": "lf desktop task LOO-1 --json --subscribe",
     "part": "task",
     "frame": {
       "answers": 7,
@@ -220,7 +220,7 @@
     }
   },
   {
-    "read": "lf history --since 7d --limit 50 --task LOO-1 --json --watch",
+    "read": "lf history --since 7d --limit 50 --task LOO-1 --json --subscribe",
     "part": "work_activity",
     "frame": {
       "answers": 7,
@@ -232,7 +232,7 @@
     }
   },
   {
-    "read": "lf monitor ps --json --watch",
+    "read": "lf monitor ps --json --subscribe",
     "part": "activity",
     "frame": {
       "answers": 7,
@@ -243,7 +243,7 @@
     }
   },
   {
-    "read": "lf desktop task LOO-1 --json --watch",
+    "read": "lf desktop task LOO-1 --json --subscribe",
     "part": "task",
     "frame": {
       "answers": 8,
@@ -276,7 +276,7 @@
     }
   },
   {
-    "read": "lf planning status --json --watch",
+    "read": "lf planning status --json --subscribe",
     "part": "peer_planning",
     "frame": {
       "answers": 7,

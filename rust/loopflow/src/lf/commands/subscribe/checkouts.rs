@@ -1,5 +1,5 @@
 //! Which Task checkouts changed on disk. A dirty file or a new commit is not
-//! a store commit, so the reader watches each existing checkout and its Git
+//! a store commit, so the reader subscriptions each existing checkout and its Git
 //! metadata and asks Git again only about the ones that changed.
 
 use std::collections::BTreeSet;
@@ -13,7 +13,7 @@ const REST: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Default)]
 pub(super) struct Checkouts {
-    watched: Vec<PathBuf>,
+    subscribed: Vec<PathBuf>,
     changed: Arc<Mutex<BTreeSet<PathBuf>>>,
     asked_on: Option<Instant>,
     #[cfg(target_os = "macos")]
@@ -29,8 +29,8 @@ fn metadata(worktree: &Path) -> Option<PathBuf> {
 }
 
 impl Checkouts {
-    /// Watch the checkouts that exist now; `wake` runs when one changes.
-    pub(super) fn watch(
+    /// Subscription the checkouts that exist now; `wake` runs when one changes.
+    pub(super) fn subscribe(
         &mut self,
         mut worktrees: Vec<PathBuf>,
         wake: impl Fn() + Send + Sync + 'static,
@@ -38,15 +38,15 @@ impl Checkouts {
         worktrees.retain(|worktree| worktree.is_dir());
         worktrees.sort();
         worktrees.dedup();
-        if worktrees == self.watched {
+        if worktrees == self.subscribed {
             return;
         }
-        self.watched = worktrees;
+        self.subscribed = worktrees;
         #[cfg(target_os = "macos")]
         {
             // Events name resolved paths; Git was asked with the stored ones.
             let roots = self
-                .watched
+                .subscribed
                 .iter()
                 .flat_map(|worktree| {
                     [worktree.canonicalize().ok(), metadata(worktree)]
@@ -55,8 +55,8 @@ impl Checkouts {
                         .map(|root| (root, worktree.clone()))
                 })
                 .collect::<Vec<_>>();
-            let (changed, all) = (self.changed.clone(), self.watched.clone());
-            let watch = roots.clone();
+            let (changed, all) = (self.changed.clone(), self.subscribed.clone());
+            let subscription = roots.clone();
             self.stream = None;
             self.stream = crate::platform::fs_events::Stream::start(
                 &roots
@@ -70,7 +70,7 @@ impl Checkouts {
                     match path {
                         None => changed.extend(all.iter().cloned()),
                         Some(path) => changed.extend(
-                            watch
+                            subscription
                                 .iter()
                                 .filter(|(root, _)| path.starts_with(root))
                                 .map(|(_, worktree)| worktree.clone()),
@@ -80,7 +80,7 @@ impl Checkouts {
                     wake();
                 },
             )
-            .inspect_err(|error| tracing::warn!(%error, "cannot watch Task checkouts"))
+            .inspect_err(|error| tracing::warn!(%error, "cannot subscription Task checkouts"))
             .ok();
         }
         #[cfg(not(target_os = "macos"))]

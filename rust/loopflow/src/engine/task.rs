@@ -16,7 +16,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use super::{launch, Error, ErrorCode, Result};
 use crate::durable::TaskOwnership;
 use crate::id::LfProcessId;
-use crate::lf::commands::watch::{Transport, Watch, Watched, ACTIVITY_CLOCK};
+use crate::lf::commands::subscribe::{Subscription, Transport, Wake, ACTIVITY_CLOCK};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
 use crate::work::task::comment::TaskComments;
@@ -286,18 +286,18 @@ pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Res
     }
 }
 
-/// `task.wait` as a watch: a reading whenever the Task changes, the
+/// `task.wait` as a subscription: a reading whenever the Task changes, the
 /// last one `reached`.
-pub fn watch_wait(
+pub fn subscribe_wait(
     issue: String,
     until: TaskWaitUntil,
     transport: Transport,
-) -> anyhow::Result<Option<Watch>> {
-    crate::lf::commands::watch::start(
+) -> anyhow::Result<Option<Subscription>> {
+    crate::lf::commands::subscribe::start(
         (issue, until),
-        Watched::every(ACTIVITY_CLOCK),
+        Wake::every(ACTIVITY_CLOCK),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
-            let store = crate::lf::commands::watch::require_store(store)?;
+            let store = crate::lf::commands::subscribe::require_store(store)?;
             match crate::ops::task::task_wait_reading(&store, &issue, until).await? {
                 Some((task, reached)) => Ok(Waited { reached, task }),
                 None => Err(missing(&issue).into()),

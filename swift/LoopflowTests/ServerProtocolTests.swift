@@ -78,13 +78,13 @@ struct ServerProtocolTests {
         #expect(status.clients.first?.requests == 12)
     }
 
-    @Test func watchesCarryTheirRequestId() throws {
-        let request = ServerClientMessage.watch(id: "tasks-1", operation:
+    @Test func subscriptionsCarryTheirRequestId() throws {
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
             .roadmap(directory: "/", wave: nil, task: nil, all: true))
-        #expect(try encoded(request) == value("watch"))
+        #expect(try encoded(request) == value("subscribe"))
         guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
-        guard case .object(let fields) = frame else { Issue.record("Missing watch frame"); return }
+        guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
         #expect(try encoded(.checkpoint(id: "tasks-1", checkpoint: 3)) == value("checkpoint"))
@@ -271,7 +271,7 @@ struct ServerProtocolTests {
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.watch(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"))
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"))
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")

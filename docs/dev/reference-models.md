@@ -162,7 +162,7 @@ Task status and `plan list` separate `graph_name` with its `graph_source`
 `execution` and `run_control`. Task work and overview carry `graph`, a
 `TaskGraph` of name, interactive steps and position. The latest
 `GraphProcessDetail` is ordinary execution evidence, including completed graphs,
-not a second Task lifecycle. Task work and watch carry `graph_processes`. Session
+not a second Task lifecycle. Task work and subscription carry `graph_processes`. Session
 membership references the exact `graph_lf_process_id`; a Task graph's run names
 its Task-run `lf_process_id`. Persisted graphs and historical capture formats
 remain unchanged.
@@ -344,7 +344,7 @@ completion are distinct: subsequent command work may fail after the agent succee
 
 One actual lf process that changes Work (Tasks, Waves, Sessions,
 Graphs, PRs, planning) gets one LfProcess, including nested direct and
-agent-issued commands. A read (status, list, show, diff, file, every `--watch`
+agent-issued commands. A read (status, list, show, diff, file, every `--subscribe`
 reader), Desktop navigation and pane or Dashboard arrangement record none, so
 they never wake a Work reader or join a Task's work; arrangement saves still
 persist. Input to a Session or shell is Work. `Commands::changes_work` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph

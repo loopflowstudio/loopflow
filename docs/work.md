@@ -97,19 +97,19 @@ lf task list                                  # open Tasks in this repository
 lf task list loo-60                           # identifier or title contains "loo-60"
 lf task list --wave infra --state idle
 lf task list --closed --wave infra --since 7d   # closed in the last week
-lf task list --watch                          # a JSON line each time the list changes
+lf task list --subscribe                          # a JSON line each time the list changes
 ```
 
 `lf task list` is the flat inventory. Every view reads this machine's store, so
 it answers instantly and offline.
 
-`--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
+`--subscribe` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
 `lf session list`, `lf session history`, `lf repo plan`, `lf process list` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf repo plan --watch` also
+answers that id. It stops when stdin closes. `lf repo plan --subscribe` also
 keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read

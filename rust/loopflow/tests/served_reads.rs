@@ -420,18 +420,18 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "watch", "id": "processes", "operation": {"kind": "process.list"}}),
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}}),
         true,
     );
-    let mut watched = false;
+    let mut subscribed = false;
     let mut answered = false;
-    while !(watched && answered) {
+    while !(subscribed && answered) {
         let message = receive().unwrap();
         assert_eq!(message["id"], "processes", "{message}");
         match message["type"].as_str().unwrap() {
             "response" => {
                 assert!(message["result"].is_null());
-                watched = true;
+                subscribed = true;
                 write(
                     serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
                     true,
@@ -461,7 +461,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
         }
         assert_eq!(
             message["id"], "processes",
-            "only the cancelled watch may still speak"
+            "only the cancelled subscription may still speak"
         );
     };
     assert_eq!(
@@ -601,7 +601,7 @@ fn server_operations_match_their_lf_commands() {
         directory: repo.path().to_owned(),
     };
     // A new Read fails to compile here until it is compared too.
-    let (reads, watches) = match task_diff(None, None) {
+    let (reads, subscriptions) = match task_diff(None, None) {
         Read::MonitorPs
         | Read::DesktopPlans { .. }
         | Read::SessionList { .. }
@@ -825,14 +825,14 @@ fn server_operations_match_their_lf_commands() {
         };
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
-    for served in watches {
+    for served in subscriptions {
         let mut argv = served.argv();
-        argv.push("--watch".into());
+        argv.push("--subscribe".into());
         let mut frame = Value::Null;
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow::server::client::Connection::open().unwrap();
-            let id = connection.watch(served.clone()).unwrap();
+            let id = connection.subscribe(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let served = frame;
@@ -1555,7 +1555,7 @@ fn processes(database: &Path) -> i64 {
         .unwrap()
 }
 
-/// The first frame `lf <args>` prints, with its stdin held open as a watch's
+/// The first frame `lf <args>` prints, with its stdin held open as a subscription's
 /// parent holds it.
 fn first_frame(repo: &Path, home: &Path, args: &[String]) -> Value {
     let mut child = isolated_lf(repo, home, args);

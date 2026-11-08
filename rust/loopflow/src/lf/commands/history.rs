@@ -32,8 +32,8 @@ pub struct HistoryFeed {
     #[arg(long)]
     pub json: bool,
     /// Print a JSON line now and each time the history changes, until stdin closes
-    #[arg(long, requires = "json")]
-    pub watch: bool,
+    #[arg(short = 's', long, requires = "json")]
+    pub subscribe: bool,
 }
 
 /// `session.usage`: provider-authored usage from recorded Session inputs.

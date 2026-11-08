@@ -270,8 +270,8 @@ impl SessionFacts {
 /// `lf session list`.
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
-    if args.watch {
-        return watch_list(filter, super::watch::Transport::Stdio).map(drop);
+    if args.subscribe {
+        return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
@@ -303,7 +303,7 @@ pub(crate) fn list_filter(
     })
 }
 
-/// What a `lf session list --watch` request can select instead.
+/// What a `lf session list --subscribe` request can select instead.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionWatchArgs {
@@ -315,10 +315,10 @@ struct SessionWatchArgs {
     interactive: Option<bool>,
 }
 
-pub(crate) fn watch_list(
+pub(crate) fn subscribe_list(
     filter: crate::session::SessionFilter,
-    transport: super::watch::Transport,
-) -> anyhow::Result<Option<super::watch::Watch>> {
+    transport: super::subscribe::Transport,
+) -> anyhow::Result<Option<super::subscribe::Subscription>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),
@@ -328,12 +328,13 @@ pub(crate) fn watch_list(
     // A clock tick rereads every summary only when an AgentProcess lived or
     // died, a Session went quiet long enough to become available, or a
     // persistent checkout appeared or vanished.
-    let watched = super::watch::Watched::every(super::watch::ACTIVITY_CLOCK).probing(|store| {
-        Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
-    });
-    super::watch::start(
+    let subscribed =
+        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK).probing(|store| {
+            Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
+        });
+    super::subscribe::start(
         args,
-        watched,
+        subscribed,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,

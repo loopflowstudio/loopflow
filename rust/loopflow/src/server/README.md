@@ -10,7 +10,7 @@ requests readiness through the selected installation; subsequent connections and
 terminal recovery never re-register a server. `lf server status` only observes.
 
 The foreground `lf server run` belongs to the OS supervisor. Desktop
-uses the service for all shared Work reads, writes and watches, plus
+uses the service for all shared Work reads, writes and subscriptions, plus
 existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
 
 `installation/server.rs` owns registration and replacement. Its hidden
@@ -53,7 +53,7 @@ rather than the connection. The root accepts any message either side sends;
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
 on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
-watch frame's `body` refers to `$defs/Untyped`, because its shape is the
+subscription frame's `body` refers to `$defs/Untyped`, because its shape is the
 `x-result` of the read that opened it. The serialize contract keeps a nullable
 field required, as both sides send it.
 
@@ -74,7 +74,7 @@ by a test and every server fixture must decode.
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
-→ {"type":"watch","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
@@ -83,7 +83,7 @@ by a test and every server fixture must decode.
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false}}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
-→ {"type":"watch","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"}}
 ← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
 ```
@@ -106,7 +106,7 @@ installation use it so readiness never opens Work or speaks the full protocol;
 `lf server status` also reports `listening` (a server accepted the connection),
 `revision` and `clients`: each welcomed connection still open, oldest first, as
 `{id, client, connected_at, requests}`, where `client` is the identity its
-`hello` gave and `requests` counts its requests, watches included. The
+`hello` gave and `requests` counts its requests, subscriptions included. The
 identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
 installation, an installation check that never applies to a remote client.
 
@@ -116,14 +116,14 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 {id, code, message, data}` in whatever order work finishes. `result` is the
 operation's value: what its CLI spelling prints with `--json`, a ticket
 `{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
-once a watch is confirmed.
+once a subscription is confirmed.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
-answer or ends a watch; a write already dispatched still completes and
-answers nothing. Closing the connection cancels every watch and releases
+answer or ends a subscription; a write already dispatched still completes and
+answers nothing. Closing the connection cancels every subscription and releases
 every wait; admitted mutations finish. An `error` with a null `id` is about the
 connection and is its last message: the server closes after `busy` at capacity
 (nothing ran; retry shortly) and after `invalid` for a malformed line or a
-repeated `hello`/`status`. A well-formed `request` or `watch` whose
+repeated `hello`/`status`. A well-formed `request` or `subscribe` whose
 operation this build does not accept fails alone: `invalid` with its own `id`
 and `data.kind`, and the connection stays open, so a newer client loses only
 that request. `data` is structured detail or null. Clients branch
@@ -132,12 +132,12 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 | `code` | Meaning | `data` |
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
-| `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as watching to a read with no watch | `{kind}` for a refused operation, else null |
-| `not_found` | The named owner, watch, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
+| `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no subscription | `{kind}` for a refused operation, else null |
+| `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
 | `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
-| `unavailable` | A dependency is missing or failed: the Machine registry, a watch, a read | `{resource}` when one is named |
+| `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
 | `outcome_unknown` | The operation may have run; inspect state before retrying | null |
-| `busy` | Capacity reached, or a watch fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
+| `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
 
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
@@ -192,7 +192,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `config.theme` | none; Appearance's theme file | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
-| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--watch`), `reviews` |
+| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
 | `account.list`, `.route` | `lf account [<provider>]`, `lf account route` | read; `engine::account::list`, `route` |
 | `account.connect`, `.disconnect`, `.set`, `.token`, `.use`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `token`, `lf account <provider> use`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `token`, `activate`, `redeem_reset` (none prompts) |
@@ -232,17 +232,17 @@ part of what a phone or bot client is offered.
   WorkViewPlan, including the recorded primary Session; planning membership alone
   cannot select one. A missing primary stays absent. Attach to it with
   `session.attach`; no owner lookup comes first.
-- `watch {id, operation}` takes a read with a watch: `desktop.view.list`,
+- `subscribe {id, operation}` takes a read with a subscription: `desktop.view.list`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,frame}` messages wrapping
-  the existing complete `answers/unavailable/body` watch frame. `checkpoint
+  the existing complete `answers/unavailable/body` subscription frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
-  that number, changed or not. A watch's arguments are fixed: new
-  arguments are a new watch with a complete first reading. A watch that
+  that number, changed or not. A subscription's arguments are fixed: new
+  arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
-  ends the watch; the connection stays open. A read with no watch is
-  `invalid`. Reconnect opens a fresh watch
+  ends the subscription; the connection stays open. A read with no subscription is
+  `invalid`. Reconnect opens a fresh subscription
   and receives a complete reading; no replay cursor exists. `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
   changes; after the reading whose `reached` is true the server sends `ended
@@ -315,8 +315,8 @@ part of what a phone or bot client is offered.
 
 Desktop holds one connection per server location for the app's lifetime,
 opened on first use and reopened on the next request after a loss with bounded
-backoff (100 ms doubling to 3.2 s). Its watches share that connection; losing it
-fails every pending request as outcome unknown and every watch, which the
+backoff (100 ms doubling to 3.2 s). Its subscriptions share that connection; losing it
+fails every pending request as outcome unknown and every subscription, which the
 window reopens for a complete reading.
 
 Every client gives the server ten seconds to answer `status`, `hello`,
@@ -336,4 +336,4 @@ streams. CLI Process records and provider usage stay with existing owners;
 arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
-diagnostics. Individual reads and watch frames are not logged by default.
+diagnostics. Individual reads and subscription frames are not logged by default.

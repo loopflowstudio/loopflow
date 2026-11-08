@@ -35,9 +35,9 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
-struct Watch(Child);
+struct Subscription(Child);
 
-impl Drop for Watch {
+impl Drop for Subscription {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
@@ -55,11 +55,11 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     store
         .ensure_wave(repo.path().to_str().unwrap(), "infra")
         .unwrap();
-    let mut watch = Watch(
+    let mut subscription = Subscription(
         command(
             repo.path(),
             home.path(),
-            &["wave", "status", "infra", "--json", "--watch"],
+            &["wave", "status", "infra", "--json", "--subscribe"],
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -67,7 +67,7 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
         .spawn()
         .unwrap(),
     );
-    let stdout = watch.0.stdout.take().unwrap();
+    let stdout = subscription.0.stdout.take().unwrap();
     let (sender, frames) = mpsc::channel();
     let reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
@@ -100,7 +100,7 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     std::fs::write(home.path().join("config.yaml"), "agent: opencode\n").unwrap();
     agent("opencode", "personal");
     assert_eq!(revision(), before);
-    drop(watch);
+    drop(subscription);
     reader.join().unwrap();
 }
 

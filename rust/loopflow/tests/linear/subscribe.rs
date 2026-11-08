@@ -1,4 +1,4 @@
-//! `--watch` on the ordinary reads shows another process's commits. Each test
+//! `--subscribe` on the ordinary reads shows another process's commits. Each test
 //! drives the real binary against a seeded `LF_HOME` and writes from here.
 
 use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
@@ -17,14 +17,14 @@ use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
 
-/// One running `lf … --watch`; its frames are `{answers, unavailable, body}`.
-struct Watch {
+/// One running `lf … --subscribe`; its frames are `{answers, unavailable, body}`.
+struct Subscription {
     child: Child,
     stdin: Option<ChildStdin>,
     frames: Receiver<serde_json::Value>,
 }
 
-impl Drop for Watch {
+impl Drop for Subscription {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -204,9 +204,9 @@ impl Machine {
         .unwrap();
     }
 
-    /// Run `lf <args> --json --watch` in the Wave's repository.
-    fn watch(&self, args: &[&str]) -> Watch {
-        Watch::open(self.path(), self.repo(), args)
+    /// Run `lf <args> --json --subscribe` in the Wave's repository.
+    fn subscribe(&self, args: &[&str]) -> Subscription {
+        Subscription::open(self.path(), self.repo(), args)
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
@@ -259,11 +259,11 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
         .collect()
 }
 
-impl Watch {
-    /// Start a watch on a Machine, which need not hold a store yet.
+impl Subscription {
+    /// Start a subscription on a Machine, which need not hold a store yet.
     fn open(home: &Path, cwd: &Path, args: &[&str]) -> Self {
         let mut child = lf(home, args)
-            .args(["--json", "--watch"])
+            .args(["--json", "--subscribe"])
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -317,7 +317,7 @@ impl Watch {
         }
     }
 
-    /// The next `lf wave show --watch` frame whose Tasks satisfy `accept`.
+    /// The next `lf wave show --subscribe` frame whose Tasks satisfy `accept`.
     fn planning(&self, within: Duration, accept: impl Fn(&[String]) -> bool) -> Vec<String> {
         let deadline = Instant::now() + within;
         loop {
@@ -359,8 +359,10 @@ const PLANNING: &[&str] = &["desktop", "plan", "--all"];
 #[test]
 fn a_frame_is_its_answer_and_body() {
     let home = Machine::new();
-    let watch = home.watch(PLANNING);
-    let frame = watch.next(Duration::from_secs(30)).expect("no frame");
+    let subscription = home.subscribe(PLANNING);
+    let frame = subscription
+        .next(Duration::from_secs(30))
+        .expect("no frame");
     let mut keys: Vec<_> = frame.as_object().unwrap().keys().cloned().collect();
     keys.sort();
     assert_eq!(keys, ["answers", "body", "unavailable"]);
@@ -369,13 +371,15 @@ fn a_frame_is_its_answer_and_body() {
 #[test]
 fn a_store_created_after_the_watch_started_is_shown() {
     let dir = tempfile::tempdir().unwrap();
-    let watch = Watch::open(dir.path(), dir.path(), PLANNING);
-    assert!(watch.planning(Duration::from_secs(30), |_| true).is_empty());
+    let subscription = Subscription::open(dir.path(), dir.path(), PLANNING);
+    assert!(subscription
+        .planning(Duration::from_secs(30), |_| true)
+        .is_empty());
 
     let home = Machine::at(dir);
     home.plan(1);
     assert_eq!(
-        watch.planning(Duration::from_secs(5), |tasks| !tasks.is_empty()),
+        subscription.planning(Duration::from_secs(5), |tasks| !tasks.is_empty()),
         ["FIX-1"]
     );
 }
@@ -388,8 +392,10 @@ fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
         .unwrap()
         .execute_batch("CREATE TABLE elsewhere(x)")
         .unwrap();
-    let watch = Watch::open(dir.path(), dir.path(), PLANNING);
-    let frame = watch.next(Duration::from_secs(30)).expect("watch ended");
+    let subscription = Subscription::open(dir.path(), dir.path(), PLANNING);
+    let frame = subscription
+        .next(Duration::from_secs(30))
+        .expect("subscription ended");
     assert_eq!(frame["body"], serde_json::Value::Null);
     assert!(frame["unavailable"].is_string());
 }
@@ -397,14 +403,14 @@ fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
 #[test]
 fn a_steady_writer_is_shown_while_it_writes() {
     let home = Machine::new();
-    let watch = home.watch(PLANNING);
-    watch.planning(Duration::from_secs(30), |_| true);
+    let subscription = home.subscribe(PLANNING);
+    subscription.planning(Duration::from_secs(30), |_| true);
     let mut shown = None;
     let mut latest = 0;
     for count in 1..=60 {
         home.plan(count);
         std::thread::sleep(Duration::from_millis(50));
-        while let Ok(frame) = watch.frames.try_recv() {
+        while let Ok(frame) = subscription.frames.try_recv() {
             let roadmap: RoadmapSnapshot = serde_json::from_value(frame["body"].clone()).unwrap();
             latest = identifiers(&roadmap).len();
             shown.get_or_insert(count);
@@ -416,41 +422,41 @@ fn a_steady_writer_is_shown_while_it_writes() {
         "first frame arrived only as the writer finished"
     );
     if latest != 60 {
-        watch.planning(Duration::from_secs(10), |tasks| tasks.len() == 60);
+        subscription.planning(Duration::from_secs(10), |tasks| tasks.len() == 60);
     }
 }
 
 #[test]
 fn a_paused_watch_and_a_truncated_log_both_catch_up() {
     let home = Machine::new();
-    let watch = home.watch(PLANNING);
-    watch.planning(Duration::from_secs(30), |_| true);
+    let subscription = home.subscribe(PLANNING);
+    subscription.planning(Duration::from_secs(30), |_| true);
 
-    // SAFETY: signals this test's own child, which `Watch` still owns.
-    unsafe { libc::kill(watch.child.id() as libc::pid_t, libc::SIGSTOP) };
+    // SAFETY: signals this test's own child, which `Subscription` still owns.
+    unsafe { libc::kill(subscription.child.id() as libc::pid_t, libc::SIGSTOP) };
     home.plan(1);
     std::thread::sleep(Duration::from_millis(500));
     // SAFETY: as above.
-    unsafe { libc::kill(watch.child.id() as libc::pid_t, libc::SIGCONT) };
-    watch.planning(Duration::from_secs(5), |tasks| tasks == ["FIX-1"]);
+    unsafe { libc::kill(subscription.child.id() as libc::pid_t, libc::SIGCONT) };
+    subscription.planning(Duration::from_secs(5), |tasks| tasks == ["FIX-1"]);
 
     home.raw()
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
     home.plan(2);
-    watch.planning(Duration::from_secs(5), |tasks| tasks.len() == 2);
+    subscription.planning(Duration::from_secs(5), |tasks| tasks.len() == 2);
 }
 
 #[test]
 fn a_confirmation_is_answered_even_when_nothing_changed() {
     let home = Machine::new();
     home.plan(1);
-    let mut watch = home.watch(PLANNING);
-    watch.planning(Duration::from_secs(30), |_| true);
-    watch.request(serde_json::json!({"id": 7}));
+    let mut subscription = home.subscribe(PLANNING);
+    subscription.planning(Duration::from_secs(30), |_| true);
+    subscription.request(serde_json::json!({"id": 7}));
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let frame = watch
+        let frame = subscription
             .next(deadline.saturating_duration_since(Instant::now()))
             .expect("confirmation never answered");
         if frame["answers"] == 7 {
@@ -463,12 +469,12 @@ fn a_confirmation_is_answered_even_when_nothing_changed() {
 #[test]
 fn a_watch_ends_with_its_parent_while_stdin_stays_open() {
     let home = Machine::new();
-    // The parent hands its own stdin to the watch, then waits. This test keeps
-    // that pipe's write end open, so only the parent's exit can end the watch.
+    // The parent hands its own stdin to the subscription, then waits. This test keeps
+    // that pipe's write end open, so only the parent's exit can end the subscription.
     let mut parent = on_machine(home.path(), Command::new("/bin/sh"))
         .args([
             "-c",
-            r#"exec 3<&0; "$0" desktop plan --all --json --watch <&3 >/dev/null & echo $!; exec sleep 600"#,
+            r#"exec 3<&0; "$0" desktop plan --all --json --subscribe <&3 >/dev/null & echo $!; exec sleep 600"#,
         ])
         .arg(loopflow_test_support::lf_binary())
         .current_dir(home.repo())
@@ -480,7 +486,7 @@ fn a_watch_ends_with_its_parent_while_stdin_stays_open() {
     BufReader::new(parent.stdout.take().unwrap())
         .read_line(&mut line)
         .unwrap();
-    let watch: libc::pid_t = line.trim().parse().unwrap();
+    let subscription: libc::pid_t = line.trim().parse().unwrap();
     let alive = |pid: libc::pid_t| {
         let state = Command::new("ps")
             .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -490,16 +496,16 @@ fn a_watch_ends_with_its_parent_while_stdin_stays_open() {
         !state.trim().is_empty() && !state.trim_start().starts_with('Z')
     };
     std::thread::sleep(Duration::from_secs(1));
-    assert!(alive(watch), "the watch never started");
+    assert!(alive(subscription), "the subscription never started");
 
     parent.kill().unwrap();
     parent.wait().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while alive(watch) {
+    while alive(subscription) {
         if Instant::now() > deadline {
-            // SAFETY: the orphaned watch this test started.
-            unsafe { libc::kill(watch, libc::SIGKILL) };
-            panic!("the watch outlived its parent");
+            // SAFETY: the orphaned subscription this test started.
+            unsafe { libc::kill(subscription, libc::SIGKILL) };
+            panic!("the subscription outlived its parent");
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -512,15 +518,15 @@ fn a_checkout_changed_on_disk_is_shown() {
     let home = Machine::at(tempfile::tempdir().unwrap());
     home.plan(1);
     let worktree = home.start(1);
-    let watch = home.watch(PLANNING);
-    watch.checkout((false, false));
+    let subscription = home.subscribe(PLANNING);
+    subscription.checkout((false, false));
 
     std::fs::write(worktree.join("note.txt"), "draft").unwrap();
-    watch.checkout((true, false));
+    subscription.checkout((true, false));
 
     git(&worktree, &["add", "note.txt"]);
     git(&worktree, &["commit", "--quiet", "-m", "note"]);
-    watch.checkout((false, true));
+    subscription.checkout((false, true));
 }
 
 /// An offline completion and reopening reach an open client without a refresh:
@@ -531,9 +537,9 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
     home.linear_repository();
     home.plan(1);
     // An open window keeps the repository's planning exchanged; no Task is selected.
-    let _sync = home.watch(&["planning", "status"]);
-    let tasks = home.watch(&["task", "list"]);
-    let status = home.watch(&["desktop", "task", "FIX-1"]);
+    let _sync = home.subscribe(&["planning", "status"]);
+    let tasks = home.subscribe(&["task", "list"]);
+    let status = home.subscribe(&["desktop", "task", "FIX-1"]);
     let listed = |body: &serde_json::Value, listed: bool| {
         body.as_array().is_some_and(|rows| {
             rows.iter().any(|row| row["task"]["identifier"] == "FIX-1") == listed
@@ -553,7 +559,7 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
                 })
         });
     }
-    let reopened = home.watch(&["task", "list"]);
+    let reopened = home.subscribe(&["task", "list"]);
     reopened.body(Duration::from_secs(30), |body| listed(body, true));
     let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
     assert!(task.worktree.is_none());
@@ -565,9 +571,9 @@ fn an_offline_comment_reaches_the_open_task_status() {
     let home = Machine::new();
     home.linear_repository();
     home.plan(1);
-    let watch = home.watch(&["task", "status", "FIX-1"]);
-    let thread = |watch: &Watch, count: usize| {
-        let body = watch.body(Duration::from_secs(30), |body| {
+    let subscription = home.subscribe(&["task", "status", "FIX-1"]);
+    let thread = |subscription: &Subscription, count: usize| {
+        let body = subscription.body(Duration::from_secs(30), |body| {
             body["comments"]["comments"].as_array().map(Vec::len) == Some(count)
         });
         serde_json::from_value::<loopflow::lf::commands::task_row::TaskThread>(
@@ -575,14 +581,14 @@ fn an_offline_comment_reaches_the_open_task_status() {
         )
         .unwrap()
     };
-    assert!(thread(&watch, 0).pending_sync.is_empty());
+    assert!(thread(&subscription, 0).pending_sync.is_empty());
     let output = home.run(&["task", "comment", "FIX-1", "Saved during outage", "--json"]);
     let saved: loopflow::work::task::comment::TaskComments =
         serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
     let saved = loopflow::lf::commands::task_row::TaskThread::from(saved);
-    assert_eq!(thread(&watch, 1), saved);
-    let reopened = home.watch(&["task", "status", "FIX-1"]);
+    assert_eq!(thread(&subscription, 1), saved);
+    let reopened = home.subscribe(&["task", "status", "FIX-1"]);
     assert_eq!(thread(&reopened, 1), saved);
 }
 
@@ -592,10 +598,10 @@ fn peer_planning_receipts_reach_an_open_watch() {
     use loopflow::store::PeerPlanningStatus;
 
     let home = Machine::new();
-    let watch = home.watch(&["planning", "status"]);
+    let subscription = home.subscribe(&["planning", "status"]);
     let repo = home.wave.repo();
     let read = |accept: &dyn Fn(&[PeerPlanningStatus]) -> bool| {
-        let body = watch.body(Duration::from_secs(10), |body| {
+        let body = subscription.body(Duration::from_secs(10), |body| {
             serde_json::from_value::<Vec<PeerPlanningStatus>>(body["destinations"].clone())
                 .is_ok_and(|statuses| accept(&statuses))
         });

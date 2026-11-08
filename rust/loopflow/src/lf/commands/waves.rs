@@ -635,16 +635,16 @@ pub fn desktop_closed_tasks(
 /// `lf task list --closed`'s default `--limit`.
 pub const CLOSED_TASK_PAGE: usize = 50;
 
-/// `lf wave status --watch`: `lf wave status --json` now and each time it
-/// changes. The watch reads the store; it does not observe the tracker.
-pub fn watch_status(wave: Option<String>) -> Result<()> {
-    super::watch::run(
+/// `lf wave status --subscribe`: `lf wave status --json` now and each time it
+/// changes. The subscription reads the store; it does not observe the tracker.
+pub fn subscribe_status(wave: Option<String>) -> Result<()> {
+    super::subscribe::run(
         (),
-        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
         |store, ()| {
             let wave = wave.clone();
             async move {
-                let store = super::watch::require_store(store)?;
+                let store = super::subscribe::require_store(store)?;
                 let wave = resolve_status_wave(&store, wave.as_deref()).await?;
                 Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
             }
@@ -729,18 +729,18 @@ pub(crate) fn show_json(
     })
 }
 
-/// `lf wave show --watch` in `directory`: `lf wave show --json` now and each
-/// time it changes. The watch reads the store; it does not observe the tracker.
-pub fn watch_show(
+/// `lf wave show --subscribe` in `directory`: `lf wave show --json` now and each
+/// time it changes. The subscription reads the store; it does not observe the tracker.
+pub fn subscribe_show(
     directory: std::path::PathBuf,
     wave: Option<String>,
     task: Option<String>,
     all: bool,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Watch>> {
-    super::watch::start(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         (),
-        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
             async move {
@@ -862,7 +862,7 @@ async fn show_roadmap(
 }
 
 /// What `lf task list` narrows the repository's open Tasks to; the flags of
-/// the same name, which a `--watch` request can replace.
+/// the same name, which a `--subscribe` request can replace.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListArgs {
@@ -901,11 +901,11 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     })
 }
 
-/// `lf task list --watch`: `lf task list --json` now and each time it changes.
-pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    super::watch::run(
+/// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
+pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
+    super::subscribe::run(
         args,
-        super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
         |store, args| {
             let repo = repo.to_owned();
             async move {
@@ -918,32 +918,32 @@ pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
     )
 }
 
-/// What a `lf task status --watch` request can select instead.
+/// What a `lf task status --subscribe` request can select instead.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TaskStatusArgs {
     issue: String,
 }
 
-/// `lf task status <issue> --watch`: `lf task status --json` now and each time
+/// `lf task status <issue> --subscribe`: `lf task status --json` now and each time
 /// it changes. Only the first reading exchanges planning with the tracker.
-pub fn watch_task_status(
+pub fn subscribe_task_status(
     repo: &Path,
     issue: String,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Watch>> {
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_detail(&store, status).await
     })
 }
 
-/// `lf task show <issue> --watch`: `lf task show --json` now and each time it
+/// `lf task show <issue> --subscribe`: `lf task show --json` now and each time it
 /// changes.
-pub fn watch_task_pane(
+pub fn subscribe_task_pane(
     repo: &Path,
     issue: String,
-    transport: super::watch::Transport,
-) -> Result<Option<super::watch::Watch>> {
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
     watch_task(repo, issue, transport, |store, status| async move {
         task_pane(&store, status).await
     })
@@ -952,23 +952,23 @@ pub fn watch_task_pane(
 fn watch_task<T, F, R>(
     repo: &Path,
     issue: String,
-    transport: super::watch::Transport,
+    transport: super::subscribe::Transport,
     reading: F,
-) -> Result<Option<super::watch::Watch>>
+) -> Result<Option<super::subscribe::Subscription>>
 where
     T: Serialize,
     F: Fn(SharedStore, crate::ops::task::TaskStatus) -> R + Clone + Send + Sync + 'static,
     R: std::future::Future<Output = Result<T>> + Send,
 {
     let repo = repo.to_owned();
-    super::watch::start(
+    super::subscribe::start(
         TaskStatusArgs { issue },
-        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         move |store, args| {
             let repo = repo.to_owned();
             let reading = reading.clone();
             async move {
-                let store = super::watch::require_store(store)?;
+                let store = super::subscribe::require_store(store)?;
                 let status = crate::ops::task::read_task_status(&store, &repo, &args.issue).await?;
                 Ok(serde_json::to_value(reading(store, status).await?)?)
             }

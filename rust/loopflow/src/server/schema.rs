@@ -118,7 +118,7 @@ const REQUESTS: &[&str] = &[
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
-/// fixture must be named here; watches answer null.
+/// fixture must be named here; subscriptions answer null.
 const RESPONSES: &[(&str, &str, &str)] = &[
     (
         "account",

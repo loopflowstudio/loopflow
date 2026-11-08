@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use super::{watch, waves};
+use super::{subscribe, waves};
 
 pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
     let status = crate::ops::task::task_status(repo, issue)?;
@@ -21,8 +21,9 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
         println!("{}", render(&reading));
         return Ok(());
     }
-    let watching = waves::watch_task_status(repo, issue, watch::Transport::Pull(Box::new(|| {})))?
-        .context("Task watch did not return its handle")?;
+    let subscribing =
+        waves::subscribe_task_status(repo, issue, subscribe::Transport::Pull(Box::new(|| {})))?
+            .context("Task subscription did not return its handle")?;
     let _terminal = Terminal::enter()?;
     let mut offset = 0usize;
     let mut dirty = true;
@@ -30,7 +31,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
     let mut selected_step = 0usize;
     let mut log = None;
     loop {
-        if let Some(bytes) = watching.pull() {
+        if let Some(bytes) = subscribing.pull() {
             let frame: Value = serde_json::from_slice(&bytes)?;
             unavailable = frame["unavailable"].as_str().map(str::to_owned);
             if !frame["body"].is_null() {
@@ -96,7 +97,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
             }
             dirty = true;
         }
-        if watching.ended() {
+        if subscribing.ended() {
             break;
         }
     }

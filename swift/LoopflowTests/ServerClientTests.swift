@@ -45,14 +45,14 @@ struct ServerClientTests {
     @Test func unansweredReadsExpireThenEndAStalledConnection() async throws {
         let peer = try ServerPeer()
         peer.serve { message, respond in
-            if message["type"] as? String == "watch" {
+            if message["type"] as? String == "subscribe" {
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
             }
             return true // Reads are never answered.
         }
-        let watch = ServerClient.watch(.allPlans, location: peer.location)
-        var frames = watch.lines.makeAsyncIterator()
-        peer.waitForMessage { $0["type"] as? String == "watch" }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        var frames = subscription.lines.makeAsyncIterator()
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
         for _ in 0..<ServerLink.stalledReads {
             do {
                 _ = try await ServerClient.read(.machineId, location: peer.location, deadline: .milliseconds(20))
@@ -63,7 +63,7 @@ struct ServerClientTests {
         }
         do {
             _ = try await frames.next()
-            Issue.record("A stalled connection kept its watch")
+            Issue.record("A stalled connection kept its subscription")
         } catch {
             #expect(!(error is CancellationError))
         }
@@ -140,19 +140,19 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
-    @Test func serverEndingAWatchFailsItsWatchAlone() async throws {
+    @Test func serverEndingASubscriptionFailsItAlone() async throws {
         let peer = try ServerPeer()
-        let watchID = Mutex<String?>(nil)
+        let subscriptionID = Mutex<String?>(nil)
         peer.serve { message, respond in
             switch (message["type"] as? String, (message["operation"] as? [String: Any])?["kind"] as? String) {
-            case ("watch", _):
+            case ("subscribe", _):
                 let id = message["id"] as! String
-                watchID.set(id)
+                subscriptionID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
                 respond(["type": "reading", "id": id, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
-                let id = watchID.get()!
+                let id = subscriptionID.get()!
                 respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
@@ -161,22 +161,22 @@ struct ServerClientTests {
             }
             return true
         }
-        let watch = ServerClient.watch(.allPlans, location: peer.location)
-        var frames = watch.lines.makeAsyncIterator()
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
-        watch.send(Data(#"{"id":4}"#.utf8 + [10]))
+        subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
         let last = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
             _ = try await frames.next()
-            Issue.record("An ended watch kept its stream open")
+            Issue.record("An ended subscription kept its stream open")
         } catch {
             #expect(error.localizedDescription == "unavailable: gone")
         }
-        // The connection outlives the watch.
+        // The connection outlives the subscription.
         #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")
-        await watch.cancel()
+        await subscription.cancel()
     }
 
     @Test(arguments: [false, true])
@@ -219,7 +219,7 @@ struct ServerClientTests {
             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
         }
         try Data().write(to: root.appendingPathComponent("setup-allowed"))
-        // Both a refreshed reading and reopened watches share one consumed
+        // Both a refreshed reading and reopened subscriptions share one consumed
         // readiness attempt. Installation is now possible but remains untouched.
         try await withThrowingTaskGroup(of: Void.self) { group in
             for attempt in 0..<3 {
@@ -232,14 +232,14 @@ struct ServerClientTests {
                             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
                         }
                     } else {
-                        let watch = ServerClient.watch(query, location: location)
+                        let subscription = ServerClient.subscribe(query, location: location)
                         do {
-                            for try await _ in watch.lines { Issue.record("The server is still unavailable") }
-                            Issue.record("The watch must report unavailability")
+                            for try await _ in subscription.lines { Issue.record("The server is still unavailable") }
+                            Issue.record("The subscription must report unavailability")
                         } catch {
                             #expect(error.localizedDescription.contains("fixture Background Items disabled"))
                         }
-                        await watch.cancel()
+                        await subscription.cancel()
                     }
                 }
             }
@@ -254,16 +254,16 @@ struct ServerClientTests {
             _ = try await server.status()
             let reading = try await ServerClient.read(query, location: location)
             #expect(reading.contains("Recovered Work"))
-            let watch = ServerClient.watch(query, location: location)
+            let subscription = ServerClient.subscribe(query, location: location)
             do {
-                var frames = watch.lines.makeAsyncIterator()
+                var frames = subscription.lines.makeAsyncIterator()
                 let first = try #require(try await frames.next())
                 #expect(String(decoding: first, as: UTF8.self).contains("Recovered Work"))
             } catch {
-                await watch.cancel()
+                await subscription.cancel()
                 throw error
             }
-            await watch.cancel()
+            await subscription.cancel()
             #expect(try String(contentsOf: root.appendingPathComponent("setup-attempts"), encoding: .utf8) == "attempt\n")
             #expect(!fm.fileExists(atPath: root.appendingPathComponent("registered-again").path))
         } catch {

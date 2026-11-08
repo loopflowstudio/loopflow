@@ -322,7 +322,7 @@ The browser retains its opening location through Close/Undo, including a first o
 without a Session link. New shell tabs use the Task's recorded location;
 existing tabs and file drafts keep their original locations.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
-Remote paths are never opened or watched on the presentation Mac. Filesystem events
+Remote paths are never opened or subscribed on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects
 retain drafts and show an error; Refresh reconnects. Stale owner readings are discarded.
 Switching files, hiding Files and returning to the Task keeps the draft.
@@ -784,13 +784,13 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf plan list --all --json --watch       # every Wave's plan and open Tasks as Desktop shows them
-lf task show LOO-1 --json --watch       # the shown Task: work, Graphs, thread
-lf session list --json --watch         # the repository's Sessions as Desktop lists them
-lf repo plan --json --watch          # stored sync receipts
+lf plan list --all --json --subscribe       # every Wave's plan and open Tasks as Desktop shows them
+lf task show LOO-1 --json --subscribe       # the shown Task: work, Graphs, thread
+lf session list --json --subscribe         # the repository's Sessions as Desktop lists them
+lf repo plan --json --subscribe          # stored sync receipts
 ```
 
-A window observes these reads through `RegistryQuery.watchWork()`, one server
+A window observes these reads through `RegistryQuery.subscribeWork()`, one server
 subscription per part. All `ServedRead` and `ServedWrite` operations cross the
 same local protocol, including Task files, diffs, Waves, Machine identity,
 Portfolio, saved panes, Task ownership and Graphs. Desktop links no Loopflow Rust
@@ -814,9 +814,9 @@ remains app-owned.
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
-activity (`lf session history`) and live call trees (`lf process list`). Each watch is
+activity (`lf session history`) and live call trees (`lf process list`). Each subscription is
 internally consistent; panes do not share one snapshot. Changing what the window
-shows restarts only the watches whose read changed; the rest answer from their last frame without reading again.
+shows restarts only the subscriptions whose read changed; the rest answer from their last frame without reading again.
 
 A part arrives again only when a commit changed what it shows, so a Task created
 by `lf`, a worker or another window appears without a refresh. A file written or
@@ -827,10 +827,10 @@ frame carries. File definitions are reread when the app becomes active or after
 customization.
 
 After Task actions and Workflow changes, the window waits for a checkpoint: each
-running watch answers the request with a reading begun after the command, and
+running subscription answers the request with a reading begun after the command, and
 the checkpoint follows once all have, even when nothing visibly changed. Session
-commands confirm only the Sessions watch. Explicit Retry and recovery after sleep
-ask every watch to read again. If a watch ends, the window reopens all of them;
+commands confirm only the Sessions subscription. Explicit Retry and recovery after sleep
+ask every subscription to read again. If a subscription ends, the window reopens all of them;
 the last readings stay on screen marked unavailable until new ones arrive. Every
 frame names its Loopflow home.
 
@@ -840,9 +840,9 @@ automatically repeated.
 
 Local subscriptions use server sockets off the main actor. Cancellation closes
 the connection; reconnect opens a fresh subscription without replaying revisions.
-Remote Task file watches retain their CLI pipes, drained off the main actor;
+Remote Task file subscriptions retain their CLI pipes, drained off the main actor;
 cancellation closes stdin, then terminates and reaps only the owned reader if
-necessary. A watch that speaks only on change is not stalled merely by silence.
+necessary. A subscription that speaks only on change is not stalled merely by silence.
 
 ## Headless checks
 
@@ -877,7 +877,7 @@ and placement JSON fields retain their existing bytes across these source rename
 Definition search keeps Graph and Workflow destinations separate, even for the
 same name. Planning selectors list only Workflows. Task reads expose
 `workflow_name`, `latest_graph_process`, `execution`, and `run_control` separately;
-completed Graph processes retain their graph and identity. The Task watch part
+completed Graph processes retain their graph and identity. The Task subscription part
 supplies `graph_processes`, using the same execution details as CLI inspection.
 
 ### Inspect retained workspaces

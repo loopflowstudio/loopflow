@@ -109,7 +109,7 @@ registry of whichever checkouts happened to be observed. Wave selectors preserve
 Wave identity through rename/relocation and distinguish reuse of an old name.
 
 Subscriptions capture the configuration files their reading uses, including absent
-paths, definition directories and bounded Task workers. The shared watch reader
+paths, definition directories and bounded Task workers. The shared subscription reader
 checks those inputs on its one-second observation clock. Content comparison detects
 hand edits, atomic replacement and removal without a store commit or Git change.
 Only changed inputs schedule another Work reading, through the existing coalescing

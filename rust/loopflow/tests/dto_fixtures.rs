@@ -566,10 +566,10 @@ fn selection_states_fixture_lists_every_state() {
 }
 
 #[test]
-fn watch_frames_carry_each_reads_json_result() {
-    use loopflow::lf::commands::watch::WatchFrame;
+fn subscribe_frames_carry_each_reads_json_result() {
+    use loopflow::lf::commands::subscribe::SubscriptionFrame;
     let entries: Vec<serde_json::Value> = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/watch_frames.json"
+        "../../../tests/fixtures/dto/subscribe_frames.json"
     ))
     .unwrap();
     let envelope = |frame: &serde_json::Value| {
@@ -577,7 +577,7 @@ fn watch_frames_carry_each_reads_json_result() {
         keys.sort();
         keys
     };
-    let written = serde_json::to_value(WatchFrame::<()> {
+    let written = serde_json::to_value(SubscriptionFrame::<()> {
         answers: None,
         unavailable: Some("gone".into()),
         body: None,
@@ -598,7 +598,7 @@ fn watch_frames_carry_each_reads_json_result() {
         match entry["part"].as_str().unwrap() {
             "planning" => read::<RoadmapSnapshot>(&body),
             "selections" => read::<Vec<loopflow::work::selection::ViewPlan>>(&body),
-            // Desktop's Session rows are pinned by `sessions.json`; the watch carries them as listed.
+            // Desktop's Session rows are pinned by `sessions.json`; the subscription carries them as listed.
             "sessions" => assert!(body
                 .as_array()
                 .unwrap()
@@ -613,7 +613,7 @@ fn watch_frames_carry_each_reads_json_result() {
                 read::<Vec<loopflow::store::PeerPlanningStatus>>(&body["destinations"]);
                 assert_eq!(body["transport"], "git");
             }
-            other => panic!("unknown watch {other}"),
+            other => panic!("unknown subscription {other}"),
         }
     }
 }

@@ -3,7 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::watch::{Transport, Watch};
+use super::subscribe::{Subscription, Transport};
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -624,9 +624,9 @@ fn repository_in(
 
 /// `lf task show`: what the Task pane shows, from the same reading as
 /// `lf task status`.
-pub fn task_pane(issue: &str, watch: bool) -> Result<()> {
-    if watch {
-        return watch_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
+pub fn task_pane(issue: &str, subscribe: bool) -> Result<()> {
+    if subscribe {
+        return subscribe_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
     }
     let pane = read_task_pane(&std::env::current_dir()?, issue)?;
     println!("{}", serde_json::to_string(&pane)?);
@@ -652,12 +652,12 @@ pub(crate) fn read_task_pane(
     })
 }
 
-/// `lf task show --watch` for the Task `issue` names from `directory`.
-pub(crate) fn watch_task_pane(
+/// `lf task show --subscribe` for the Task `issue` names from `directory`.
+pub(crate) fn subscribe_task_pane(
     directory: &std::path::Path,
     issue: &str,
     transport: Transport,
-) -> Result<Option<Watch>> {
+) -> Result<Option<Subscription>> {
     let repo = crate::ops::task::task_repository(directory, Some(issue))?;
     let identifier = tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
@@ -667,22 +667,22 @@ pub(crate) fn watch_task_pane(
         anyhow::Ok(
             status
                 .task
-                .context("only a registered Task can be watched")?
+                .context("only a registered Task can be subscribed")?
                 .identifier,
         )
     })?;
-    super::waves::watch_task_pane(&repo, identifier, transport)
+    super::waves::subscribe_task_pane(&repo, identifier, transport)
 }
 
 /// `lf desktop view list`: every plan a repository window shows, the default
 /// and each saved Dashboard, as Desktop reads them.
-fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
-    if !watch {
+fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
+    if !subscribe {
         let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
         println!("{}", serde_json::to_string(&plans)?);
         return Ok(());
     }
-    watch_plans(
+    subscribe_plans(
         cli.repository.clone(),
         std::env::current_dir()?,
         Transport::Stdio,
@@ -703,16 +703,16 @@ pub(crate) fn read_plans(
     Ok(store.sqlite.selection_plans(&repository)?)
 }
 
-/// `lf desktop view list --watch` for `--repository`, else the repository
+/// `lf desktop view list --subscribe` for `--repository`, else the repository
 /// containing `directory`.
-pub(crate) fn watch_plans(
+pub(crate) fn subscribe_plans(
     selected: Option<crate::durable::RepositoryId>,
     directory: std::path::PathBuf,
     transport: Transport,
-) -> Result<Option<Watch>> {
-    super::watch::start(
+) -> Result<Option<Subscription>> {
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)
@@ -1110,9 +1110,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             return Ok(());
         }
         DesktopCommand::View {
-            cmd: Some(DesktopViewCommand::List { watch, .. }),
+            cmd: Some(DesktopViewCommand::List { subscribe, .. }),
             ..
-        } => return plans(cli, *watch),
+        } => return plans(cli, *subscribe),
         DesktopCommand::View {
             cmd: Some(DesktopViewCommand::Show { expression, json }),
             ..
@@ -1967,7 +1967,7 @@ fn stream_events(desktop: DesktopConnection, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// What `wait` watches, by full ID so a later reading cannot retarget it.
+/// What `wait` subscriptions, by full ID so a later reading cannot retarget it.
 #[derive(Debug, Clone, PartialEq)]
 struct WaitTarget {
     window: String,
@@ -1976,7 +1976,7 @@ struct WaitTarget {
     tab: Option<String>,
 }
 
-/// One observation of the watched target.
+/// One observation of the subscribed target.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WaitState {
     /// Not there yet, or a terminal without a running surface.

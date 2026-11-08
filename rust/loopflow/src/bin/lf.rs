@@ -2845,6 +2845,24 @@ fn execute_command(
             provider_pid.expect("clap requires --provider-pid with --lifeline"),
         ),
         Some(Commands::ContextBlock {
+            moment: ContextMoment::Limit,
+            ..
+        }) => {
+            loopflow::provider_account::observe_native_limit();
+            Ok(())
+        }
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::RecordLimit,
+            ..
+        }) => {
+            loopflow::provider_account::record_limit();
+            Ok(())
+        }
+        Some(Commands::ContextBlock {
+            moment: ContextMoment::Move,
+            ..
+        }) => loopflow::lf::commands::context::apply_session_move(),
+        Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
@@ -2862,13 +2880,10 @@ fn execute_command(
         }
         Some(Commands::Account {
             cmd,
-            provider,
+            target,
             cached,
-            details,
             json,
-        }) => {
-            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
-        }
+        }) => loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *cached, *json),
         Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {

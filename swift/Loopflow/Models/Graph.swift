@@ -80,6 +80,7 @@ public enum TaskExecutionState: String, Decodable, Sendable, Hashable {
     case starting
     case running
     case stalled
+    case waiting
     case blocked
     case unknown
 }

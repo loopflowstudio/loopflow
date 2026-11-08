@@ -598,17 +598,21 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     fs::create_dir_all(&logs)?;
     if cfg!(target_os = "macos") {
         launchd_schedule(&home, &binary, &logs, frequency)?;
-        install_launchd(
-            &home,
-            "com.loopflow.cleanup",
-            &cleanup_plist(&home, &binary, &logs),
-        )
+        launchd_cleanup(&home, &binary, &logs)?;
+        launchd_renewal(&home, &binary, &logs)
     } else if cfg!(target_os = "linux") {
-        cron_schedule(&home, &binary, &logs, frequency)
+        cron_schedule(&home, &binary, &logs, frequency)?;
+        cron_renewal(&home, &binary, &logs)
     } else {
         bail!("automatic cleanup needs launchd on macOS or cron on Linux")
     }
 }
+
+/// Rental Claude logins renew every 2 hours: an access token lasts about 8,
+/// and is resent once within 2 of expiry.
+const RENEWAL_SECONDS: u32 = 2 * 60 * 60;
+const RENEWAL_LABEL: &str = "com.loopflow.rental-renewal";
+const RENEWAL_CRON_MARKER: &str = "# loopflow rental renewal";
 
 /// The frequency whose rendered schedule is already installed, else daily.
 fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
@@ -647,7 +651,10 @@ fn launchd_schedule(
         })
     });
     let payload = schedule_plist(home, binary, logs, frequency);
-    install_launchd(home, "com.loopflow.refresh", &payload)?;
+    if !install_launchd(home, "com.loopflow.refresh", &payload)? {
+        println!("Installation already scheduled: {}", path.display());
+        return Ok(());
+    }
     println!(
         "Installation scheduled at login and {}: {}; logs: {}",
         cadence(frequency),
@@ -657,7 +664,9 @@ fn launchd_schedule(
     Ok(())
 }
 
-fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<()> {
+/// Write and (re)load the LaunchAgent `name` unless `payload` is already loaded;
+/// `true` when it changed.
+fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<bool> {
     let path = home.join(format!("Library/LaunchAgents/{name}.plist"));
     fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
     let current = fs::read_to_string(&path).ok();
@@ -676,8 +685,7 @@ fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<()> {
         .status
         .success();
     if loaded && current.as_deref() == Some(payload) {
-        println!("Already scheduled: {}", path.display());
-        return Ok(());
+        return Ok(false);
     }
     if loaded
         && !Command::new("launchctl")
@@ -696,7 +704,43 @@ fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<()> {
     {
         bail!("could not load the {name} schedule; rerun `lf install schedule`");
     }
+    Ok(true)
+}
+
+/// `lf task retire` every minute, separate from the update schedule.
+fn launchd_cleanup(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let payload = cleanup_plist(home, binary, logs);
+    if install_launchd(home, "com.loopflow.cleanup", &payload)? {
+        println!(
+            "Cleanup scheduled every minute; logs: {}",
+            logs.join("workspace-retirement.log").display()
+        );
+    }
     Ok(())
+}
+
+/// `lf machine credentials renew` every 2 hours. The rental logins are files
+/// under `~/.lf/accounts`, so the job reads no Keychain item.
+fn launchd_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let payload = renewal_plist(home, binary, logs);
+    if install_launchd(home, RENEWAL_LABEL, &payload)? {
+        println!(
+            "Rental logins renew every 2 hours; logs: {}",
+            logs.join("rental-renewal.log").display()
+        );
+    }
+    Ok(())
+}
+
+fn renewal_plist(home: &Path, binary: &Path, logs: &Path) -> String {
+    launch_agent_plist(
+        RENEWAL_LABEL,
+        home,
+        binary,
+        &["machine", "credentials", "renew"],
+        &logs.join("rental-renewal.log"),
+        &format!("<key>StartInterval</key><integer>{RENEWAL_SECONDS}</integer>"),
+    )
 }
 
 const CLEANUP_CRON_MARKER: &str = "# loopflow cleanup schedule";
@@ -754,11 +798,19 @@ fn cron_schedule(
         })
     });
     let table = cron_table(
-        &current,
-        &cron_line(home, binary, logs, frequency),
+        &cron_table(
+            &current,
+            CRON_MARKER,
+            &cron_line(home, binary, logs, frequency),
+        ),
+        CLEANUP_CRON_MARKER,
         &cleanup_cron_line(home, binary, logs),
     );
-    write_crontab(&current, &table)?;
+    if table == current {
+        println!("Installation and cleanup already scheduled in your crontab");
+        return Ok(());
+    }
+    write_crontab(&table)?;
     println!(
         "Installation scheduled {} in your crontab; logs: {}",
         cadence(frequency),
@@ -772,19 +824,14 @@ fn read_crontab() -> Result<String> {
         "automatic installation and cleanup need cron; install it and rerun `lf install schedule`",
     )?;
     // `crontab -l` fails when the user has no crontab yet.
-    let current = if listed.status.success() {
+    Ok(if listed.status.success() {
         String::from_utf8(listed.stdout)?
     } else {
         String::new()
-    };
-    Ok(current)
+    })
 }
 
-fn write_crontab(current: &str, table: &str) -> Result<()> {
-    if table == current {
-        println!("Installation and cleanup already scheduled in your crontab");
-        return Ok(());
-    }
+fn write_crontab(table: &str) -> Result<()> {
     let mut child = Command::new("crontab")
         .arg("-")
         .stdin(std::process::Stdio::piped())
@@ -800,6 +847,34 @@ fn write_crontab(current: &str, table: &str) -> Result<()> {
     Ok(())
 }
 
+fn cron_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
+    let current = read_crontab()?;
+    let table = cron_table(
+        &current,
+        RENEWAL_CRON_MARKER,
+        &renewal_cron_line(home, binary, logs),
+    );
+    if table != current {
+        write_crontab(&table)?;
+        println!(
+            "Rental logins renew every 2 hours in your crontab; logs: {}",
+            logs.join("rental-renewal.log").display()
+        );
+    }
+    Ok(())
+}
+
+fn renewal_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
+    cron_entry(
+        "0 */2 * * *",
+        home,
+        binary,
+        "machine credentials renew",
+        &logs.join("rental-renewal.log"),
+        RENEWAL_CRON_MARKER,
+    )
+}
+
 fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
     let when = match frequency {
         InstallFrequency::Weekly => "0 9 * * 1",
@@ -807,9 +882,29 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
         InstallFrequency::Hourly => "0 * * * *",
         InstallFrequency::FiveMinutes => "*/5 * * * *",
     };
+    cron_entry(
+        when,
+        home,
+        binary,
+        "install",
+        &logs.join("refresh.log"),
+        CRON_MARKER,
+    )
+}
+
+/// One crontab line running the installed `lf <command>` with its install
+/// directory and PATH, appending to `log`, owned by `marker`.
+fn cron_entry(
+    when: &str,
+    home: &Path,
+    binary: &Path,
+    command: &str,
+    log: &Path,
+    marker: &str,
+) -> String {
     let bin = binary.parent().expect("installation binary has a parent");
     format!(
-        "{when} LF_INSTALL_DIR={} PATH={} {} install >> {} 2>&1 {CRON_MARKER}",
+        "{when} LF_INSTALL_DIR={} PATH={} {} {command} >> {} 2>&1 {marker}",
         cron_quote(&bin.to_string_lossy()),
         cron_quote(&format!(
             "{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
@@ -817,7 +912,7 @@ fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequenc
             home.display()
         )),
         cron_quote(&binary.to_string_lossy()),
-        cron_quote(&logs.join("refresh.log").to_string_lossy())
+        cron_quote(&log.to_string_lossy())
     )
 }
 
@@ -826,17 +921,15 @@ fn cron_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'")).replace('%', "\\%")
 }
 
-/// Replace both owned jobs in one crontab update; unrelated entries stay.
-fn cron_table(current: &str, install: &str, cleanup: &str) -> String {
+/// `current` with its `marker` line replaced by `line`; other entries stay.
+fn cron_table(current: &str, marker: &str, line: &str) -> String {
     let mut table: String = current
         .lines()
-        .filter(|entry| !entry.ends_with(CRON_MARKER) && !entry.ends_with(CLEANUP_CRON_MARKER))
+        .filter(|entry| !entry.ends_with(marker))
         .map(|entry| format!("{entry}\n"))
         .collect();
-    for line in [install, cleanup] {
-        table.push_str(line);
-        table.push('\n');
-    }
+    table.push_str(line);
+    table.push('\n');
     table
 }
 
@@ -862,20 +955,44 @@ fn plist_path(path: &Path) -> String {
 }
 
 fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
-    let binary_path = plist_path(binary);
+    launch_agent_plist(
+        "com.loopflow.refresh",
+        home,
+        binary,
+        &["install"],
+        &logs.join("refresh.log"),
+        &format!(
+            "<key>RunAtLoad</key><true/>\n<key>StartCalendarInterval</key>{}",
+            schedule_calendar(frequency)
+        ),
+    )
+}
+
+/// A LaunchAgent running the installed `lf args…` with its install directory
+/// and PATH, logging to `log`; `timing` holds its schedule keys.
+fn launch_agent_plist(
+    label: &str,
+    home: &Path,
+    binary: &Path,
+    args: &[&str],
+    log: &Path,
+    timing: &str,
+) -> String {
+    let program: String = std::iter::once(plist_path(binary))
+        .chain(args.iter().map(|arg| arg.to_string()))
+        .map(|arg| format!("<string>{arg}</string>"))
+        .collect();
     let bin = plist_path(binary.parent().expect("installation binary has a parent"));
     let home = plist_path(home);
-    let log = plist_path(&logs.join("refresh.log"));
-    let calendar = schedule_calendar(frequency);
+    let log = plist_path(log);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>Label</key><string>com.loopflow.refresh</string>
-<key>ProgramArguments</key><array><string>{binary_path}</string><string>install</string></array>
+<key>Label</key><string>{label}</string>
+<key>ProgramArguments</key><array>{program}</array>
 <key>EnvironmentVariables</key><dict><key>LF_INSTALL_DIR</key><string>{bin}</string><key>PATH</key><string>{bin}:{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
-<key>RunAtLoad</key><true/>
-<key>StartCalendarInterval</key>{calendar}
+{timing}
 <key>StandardOutPath</key><string>{log}</string>
 <key>StandardErrorPath</key><string>{log}</string>
 </dict></plist>
@@ -888,8 +1005,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::{checked, launchd_schedule, DiskImage};
     use super::{
-        is_current, newest_release, newest_run, package_target, record_stream, recorded_stream,
-        release_tag, run_verified_installer, InstallFrequency, Stream,
+        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
+        recorded_stream, release_tag, run_verified_installer, InstallFrequency, Stream,
+        CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1001,6 +1119,36 @@ mod tests {
             super::launchd_schedule(temp.path(), &binary, temp.path(), None).unwrap();
             assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn schedule_renews_rental_logins_every_two_hours() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        let launchctl = bin.join("launchctl");
+        fs::write(&launchctl, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let agents = temp.path().join("Library/LaunchAgents");
+        fs::create_dir_all(&agents).unwrap();
+        super::launchd_renewal(temp.path(), &bin.join("lf"), temp.path()).unwrap();
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-convert", "json", "-o", "-"])
+            .arg(agents.join("com.loopflow.rental-renewal.plist"))
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(plist["StartInterval"], 7200);
+        assert_eq!(
+            plist["ProgramArguments"],
+            serde_json::json!([bin.join("lf"), "machine", "credentials", "renew"])
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1259,12 +1407,16 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         let update = super::cron_line(home, &binary, &logs, InstallFrequency::Daily);
         let cleanup = super::cleanup_cron_line(home, &binary, &logs);
         let current = "MAILTO=me\n0 0 * * * backup\n";
-        let first = super::cron_table(current, &update, &cleanup);
+        let table = |current: &str, update: &str| {
+            let updated = cron_table(current, CRON_MARKER, update);
+            cron_table(&updated, super::CLEANUP_CRON_MARKER, &cleanup)
+        };
+        let first = table(current, &update);
         assert_eq!(first, format!("{current}{update}\n{cleanup}\n"));
-        assert_eq!(super::cron_table(&first, &update, &cleanup), first);
+        assert_eq!(table(&first, &update), first);
         let hourly = super::cron_line(home, &binary, &logs, InstallFrequency::Hourly);
         assert_eq!(
-            super::cron_table(&first, &hourly, &cleanup),
+            table(&first, &hourly),
             format!("{current}{hourly}\n{cleanup}\n")
         );
         assert!(cleanup.starts_with("* * * * * "));
@@ -1419,6 +1571,29 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
         ]"#;
         assert_eq!(newest_release(releases).unwrap(), "v0.16.2");
         assert!(newest_release("[]").is_err());
+    }
+
+    #[test]
+    fn the_cron_schedule_replaces_only_its_own_line() {
+        let ours = format!("0 9 * * 1 lf install {CRON_MARKER}");
+        let current = format!("MAILTO=me\n*/10 * * * * backup\n{ours}\n");
+        let daily = format!("0 9 * * * lf install {CRON_MARKER}");
+        assert_eq!(
+            cron_table(&current, CRON_MARKER, &daily),
+            format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
+        );
+        assert_eq!(cron_table("", CRON_MARKER, &daily), format!("{daily}\n"));
+        let renewal = super::renewal_cron_line(
+            Path::new("/home/me"),
+            Path::new("/home/me/.local/bin/lf"),
+            Path::new("/home/me/.lf/logs"),
+        );
+        assert!(renewal.starts_with("0 */2 * * * "), "{renewal}");
+        assert!(renewal.contains("'/home/me/.local/bin/lf' machine credentials renew"));
+        assert_eq!(
+            cron_table(&format!("{daily}\n"), super::RENEWAL_CRON_MARKER, &renewal),
+            format!("{daily}\n{renewal}\n")
+        );
     }
 
     #[test]

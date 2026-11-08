@@ -536,7 +536,6 @@ pub fn generate_pr_copy(
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {
-        isolate: None,
         chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),

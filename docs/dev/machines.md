@@ -53,11 +53,11 @@ probe duplicates that check. Launch retains its sender probe and credential
 preparation. `--context`/`--explain` skip both, and neither side admits a Process.
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
-login through SSH stdin. Claude's is the account's long-lived subscription token
-(`lf account token claude <email>`, minted on first use in a foreground run):
-it cannot refresh, so no machine rotates another's login, and it cannot read
-its profile, so the receiving machine registers the identity the sender asserts; account-selected launches connect missing logins in the
-foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
+login through SSH stdin: a fresh login the Machine refreshes itself, or, on a
+rental, a Claude access token the laptop refreshes from a login it keeps for
+rentals. An access token cannot refresh, so no machine rotates another's login;
+the rental registers the identity the sender asserts. Account-selected launches
+connect missing or expiring logins in the foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
@@ -251,7 +251,7 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, then the price from the provider's published per-second rates), writes
 the rental as `requested` with its sandbox name `lf-<id>` before the create,
 creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
-and installs every Claude account's long-lived token (and, when the repository
+and installs each Claude account's rental access token (and, when the repository
 plans in Linear, a freshly refreshed Linear access token), clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,

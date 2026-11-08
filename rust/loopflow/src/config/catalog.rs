@@ -238,11 +238,11 @@ definitions! {
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists; a comma list names the providers a step falls through to";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
-    isolate: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Run in the selected account home";
+    isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
     summaries: Vec<SummaryConfig> = "[]", Launch, AppendReset, ReferencedAssets, Inactive, Agents, "Parsed summary requests; no runtime consumer";
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]

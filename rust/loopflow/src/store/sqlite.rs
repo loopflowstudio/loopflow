@@ -66,7 +66,7 @@ pub(crate) mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
+pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub use task_details::TaskDetailFacts;
@@ -457,6 +457,8 @@ fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<A
         plan: row.get(5)?,
         observed_at: row.get(6)?,
         source: row.get(7)?,
+        model: row.get(8)?,
+        limited_until: row.get(9)?,
     }))
 }
 
@@ -1120,63 +1122,6 @@ impl SqliteStore {
             .collect()
     }
 
-    /// Store a long-lived token on an existing account. False when no such account.
-    pub fn set_long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        token: &str,
-        minted_at: i64,
-    ) -> StoreResult<bool> {
-        let encrypted = token_crypto::encrypt_token(token).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to encrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET long_lived_token = ?3, long_lived_token_minted_at = ?4, updated_at = ?5
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                encrypted,
-                minted_at,
-                now_unix()
-            ],
-        )?;
-        Ok(changed == 1)
-    }
-
-    pub fn long_lived_token(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<Option<super::LongLivedToken>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let row: Option<(Option<String>, Option<i64>)> = conn
-            .query_row(
-                "SELECT long_lived_token, long_lived_token_minted_at FROM provider_accounts
-                 WHERE provider = ?1 AND account_id = ?2",
-                params![provider, account_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let Some((Some(encrypted), Some(minted_at))) = row else {
-            return Ok(None);
-        };
-        let token = token_crypto::decrypt_token(&encrypted).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "failed to decrypt long-lived token for account '{account_id}': {error}"
-            ))
-        })?;
-        Ok(Some(super::LongLivedToken {
-            token: secrecy::SecretString::new(token),
-            minted_at,
-        }))
-    }
-
     pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let exists: bool = conn.query_row(
@@ -1308,14 +1253,16 @@ impl SqliteStore {
         for window in windows {
             transaction.execute(
                 "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(provider, account_id, window) DO UPDATE SET
                      used_percent = excluded.used_percent,
                      resets_at = excluded.resets_at,
                      plan = excluded.plan,
                      observed_at = excluded.observed_at,
-                     source = excluded.source",
+                     source = excluded.source,
+                     model = excluded.model,
+                     limited_until = excluded.limited_until",
                 params![
                     provider,
                     account_id.as_str(),
@@ -1325,6 +1272,8 @@ impl SqliteStore {
                     window.plan,
                     now,
                     source,
+                    window.model,
+                    window.limited_until,
                 ],
             )?;
         }
@@ -1338,7 +1287,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
              FROM provider_account_limits
              WHERE ?1 IS NULL OR provider = ?1
              ORDER BY provider, account_id, window",
@@ -1349,6 +1298,43 @@ impl SqliteStore {
             limits.push(row??);
         }
         Ok(limits)
+    }
+
+    // -- Session moves --------------------------------------------------------
+
+    /// Leave a move for a busy Session; its next Stop hook applies it.
+    pub fn record_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_moves (session_id, agent, requested_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET
+                agent = excluded.agent,
+                requested_at = excluded.requested_at",
+            params![session, agent, now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// The agent a move left for `session` names, if one waits.
+    pub fn pending_session_move(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT agent FROM session_moves WHERE session_id = ?1",
+                [session],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Clear an applied move. A move re-requested for another agent meanwhile stays.
+    pub fn clear_session_move(&self, session: &str, agent: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM session_moves WHERE session_id = ?1 AND agent = ?2",
+            [session, agent],
+        )?;
+        Ok(())
     }
 
     // -- Access profiles and provider routes ----------------------------------
@@ -1600,44 +1586,46 @@ impl SqliteStore {
         provider: Provider,
         agent_session: &AgentSessionId,
         account_id: &ProviderAccountId,
-        isolated: bool,
     ) -> StoreResult<()> {
+        // Every launch runs in the shared home, so the conversation lives
+        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_session_accounts (
                 provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ) VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(provider, provider_session_id) DO UPDATE SET
                 account_id = excluded.account_id,
                 created_at = excluded.created_at,
-                isolated = excluded.isolated",
+                isolated = 0",
             params![
                 provider.as_str(),
                 agent_session,
                 account_id.as_str(),
                 now_unix(),
-                isolated,
             ],
         )?;
         Ok(())
     }
 
-    /// The home a recorded conversation lives in: its account's own
-    /// (`true`) or the provider's native one.
-    pub fn provider_session_isolated(
+    /// The account a launch last ran this conversation on.
+    pub fn provider_session_account(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
-    ) -> StoreResult<Option<bool>> {
+    ) -> StoreResult<Option<ProviderAccountId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT isolated FROM provider_session_accounts
-                 WHERE provider = ?1 AND provider_session_id = ?2",
-                params![provider.as_str(), agent_session],
-                |row| row.get(0),
-            )
-            .optional()?)
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), agent_session],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
     }
 
     pub fn record_provider_account_switch(
@@ -1678,7 +1666,9 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
-    pub fn provider_session_account(
+    /// The account whose own home still holds this conversation: it ran
+    /// there before every launch shared one, and has not resumed since.
+    pub fn provider_session_account_home(
         &self,
         provider: Provider,
         agent_session: &AgentSessionId,
@@ -1697,11 +1687,34 @@ impl SqliteStore {
         .map_err(StoreError::InvalidData)
     }
 
+    /// Record that `agent_session` ran in `account_id`'s own home, as every
+    /// conversation did before launches shared one. Nothing writes this now.
+    #[cfg(test)]
+    pub(crate) fn record_account_home_conversation(
+        &self,
+        provider: Provider,
+        agent_session: &str,
+        account_id: &str,
+    ) {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "INSERT INTO provider_session_accounts
+                    (provider, provider_session_id, account_id, created_at, isolated)
+                 VALUES (?1, ?2, ?3, 1, 1)",
+                params![provider.as_str(), agent_session, account_id],
+            )
+            .expect("record account-home conversation");
+    }
+
+    /// The most urgent eligible candidate for `model` (`None`: a
+    /// launch whose model the provider picks, held back by every scoped limit).
     pub fn select_provider_account(
         &self,
         provider: Provider,
         candidates: &[ProviderAccountId],
-        agent_session: Option<&AgentSessionId>,
+        model: Option<&str>,
     ) -> StoreResult<Option<ProviderAccountSelection>> {
         if candidates.is_empty() {
             return Ok(None);
@@ -1716,20 +1729,9 @@ impl SqliteStore {
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested = match agent_session {
-            Some(session_id) => transaction
-                .query_row(
-                    "SELECT account_id FROM provider_session_accounts
-                     WHERE provider = ?1 AND provider_session_id = ?2 AND isolated = 1",
-                    params![provider.as_str(), session_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?,
-            None => None,
-        };
         let limits = {
             let mut statement = transaction.prepare(
-                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
                  FROM provider_account_limits
                  WHERE provider = ?1
                  ORDER BY account_id, window",
@@ -1760,31 +1762,18 @@ impl SqliteStore {
                         .map_err(|error| StoreError::InvalidData(error.to_string()))
                 })
                 .transpose()?;
-            if let Some(account) = account
-                .filter(|account| crate::provider_account::account_route_eligible(account, now))
-            {
+            if let Some(account) = account.filter(|account| {
+                crate::provider_account::account_route_eligible(account, &limits, model, now)
+            }) {
                 available.push(account);
             }
         }
         drop(account_statement);
 
-        let resumed = requested.as_ref().and_then(|account_id| {
-            available
-                .iter()
-                .position(|account| account.account_id.as_str() == account_id)
-        });
-        let mut account = match resumed {
-            Some(index) => available.remove(index),
-            None => {
-                crate::provider_account::order_accounts_by_room(&mut available, &limits, now);
-                match available.into_iter().next() {
-                    Some(selection) => selection,
-                    None => {
-                        transaction.commit()?;
-                        return Ok(None);
-                    }
-                }
-            }
+        crate::provider_account::order_accounts_by_urgency(&mut available, &limits, model, now);
+        let Some(mut account) = available.into_iter().next() else {
+            transaction.commit()?;
+            return Ok(None);
         };
         transaction.execute(
             "UPDATE provider_accounts
@@ -2722,6 +2711,8 @@ mod account_observation_tests {
             used_percent: 98,
             resets_at: Some(1900000000),
             plan: Some("max".into()),
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[weekly], "stream")
@@ -2745,6 +2736,8 @@ mod account_observation_tests {
             used_percent: 2,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits("claude", &expected.account_id, &[session], "poll")
@@ -2768,6 +2761,8 @@ mod account_observation_tests {
             used_percent: 22,
             resets_at: None,
             plan: None,
+            model: None,
+            limited_until: None,
         };
         store
             .upsert_provider_account_limits(

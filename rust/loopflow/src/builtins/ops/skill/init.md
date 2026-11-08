@@ -43,8 +43,8 @@ git rev-parse --show-toplevel
 lf --version
 lf account --cached          # last known state; no provider request
 lf account --json            # managed account status
-lf account route
-lf machine self --json
+lf account next
+lf id --json
 lf wave list --json
 command -v claude codex opencode
 test -f .lf/config.yaml && echo "repo config: present"
@@ -160,7 +160,8 @@ one, use the ids the commands print:
 ```bash
 lf machine add <ssh-target> --label <label>
 lf --machine <machine-id> account --cached
-lf --machine <machine-id> account route
+lf --machine <machine-id> account next
+
 lf --wave <wave> set machine <machine-label>   # this Wave's new Tasks
 lf --repo <repo> set machine <machine-label>   # this repository's new Tasks
 lf task move <issue> --machine <machine-label> # one Task, with its Session

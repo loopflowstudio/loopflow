@@ -1426,6 +1426,17 @@ pub(crate) fn register_session_attachment_interrupt(
     });
 }
 
+/// Whether a retry resuming `resume` keeps the conversation whose saved
+/// thread is `saved`. The thread goes on under any model; only a move to
+/// another account or provider may leave it behind, and only to start fresh.
+fn retry_keeps_its_thread(
+    saved: Option<&AgentSessionId>,
+    resume: Option<&AgentSessionId>,
+    moved: bool,
+) -> bool {
+    saved == resume || (resume.is_none() && moved)
+}
+
 impl CaptureHandle {
     /// Publish identity before a human boundary becomes visible. No provider or
     /// terminal receipt exists until this prepared Session executes.
@@ -1921,13 +1932,10 @@ impl CaptureHandle {
         let saved_thread = store
             .session_thread(session)?
             .or_else(|| capture.agent_session.clone());
-        let account_changed = capture.account_observed && capture.account_id != account_id;
-        if (account_changed && resume_thread.is_some())
-            || (!account_changed && saved_thread.as_ref() != resume_thread)
-        {
-            anyhow::bail!(
-                "AgentProcess retry must retain its thread unless the selected account changes"
-            );
+        let moved = (capture.account_observed && capture.account_id != account_id)
+            || capture.provider != provider;
+        if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
+            anyhow::bail!("AgentProcess retry must retain its thread");
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
             crate::harness::agent_process::close_session_agent_process(&store, session)
@@ -3318,7 +3326,6 @@ mod tests {
     fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            isolate: None,
             chrome: Some(true),
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
@@ -3872,6 +3879,26 @@ mod tests {
             .expect("provider session reference");
         assert_eq!(session.agent_session, "provider-session".into());
         assert_eq!(session.account_id, Some(account_id));
+    }
+
+    /// November 7: Fable ran out of usage credits, and the step went on with
+    /// Opus on the same account. That retry resumes the thread it saved.
+    #[test]
+    fn a_retry_on_another_model_keeps_its_thread() {
+        let thread: crate::id::AgentSessionId = "thread".into();
+        let other: crate::id::AgentSessionId = "other".into();
+        assert!(super::retry_keeps_its_thread(
+            Some(&thread),
+            Some(&thread),
+            false
+        ));
+        assert!(!super::retry_keeps_its_thread(Some(&thread), None, false));
+        assert!(super::retry_keeps_its_thread(Some(&thread), None, true));
+        assert!(!super::retry_keeps_its_thread(
+            Some(&thread),
+            Some(&other),
+            true
+        ));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -8,111 +9,169 @@ use crate::provider_account::{account_login, acquire_managed_login_lock, open_ac
 use crate::provider_auth::{Provider, ProviderAuthService};
 use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedStore};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Verification {
+enum Verification {
     Accepted,
     Rejected,
     Unavailable,
     NotChecked,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Scope {
+enum Scope {
     Managed,
     Local,
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
 pub struct AccountReport {
     pub accounts: Vec<AccountRow>,
-    pub browser: Option<BrowserDetails>,
+    browser: Option<BrowserDetails>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
 pub struct AccountRow {
-    pub provider: Provider,
-    pub account_id: Option<ProviderAccountId>,
-    pub login: Option<String>,
-    pub scope: Scope,
-    pub source: String,
-    pub cached_credential_state: String,
-    pub verification: Verification,
-    pub diagnostic: Option<String>,
-    pub recovery: Option<String>,
-    pub observed_plan: Option<String>,
-    pub configured_plan: Option<String>,
-    pub routing: Option<String>,
-    pub cooldown_until: Option<i64>,
-    pub expires_at: Option<i64>,
-    /// When the long-lived token lf machine connect installs stops working.
-    pub long_lived_token_expires_at: Option<i64>,
-    pub windows: Vec<AccountLimitRow>,
-    pub verified_windows: Vec<String>,
-    pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    provider: Provider,
+    account_id: Option<ProviderAccountId>,
+    login: Option<String>,
+    scope: Scope,
+    source: String,
+    cached_credential_state: String,
+    verification: Verification,
+    diagnostic: Option<String>,
+    recovery: Option<String>,
+    observed_plan: Option<String>,
+    configured_plan: Option<String>,
+    routing: Option<String>,
+    cooldown_until: Option<i64>,
+    /// When the credential stops working: an ambient token's expiry, or a
+    /// rental's access token, which the laptop renews before then.
+    expires_at: Option<i64>,
+    windows: Vec<AccountLimitRow>,
+    verified_windows: Vec<String>,
+    reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    /// Signed in to the provider's shared home.
+    active: bool,
+    /// Held there by `lf account use`.
+    held: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
 pub struct BrowserDetails {
-    pub profiles: Vec<AccessProfile>,
-    pub bindings: Vec<AuthBrowserBinding>,
-    pub local_choices: Vec<LocalChromeProfile>,
-    pub discovery_diagnostic: Option<String>,
+    profiles: Vec<AccessProfile>,
+    bindings: Vec<AuthBrowserBinding>,
+    local_choices: Vec<LocalChromeProfile>,
+    discovery_diagnostic: Option<String>,
 }
 
-pub(super) fn run(
-    provider: Option<Provider>,
-    verify: bool,
-    details: bool,
-    json: bool,
-) -> Result<()> {
-    let report = crate::engine::account::list(provider, verify, details)?;
+/// Which accounts a read asks the provider about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Refresh {
+    None,
+    All,
+    /// Only those whose newest reading is older than [`STALE_READING_SECS`].
+    Stale,
+}
+
+/// A reading older than this is refreshed by `lf account` and shows its age.
+const STALE_READING_SECS: i64 = 15 * 60;
+
+impl Refresh {
+    fn wants<'a>(self, windows: impl IntoIterator<Item = &'a AccountLimitRow>, now: i64) -> bool {
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::Stale => newest_reading(windows).is_none_or(|at| now - at > STALE_READING_SECS),
+        }
+    }
+}
+
+fn newest_reading<'a>(windows: impl IntoIterator<Item = &'a AccountLimitRow>) -> Option<i64> {
+    windows.into_iter().map(|window| window.observed_at).max()
+}
+
+/// `lf account` and `lf account <login|provider>`.
+pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool) -> Result<()> {
+    let detail = target.is_some();
+    let (report, store, only) = project(target, cached).await?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
+    } else if detail {
         let width = std::env::var("COLUMNS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(80);
-        print!(
-            "{}",
-            render(&report, width, OffsetDateTime::now_utc().unix_timestamp())
-        );
+        let text = if only.is_some() {
+            render_login(&report, width, now)
+        } else {
+            render(&report, width, now)
+        };
+        print!("{text}");
+    } else {
+        let notes = match &store {
+            Some(store) => route_notes(store).await?,
+            None => vec![],
+        };
+        print!("{}", render_table(&report, &notes, now));
     }
     Ok(())
 }
 
-/// Every login's state; `verify` contacts providers, `details` adds
-/// credential sources and browser choices.
-pub(crate) async fn report(
-    provider: Option<Provider>,
-    verify: bool,
-    details: bool,
-) -> Result<AccountReport> {
-    let store = if verify {
-        Some(open_account_store().await?)
-    } else {
+pub(crate) async fn report(target: Option<super::Target>, cached: bool) -> Result<AccountReport> {
+    Ok(project(target, cached).await?.0)
+}
+
+async fn project(
+    target: Option<super::Target>,
+    cached: bool,
+) -> Result<(
+    AccountReport,
+    Option<SharedStore>,
+    Option<ProviderAccountId>,
+)> {
+    let detail = target.is_some();
+    let refresh = match (cached, detail) {
+        (true, _) => Refresh::None,
+        (false, true) => Refresh::All,
+        (false, false) => Refresh::Stale,
+    };
+    let store = if refresh == Refresh::None {
         crate::provider_account::read_account_store()?
+    } else {
+        Some(open_account_store().await?)
+    };
+    let (provider, only) = match &target {
+        None => (None, None),
+        Some(super::Target::Provider(provider)) => (Some(*provider), None),
+        Some(super::Target::Login { provider, login }) => {
+            let store = store
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("no stored logins on this Machine"))?;
+            let account =
+                super::super::profile::resolve_login(store, *provider, login, "lf account").await?;
+            (Some(account.provider.parse()?), Some(account.account_id))
+        }
     };
     let service = store
         .as_ref()
         .map(|store| ProviderAuthService::new(store.clone()));
     let mut rows = match &store {
-        Some(store) => managed_rows(store, provider, verify).await?,
+        Some(store) => managed_rows(store, provider, only.as_ref(), refresh).await?,
         None => vec![],
     };
-    rows.extend(local_rows(service.as_ref(), provider, verify).await?);
-    let browser = if details {
+    if only.is_none() {
+        rows.extend(local_rows(service.as_ref(), provider, refresh != Refresh::None).await?);
+    }
+    let browser = if detail {
         let (local_choices, discovery_diagnostic) = match crate::profile::local_chrome_profiles() {
             Ok(choices) => (choices, None),
             Err(_) => (vec![], Some("local Chrome profiles unavailable".into())),
         };
-        Some(BrowserDetails {
+        let browser = BrowserDetails {
             profiles: match &store {
                 Some(store) => store.list_access_profiles().await?,
                 None => vec![],
@@ -123,14 +182,58 @@ pub(crate) async fn report(
             },
             local_choices,
             discovery_diagnostic,
+        };
+        // One login shows only the browsers bound to it.
+        Some(match (&only, rows.first()) {
+            (Some(_), Some(row)) => login_browser(browser, row),
+            _ => browser,
         })
     } else {
         None
     };
-    Ok(AccountReport {
+    let report = AccountReport {
         accounts: rows,
         browser,
-    })
+    };
+    Ok((report, store, only))
+}
+
+/// A route that leaves stored logins out: worth fixing when unintended.
+#[derive(Debug)]
+struct RouteNote {
+    provider: Provider,
+    scope: crate::profile::RouteScope,
+    named: usize,
+    rotating: usize,
+}
+
+async fn route_notes(store: &SharedStore) -> Result<Vec<RouteNote>> {
+    let repo = crate::provider_account::launch_repo_id(None)?;
+    let today = OffsetDateTime::now_utc().date();
+    let mut notes = Vec::new();
+    for provider in [Provider::Claude, Provider::Codex] {
+        let Some(route) =
+            crate::provider_account::nearest_provider_route(store, repo.as_ref(), None, provider)
+                .await?
+        else {
+            continue;
+        };
+        let rotating = store
+            .list_provider_accounts(Some(provider.as_str()))
+            .await?
+            .iter()
+            .filter(|account| account.eligible_for_automatic_routing(today))
+            .count();
+        if route.accounts.len() < rotating {
+            notes.push(RouteNote {
+                provider,
+                scope: route.scope,
+                named: route.accounts.len(),
+                rotating,
+            });
+        }
+    }
+    Ok(notes)
 }
 
 async fn local_rows(
@@ -178,10 +281,11 @@ async fn local_rows(
             routing: None,
             cooldown_until: None,
             expires_at: snapshot.and_then(|s| s.expires_at),
-            long_lived_token_expires_at: None,
             windows: vec![],
             verified_windows: vec![],
             reset_credits: None,
+            active: false,
+            held: false,
         });
     }
     Ok(rows)
@@ -190,9 +294,10 @@ async fn local_rows(
 async fn managed_rows(
     store: &SharedStore,
     provider: Option<Provider>,
-    verify: bool,
+    only: Option<&ProviderAccountId>,
+    refresh: Refresh,
 ) -> Result<Vec<AccountRow>> {
-    if verify && provider.is_none_or(|provider| provider == Provider::Claude) {
+    if refresh != Refresh::None && provider.is_none_or(|provider| provider == Provider::Claude) {
         // A login Claude refreshed in its own home is placed first, so the
         // active account is polled there and not on its stale stored copy.
         let native = crate::provider_account::activation::native_home(Provider::Claude, None);
@@ -209,9 +314,33 @@ async fn managed_rows(
     let accounts = store
         .list_provider_accounts(provider.map(Provider::as_str))
         .await?;
+    let limits = store
+        .provider_account_limits(provider.map(Provider::as_str))
+        .await?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let active: Vec<_> = [Provider::Claude, Provider::Codex]
+        .into_iter()
+        .filter_map(|provider| {
+            crate::provider_account::activation::active_account(
+                provider,
+                &crate::provider_account::activation::native_home(provider, None),
+                &accounts,
+            )
+            .map(|account| account.account_id.clone())
+        })
+        .collect();
     let mut rows = Vec::new();
-    for account in &accounts {
+    for account in accounts
+        .iter()
+        .filter(|account| only.is_none_or(|only| account.account_id == *only))
+    {
         let provider = account.provider.parse::<Provider>()?;
+        let verify = refresh.wants(
+            limits.iter().filter(|limit| {
+                limit.provider == account.provider && limit.account_id == account.account_id
+            }),
+            now,
+        );
         let presence = account
             .home
             .as_deref()
@@ -243,6 +372,7 @@ async fn managed_rows(
             .as_ref()
             .map(|identity| identity.email.clone());
         let mut live_usage = None;
+        let mut cooldown_until = account.cooldown_until;
         let identity_error = (presence == crate::provider_auth::CredentialPresence::Present
             && (provider == Provider::Codex || (!verify && cached_identity.is_some())))
         .then(|| {
@@ -288,14 +418,11 @@ async fn managed_rows(
                             usage.identity.credential_digest.as_deref(),
                         )
                         .await?;
-                    store
-                        .upsert_provider_account_limits(
-                            &account.provider,
-                            &account.account_id,
-                            &usage.windows,
-                            "poll",
-                        )
-                        .await?;
+                    if crate::provider_account::save_polled_usage(store, account, &usage.windows)
+                        .await?
+                    {
+                        cooldown_until = None;
+                    }
                     store
                         .update_provider_account_credential_state(
                             &account.provider,
@@ -360,9 +487,19 @@ async fn managed_rows(
                     .max_by_key(|w| w.observed_at)
                     .and_then(|w| w.plan.clone())
             });
-        let long_lived_token = store
-            .long_lived_token(&account.provider, &account.account_id)
-            .await?;
+        // Only an access token with nothing to refresh has an expiry worth
+        // showing; a full login renews itself.
+        let access_expires_at = match (provider, account.home.as_deref()) {
+            (Provider::Claude, Some(home)) => crate::provider_auth::read_claude_login(home)
+                .ok()
+                .flatten()
+                .and_then(|login| {
+                    super::super::machine_credentials::access_only_expiry(login.expose_secret())
+                        .ok()
+                        .flatten()
+                }),
+            _ => None,
+        };
         rows.push(AccountRow {
             provider,
             account_id: Some(account.account_id.clone()),
@@ -374,7 +511,7 @@ async fn managed_rows(
             diagnostic,
             recovery: recover.then(|| {
                 format!(
-                    "lf account connect {} {}",
+                    "lf account connect {}={}",
                     account.provider,
                     account_login(account)
                 )
@@ -387,9 +524,8 @@ async fn managed_rows(
                     .as_str()
                     .into(),
             ),
-            cooldown_until: account.cooldown_until,
-            expires_at: None,
-            long_lived_token_expires_at: long_lived_token.map(|token| token.expires_at()),
+            cooldown_until,
+            expires_at: access_expires_at,
             windows,
             reset_credits: live_usage
                 .as_ref()
@@ -397,6 +533,9 @@ async fn managed_rows(
             verified_windows: live_usage
                 .map(|u| u.windows.into_iter().map(|w| w.window).collect())
                 .unwrap_or_default(),
+            active: active.contains(&account.account_id),
+            held: crate::provider_account::hold::held(provider).as_ref()
+                == Some(&account.account_id),
         });
     }
     Ok(rows)
@@ -415,17 +554,107 @@ fn next_action(row: &AccountRow, now: i64) -> String {
         };
     }
     if row.routing.as_deref() == Some("disabled") {
-        return "lf account route (account disabled for routing)".into();
+        return "disabled for routing; lf account next explains the route".into();
     }
     if row.cooldown_until.is_some_and(|until| until > now) {
         return format!("wait for cooldown, then lf account {provider}");
     }
     if row.routing.as_deref() == Some("explicit_only") {
-        return "select this login with --account; launch checks required access".into();
+        return format!(
+            "paused: name it with --account, or lf account unpause {provider}={}",
+            row.login.as_deref().unwrap_or("<login>")
+        );
     }
     format!("lf account {provider} (refresh credential and capacity evidence)")
 }
 
+/// A login's browsers: the bindings that name it, the profiles they point
+/// at, and whether this Chrome has each one signed in.
+fn login_browser(browser: BrowserDetails, row: &AccountRow) -> BrowserDetails {
+    let mut bindings: Vec<_> = browser
+        .bindings
+        .into_iter()
+        .filter(|binding| binding.provider == row.provider && binding.account_id == row.account_id)
+        .collect();
+    bindings.sort_by_key(|binding| binding.position);
+    let profiles: Vec<_> = browser
+        .profiles
+        .into_iter()
+        .filter(|profile| {
+            bindings
+                .iter()
+                .any(|binding| binding.profile_id == profile.id)
+        })
+        .collect();
+    let local_choices = browser
+        .local_choices
+        .into_iter()
+        .filter(|choice| {
+            profiles
+                .iter()
+                .any(|profile| profile.chrome_directory == choice.directory)
+        })
+        .collect();
+    BrowserDetails {
+        profiles,
+        bindings,
+        local_choices,
+        discovery_diagnostic: browser.discovery_diagnostic,
+    }
+}
+
+/// `lf account <login>`: the one login, then the browsers it connects through.
+fn render_login(report: &AccountReport, width: usize, now: i64) -> String {
+    let Some(row) = report.accounts.first() else {
+        return String::new();
+    };
+    let mut lines = row_lines(row, now);
+    if let Some(browser) = &report.browser {
+        if browser.bindings.is_empty() {
+            lines.push(format!(
+                "  browser: none saved; lf account set {provider}={login} --chrome-profile <profile>",
+                provider = row.provider.as_str(),
+                login = row.login.as_deref().unwrap_or("<login>")
+            ));
+        }
+        for binding in &browser.bindings {
+            let Some(profile) = browser
+                .profiles
+                .iter()
+                .find(|profile| profile.id == binding.profile_id)
+            else {
+                continue;
+            };
+            let signed_in = browser
+                .local_choices
+                .iter()
+                .find(|choice| choice.directory == profile.chrome_directory)
+                .map(|choice| match &choice.login {
+                    Some(login) => format!("signed in as {login}"),
+                    None => "not signed in".into(),
+                })
+                .unwrap_or_else(|| "not in this Chrome".into());
+            lines.push(format!(
+                "  browser {}: {} · {} · expects {} · {signed_in}",
+                binding.position + 1,
+                profile.id,
+                profile.chrome_directory,
+                profile
+                    .expected_login
+                    .as_ref()
+                    .map(|e| e.as_str())
+                    .unwrap_or("unconstrained")
+            ));
+        }
+        if let Some(reason) = &browser.discovery_diagnostic {
+            lines.push(format!("  {reason}"));
+        }
+    }
+    wrap_lines(lines, width)
+}
+
+/// `lf account <provider>`: every login and local credential, then every
+/// saved browser.
 fn render(report: &AccountReport, width: usize, now: i64) -> String {
     let mut lines = Vec::new();
     for (local, title) in [(false, "Managed accounts"), (true, "Local services")] {
@@ -437,124 +666,7 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             .filter(|row| (row.scope == Scope::Local) == local)
         {
             count += 1;
-            let identity = match (&row.account_id, &row.login) {
-                (Some(id), Some(login)) => format!("{id} · {login}"),
-                (Some(id), None) => id.to_string(),
-                (None, Some(login)) => login.clone(),
-                (None, None) => "local credentials".into(),
-            };
-            lines.push(format!("{:<12} {identity}", row.provider.as_str()));
-            let evidence = match row.verification {
-                Verification::Accepted => "active (verified)".into(),
-                Verification::Rejected => "needs login (identity or credential rejected)".into(),
-                Verification::Unavailable => format!(
-                    "cached {} · verification unavailable",
-                    row.cached_credential_state
-                ),
-                Verification::NotChecked => {
-                    format!("cached {} · not checked", row.cached_credential_state)
-                }
-            };
-            lines.push(format!("  auth: {evidence}"));
-
-            if let Some(plan) = &row.observed_plan {
-                lines.push(format!("  observed plan: {plan}"));
-            }
-            let mut policy = Vec::new();
-            if let Some(routing) = row.routing.as_ref().filter(|r| r.as_str() != "automatic") {
-                policy.push(routing.replace('_', "-"));
-            }
-            if let Some(until) = row.cooldown_until.filter(|until| *until > now) {
-                policy.push(format!(
-                    "cooling for {}",
-                    format_relative_delta(until - now)
-                ));
-            }
-            if !policy.is_empty() {
-                lines.push(format!("  routing: {}", policy.join(" · ")));
-            }
-            if let Some(expires) = row.long_lived_token_expires_at {
-                let state = if expires > now { "until" } else { "expired" };
-                lines.push(format!("  long-lived token {state} {}", date(expires)));
-            }
-            if let Some(reason) = &row.diagnostic {
-                lines.push(format!("  {reason}"));
-            }
-            if let Some(recovery) = &row.recovery {
-                lines.push(format!("  recover: {recovery}"));
-            } else {
-                lines.push(format!("  next: {}", next_action(row, now)));
-            }
-            if row.windows.is_empty() {
-                lines.push("  usage: unknown".into());
-            }
-            for window in &row.windows {
-                let freshness = if row.verified_windows.contains(&window.window) {
-                    "live".to_string()
-                } else {
-                    format!(
-                        "cached {} ago",
-                        format_relative_delta(now - window.observed_at)
-                    )
-                };
-                let reset = match window.resets_at {
-                    Some(reset) if reset <= now => "reset passed; refresh needed".into(),
-                    Some(reset) => format!("resets {}", timestamp(reset)),
-                    None => "reset unknown".into(),
-                };
-                let usage = if window.resets_at.is_some_and(|reset| reset <= now) {
-                    "usage unknown".to_string()
-                } else {
-                    format!(
-                        "{}% used, {}% left",
-                        window.used_percent,
-                        100u8.saturating_sub(window.used_percent)
-                    )
-                };
-                lines.push(format!(
-                    "  {}: {usage} · {freshness} · {reset}",
-                    window.window
-                ));
-                if report.browser.is_some() {
-                    lines.push(format!(
-                        "    source={} observed={} plan={}",
-                        window.source,
-                        timestamp(window.observed_at),
-                        window.plan.as_deref().unwrap_or("unknown")
-                    ));
-                }
-            }
-            if row.provider == Provider::Codex && row.scope == Scope::Managed {
-                match &row.reset_credits {
-                    Some(credits) => {
-                        lines.push(format!(
-                            "  banked resets: {} available (live)",
-                            credits.available_count
-                        ));
-                        for credit in credits.credits.iter().flatten() {
-                            let expiry = credit
-                                .expires_at
-                                .map(timestamp)
-                                .unwrap_or_else(|| "unknown".into());
-                            lines.push(format!(
-                                "    {}: {} · expires {expiry}",
-                                credit.id, credit.status
-                            ));
-                        }
-                    }
-                    None => lines.push("  banked resets: unknown".into()),
-                }
-            }
-            if report.browser.is_some() {
-                lines.push(format!(
-                    "  source={} configured plan={} expires={}",
-                    row.source,
-                    row.configured_plan.as_deref().unwrap_or("unknown"),
-                    row.expires_at
-                        .map(timestamp)
-                        .unwrap_or_else(|| "unknown".into())
-                ));
-            }
+            lines.extend(row_lines(row, now));
         }
         if count == 0 {
             lines.push("  none".into());
@@ -604,12 +716,300 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             lines.push(format!("  {reason}"));
         }
     }
+    wrap_lines(lines, width)
+}
+
+/// One login or local credential: identity, auth, plan, routing, what to do
+/// next, and each usage window with its age and source.
+fn row_lines(row: &AccountRow, now: i64) -> Vec<String> {
+    let mut lines = Vec::new();
+    let identity = match (&row.account_id, &row.login) {
+        (Some(id), Some(login)) => format!("{id} · {login}"),
+        (Some(id), None) => id.to_string(),
+        (None, Some(login)) => login.clone(),
+        (None, None) => "local credentials".into(),
+    };
+    lines.push(format!("{:<12} {identity}", row.provider.as_str()));
+    let evidence = match row.verification {
+        Verification::Accepted => "active (verified)".into(),
+        Verification::Rejected => "needs login (identity or credential rejected)".into(),
+        Verification::Unavailable => format!(
+            "cached {} · verification unavailable",
+            row.cached_credential_state
+        ),
+        Verification::NotChecked => {
+            format!("cached {} · not checked", row.cached_credential_state)
+        }
+    };
+    lines.push(format!("  auth: {evidence}"));
+    if row.scope == Scope::Managed {
+        let plan = match (row.configured_plan.as_deref(), row.observed_plan.as_deref()) {
+            (Some(set), Some(seen)) if set == seen => set.to_string(),
+            (Some(set), Some(seen)) => format!("{set} set · {seen} observed"),
+            (Some(set), None) => format!("{set} set"),
+            (None, Some(seen)) => format!("{seen} observed"),
+            (None, None) => "unknown".into(),
+        };
+        lines.push(format!("  plan: {plan}"));
+    }
+    let mut policy = Vec::new();
+    if let Some(routing) = row.routing.as_ref().filter(|r| r.as_str() != "automatic") {
+        policy.push(routing.replace('_', "-"));
+    }
+    if let Some(until) = row.cooldown_until.filter(|until| *until > now) {
+        policy.push(format!(
+            "cooling for {}",
+            format_relative_delta(until - now)
+        ));
+    }
+    if !policy.is_empty() {
+        lines.push(format!("  routing: {}", policy.join(" · ")));
+    }
+    if let (Scope::Managed, Some(expires)) = (&row.scope, row.expires_at) {
+        let state = if expires > now { "until" } else { "expired" };
+        lines.push(format!(
+            "  access token {state} {}; the laptop's `lf machine connect` renews it",
+            date(expires)
+        ));
+    }
+    if let Some(reason) = &row.diagnostic {
+        lines.push(format!("  {reason}"));
+    }
+    if let Some(recovery) = &row.recovery {
+        lines.push(format!("  recover: {recovery}"));
+    } else {
+        lines.push(format!("  next: {}", next_action(row, now)));
+    }
+    if row.windows.is_empty() {
+        lines.push("  usage: unknown".into());
+    }
+    for window in &row.windows {
+        let freshness = if row.verified_windows.contains(&window.window) {
+            "live".to_string()
+        } else {
+            format!(
+                "cached {} ago",
+                format_relative_delta(now - window.observed_at)
+            )
+        };
+        let reset = match window.resets_at {
+            Some(reset) if reset <= now => "reset passed; refresh needed".into(),
+            Some(reset) => format!("resets {}", timestamp(reset)),
+            None => "reset unknown".into(),
+        };
+        let usage = if window.resets_at.is_some_and(|reset| reset <= now) {
+            "usage unknown".to_string()
+        } else {
+            format!(
+                "{}% used, {}% left",
+                window.used_percent,
+                100u8.saturating_sub(window.used_percent)
+            )
+        };
+        lines.push(format!(
+            "  {}: {usage} · {freshness} · {reset}",
+            window.window
+        ));
+        lines.push(format!(
+            "    source={} observed={} plan={}",
+            window.source,
+            timestamp(window.observed_at),
+            window.plan.as_deref().unwrap_or("unknown")
+        ));
+    }
+    if row.provider == Provider::Codex && row.scope == Scope::Managed {
+        match &row.reset_credits {
+            Some(credits) => {
+                lines.push(format!(
+                    "  banked resets: {} available (live)",
+                    credits.available_count
+                ));
+                for credit in credits.credits.iter().flatten() {
+                    let expiry = credit
+                        .expires_at
+                        .map(timestamp)
+                        .unwrap_or_else(|| "unknown".into());
+                    lines.push(format!(
+                        "    {}: {} · expires {expiry}",
+                        credit.id, credit.status
+                    ));
+                }
+            }
+            None => lines.push("  banked resets: unknown".into()),
+        }
+    }
+    lines
+}
+
+fn wrap_lines(lines: Vec<String>, width: usize) -> String {
     lines
         .into_iter()
         .map(|line| wrap_line(&line, width.max(40)))
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+
+const BAR_WIDTH: usize = 16;
+
+/// One row per stored login: the weekly window as a bar and percent left,
+/// when it resets, and what marks it; then a line per thing to fix, with the
+/// command that fixes it.
+fn render_table(report: &AccountReport, notes: &[RouteNote], now: i64) -> String {
+    let rows: Vec<_> = report
+        .accounts
+        .iter()
+        .filter(|row| row.scope == Scope::Managed)
+        .collect();
+    if rows.is_empty() {
+        return "No stored logins. `lf account connect claude=<email>` adds one\n".into();
+    }
+    let names: Vec<String> = rows
+        .iter()
+        .map(|row| short_login(row, &report.accounts))
+        .collect();
+    let login_width = names
+        .iter()
+        .map(|name| name.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut lines = Vec::new();
+    let mut fixes = Vec::new();
+    for (row, name) in rows.iter().zip(&names) {
+        let weekly = crate::provider_account::tightest_weekly(&row.windows, now);
+        let (bar, left) = match weekly {
+            Some(window) => {
+                let left = 100u8.saturating_sub(window.used_percent);
+                let filled = usize::from(left) * BAR_WIDTH / 100;
+                (
+                    format!("{}{}", "━".repeat(filled), "─".repeat(BAR_WIDTH - filled)),
+                    format!("{left:>3}% left"),
+                )
+            }
+            None => ("╌".repeat(BAR_WIDTH), "   ? left".to_string()),
+        };
+        let reset = weekly
+            .and_then(|window| window.resets_at)
+            .map(local_time)
+            .unwrap_or_default();
+        let mut marks = Vec::new();
+        if row.active {
+            marks.push("● active".to_string());
+        }
+        if row.held {
+            marks.push("held".to_string());
+        }
+        match row.routing.as_deref() {
+            Some("explicit_only") => marks.push("paused".to_string()),
+            Some("disabled") => marks.push("disabled".to_string()),
+            _ => {}
+        }
+        if let Some(at) = newest_reading(&row.windows).filter(|at| now - at > STALE_READING_SECS) {
+            marks.push(format!("{} ago", format_relative_delta(now - at)));
+        }
+        lines.push(
+            format!(
+                "  {:<6}  {name:<login_width$}  {bar}  {left}  {reset:<9}  {}",
+                row.provider.as_str(),
+                marks.join(" · ")
+            )
+            .trim_end()
+            .to_string(),
+        );
+        let indent = " ".repeat(10 + login_width);
+        if let Some(until) = row.cooldown_until.filter(|until| *until > now) {
+            lines.push(format!("{indent}out until {}", local_time(until)));
+        }
+        for window in &row.windows {
+            if let (Some(model), Some(until)) = (&window.model, window.limited_until) {
+                if until > now {
+                    lines.push(format!("{indent}{model} out until {}", local_time(until)));
+                }
+            }
+        }
+        if let Some(recovery) = &row.recovery {
+            fixes.push((
+                format!("{} {name} needs a login", row.provider.as_str()),
+                recovery.clone(),
+            ));
+        }
+    }
+    for note in notes {
+        let provider = note.provider.as_str();
+        let (scope, command) = match &note.scope {
+            crate::profile::RouteScope::Default => (
+                "default order",
+                format!("lf unset account.{provider} --global"),
+            ),
+            crate::profile::RouteScope::Repo(_) => {
+                ("order here", format!("lf unset account.{provider}"))
+            }
+            crate::profile::RouteScope::Wave(wave) => (
+                "Wave order",
+                format!("lf --wave {wave} unset account.{provider}"),
+            ),
+        };
+        fixes.push((
+            format!(
+                "{provider} {scope} uses {} of {}",
+                note.named, note.rotating
+            ),
+            command,
+        ));
+    }
+    if !fixes.is_empty() {
+        lines.push(String::new());
+        let width = fixes
+            .iter()
+            .map(|(what, _)| what.chars().count())
+            .max()
+            .unwrap_or(0);
+        for (what, command) in fixes {
+            lines.push(format!("  ! {what:<width$}   {command}"));
+        }
+    }
+    lines.join("\n") + "\n"
+}
+
+/// `jack@` when no other login of the provider starts that way, else the
+/// whole email: what `lf account use` accepts for it.
+fn short_login(row: &AccountRow, rows: &[AccountRow]) -> String {
+    let Some(login) = row.login.as_deref() else {
+        return row
+            .account_id
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+    };
+    let Some((local, _)) = login.split_once('@') else {
+        return login.to_string();
+    };
+    let prefix = format!("{local}@");
+    let shared = rows.iter().any(|other| {
+        other.provider == row.provider
+            && other.scope == Scope::Managed
+            && other.account_id != row.account_id
+            && other.login.as_deref().is_some_and(|other| {
+                other
+                    .to_ascii_lowercase()
+                    .starts_with(&prefix.to_ascii_lowercase())
+            })
+    });
+    if shared {
+        login.to_string()
+    } else {
+        prefix
+    }
+}
+
+pub(crate) fn local_time(seconds: i64) -> String {
+    chrono::DateTime::from_timestamp(seconds, 0)
+        .map(|at| {
+            at.with_timezone(&chrono::Local)
+                .format("%a %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 fn date(seconds: i64) -> String {
@@ -651,7 +1051,7 @@ fn wrap_line(line: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{render, AccountReport};
+    use super::{login_browser, render, render_login, render_table, AccountReport, RouteNote};
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
@@ -690,7 +1090,9 @@ mod tests {
             r#"{"oauthAccount":{"emailAddress":"first@example.com","accountUuid":"first-user"}}"#,
         )
         .unwrap();
-        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::None)
+            .await
+            .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
         assert!(rows[0]
             .diagnostic
@@ -709,7 +1111,9 @@ mod tests {
             |_| {},
         )
         .await;
-        let rows = super::managed_rows(&store, None, true).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::All)
+            .await
+            .unwrap();
         server.await.unwrap();
         assert_eq!(
             rows[0].verification,
@@ -725,7 +1129,9 @@ mod tests {
         assert!(verified.observed_credential_digest.is_some());
         // The fixture server has exited. Cached inspection needs neither it nor
         // a native provider process and writes no new evidence.
-        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::None)
+            .await
+            .unwrap();
         assert_eq!(rows[0].verification, super::Verification::NotChecked);
         assert_eq!(rows[0].login.as_deref(), Some("first@example.com"));
         assert_eq!(
@@ -741,7 +1147,9 @@ mod tests {
             credential.replace("fixture-first", "fixture-second"),
         )
         .unwrap();
-        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::None)
+            .await
+            .unwrap();
         assert_eq!(rows[0].verification, super::Verification::Unavailable);
         assert_eq!(
             store
@@ -761,7 +1169,9 @@ mod tests {
             |_| {},
         )
         .await;
-        let rows = super::managed_rows(&store, None, true).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::All)
+            .await
+            .unwrap();
         server.await.unwrap();
         assert_eq!(rows[0].verification, super::Verification::Rejected);
         assert!(rows[0]
@@ -792,7 +1202,9 @@ mod tests {
             Some(crate::profile::EmailAddress::parse("other@example.com").unwrap()),
         );
         store.upsert_provider_account(&duplicate).await.unwrap();
-        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        let rows = super::managed_rows(&store, None, None, super::Refresh::None)
+            .await
+            .unwrap();
         let primary = rows
             .iter()
             .find(|row| row.account_id.as_ref() == Some(&account.account_id))
@@ -843,8 +1255,8 @@ mod tests {
                 "claude / personal · choice 2",
                 "linear / local credentials · choice 1",
                 "Spare · Profile 9 · not signed in",
-                "long-lived token until 2027-05-11",
-                "long-lived token expired 2026-09-21",
+                "access token until 2027-05-11",
+                "access token expired 2026-09-21",
             ] {
                 assert!(
                     text.replace("\n    ", "").contains(evidence),
@@ -865,5 +1277,147 @@ mod tests {
             .unwrap()
             .remove("windows");
         assert!(serde_json::from_value::<AccountReport>(incomplete).is_err());
+    }
+
+    #[test]
+    fn a_login_alone_shows_that_login_and_its_browsers() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
+        let report: AccountReport = serde_json::from_str(fixture).unwrap();
+        let now = 1_800_000_000;
+        let login = |id: &str| {
+            report
+                .accounts
+                .iter()
+                .find(|row| {
+                    row.account_id
+                        .as_ref()
+                        .is_some_and(|account| account.as_str() == id)
+                })
+                .unwrap()
+        };
+        let browser = || {
+            serde_json::from_value(serde_json::to_value(report.browser.as_ref().unwrap()).unwrap())
+                .unwrap()
+        };
+        let personal = login_browser(browser(), login("personal"));
+        assert_eq!(personal.bindings.len(), 2, "{personal:?}");
+        assert_eq!(personal.profiles.len(), 2);
+        assert_eq!(personal.local_choices.len(), 2, "Spare is nobody's");
+        let text = render_login(
+            &AccountReport {
+                accounts: vec![serde_json::from_value(
+                    serde_json::to_value(login("personal")).unwrap(),
+                )
+                .unwrap()],
+                browser: Some(personal),
+            },
+            120,
+            now,
+        );
+        println!("{text}");
+        for expected in [
+            "personal · someone-with-a-very-long-but-valid-username@engineering.department.example.com",
+            "auth: active (verified)",
+            "plan: max",
+            "session: 22% used, 78% left · live · resets 2027-01-15T09:00:00Z",
+            "source=poll observed=2027-01-15T08:00:00Z plan=unknown",
+            "weekly:opus: usage unknown · cached 1d ago · reset passed; refresh needed",
+            "browser 1: personal · Profile 3 · expects personal@example.com · signed in as personal@example.com",
+            "browser 2: work · Profile 7 · expects unconstrained · not signed in",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        for absent in [
+            "Managed accounts",
+            "Local services",
+            "Browser profiles",
+            "Local Chrome choices",
+            "linear",
+            "Spare",
+            "missing@example.com",
+            "source=managed_home",
+        ] {
+            assert!(!text.contains(absent), "unexpected {absent}: {text}");
+        }
+        let unbound = login_browser(browser(), login("missing"));
+        assert!(unbound.bindings.is_empty() && unbound.profiles.is_empty());
+        let text = render_login(
+            &AccountReport {
+                accounts: vec![serde_json::from_value(
+                    serde_json::to_value(login("missing")).unwrap(),
+                )
+                .unwrap()],
+                browser: Some(unbound),
+            },
+            120,
+            now,
+        );
+        assert!(text.contains("plan: unknown"), "{text}");
+        assert!(
+            text.contains(
+                "browser: none saved; lf account set claude=missing@example.com --chrome-profile <profile>"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_overview_is_one_row_per_login_with_fixes_under_it() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/auth_status.json");
+        let mut report: AccountReport = serde_json::from_str(fixture).unwrap();
+        let now = 1_800_000_000;
+        report.accounts[0]
+            .windows
+            .push(crate::store::AccountLimitRow {
+                provider: "claude".into(),
+                account_id: crate::store::ProviderAccountId::parse("primary").unwrap(),
+                window: "seven_day".into(),
+                used_percent: 69,
+                resets_at: Some(now + 86_400),
+                plan: None,
+                observed_at: now - 60,
+                source: "poll".into(),
+                model: None,
+                limited_until: None,
+            });
+        let fable = crate::store::AccountLimitRow {
+            window: "seven_day_fable".into(),
+            used_percent: 100,
+            model: Some("fable".into()),
+            limited_until: Some(now + 86_400),
+            ..report.accounts[0].windows[2].clone()
+        };
+        report.accounts[0].windows.push(fable);
+        let notes = [RouteNote {
+            provider: crate::provider_auth::Provider::Codex,
+            scope: crate::profile::RouteScope::Default,
+            named: 1,
+            rotating: 4,
+        }];
+        let text = render_table(&report, &notes, now);
+        println!("{text}");
+        let rows: Vec<_> = text
+            .lines()
+            .filter(|line| line.starts_with("  claude") || line.starts_with("  codex"))
+            .collect();
+        assert_eq!(rows.len(), 5, "managed logins only: {text}");
+        assert!(rows[0].contains("31% left") && rows[0].contains("● active · held"));
+        assert!(
+            rows[1].contains("? left"),
+            "no reading is unknown, never 0%"
+        );
+        assert!(rows[4].contains("paused"));
+        for expected in [
+            "fable out until",
+            "out until",
+            "! claude missing@ needs a login",
+            "lf account connect claude=missing@example.com",
+            "! codex default order uses 1 of 4",
+            "lf unset account.codex --global",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains(" 0% left"));
+        assert!(!text.contains("local credentials"));
     }
 }

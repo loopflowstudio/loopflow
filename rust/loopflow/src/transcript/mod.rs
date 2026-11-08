@@ -31,7 +31,6 @@ use crate::id::AgentSessionId;
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
-use crate::store::ProviderAccountId;
 
 pub(crate) use claude::is_user_input;
 
@@ -76,7 +75,8 @@ pub(crate) enum Source {
 /// Why a recorded conversation has no readable transcript here.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Gap {
-    /// The isolated account whose home held it no longer exists.
+    /// The account home it ran in, before every launch shared one, no longer
+    /// exists.
     AccountHomeRemoved,
     /// The home is here and the file is not.
     FileMissing { home: PathBuf },
@@ -92,23 +92,16 @@ pub(crate) enum Located {
     Gone(Gap),
 }
 
-/// The home that holds a recorded conversation: its isolated account's home,
-/// else the provider's native one. `None` when the isolated account is gone.
+/// The home that holds a recorded conversation: the provider's shared one,
+/// unless it ran in an account's own home and has not resumed since. `None`
+/// when that account is gone.
 pub(crate) fn conversation_home(
     store: &SqliteStore,
     provider: Provider,
     id: &AgentSessionId,
-    account: Option<&ProviderAccountId>,
 ) -> Result<Option<PathBuf>> {
-    if store.provider_session_isolated(provider, id)? != Some(true) {
+    let Some(account) = store.provider_session_account_home(provider, id)? else {
         return Ok(Some(native_home(provider, None)));
-    }
-    let account = match account {
-        Some(account) => Some(account.clone()),
-        None => store.provider_session_account(provider, id)?,
-    };
-    let Some(account) = account else {
-        return Ok(None);
     };
     Ok(store
         .get_provider_account(provider.as_str(), &account)?
@@ -120,7 +113,6 @@ pub(crate) fn locate(
     store: &SqliteStore,
     harness: HarnessKind,
     id: &AgentSessionId,
-    account: Option<&ProviderAccountId>,
     cwd: &Path,
 ) -> Result<Located> {
     let provider = match harness {
@@ -150,7 +142,7 @@ pub(crate) fn locate(
             })
         }
     };
-    let Some(home) = conversation_home(store, provider, id, account)? else {
+    let Some(home) = conversation_home(store, provider, id)? else {
         return Ok(Located::Gone(Gap::AccountHomeRemoved));
     };
     Ok(match transcript(harness, &home, id.as_str()) {

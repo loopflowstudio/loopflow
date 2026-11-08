@@ -15,7 +15,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::io::Write as _;
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command as ProcessCommand;
@@ -365,18 +364,11 @@ impl AuthFlowHandle {
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizationCodeInput {
     provider: Provider,
-    writer: Arc<Mutex<Option<CodeWriter>>>,
-}
-
-/// Where a pasted code goes: a line on a pipe, or Enter on the provider's terminal.
-#[derive(Debug)]
-enum CodeWriter {
-    Pipe(ChildStdin),
-    Terminal(tokio::fs::File),
+    writer: Arc<Mutex<Option<ChildStdin>>>,
 }
 
 impl AuthorizationCodeInput {
-    fn new(provider: Provider, writer: CodeWriter) -> Self {
+    fn new(provider: Provider, writer: ChildStdin) -> Self {
         Self {
             provider,
             writer: Arc::new(Mutex::new(Some(writer))),
@@ -392,7 +384,7 @@ impl AuthorizationCodeInput {
             });
         }
 
-        let writer = self
+        let mut stdin = self
             .writer
             .lock()
             .await
@@ -402,19 +394,9 @@ impl AuthorizationCodeInput {
             provider: self.provider,
             source,
         };
-        match writer {
-            CodeWriter::Pipe(mut stdin) => {
-                stdin.write_all(code.as_bytes()).await.map_err(io)?;
-                stdin.write_all(b"\n").await.map_err(io)?;
-                stdin.shutdown().await.map_err(io)
-            }
-            // A terminal in raw mode reads Enter as a carriage return.
-            CodeWriter::Terminal(mut terminal) => {
-                terminal.write_all(code.as_bytes()).await.map_err(io)?;
-                terminal.write_all(b"\r").await.map_err(io)?;
-                terminal.flush().await.map_err(io)
-            }
-        }
+        stdin.write_all(code.as_bytes()).await.map_err(io)?;
+        stdin.write_all(b"\n").await.map_err(io)?;
+        stdin.shutdown().await.map_err(io)
     }
 }
 
@@ -448,12 +430,6 @@ impl Drop for AuthMonitor {
             task.abort();
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-struct ClaudeKeychainCredential {
-    account: String,
-    blob: SecretString,
 }
 
 #[derive(Debug, Error)]
@@ -1510,14 +1486,6 @@ impl ClaudeAuthBroker {
         command
     }
 
-    /// `claude setup-token`: the same browser approval and code paste as a
-    /// login, ending with a long-lived subscription token printed once.
-    fn setup_token_command(&self) -> Command {
-        let mut command = self.command();
-        command.arg("setup-token");
-        command
-    }
-
     fn login_command(&self) -> Command {
         let mut command = self.command();
         command.args(["auth", "login"]);
@@ -1706,53 +1674,6 @@ fn provider_account_broker(
         Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
         _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
     }
-}
-
-/// What `claude setup-token` printed, once its flow completes.
-#[derive(Debug, Clone, Default)]
-pub struct MintedToken(Arc<std::sync::Mutex<Option<SecretString>>>);
-
-impl MintedToken {
-    pub fn take(&self) -> Option<SecretString> {
-        self.0.lock().expect("minted token lock").take()
-    }
-}
-
-/// Start `claude setup-token` in a throwaway config home. Its line output is
-/// parsed for the URL and then for the token; neither is logged.
-pub async fn start_claude_setup_token(
-    config_dir: PathBuf,
-) -> Result<(AuthFlowHandle, MintedToken), AuthError> {
-    let minted = MintedToken::default();
-    let sink = minted.clone();
-    let handle = start_auth_command(
-        Provider::Claude,
-        "claude",
-        ClaudeAuthBroker::for_profile(config_dir, None).setup_token_command(),
-        AuthCommandInput::TerminalAuthorizationCode,
-        move |line, builder| {
-            if let Some(token) = subscription_token_in(line) {
-                *sink.0.lock().expect("minted token lock") = Some(SecretString::new(token));
-            } else {
-                parse_generic_auth_line(line, builder);
-            }
-        },
-    )
-    .await?;
-    Ok((handle, minted))
-}
-
-/// The Claude subscription token prefix. API keys (`sk-ant-api…`) bill per
-/// token, so nothing else is accepted as a long-lived machine credential.
-pub const SUBSCRIPTION_TOKEN_PREFIX: &str = "sk-ant-oat";
-
-fn subscription_token_in(line: &str) -> Option<String> {
-    let start = line.find(SUBSCRIPTION_TOKEN_PREFIX)?;
-    let token: String = line[start..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-    (token.len() > SUBSCRIPTION_TOKEN_PREFIX.len() + 8).then_some(token)
 }
 
 pub async fn start_provider_account_auth(
@@ -2029,8 +1950,6 @@ struct AuthFlowBuilder {
 enum AuthCommandInput {
     None,
     AuthorizationCode,
-    /// A pasted code into a full-screen prompt that renders only on a terminal.
-    TerminalAuthorizationCode,
 }
 
 impl AuthCommandInput {
@@ -2038,9 +1957,6 @@ impl AuthCommandInput {
         self != Self::None
     }
 }
-
-/// Wide enough that a printed token never wraps.
-const AUTH_TERMINAL_COLUMNS: u16 = 500;
 
 async fn start_auth_command(
     provider: Provider,
@@ -2058,32 +1974,11 @@ async fn start_auth_command(
     } else {
         None
     };
-    let terminal = match input {
-        AuthCommandInput::None => {
-            command
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            None
-        }
-        AuthCommandInput::AuthorizationCode => {
-            command
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            None
-        }
-        AuthCommandInput::TerminalAuthorizationCode => {
-            let io = |source| AuthError::CommandIo { provider, source };
-            let (master, slave) = crate::transport::terminal_pair().map_err(io)?;
-            crate::transport::resize(master.as_raw_fd(), 24, AUTH_TERMINAL_COLUMNS).map_err(io)?;
-            command
-                .stdin(slave.try_clone().map_err(io)?)
-                .stdout(slave.try_clone().map_err(io)?)
-                .stderr(slave);
-            Some(master)
-        }
+    match input {
+        AuthCommandInput::None => command.stdin(Stdio::null()),
+        AuthCommandInput::AuthorizationCode => command.stdin(Stdio::piped()),
     };
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
     #[cfg(unix)]
     command.process_group(0);
@@ -2104,7 +1999,6 @@ async fn start_auth_command(
         }
     };
 
-    // The child holds the terminal's only other end, so output ends when it exits.
     drop(command);
     let process_group = crate::os_process::ProcessGroupGuard::new(
         child
@@ -2112,34 +2006,16 @@ async fn start_auth_command(
             .expect("newly spawned auth command should have a process id"),
     );
     let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
-    let (authorization_code_input, readers) = match terminal {
-        Some(master) => {
-            let io = |source| AuthError::CommandIo { provider, source };
-            let writer = tokio::fs::File::from_std(master.try_clone().map_err(io)?);
-            let reader = spawn_line_reader(tokio::fs::File::from_std(master), line_tx);
-            (
-                Some(AuthorizationCodeInput::new(
-                    provider,
-                    CodeWriter::Terminal(writer),
-                )),
-                AuthReaders(vec![reader]),
-            )
-        }
-        None => {
-            let authorization_code_input = child
-                .stdin
-                .take()
-                .map(|stdin| AuthorizationCodeInput::new(provider, CodeWriter::Pipe(stdin)));
-            let stdout = child.stdout.take().expect("auth stdout is piped");
-            let stderr = child.stderr.take().expect("auth stderr is piped");
-            let stdout_task = spawn_line_reader(stdout, line_tx.clone());
-            let stderr_task = spawn_line_reader(stderr, line_tx);
-            (
-                authorization_code_input,
-                AuthReaders(vec![stdout_task, stderr_task]),
-            )
-        }
-    };
+    let authorization_code_input = child
+        .stdin
+        .take()
+        .map(|stdin| AuthorizationCodeInput::new(provider, stdin));
+    let stdout = child.stdout.take().expect("auth stdout is piped");
+    let stderr = child.stderr.take().expect("auth stderr is piped");
+    let readers = AuthReaders(vec![
+        spawn_line_reader(stdout, line_tx.clone()),
+        spawn_line_reader(stderr, line_tx),
+    ]);
     let started_at = Instant::now();
     let mut builder = AuthFlowBuilder::default();
     let mut callback_url = None;
@@ -2209,7 +2085,7 @@ async fn start_auth_command(
         // The private FIFO and helper live exactly as long as the provider.
         #[cfg(unix)]
         let _handoff = handoff;
-        // Output after the URL still reaches the parser: `setup-token` prints its result.
+        // Output after the URL still reaches the parser.
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,
@@ -2565,7 +2441,7 @@ pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString
     #[cfg(all(target_os = "macos", not(test)))]
     if claude_login_in_keychain(config_dir) {
         if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
-            return Ok(Some(credential.blob));
+            return Ok(Some(credential));
         }
     }
     match fs::read_to_string(config_dir.join(".credentials.json")) {
@@ -2596,8 +2472,10 @@ pub(crate) fn write_claude_login(
 
 /// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
 /// it: `security add-generic-password -U`, fed on stdin so the login never
-/// appears in a process listing.
-#[cfg(all(target_os = "macos", not(test)))]
+/// appears in a process listing. Claude reads the item under its own account
+/// name (`claude_keychain_account`); a service can hold more than one item, so
+/// the first other item `security` finds gets the same login.
+#[cfg(target_os = "macos")]
 fn write_claude_keychain_credential(
     config_dir: &Path,
     credential: &SecretString,
@@ -2607,23 +2485,19 @@ fn write_claude_keychain_credential(
             "Claude credential has an unknown format".to_string(),
         ));
     }
+    let account = claude_keychain_account();
     let scoped = claude_keychain_service(config_dir);
     // The default home's item carries no suffix unless Claude already keeps a
     // suffixed one for it.
-    let (service, existing) = match read_claude_keychain_account_with_security(&scoped)? {
-        Some(account) => (scoped, Some(account)),
-        None if config_dir == home_dir_or_cwd().join(".claude") => (
-            LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string(),
-            read_claude_keychain_account_with_security(LEGACY_CLAUDE_KEYCHAIN_SERVICE)?,
-        ),
-        None => (scoped, None),
+    let service = if config_dir == home_dir_or_cwd().join(".claude")
+        && read_claude_keychain_account_with_security(&scoped)?.is_none()
+    {
+        LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string()
+    } else {
+        scoped
     };
-    let account = existing
-        .or_else(|| std::env::var("USER").ok())
-        .filter(|account| !account.is_empty() && !account.contains(['"', '\\', '\n']))
-        .ok_or_else(|| {
-            AuthError::Filesystem("no usable account name for the Claude Keychain item".to_string())
-        })?;
+    let other = read_claude_keychain_account_with_security(&service)?
+        .filter(|other| *other != account && !other.contains(['"', '\\', '\n']));
     let failed = |error: std::io::Error| {
         AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
     };
@@ -2634,10 +2508,11 @@ fn write_claude_keychain_credential(
         .stderr(Stdio::null())
         .spawn()
         .map_err(failed)?;
-    let script = format!(
-        "add-generic-password -U -a \"{account}\" -s \"{service}\" -X {}\n",
-        hex::encode(credential.expose_secret().as_bytes())
-    );
+    let hex = hex::encode(credential.expose_secret().as_bytes());
+    let script: String = std::iter::once(account.as_str())
+        .chain(other.as_deref())
+        .map(|item| format!("add-generic-password -U -a \"{item}\" -s \"{service}\" -X {hex}\n"))
+        .collect();
     security
         .stdin
         .take()
@@ -2646,13 +2521,30 @@ fn write_claude_keychain_credential(
         .map_err(failed)?;
     let status = security.wait().map_err(failed)?;
     // `security -i` reports a failed command only through what it stored.
-    let stored = read_claude_keychain_blob_with_security(&service).ok();
-    if !status.success() || stored.as_deref() != Some(credential.expose_secret().as_bytes()) {
-        return Err(AuthError::Filesystem(
-            "write Claude Keychain credential: the item did not take the login".to_string(),
-        ));
+    let stored = read_claude_keychain_blob_with_security(&service, &account).ok();
+    if !status.success()
+        || stored.as_ref().and_then(Option::as_deref) != Some(credential.expose_secret().as_bytes())
+    {
+        return Err(AuthError::Filesystem(format!(
+            "write Claude Keychain credential: the item for account \"{account}\" did not take the login"
+        )));
     }
     Ok(())
+}
+
+/// The account name Claude files its Keychain login under: `USER`, or
+/// `claude-code-user` when that is not a plain name (Claude 2.1.319).
+#[cfg(target_os = "macos")]
+fn claude_keychain_account() -> String {
+    std::env::var("USER")
+        .ok()
+        .filter(|user| {
+            !user.is_empty()
+                && user
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        })
+        .unwrap_or_else(|| "claude-code-user".to_string())
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -2683,10 +2575,10 @@ fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
     })
 }
 
-/// Keep Claude's completed login in its isolated profile.
+/// Keep Claude's completed login in its stored profile.
 ///
 /// Claude may write the native credentials file directly. On macOS versions
-/// that use Keychain instead, copy that credential into the isolated profile.
+/// that use Keychain instead, copy that credential into the stored profile.
 ///
 /// # Errors
 ///
@@ -2707,8 +2599,8 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
         let deadline = Instant::now() + CLAUDE_KEYCHAIN_WRITE_TIMEOUT;
         loop {
             if let Some(credential) = read_claude_keychain_credential(&service)? {
-                write_claude_profile_credentials(config_dir, &credential.blob)?;
-                return delete_claude_keychain_credential(&service, &credential.account);
+                write_claude_profile_credentials(config_dir, &credential)?;
+                return delete_claude_keychain_credential(&service, &claude_keychain_account());
             }
             if Instant::now() >= deadline {
                 break;
@@ -2726,7 +2618,7 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
     }
 }
 
-/// Copy the ambient Claude login into an isolated profile.
+/// Copy the ambient Claude login into a stored profile.
 ///
 /// # Errors
 ///
@@ -2747,7 +2639,7 @@ pub fn import_ambient_claude_profile_credentials(config_dir: &Path) -> Result<()
                         .to_string(),
                 )
             })?;
-        write_claude_profile_credentials(config_dir, &credential.blob)
+        write_claude_profile_credentials(config_dir, &credential)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -2803,31 +2695,27 @@ pub(crate) fn write_claude_profile_credentials(
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_credential(
-    service: &str,
-) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
-    let Some(account) = read_claude_keychain_account_with_security(service)? else {
+fn read_claude_keychain_credential(service: &str) -> Result<Option<SecretString>, AuthError> {
+    let Some(blob) = read_claude_keychain_blob_with_security(service, &claude_keychain_account())
+        .map_err(|error| {
+        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
+    })?
+    else {
         return Ok(None);
     };
-    let blob = read_claude_keychain_blob_with_security(service).map_err(|error| {
-        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-    })?;
     let blob = String::from_utf8(blob).map_err(|_| {
         AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
     })?;
     if claude_token_from_credentials_json(&blob).is_none() {
         return Ok(None);
     }
-    Ok(Some(ClaudeKeychainCredential {
-        account,
-        blob: SecretString::new(blob),
-    }))
+    Ok(Some(SecretString::new(blob)))
 }
 
 #[cfg(target_os = "macos")]
 fn read_claude_keychain_credential_for_config(
     config_dir: &Path,
-) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+) -> Result<Option<SecretString>, AuthError> {
     let scoped_service = claude_keychain_service(config_dir);
     if let Some(credential) = read_claude_keychain_credential(&scoped_service)? {
         return Ok(Some(credential));
@@ -2879,15 +2767,21 @@ fn parse_security_keychain_account(metadata: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_blob_with_security(service: &str) -> Result<Vec<u8>, String> {
+fn read_claude_keychain_blob_with_security(
+    service: &str,
+    account: &str,
+) -> Result<Option<Vec<u8>>, String> {
     let output = ProcessCommand::new("security")
-        .args(["find-generic-password", "-s", service, "-w"])
+        .args(["find-generic-password", "-a", account, "-s", service, "-w"])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
+        if security_item_not_found(&output) {
+            return Ok(None);
+        }
         return Err(format!("security exited with {}", output.status));
     }
-    Ok(trim_security_password_output(output.stdout))
+    Ok(Some(trim_security_password_output(output.stdout)))
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -2929,7 +2823,7 @@ fn read_claude_keychain_token(config_dir: &Path) -> Option<ProviderToken> {
     let credential = read_claude_keychain_credential_for_config(config_dir)
         .ok()
         .flatten()?;
-    claude_token_from_credentials_json(credential.blob.expose_secret())
+    claude_token_from_credentials_json(credential.expose_secret())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -4230,63 +4124,6 @@ mod tests {
         handle.wait().await.expect("auth command should complete");
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn setup_token_runs_on_a_wide_terminal_and_captures_the_printed_token() {
-        use std::os::unix::fs::PermissionsExt;
-        let _lock = crate::journal::test_env_lock();
-        let tmp = tempdir().unwrap();
-        let claude = tmp.path().join("claude");
-        fs::write(
-            &claude,
-            r#"#!/bin/sh
-[ "$1" = setup-token ] || exit 3
-# The real prompt renders nothing off a terminal, and a narrow one wraps the token.
-[ -t 0 ] && [ -t 1 ] || exit 5
-[ "$(stty size | cut -d' ' -f2)" -ge 200 ] || exit 6
-"$BROWSER" 'https://claude.ai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
-IFS= read -r code
-[ "$code" = pasted-code ] || exit 4
-printf '\033[32m✓ Long-lived authentication token created:\033[0m\n'
-printf '  sk-ant-oat01-Fixture_Token-123456  \n'
-printf 'Store this token securely.\n'
-"#,
-        )
-        .unwrap();
-        fs::set_permissions(&claude, fs::Permissions::from_mode(0o700)).unwrap();
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![tmp.path().to_path_buf()];
-        paths.extend(std::env::split_paths(&path));
-        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-        let started = start_claude_setup_token(tmp.path().join("home")).await;
-        std::env::set_var("PATH", path);
-        let (handle, minted) = started.unwrap();
-        assert!(handle
-            .response
-            .verification_uri
-            .contains("claude.ai/oauth/authorize"));
-        handle
-            .submit_authorization_code("pasted-code")
-            .await
-            .unwrap();
-        handle.wait().await.unwrap();
-        assert_eq!(
-            minted.take().unwrap().expose_secret(),
-            "sk-ant-oat01-Fixture_Token-123456"
-        );
-    }
-
-    #[test]
-    fn only_subscription_tokens_are_captured() {
-        assert_eq!(
-            subscription_token_in("token: sk-ant-oat01-abc_DEF-0123456789.").as_deref(),
-            Some("sk-ant-oat01-abc_DEF-0123456789")
-        );
-        assert!(subscription_token_in("sk-ant-api03-abcdefghijklmnop").is_none());
-        assert!(subscription_token_in("prefix sk-ant-oat").is_none());
-    }
-
     #[tokio::test]
     async fn discovery_timeout_kills_only_the_owned_provider_group() {
         let tmp = tempdir().unwrap();
@@ -4624,6 +4461,83 @@ attributes:
             parse_security_keychain_account(metadata).as_deref(),
             Some("operator")
         );
+    }
+
+    /// A `security` that keeps each item as `keychain/<service>/<account>`,
+    /// finding them by `-s` alone in `.order`, as the real one finds the oldest.
+    #[cfg(target_os = "macos")]
+    const FAKE_SECURITY: &str = r#"#!/bin/sh
+dir="$(dirname "$0")/../keychain"
+if [ "$1" = "-i" ]; then
+  while IFS= read -r line; do
+    acct=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)" -s .*/\1/p')
+    svc=$(printf '%s' "$line" | sed -n 's/.* -s "\([^"]*\)" -X .*/\1/p')
+    mkdir -p "$dir/$svc"
+    printf '%s' "${line##* -X }" | xxd -r -p > "$dir/$svc/$acct"
+    grep -qx "$acct" "$dir/$svc/.order" 2>/dev/null || echo "$acct" >> "$dir/$svc/.order"
+  done
+  exit 0
+fi
+shift
+acct=; svc=; w=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -a) acct=$2; shift ;;
+    -s) svc=$2; shift ;;
+    -w) w=1 ;;
+  esac
+  shift
+done
+[ -n "$acct" ] || acct=$(head -n 1 "$dir/$svc/.order" 2>/dev/null)
+if [ -z "$acct" ] || [ ! -f "$dir/$svc/$acct" ]; then
+  echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2
+  exit 44
+fi
+if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=\"$acct\""; fi
+"#;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_keychain_write_lands_on_the_item_claude_reads_when_a_service_holds_two() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = crate::journal::test_env_lock();
+        let root = tempdir().unwrap();
+        let bin = root.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("security"), FAKE_SECURITY).unwrap();
+        fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
+        let config_dir = root.path().join("native");
+        let service = claude_keychain_service(&config_dir);
+        // An older item under another account name comes back first from `-s`.
+        let items = root.path().join("keychain").join(&service);
+        fs::create_dir_all(&items).unwrap();
+        let stale = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-stale"}}"#;
+        fs::write(items.join("unknown"), stale).unwrap();
+        fs::write(items.join("jack"), stale).unwrap();
+        fs::write(items.join(".order"), "unknown\njack\n").unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let user = std::env::var_os("USER");
+        let mut search = std::ffi::OsString::from(&bin);
+        search.push(":");
+        search.push(&path);
+        std::env::set_var("PATH", search);
+        std::env::set_var("USER", "jack");
+
+        let fresh = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fresh"}}"#;
+        let written =
+            write_claude_keychain_credential(&config_dir, &SecretString::new(fresh.to_string()));
+        let read = read_claude_keychain_credential(&service);
+
+        std::env::set_var("PATH", path);
+        match user {
+            Some(user) => std::env::set_var("USER", user),
+            None => std::env::remove_var("USER"),
+        }
+        written.unwrap();
+        assert_eq!(read.unwrap().unwrap().expose_secret(), fresh);
+        assert_eq!(fs::read_to_string(items.join("jack")).unwrap(), fresh);
+        assert_eq!(fs::read_to_string(items.join("unknown")).unwrap(), fresh);
     }
 
     #[test]

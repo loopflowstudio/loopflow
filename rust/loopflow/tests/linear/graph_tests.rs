@@ -2317,7 +2317,7 @@ fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
             } else {
                 let claims = BASE64_URL_SAFE_NO_PAD
                     .encode(serde_json::json!({"email":email,"sub":id}).to_string());
-                serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
+                serde_json::json!({"tokens":{"access_token":format!("fixture-{id}"), "id_token":format!("h.{claims}.s")}}).to_string()
             };
             fs::write(
                 account_home.join(if provider == "claude" {
@@ -2381,7 +2381,9 @@ fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
         &bin.path().join("claude"),
         r#"#!/bin/sh
 case "$1" in --version) exit 0;; esac
-printf 'claude:%s\n' "$CLAUDE_CONFIG_DIR" >> "$LF_HOME/selected"
+# The shared home's login: the stand-in Keychain on macOS, else its file.
+login=$(cat "$(dirname "$(command -v security)")"/keychain/* "$CLAUDE_CONFIG_DIR/.credentials.json" 2>/dev/null | grep -o 'fixture-claude-[a-z]*' | head -n 1)
+printf 'claude:%s\n' "$login" >> "$LF_HOME/selected"
 read -r input
 echo '{"type":"system","subtype":"init","session_id":"account-fixture"}'
 echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"account-fixture"}'
@@ -2392,7 +2394,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
         &codex_app_server_script(
             "done",
             r#"if [ "$1" = --version ]; then exit 0; fi
-printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
+printf 'codex:%s\n' "$(grep -o 'fixture-codex-[a-z]*' "$CODEX_HOME/auth.json")" >> "$LF_HOME/selected"
 "#,
         ),
     );
@@ -2405,7 +2407,6 @@ printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
         repo.path(),
         home.path(),
         &[
-            "--isolate",
             "--account",
             "claude=claude-chosen@",
             "--account",
@@ -2422,16 +2423,9 @@ printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
         String::from_utf8_lossy(&output.stderr)
     );
     let selected = fs::read_to_string(home.path().join("selected")).unwrap();
-    let expected = ["claude", "codex", "claude", "codex"].map(|provider| {
-        format!(
-            "{provider}:{}",
-            home.path()
-                .join("accounts")
-                .join(provider)
-                .join(format!("{provider}-chosen"))
-                .display()
-        )
-    });
+    // Each step's shared home was signed in as the chosen account.
+    let expected = ["claude", "codex", "claude", "codex"]
+        .map(|provider| format!("{provider}:fixture-{provider}-chosen"));
     assert_eq!(
         selected.lines().collect::<Vec<_>>(),
         expected.iter().map(String::as_str).collect::<Vec<_>>()

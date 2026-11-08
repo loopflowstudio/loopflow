@@ -292,18 +292,17 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
-in as one stored account at a time: switching, saved-back logins, isolation,
-and provider conversation IDs in `lf session`.
+in as one stored account at a time: switching, saved-back logins and provider
+conversation IDs in `lf session`.
 `tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
 target/debug/lf --output <dir>` proves the same for Claude with synthetic
 logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, a shared launch gets no account home or credential
-variable, and an isolated launch stays in its account's home. On macOS it
-writes and removes one Keychain item scoped to its temporary config directory.
-The fixture copies the candidate, uses private Machines and stops only its identified
-provider process children. Native execution uses synthetic Responses, not configured
-accounts or installed data. Ordinary retry, usage, binding and review behavior
-belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
+Loopflow installed, and a launch gets no account home or credential variable.
+On macOS it writes and removes one Keychain item scoped to its temporary config
+directory. The fixture copies the candidate, uses private Machines and stops
+only its identified provider process children. Native execution uses synthetic
+Responses, not configured accounts or installed data. Ordinary retry, usage,
+binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
 `ops::linear::adoption_tests`.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against

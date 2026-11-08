@@ -4,9 +4,7 @@ Reuse the local attach flow and wire shapes. The planned contract lives in
 `rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
 `docs/server.md`.
 
-This checkout contains the planned contract only. Implementation, authenticated
-connection checks and publication wait for LOO-718's remote admission. The local
-UID-only store cannot establish remote acceptance. The listener, mobile settings
+This checkout contains the planned contract only. The listener, mobile settings
 and bulk protocol are outside this Task; no product decision is missing.
 
 ## Transport dependency — November 8, 2026
@@ -28,7 +26,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8, 22:19 UTC implementation recheck reconfirmed the dependency:
+The November 8, 22:55 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -37,10 +35,9 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-The local implementation still consumes tickets on every redemption attempt,
-checks only the Unix peer UID and measures its 60 seconds with `Instant`.
-It supplies neither remote identity nor the planned expiry across host sleep;
-the planned wording in both docs remains accurate.
+Implementation remains blocked on that external dependency. The Graph's next
+decision is stop until LOO-718 lands; the attach implementation and authenticated
+acceptance checks remain unfinished.
 
 ## Delete — do not maintain
 
@@ -58,20 +55,23 @@ deadline includes host sleep. Leave unrelated throttles on `Instant`.
 The terminal ticket contract must not silently change bulk transfer redemption
 policy when both use the shared store.
 
+After integration, update the docs' planned/local-only wording to match the
+implemented endpoint.
+
 ## Remaining acceptance
 
 Exercise the remote attach contract through authenticated client and bridge
 connections: matching node/user succeeds once; a different node, different user,
 or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
 60 seconds with a clock advance representing host sleep, expired-ticket sweeping,
-and unchanged bulk-transfer redemption behavior. These checks remain for
-implementation, gate and QA; local UID tests alone cannot satisfy them.
+and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
+satisfy these checks.
 
 Visual review remains for demo or QA; Desktop opening results are in
 `questions.md`.
 
-After integration, update the docs' planned/local-only wording to match the
-implemented endpoint.
+Keep the plan focused on the transport findings and remaining work; the current
+local implementation is recoverable from code.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose-only
-edits need no build or tests.
+compression; no build or tests needed.

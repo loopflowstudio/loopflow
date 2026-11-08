@@ -117,7 +117,7 @@ struct RegistryQueryTests {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
         let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil, machine: nil)
-        #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#))
+        #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
@@ -149,8 +149,8 @@ struct RegistryQueryTests {
         #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
         let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(
-            #"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#))
-        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--prepare", "--json"])
+            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
+        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--request-id", "fixture-thread", "--prepare", "--json"])
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])

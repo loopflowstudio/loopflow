@@ -89,12 +89,11 @@ struct CreationSubmissionTests {
         let server = Server()
         let (entered, began) = AsyncStream<Void>.makeStream()
         let (release, finish) = AsyncStream<Void>.makeStream()
-        let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { await server.lookup($0) }, send: { payload in
+        let client = CreationSubmissions(directory: root, machine: {
                 began.yield(())
                 for await _ in release { break }
-                return try await server.send(payload)
-            })
+                return "machine"
+            }, lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         let record = SubmittedCreation(requestID: "same", destination: "machine",
             payload: Data(#"{"kind":"task.create","request_id":"same","directory":"/repo"}"#.utf8),
             version: ServerProtocol.revision, submittedAt: Date())

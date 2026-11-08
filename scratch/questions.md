@@ -24,3 +24,8 @@ while either materializes. These count reservations and serialized output, not R
 
 The grace-expiry test waits 61 seconds against the production deadline instead
 of adding a test-only transport deadline. Gate owns this slower acceptance case.
+
+Context check, 2026-11-08: Wave memory is 16,417/16,000 tokens and
+77,072/131,072 bytes (417 tokens over); scratch is within both limits.
+The Task's work guidance makes `.lf/wave/` read-only, so memory curation remains
+with its Wave owner. Limits were not raised.

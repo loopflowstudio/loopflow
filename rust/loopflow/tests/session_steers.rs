@@ -463,9 +463,9 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
     assert!(String::from_utf8_lossy(&after_clear.stdout).contains("AFTER_CLEAR_DIRECTION"));
     let selected: String = db
         .query_row(
-            "SELECT json_extract(payload,'$.provider_thread') FROM session_events
-             WHERE session_id=?1 AND json_extract(payload,'$.type')='agent_session_selected'
-             AND json_extract(payload,'$.next_provider_thread')='cleared-native'",
+            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events
+             WHERE session_id=?1 AND json_extract(payload,'$.type')='provider_transition'
+             AND json_extract(payload,'$.transition.to_provider_session')='cleared-native'",
             [session],
             |r| r.get(0),
         )

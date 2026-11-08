@@ -26,7 +26,7 @@ pub struct ProviderTransition {
     pub observed_at: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ProviderLineage {
     source_session: String,
     provider_session: Option<String>,
@@ -98,20 +98,14 @@ pub(crate) fn observe_in(
          WHERE s.id=?1 AND e.captured_event=s.current_capture AND json_extract(e.payload,'$.type')='provider_lineage'
          AND NOT EXISTS(SELECT 1 FROM session_events changed WHERE changed.session_id=s.id AND changed.captured_event=s.current_capture AND json_extract(changed.payload,'$.type')='provider_transition')
          ORDER BY e.seq DESC LIMIT 1", [session], |row| row.get(0)).optional()?;
-    let lineage: Option<serde_json::Value> =
-        lineage.map(|s| serde_json::from_str(&s)).transpose()?;
+    let lineage: Option<ProviderLineage> = lineage.map(|s| serde_json::from_str(&s)).transpose()?;
     let from_thread = lineage
         .as_ref()
-        .and_then(|p| p["provider_session"].as_str())
-        .map(str::to_owned)
+        .and_then(|p| p.provider_session.clone())
         .or_else(|| previous.as_ref().map(|p| p.to_provider_session.clone()));
     let from_process = lineage
         .as_ref()
-        .map(|p| {
-            serde_json::from_value::<Option<crate::id::AgentProcessId>>(p["agent_process"].clone())
-        })
-        .transpose()?
-        .flatten()
+        .and_then(|p| p.agent_process.clone())
         .or_else(|| previous.as_ref().map(|p| p.to_agent_process.clone()));
     let forked = source == "fork" || lineage.is_some();
     let kind = if from_thread.as_deref() == Some(thread) {
@@ -131,9 +125,7 @@ pub(crate) fn observe_in(
         to_provider_session: thread.into(),
         from_agent_process: from_process,
         to_agent_process: process.clone(),
-        original_running: lineage
-            .as_ref()
-            .and_then(|p| p["original_running"].as_bool()),
+        original_running: lineage.as_ref().and_then(|p| p.original_running),
         seed: forked.then(|| if source == "fork" { "native" } else { "log" }.into()),
         observed_at: crate::store::rows::now_unix(),
     };
@@ -193,12 +185,13 @@ impl SqliteStore {
         next: &crate::session::LfSession,
         source: &ProviderLineage,
     ) -> StoreResult<()> {
+        let mut payload = serde_json::to_value(source)?;
+        payload["type"] = "provider_lineage".into();
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
             SELECT id,'observed',?2,unixepoch(),?3,current_capture FROM agent_sessions WHERE id=?1",
             params![next.id,format!("lineage:{}",next.artifact_key.as_deref().unwrap_or("unknown")),
-                serde_json::to_string(&serde_json::json!({"type":"provider_lineage","source_session":source.source_session,
-                    "provider_session":source.provider_session,"agent_process":source.agent_process,"original_running":source.original_running}))?])?;
+                serde_json::to_string(&payload)?])?;
         Ok(())
     }
 }

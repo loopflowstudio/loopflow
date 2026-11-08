@@ -111,50 +111,7 @@ process". A New Task sheet submitted as the connection dropped files exactly
 one Task. Quit Desktop before the answer returns, reopen it, and recover that
 same Task from the submitted request and its receipt. An unconfirmed launch
 shows "Task created; start unconfirmed" and starts nothing again. Headless
-analog at gate: the tests in each slice below.
-
-## What the code shows today (LOO-593 base `971897b8b`)
-
-- `server/service.rs` `session()`: every distinct request/subscription ID is
-  spawned into a `JoinSet` and `inflight` map with no count limit. Answers go
-  through `mpsc::channel(QUEUE = 64)` of `ServerMessage` values, serialized only
-  in `send()`. A finished `request()` holds its whole `serde_json::Value` while
-  awaiting `outgoing.send`, outside the 64 slots. Worst case per connection is
-  unbounded; 64 queued 32 MiB readings alone is 2 GiB. No exhaustion was
-  reproduced; this is from reading the code.
-- A subscription already coalesces: `Notify` stores one wake, `pull()` reads
-  the newest state, and `deliver` awaits, so one subscription has at most one
-  reading in flight. `Subscription::checkpoint(n)` pushes a request the next
-  frame answers, so a dropped frame can be re-asked by calling it again.
-- Desktop's **New Task** does not use the server: `RegistryQuery.createTask`
-  runs `lf task create --wave … --run --json -- REQUEST` as a subprocess and
-  parses stdout, including a failure path (`TaskCreateRunFailed`). `runTask`,
-  `shipTask`, `moveTask --machine`, wave set machine, `removeWave`,
-  `processHistory` also shell out, though `task.run` and `task.ship` are served.
-- Served `task.create` (`Write::TaskFromSession`) only adopts an existing
-  Session. The Task ID is minted at `ops/task.rs:1570`. `create_task_in`
-  (`store/sqlite/children.rs:57`) already returns the existing Task for a
-  repeated `NewTask` with identical content and refuses a different one: the
-  receipt half exists, but the client cannot name the ID, so a retry mints a
-  new one.
-- `session.new` (`human_session::new_thread`) stops the running agent and
-  appends a new input on every call: a retry stops it again and starts another
-  thread. `session.resume` with a scope is find-or-create under `lock_scope`
-  and needs no receipt.
-- Terminal coverage (`tests/transport_tests.rs`): case (c) below is untested;
-  (a), (b), (d), (e) are partial. `attached_owner`'s
-  `{owner_lf_process_id, current_lf_process_id}` refusal has no test anywhere.
-  Untested edge: a resume that reaches the owner while that viewer's old
-  connection is still open is refused (`transport.rs:1182`), so the relay falls
-  back to a passive fresh attach behind its own stale connection.
-- No operation reports what happened to the provider conversation.
-  `SessionRecord` has no provider session ID. `--explain`'s
-  `SessionResumeIntent` is a forecast. `lf resume --fork` makes a log-seeded
-  new LfSession titled "(fork)" with no link to its source. Account failover
-  in `agent/mod.rs:1016` silently starts a history-less provider conversation.
-  The only typed record is `agent_session_selected` (`store/sqlite/steers.rs:87`)
-  for in-process switches (Codex `/new`, `/fork`), and it writes nothing when
-  the ID is unchanged.
+analog at gate: the acceptance checks below.
 
 ## Implementation contract
 
@@ -284,8 +241,7 @@ Every other write keeps "admitted mutations finish; a lost answer is
   a receipt when available, otherwise inspect the resource; never generic retry.
 - Desktop stops shelling out for Work: `task.create`, `task.run`, `task.ship`
   move to served kinds this Task. `task.move --machine`, wave machine set,
-  `wave.remove`, `wave.rename` and process history show need served kinds;
-  they are slice 6. Done means `grep "await run(" swift/Loopflow/Services/RegistryQuery.swift`
+  `wave.remove`, `wave.rename` and process history also use served kinds. Done means `grep "await run(" swift/Loopflow/Services/RegistryQuery.swift`
   finds no Work mutation. The same-user socket stays local; remote admission
   is out of scope.
 
@@ -330,66 +286,29 @@ served one; `lf` in the provider byte path.
 
 ## Delete — do not maintain
 
-- `service.rs`'s queue of `ServerMessage` values and unbounded request admission:
-  replace with serialized frames carrying producer reservations through delivery.
-- `Write::TaskFromSession`: replace with the complete `TaskCreate` operation;
-  retain adoption and CLI/server parity coverage on that operation.
-- Desktop `TaskCreateRunFailed` stdout parsing and Work subprocess calls in
-  `RegistryQuery`: move creation, launch, movement, Wave mutations and history
-  to the shared protocol. Keep Ghostty and app automation owners.
-- `agent_session_selected` writer: replace with observed provider transitions;
-  retain a reader for already shipped historical rows.
-- Transport resume's closed-socket precondition: supersede the matching viewer's
-  old socket, retaining exact-owner identity and newer viewers' claims.
+The unbounded message queue, adoption-only `Write::TaskFromSession`, Desktop
+`TaskCreateRunFailed` parsing and Work subprocess paths, provider-selection
+writer, and closed-socket resume precondition are removed. The remaining
+`agent_session_selected` reader translates released history only; runtime tests
+query `provider_transition`. No deletion targets remain.
 
-## Slices
+Compression keeps request slots with their producer reservation through worker
+completion and delivery; task completion no longer returns an unused request ID.
+Task creation decodes one recorded receipt, and provider lineage uses its typed
+record for both writing and reading. Desktop claims recovery before any await,
+so destination lookup cannot admit two recoveries for one submission.
 
-1. **Budget**. `Outbox`, open and write limits, serialization in
-   the producer, limits in welcome and status, README. Test in `service.rs`:
-   one connection floods 1,000 requests and 300 subscriptions against a read
-   with a large answer; assert refusals are `busy` with their `id` and the
-   `limit` named, every admitted request answers, retained bytes never exceed
-   the declared budget including pending producers (exposed under `#[cfg(test)]`),
-   and a checkpoint is answered after budget frees. Include multiple clients to
-   exercise the shared process budget.
-2. **Terminal cases** (a)–(e) and the stale-connection resume fix.
-3. **Creation receipts**: migration, `Write::TaskCreate` replacing
-   `TaskFromSession`, `session.new` receipts, CLI `--request-id`, fixtures and
-   `ServerProtocolTests`. Test in `tests/served_reads.rs`: send `task.create`,
-   wait until its receipt row exists, drop the connection unread, reconnect,
-   resend; one `tasks` row, same ID, milestone `filed`; resend with a different
-   title is `conflict`. A unit test drives `run_requested` with no Graph to
-   `outcome_unknown`. Include receipt lookup, concurrent duplicates, server restart
-   and Session stop/append crash windows; an unrelated Graph cannot settle a retry.
-4. **Desktop creation and restart recovery**: New Task and adoption through served
-   `task.create`, plus `task.run` and `task.ship` cutover. Persist immutable
-   submissions for Task creation and `session.new` before send. Test restart
-   before send, after effect/before reply, after reply/before local removal;
-   storage failures, original destination, multiple windows and unknown launch.
-   Every replay yields the original resource/input and no extra launch.
-5. **Provider transitions**: type, writer, `agent_session_selected` replaced,
-   `SessionRecord.transition`, Desktop connection row with a view test.
-6. **Remaining Desktop CLI paths** to served kinds, and the README's Client
-   contract section. Each earlier slice writes its own row's README contract.
+The original baseline analysis and implementation slices are at
+`758309facbef6368627cc9cd2a426de9230e5fe0:scratch/loo-810-server-contracts.md`.
+The contract above and acceptance checks below remain current.
 
 ## Checks
 
 ### Shipping docs · write-docs step
 
-These files describe the intended behavior ahead of implementation:
-
-- `docs/server.md`: Desktop submission recovery after connection loss or app restart.
-- `docs/work.md`: CLI creation identity, retry and uncertain launch recovery.
-- `docs/sessions.md`: exact-owner display recovery and provider-transition explanations.
-- `rust/loopflow/src/server/README.md`: shared client, receipt, budget, terminal and provider contracts.
-- `docs/dev/server.md`: creation/cutover overview aligned with the client contract.
-
-Keep them in agreement with the implemented schema and help. The `--request-id`
-example and new welcome/status fields require implementation; this prose-only
-step does not establish runtime behavior. Receipt lookup's final operation name
-and concrete payload belong in the schema and protocol examples once implemented.
-Budget numbers in the welcome example remain the plan's provisional defaults.
-Reconcile the negotiated revision and fixtures with the required DTO additions.
+The user contracts are in `docs/{server,work,sessions}.md`; the protocol
+reference is `rust/loopflow/src/server/README.md`. Keep those aligned with
+`lf server describe` and its fixtures.
 
 Write-docs checks, 2026-11-08:
 
@@ -414,6 +333,20 @@ is recorded in `loo-810-sync.md`; fixture runs pin `LOOPFLOW_TEST_LF` to it.
 - `cargo test -p loopflow --lib server::service::tests::flooded_requests`: passed after retaining construction/pull capacity through cancellation; no runtime shutdown panic.
 - `scripts/test_desktop.sh --no-parallel --filter 'CreationSubmissionTests|ServerProtocolTests|ProviderTransitionTests|NewTaskTests|SessionControlsTests|WorkDestinationTests/newTask|RegistryQueryTests/contentRoutedStepHistory'`: 32 passed headlessly; the additional `WorkDestinationTests/submittedCreationHasNoSecondSubmitButton` check passed from that build.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.
+
+### Compression checks · 2026-11-08
+
+Same environment and candidate CLI as above.
+
+- `cargo test -p loopflow --lib server::`: 28 passed, including request/write permit ownership after cancellation.
+- `cargo test -p loopflow --lib store::sqlite::provider_transitions::`: 2 passed with typed lineage.
+- `cargo test -p loopflow --lib task_graph_launch_tests::task_create_run_starts_the_graph_and_admits_the_request_as_first_turn`: passed with one receipt decode.
+- `cargo test -p loopflow --test served_reads served_task_create_survives_a_dropped_connection_and_server_restart`: passed.
+- `cargo test -p loopflow --test integration session_steers::public_context_capability_survives_claim_changes_and_rejects_children_and_replacement`: passed using the new transition event; corrected an initial invocation naming a nonexistent standalone target.
+- `cargo test -p loopflow --test integration documented_commands::`: 4 passed.
+- `scripts/test_desktop.sh --no-parallel --filter 'CreationSubmissionTests|RegistryQueryTests|ServerProtocolTests|ProviderTransitionTests'`: 40 passed, including concurrent recovery during destination lookup.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed.
+- `uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --new-thread`: plain and wrapped native PTY cases passed; `/new` and resume selected the new conversation, with no live fixture providers remaining. First run saw one unsettled observer after renderer exit; both processes later completed. The check now waits up to five seconds for teardown. Passing artifacts: `/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-codex-terminal-4xv_2wcn`.
 
 Gate owns affected suites and the complete terminal acceptance set:
 `server_reconnect_preserves_newer_viewers_input_and_geometry`,

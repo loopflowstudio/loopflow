@@ -92,13 +92,12 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
             ),
             other => other.into(),
         })?;
-    let saved = store.sqlite.creation_receipt(id)?;
-    if let Some(graph) = input.graph.as_deref().filter(|_| saved.is_none()) {
-        crate::ops::task::load_graph(graph, "", &input.directory)?;
-    }
-    let mut receipt: TaskCreateReceipt = match saved.as_ref().and_then(|r| r.result.as_ref()) {
-        Some(result) => serde_json::from_value(result.clone())?,
+    let recorded = match store.sqlite.creation_receipt(id)? {
+        Some(receipt) => receipt,
         None => {
+            if let Some(graph) = input.graph.as_deref() {
+                crate::ops::task::load_graph(graph, "", &input.directory)?;
+            }
             crate::ops::task::task_create(
                 &input.directory,
                 input.wave.as_deref(),
@@ -110,16 +109,18 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
                 },
                 Some(identity),
             )?;
-            serde_json::from_value(
-                store
-                    .sqlite
-                    .creation_receipt(id)?
-                    .context("creation receipt is missing")?
-                    .result
-                    .context("filed receipt has no result")?,
-            )?
+            store
+                .sqlite
+                .creation_receipt(id)?
+                .context("creation receipt is missing")?
         }
     };
+    let mut receipt: TaskCreateReceipt = serde_json::from_value(
+        recorded
+            .result
+            .clone()
+            .context("filed receipt has no result")?,
+    )?;
     // A receipt never restores a removed resource.
     if store.sqlite.task(&receipt.task.id)?.is_none() {
         return Err(Error::new(
@@ -132,10 +133,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
     if !input.run || receipt.milestone == "admitted" {
         return Ok(receipt);
     }
-    let recorded = store
-        .sqlite
-        .creation_receipt(id)?
-        .context("creation receipt is missing")?;
     match recorded.milestone.as_str() {
         "filed" => {
             store.sqlite.advance_creation(id, "run_requested", None)?;

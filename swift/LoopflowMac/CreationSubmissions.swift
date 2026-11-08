@@ -97,15 +97,15 @@ actor CreationSubmissions {
     }
 
     func reconcile(_ record: SubmittedCreation) async throws -> CreationLookup? {
-        guard !active.contains(record.id) else { return nil }
+        // Own recovery before the first await, including destination lookup.
+        guard active.insert(record.id).inserted else { return nil }
+        defer { active.remove(record.id) }
         guard record.version == ServerProtocol.revision else {
             throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
         }
         guard try await currentMachine() == record.destination else {
             throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
         }
-        active.insert(record.id)
-        defer { active.remove(record.id) }
         let data = Data(try await lookup(record.id).utf8)
         let receipt = try JSONDecoder().decode(CreationLookup?.self, from: data)
         // Only absence or local milestones preceding/after an external effect
@@ -209,7 +209,6 @@ struct CreationRecoveryView: View {
         .task { recovery.start() }
     }
 }
-
 
 private struct RecoveredCreationInspector: View {
     let resource: CreationRecovery.Resource

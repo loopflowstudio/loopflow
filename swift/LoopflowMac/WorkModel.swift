@@ -2331,8 +2331,7 @@ final class WorkModel {
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
     /// repository), starts its workflow and admits its conversation with the
     /// request as the first turn; this window then shows that conversation.
-    /// When nothing was filed, the sheet keeps the request and the error. A Task
-    /// filed before its run failed is selected with the error at its Start control.
+    /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         do {
             let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)

@@ -29,7 +29,7 @@ pub(super) struct Frame {
     pub reservation: Arc<Reservation>,
 }
 
-pub(super) type RequestSlots = Arc<(OwnedSemaphorePermit, Option<OwnedSemaphorePermit>)>;
+type RequestSlots = (OwnedSemaphorePermit, Option<OwnedSemaphorePermit>);
 
 pub(super) struct Reservation {
     slots: Mutex<Option<RequestSlots>>,
@@ -224,12 +224,22 @@ mod tests {
     #[tokio::test]
     async fn a_disconnected_waiter_cannot_release_a_running_workers_reservation() {
         let (outbox, receiver) = Outbox::with_process(Arc::new(Semaphore::new(PROCESS_RETAINED)));
+        let open = Arc::new(Semaphore::new(1));
+        let writes = Arc::new(Semaphore::new(1));
         let waiting = outbox.reserve().unwrap();
+        waiting.hold((
+            open.clone().try_acquire_owned().unwrap(),
+            Some(writes.clone().try_acquire_owned().unwrap()),
+        ));
         let worker = waiting.clone();
         drop(receiver);
         drop(waiting);
         assert_eq!(outbox.retained(), MAX_MESSAGE);
+        assert_eq!(open.available_permits(), 0);
+        assert_eq!(writes.available_permits(), 0);
         drop(worker);
         assert_eq!(outbox.retained(), 0);
+        assert_eq!(open.available_permits(), 1);
+        assert_eq!(writes.available_permits(), 1);
     }
 }

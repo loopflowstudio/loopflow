@@ -483,8 +483,8 @@ async fn session(
 ) -> Result<()> {
     let writes = Arc::new(Semaphore::new(MAX_WRITES));
     // Dropping the set aborts every answer still pending; admitted blocking
-    // work finishes on its worker. A task returns its request ID.
-    let mut tasks: JoinSet<String> = JoinSet::new();
+    // work finishes on its worker. Final frame delivery releases the request ID.
+    let mut tasks: JoinSet<()> = JoinSet::new();
     let mut inflight: HashMap<String, Inflight> = HashMap::new();
     loop {
         tokio::select! {
@@ -600,7 +600,8 @@ async fn session(
                             send(&mut lines, &busy(&id, "retained_bytes", MAX_RETAINED)).await?;
                             continue;
                         };
-                        let task = tasks.spawn(request(id.clone(), operation, select, instance.clone(), outgoing.clone(), reservation, Arc::new((slot, write))));
+                        reservation.hold((slot, write));
+                        let task = tasks.spawn(request(id.clone(), operation, select, instance.clone(), outgoing.clone(), reservation));
                         Inflight { task, checkpoints: None }
                     }
                 };
@@ -614,13 +615,9 @@ async fn session(
                 let _ = frame.delivered.send(());
                 if complete { inflight.remove(&frame.id); }
             },
-            Some(finished) = tasks.join_next_with_id() => {
+            Some(finished) = tasks.join_next() => {
                 match finished {
-                    // A cancelled ID may already name a newer request.
-                    Ok((task, id)) => {
-                        // Its queued final frame releases the ID after delivery.
-                        let _ = (task, id);
-                    }
+                    Ok(()) => {}
                     Err(join) if join.is_cancelled() => {}
                     Err(join) => tracing::warn!(%instance, %join, "Server request task failed"),
                 }
@@ -747,7 +744,6 @@ fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn request(
     id: String,
     operation: Operation,
@@ -755,21 +751,11 @@ async fn request(
     instance: Arc<str>,
     outgoing: Outbox,
     reservation: Arc<Reservation>,
-    slots: super::outbox::RequestSlots,
-) -> String {
-    reservation.hold(slots.clone());
+) {
     let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
-    let result = operate(
-        operation,
-        &id,
-        &instance,
-        &trace_id,
-        reservation.clone(),
-        slots.clone(),
-    )
-    .await;
+    let result = operate(operation, &id, &instance, &trace_id, reservation.clone()).await;
     tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
@@ -804,7 +790,6 @@ async fn request(
         )
         .await;
     }
-    id
 }
 
 async fn operate(
@@ -813,11 +798,10 @@ async fn operate(
     instance: &str,
     trace_id: &crate::id::TraceId,
     reservation: Arc<Reservation>,
-    slots: super::outbox::RequestSlots,
 ) -> Result<serde_json::Value, Error> {
     match operation {
         Operation::Read(query) => tokio::task::spawn_blocking(move || {
-            let _held = (reservation, slots);
+            let _held = reservation;
             crate::journal::request::isolate(|| query.read())
         })
         .await
@@ -842,7 +826,7 @@ async fn operate(
                 }
             }
             effect(target, id, instance, trace_id, move || {
-                let _held = (reservation, slots);
+                let _held = reservation;
                 crate::lf::commands::account::served(|| change.run())
             })
             .await
@@ -886,7 +870,7 @@ async fn subscribing(
     outgoing: Outbox,
     checkpoints: mpsc::Receiver<u64>,
     slot: tokio::sync::OwnedSemaphorePermit,
-) -> String {
+) {
     let slot = Arc::new(slot);
     if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints, slot.clone()).await
     {
@@ -898,7 +882,6 @@ async fn subscribing(
         )
         .await;
     }
-    id
 }
 
 async fn subscribe(

@@ -9,6 +9,10 @@ Read the Task's outcome and Done when claims, the merged PR and any demo notes
 in `scratch/`. Check each claim against what main does now, not the branch you
 remember. If nothing is left to check after merge, say why and finish.
 
+Inspect post-merge CI for the exact merge SHA. Report its event, run link and
+result separately from PR and merge-queue checks; a green PR or queue does not
+establish a green push run. If the push run is pending or unobserved, say so.
+
 Check headless first; most claims need no person:
 
 - Build main and run its `lf` with its own `LF_HOME` so nothing touches real

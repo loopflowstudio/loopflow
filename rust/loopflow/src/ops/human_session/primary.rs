@@ -129,6 +129,86 @@ pub(crate) fn task_resume(
     )
 }
 
+/// Background Task conversations stop starting at this many running ones;
+/// Desktop keeps the same number of Tasks warm.
+pub(crate) const BACKGROUND_TASK_CONVERSATIONS: usize = 16;
+
+/// Start a newly checked-out Task's conversation beside its Graph, so `lf
+/// resume` reattaches instead of creating it. Best-effort: a failure is logged
+/// and `lf resume` creates the conversation as before.
+pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::work::task::Task) {
+    let (phase, subject) = match start_in_background(store, task).await {
+        Ok(Some(session)) => ("background_start", session),
+        Ok(None) => ("background_skip", task.identifier.clone()),
+        Err(error) => {
+            tracing::warn!(task = %task.identifier, error = %format!("{error:#}"), "background Task conversation did not start");
+            ("background_failed", task.identifier.clone())
+        }
+    };
+    crate::agent_input_timing::record(phase, &subject);
+}
+
+async fn start_in_background(
+    store: &SharedStore,
+    task: &crate::work::task::Task,
+) -> Result<Option<String>> {
+    let running = store.sqlite.running_task_conversations()?;
+    if running >= BACKGROUND_TASK_CONVERSATIONS {
+        tracing::info!(task = %task.identifier, running, "background Task conversation skipped");
+        return Ok(None);
+    }
+    let worktree = task.worktree()?.clone();
+    let wave = match &task.wave_id {
+        Some(id) => store.get_wave(id).await?,
+        None => None,
+    };
+    // A Machine with no agent selected, or without its CLI, would only record
+    // a launch that fails.
+    let config =
+        crate::config::load_wave_config(Some(&worktree), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
+    let Ok(agent) = config.agent() else {
+        tracing::info!(task = %task.identifier, "background Task conversation skipped: no agent selected");
+        return Ok(None);
+    };
+    let (harness, _) = crate::config::parse_agent(agent);
+    if !crate::agent::check_cli_available(&harness) {
+        tracing::info!(task = %task.identifier, %harness, "background Task conversation skipped: agent not installed");
+        return Ok(None);
+    }
+    let (session, _) = ensure_task(store, &worktree, task.id.as_str(), None).await?;
+    // Promotion can keep a repository or Wave conversation in its original
+    // checkout. Allocating the Task's own checkout does not open that conversation.
+    if Path::new(&session.cwd) != worktree.as_path()
+        || session.agent_process_id.is_some()
+        || store
+            .sqlite
+            .session_transport(session.id.as_str())?
+            .is_some()
+    {
+        // Prepared conversations can start; previously opened ones stay as they are.
+        return Ok(None);
+    }
+    let id = session.id.to_string();
+    let argv = [
+        std::env::current_exe()?.to_string_lossy().into_owned(),
+        "session".into(),
+        "resume".into(),
+        id.clone(),
+    ];
+    tokio::task::spawn_blocking(move || {
+        crate::transport::start(&argv, true, &worktree, &|command| {
+            let key = crate::work::wave::context::WAVE_ID_ENV;
+            match &wave {
+                Some(wave) => command.env(key, wave.id().as_str()),
+                None => command.env_remove(key),
+            };
+        })
+    })
+    .await??;
+    Ok(Some(id))
+}
+
 pub(super) async fn task_conversation(
     store: &SharedStore,
     task: &crate::durable::TaskId,

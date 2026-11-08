@@ -739,6 +739,199 @@ fn claude_dialog_in_a_checkout_lf_did_not_create_makes_the_session_available() {
     );
 }
 
+/// Lets a holding provider go when the test ends, however it ends.
+struct Release(PathBuf);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        let _ = fs::write(&self.0, b"");
+    }
+}
+
+fn open_task_conversations(db: &Path, task: &str) -> i64 {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
+             WHERE s.task_id=?1 AND s.interactive=1 AND s.completed_at IS NULL
+                 AND o.completed_at IS NULL",
+            [task],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+}
+
+#[test]
+fn a_task_checkout_starts_its_conversation_in_the_background() {
+    assert_background_conversation(false);
+}
+
+#[test]
+fn a_task_run_starts_its_conversation_and_abandon_stops_it() {
+    assert_background_conversation(true);
+}
+
+fn assert_background_conversation(run_graph: bool) {
+    let repo = TestRepo::new();
+    repo.create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+    repo.stage_all();
+    repo.commit("Add a graph that waits for review");
+    repo.push();
+    let home = tempfile::tempdir().unwrap();
+    let stop = home.path().join("stop");
+    let _release = Release(stop.clone());
+    // The provider holds until released, so the conversation can be seen.
+    let script = format!(
+        "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        stop.display()
+    );
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["set", "--global", "default_agent", "claude"]),
+    );
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args([
+                "task",
+                "create",
+                "--title",
+                "Background conversation",
+                "--json",
+            ]),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let db = home.path().join("machine/loopflow.db");
+    let worktree = if run_graph {
+        succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["task", "run", id, "pause"]),
+        );
+        let path: String = rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        PathBuf::from(path)
+    } else {
+        let placed: serde_json::Value = serde_json::from_str(&succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["checkout", id, "--json"]),
+        ))
+        .unwrap();
+        PathBuf::from(placed["worktree"].as_str().unwrap())
+    };
+
+    // The conversation shows up in the worktree once its provider is running.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let listed: serde_json::Value = serde_json::from_str(&succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(&worktree)
+                .args(["session", "list", "--json"]),
+        ))
+        .unwrap();
+        let conversations: Vec<&serde_json::Value> = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["workspace"]["task_id"] == id)
+            .collect();
+        assert!(conversations.len() <= 1, "{listed}");
+        if conversations
+            .first()
+            .is_some_and(|row| matches!(row["state"].as_str(), Some("active" | "detached")))
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the checkout started no conversation: {listed}\n{}",
+            fs::read_to_string(home.path().join("machine/logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // Checking the Task out again keeps the one conversation.
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    );
+    assert_eq!(open_task_conversations(&db, id), 1);
+    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
+    assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
+
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let owner: String = conn
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE task_id=?1 AND interactive=1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["task", "abandon", id]),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let ended: bool = conn
+            .query_row(
+                "SELECT completed_at IS NOT NULL FROM processes WHERE id=?1",
+                [&owner],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if ended {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "abandon left the conversation running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(open_task_conversations(&db, id), 0);
+}
+
+#[test]
+fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), "exit 0")
+            .current_dir(repo.path())
+            .args(["task", "create", "--title", "Checkout alone", "--json"]),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    // A Machine with no provider installed has nothing to start. A real
+    // Machine always has its logs directory, where the skip is recorded.
+    fs::create_dir_all(home.path().join("machine/logs")).unwrap();
+    let mut checkout = claude_launch(home.path(), "exit 0");
+    fs::remove_file(home.path().join("bin/claude")).unwrap();
+    let placed: serde_json::Value = serde_json::from_str(&succeed(
+        checkout
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    ))
+    .unwrap();
+    assert!(Path::new(placed["worktree"].as_str().unwrap()).is_dir());
+    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
+    assert!(timing.contains("background_skip"), "{timing}");
+    assert_eq!(
+        open_task_conversations(&home.path().join("machine/loopflow.db"), id),
+        0
+    );
+}
+
 #[test]
 fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
     let repo = TestRepo::new();

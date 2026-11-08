@@ -1462,7 +1462,7 @@ final class WorkModel {
             await refresh()
             return
         }
-        var delay = Duration.seconds(1)
+        var retry = WorkObservationRetry()
         while !Task.isCancelled {
             var observation: WorkObservation?
             do {
@@ -1483,21 +1483,21 @@ final class WorkModel {
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
+                    retry.receive(frame, scope: workScope, at: .now)
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
-                    delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch {
                 if !Task.isCancelled { workUnavailable(error.localizedDescription) }
             }
+            let delay = retry.failed(at: .now)
             workObservation = nil
             await observation?.cancel()
             resumePlanningWaiters(through: .max)
             finishCheckpoints(through: .max, reason: "Work observation ended before the update was confirmed")
             do { try await Task.sleep(for: delay) } catch { return }
-            delay = min(delay * 2, .seconds(30))
         }
     }
 

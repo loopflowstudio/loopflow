@@ -18,14 +18,27 @@ final class DesktopAppDelegate: NSObject, NSApplicationDelegate {
         runtime: .shared)
     private var quitting = false
 
+    /// Quit can start inside a MainActor job (the UI-test snapshot's `.task`).
+    /// AppKit's terminate-later loop then runs nested inside that job, where
+    /// MainActor tasks never run, so the wait for relays polls a run-loop timer.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !quitting else { return .terminateLater }
         quitting = true
         workspaces.prepareForQuit()
-        Task { @MainActor in
-            await workspaces.releaseViewersForQuit()
-            sender.reply(toApplicationShouldTerminate: true)
+        // Let leave cross SSH before AppKit tears down the PTYs. If delivery
+        // fails, the remote connection's bounded absence policy owns cleanup.
+        workspaces.detachViewersForQuit()
+        guard workspaces.hasRunningRelays else { return .terminateNow }
+        let deadline = Date().addingTimeInterval(2)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [workspaces] timer in
+            let done = MainActor.assumeIsolated {
+                Date() >= deadline || !workspaces.hasRunningRelays
+            }
+            guard done else { return }
+            timer.invalidate()
+            MainActor.assumeIsolated { sender.reply(toApplicationShouldTerminate: true) }
         }
+        RunLoop.main.add(timer, forMode: .common)
         return .terminateLater
     }
 }

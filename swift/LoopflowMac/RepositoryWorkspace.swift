@@ -32,15 +32,13 @@ final class RepositoryWorkspaces {
         self.runtime = runtime
     }
 
-    func releaseViewersForQuit() async {
-        let pools = repositories.values.map(\.surfaces)
-        for pool in pools { pool.detachForQuit() }
-        // Let leave cross SSH before AppKit tears down the PTYs. If delivery
-        // fails, the remote connection's bounded absence policy owns cleanup.
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline && pools.contains(where: \.hasRunningRelays) {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
+    /// Sends leave to every relay; `hasRunningRelays` reports which have not exited.
+    func detachViewersForQuit() {
+        for registry in repositories.values { registry.surfaces.detachForQuit() }
+    }
+
+    var hasRunningRelays: Bool {
+        repositories.values.contains { $0.surfaces.hasRunningRelays }
     }
 
     func registry(for repository: String) -> SessionsWorkspaceRegistry {

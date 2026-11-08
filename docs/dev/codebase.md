@@ -8,7 +8,7 @@ Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
 ```bash
-rg "CaptureHandle" rust/loopflow/src
+rg "AgentExecution" rust/loopflow/src
 rg "WorkRef" rust/loopflow/src
 uv run python scripts/check_architecture.py
 ```

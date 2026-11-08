@@ -72,7 +72,7 @@ impl Observer {
     }
 }
 
-impl super::CaptureHandle {
+impl super::AgentExecution {
     pub(crate) async fn observe_activity(&self, body_pid: Option<u32>) {
         let processes = sample(body_pid).await;
         self.with_capture(|capture| {

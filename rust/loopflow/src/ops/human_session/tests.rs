@@ -13,7 +13,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 ))
                 .await?,
             );
-            let capture = crate::session_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::AgentExecution::begin_at(
                 home,
                 crate::session_record::SessionCaptureSpec {
                     harness: "claude".into(),

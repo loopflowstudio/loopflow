@@ -1020,7 +1020,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(binding.work, work);
-            let capture = crate::session_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::AgentExecution::begin_at(
                 directory.path(),
                 crate::session_record::SessionCaptureSpec {
                     harness: "codex".into(),

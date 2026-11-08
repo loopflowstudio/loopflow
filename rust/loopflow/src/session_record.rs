@@ -1396,8 +1396,10 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
     i64::try_from(value).map_err(|_| *gaps += 1).ok()
 }
 
+/// One invocation's provider lifecycle and recording. Clones share attachment
+/// changes and settlement; harnesses retain immutable snapshots for dispatch.
 #[derive(Debug, Clone)]
-pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
+pub struct AgentExecution(Arc<Mutex<SessionCapture>>);
 
 /// A capture's state as it crosses from an exec'd launcher to the execution
 /// owner that records its outcome.
@@ -1437,7 +1439,7 @@ fn retry_keeps_its_thread(
     saved == resume || (resume.is_none() && moved)
 }
 
-impl CaptureHandle {
+impl AgentExecution {
     /// Publish identity before a human boundary becomes visible. No provider or
     /// terminal receipt exists until this prepared Session executes.
     pub(crate) fn prepare(
@@ -1481,7 +1483,7 @@ impl CaptureHandle {
         }
         reconcile_private_file(&dir.join("prepared"), b"").map_err(record_error)?;
         sync_dir(&dir).map_err(record_error)?;
-        // This is not a CaptureHandle: dropping preparation must not settle a
+        // Preparation creates no execution owner: dropping it must not settle a
         // Session whose provider has never been launched.
         Ok(id)
     }
@@ -1929,9 +1931,12 @@ impl CaptureHandle {
             StoreError::InvalidAuthority("AgentProcess retry has no attachment".into())
         })?;
         let store = row_store(&capture.dir)?;
-        let saved_thread = store
-            .session_thread(session)?
-            .or_else(|| capture.agent_session.clone());
+        // The provider may have switched threads while history was unavailable.
+        // Its latest observation outranks an older persisted projection.
+        let saved_thread = capture
+            .agent_session
+            .clone()
+            .or(store.session_thread(session)?);
         let moved = (capture.account_observed && capture.account_id != account_id)
             || capture.provider != provider;
         if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
@@ -1953,27 +1958,38 @@ impl CaptureHandle {
         account_id: Option<crate::store::ProviderAccountId>,
     ) {
         self.with_capture(|capture| {
+            let retry_recording = capture.provider_observation_pending;
             let account_changed = !capture.account_observed || capture.account_id != account_id;
+            let thread_changed = session_id.as_ref().is_some_and(|session| {
+                account_changed || capture.agent_session.as_ref() != Some(session)
+            });
+            // Retry and handoff use what the provider did, even when keeping
+            // its history fails. Recording cannot grant or erase that identity.
+            capture.account_id = account_id.clone();
+            capture.account_observed = true;
             if account_changed {
+                capture.agent_session = None;
+            }
+            if let Some(session_id) = &session_id {
+                capture.agent_session = Some(session_id.clone());
+            }
+            capture.provider_observation_pending = true;
+            if account_changed || retry_recording {
                 capture.record_fact(CaptureFact::ProviderAccountSelected {
                     attempt_key: capture.attempt_key(),
-                    account_id: account_id.clone(),
+                    account_id,
                 })?;
-                capture.account_id = account_id;
-                capture.account_observed = true;
             }
-            let Some(session_id) = session_id else {
-                return Ok(());
-            };
-            if !account_changed && capture.agent_session.as_ref() == Some(&session_id) {
-                return Ok(());
+            if thread_changed || retry_recording {
+                if let Some(session_id) = capture.agent_session.clone() {
+                    write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
+                    capture.record_fact(CaptureFact::ProviderSessionObserved {
+                        attempt_key: capture.attempt_key(),
+                        agent_session: session_id,
+                    })?;
+                }
             }
-            write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
-            capture.record_fact(CaptureFact::ProviderSessionObserved {
-                attempt_key: capture.attempt_key(),
-                agent_session: session_id.clone(),
-            })?;
-            capture.agent_session = Some(session_id);
+            capture.provider_observation_pending = false;
             Ok(())
         });
     }
@@ -2038,22 +2054,15 @@ impl CaptureHandle {
     }
 }
 
-impl Drop for CaptureHandle {
+impl Drop for SessionCapture {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.0) != 1 {
+        if self.settled_outcome.is_some() {
             return;
         }
-        let Ok(mut capture) = self.0.lock() else {
-            tracing::warn!("Session capture was poisoned before terminal settlement");
-            return;
-        };
-        if capture.settled_outcome.is_some() {
-            return;
-        }
-        if let Err(error) = capture.finish("failed") {
+        if let Err(error) = self.finish("failed") {
             tracing::warn!(
                 %error,
-                artifact_key = %capture.manifest.artifact_key,
+                artifact_key = %self.manifest.artifact_key,
                 "failed to settle dropped Session capture"
             );
         }
@@ -2070,6 +2079,8 @@ struct SessionCapture {
     account_id: Option<crate::store::ProviderAccountId>,
     account_observed: bool,
     agent_session: Option<AgentSessionId>,
+    /// The live identity is known, but its last observation could not be kept.
+    provider_observation_pending: bool,
     attempt: u32,
     attempt_started: bool,
     event_seq: u64,
@@ -2189,6 +2200,7 @@ impl SessionCapture {
                 .and_then(|process| process.account_id.clone()),
             account_observed: false,
             agent_session: None,
+            provider_observation_pending: false,
             manifest,
             dir,
             attempt: 1,
@@ -2239,6 +2251,7 @@ impl SessionCapture {
         self.account_id = account_id;
         self.account_observed = false;
         self.agent_session = None;
+        self.provider_observation_pending = false;
         self.attempt += 1;
         self.attempt_started = false;
         let start_error = self.start_attempt().err();
@@ -2740,7 +2753,7 @@ mod tests {
     use std::fs;
 
     use super::{
-        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
+        read_provider_session, AgentExecution, AgentProcessRequest, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::agent::AgentConfig;
@@ -2904,7 +2917,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-            let capture = CaptureHandle::begin_at(home, spec(home))?;
+            let capture = AgentExecution::begin_at(home, spec(home))?;
             capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
             let store = super::row_store(&capture.artifact_dir())?;
@@ -2959,7 +2972,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         std::env::set_var("LF_HOME", home.path());
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let key = capture.artifact_key();
         std::env::set_var(super::CAPTURE_KEY_ENV, &key);
         assert_eq!(super::inherited_capture_key().unwrap(), Some(key.clone()));
@@ -2982,7 +2995,7 @@ mod tests {
     #[test]
     fn history_times_provider_work_from_its_first_recorded_attempt() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         capture.mark_spawn_requested();
         capture
             .0
@@ -3032,14 +3045,14 @@ mod tests {
         };
         let mut prepared = spec(home.path());
         prepared.graph = super::SessionGraphMembership::Step(step.clone());
-        let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
+        let id = AgentExecution::prepare_at(home.path(), prepared, None).unwrap();
         let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
         step.task_pr_id = Some(crate::work::task::TaskPrId::new());
         let mut process = spec(home.path());
         process.graph = super::SessionGraphMembership::Step(step);
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let capture =
-            CaptureHandle::start_prepared(home.path(), &id, process, &context, None).unwrap();
+            AgentExecution::start_prepared(home.path(), &id, process, &context, None).unwrap();
         capture.finish("completed").unwrap();
 
         let manifest = super::read_manifest(&dir).unwrap();
@@ -3059,7 +3072,7 @@ mod tests {
         })
         .unwrap();
         let capture =
-            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
+            AgentExecution::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
         let session = store
             .session_for_artifact(&capture.artifact_key())
@@ -3133,7 +3146,7 @@ mod tests {
                     "interrupted publication".into(),
                 ))
             };
-            assert!(CaptureHandle::begin_reserved_at(
+            assert!(AgentExecution::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
                 id.clone(),
@@ -3146,7 +3159,7 @@ mod tests {
             let original = std::fs::read(dir.join("manifest.json")).unwrap();
             assert!(!dir.join("terminal.json").exists());
             assert!(!dir.join("events.jsonl").exists());
-            let capture = CaptureHandle::begin_reserved_at(
+            let capture = AgentExecution::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
                 id.clone(),
@@ -3164,7 +3177,7 @@ mod tests {
             );
             // SQL has granted authority once, but no provider has started.
             // An absent provider receipt does not grant a second process.
-            assert!(CaptureHandle::begin_reserved_at(
+            assert!(AgentExecution::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
                 id.clone(),
@@ -3177,7 +3190,7 @@ mod tests {
             assert!(!dir.join("terminal.json").exists());
             capture.finish("interrupted").unwrap();
             let terminal = std::fs::read(dir.join("terminal.json")).unwrap();
-            assert!(CaptureHandle::begin_reserved_at(
+            assert!(AgentExecution::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
                 id,
@@ -3202,7 +3215,7 @@ mod tests {
         let dir = super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         let changed = crate::trace::PreparedTurnContext::from_prompts("system", "different review");
-        let error = CaptureHandle::begin_reserved_at(
+        let error = AgentExecution::begin_reserved_at(
             home.path(),
             spec(home.path()),
             id.clone(),
@@ -3223,7 +3236,7 @@ mod tests {
         assert!(!dir.join("terminal.json").exists());
 
         std::fs::write(dir.join("context.json"), b"interrupted write").unwrap();
-        assert!(CaptureHandle::begin_reserved_at(
+        assert!(AgentExecution::begin_reserved_at(
             home.path(),
             spec(home.path()),
             id,
@@ -3246,7 +3259,7 @@ mod tests {
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         let caller = crate::session_record::new_artifact_key();
-        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(caller.clone()))
+        let id = AgentExecution::prepare_at(home.path(), spec(home.path()), Some(caller.clone()))
             .unwrap();
         let (dir, prepared) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
         assert_eq!(prepared.artifact_key, id);
@@ -3254,7 +3267,7 @@ mod tests {
         // Recover a crash after the manifest was published but before the prepared marker.
         fs::remove_file(dir.join("prepared")).unwrap();
         assert_eq!(
-            CaptureHandle::prepare_at_with_key(
+            AgentExecution::prepare_at_with_key(
                 home.path(),
                 spec(home.path()),
                 Some(caller.clone()),
@@ -3268,7 +3281,7 @@ mod tests {
             prepared.created_at
         );
         assert_eq!(
-            CaptureHandle::prepare_at_with_key(
+            AgentExecution::prepare_at_with_key(
                 home.path(),
                 spec(home.path()),
                 Some(caller.clone()),
@@ -3281,11 +3294,11 @@ mod tests {
         assert!(!dir.join("provider-clients").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "human prompt");
         let capture =
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
+            AgentExecution::start_prepared(home.path(), &id, spec(home.path()), &context, None)
                 .unwrap();
         let launched = super::read_manifest(&dir).unwrap();
         assert_eq!(capture.artifact_key(), id);
-        assert!(CaptureHandle::prepare_at_with_key(
+        assert!(AgentExecution::prepare_at_with_key(
             home.path(),
             spec(home.path()),
             Some(caller.clone()),
@@ -3305,10 +3318,14 @@ mod tests {
             context_ref.content_sha256,
             hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&context_bytes))
         );
-        assert!(
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
-                .is_err()
-        );
+        assert!(AgentExecution::start_prepared(
+            home.path(),
+            &id,
+            spec(home.path()),
+            &context,
+            None
+        )
+        .is_err());
         capture.mark_spawn_requested();
         capture.finish("completed").unwrap();
         assert_eq!(
@@ -3342,7 +3359,7 @@ mod tests {
         };
         let expected = AgentProcessRequest::from_prepared(&config).unwrap();
         let capture =
-            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
+            AgentExecution::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
 
         let bytes = fs::read(capture.artifact_dir().join("manifest.json")).unwrap();
@@ -3392,7 +3409,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
         let artifact_key = capture.artifact_key().to_string();
@@ -3448,7 +3465,7 @@ mod tests {
     #[test]
     fn history_keeps_only_how_a_turn_ended() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let turn = || "turn-1".to_string();
         capture.record_conversation(ConversationEvent::TurnStarted { turn_id: turn() });
         for word in ["streamed ", "one ", "token ", "at a time"] {
@@ -3498,7 +3515,7 @@ mod tests {
     #[test]
     fn history_records_a_long_gap_as_a_silence() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let say = |content: &str| {
             capture.record_conversation(ConversationEvent::TextDelta {
                 turn_id: "turn-1".into(),
@@ -3525,7 +3542,7 @@ mod tests {
     fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let original = CaptureHandle::begin_at(ledger.home(), spec(ledger.home())).unwrap();
+        let original = AgentExecution::begin_at(ledger.home(), spec(ledger.home())).unwrap();
         let store = super::row_store(&original.artifact_dir()).unwrap();
         let session = store
             .session_for_artifact(&original.artifact_key())
@@ -3572,7 +3589,7 @@ mod tests {
         .unwrap();
         let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
         crate::journal::with_runtime(ledger.home(), &command, || {
-            let next = CaptureHandle::continue_with_context(
+            let next = AgentExecution::continue_with_context(
                 &session.id,
                 spec(ledger.home()),
                 &context,
@@ -3634,7 +3651,7 @@ mod tests {
     fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let original = CaptureHandle::begin_at(ledger.home(), spec(ledger.home())).unwrap();
+        let original = AgentExecution::begin_at(ledger.home(), spec(ledger.home())).unwrap();
         let store = super::row_store(&original.artifact_dir()).unwrap();
         let session = store
             .session_for_artifact(&original.artifact_key())
@@ -3648,7 +3665,7 @@ mod tests {
         fs::write(ledger.home().join("runs"), "unavailable capture directory").unwrap();
         let command = vec!["lf".into(), "skill".into()];
         crate::journal::with_runtime(ledger.home(), &command, || {
-            assert!(CaptureHandle::continue_with_context(
+            assert!(AgentExecution::continue_with_context(
                 &session.id,
                 spec(ledger.home()),
                 &crate::trace::PreparedTurnContext::from_prompts("", "next"),
@@ -3850,7 +3867,7 @@ mod tests {
     #[test]
     fn agent_session_identity_is_durable_before_the_provider_starts() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         capture.observe_provider(Some("provider-session".into()), None);
 
         assert_eq!(
@@ -3864,7 +3881,7 @@ mod tests {
     #[test]
     fn provider_session_preserves_the_selected_account() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let account_id = crate::store::ProviderAccountId::parse("primary").unwrap();
         super::write_provider_session(
             &capture.artifact_dir(),
@@ -3902,12 +3919,87 @@ mod tests {
     }
 
     #[test]
+    fn recording_failure_cannot_forget_the_thread_or_account_used_by_retry() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            // Exercise failure both before and after the account fact is saved,
+            // including a stale persisted thread after a provider-side switch.
+            for (source, failover) in ["events.jsonl:%", "provider-session:%"]
+                .into_iter()
+                .flat_map(|source| [false, true].map(|failover| (source, failover)))
+            {
+                let capture = AgentExecution::begin_at(home, spec(home))?;
+                capture.claim_session_attachment()?;
+                let primary = crate::store::ProviderAccountId::parse("primary").unwrap();
+                let fallback = crate::store::ProviderAccountId::parse("fallback").unwrap();
+                let thread = crate::id::AgentSessionId::from("observed-thread");
+                let sql = rusqlite::Connection::open(super::row_database(&capture.artifact_dir())?)?;
+                let (session, original) = capture.session_attachment().unwrap();
+                sql.execute("UPDATE agent_sessions SET provider_thread='previous-thread' WHERE id=?1", [&session])?;
+                sql.execute_batch(&format!(
+                    "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
+                     WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
+                     BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+                ))?;
+                capture.observe_provider(Some(thread.clone()), Some(primary.clone()));
+                sql.execute_batch("DROP TRIGGER reject_observation")?;
+                let store = super::row_store(&capture.artifact_dir())?;
+                store.record_agent_process_exit(&session, &original, false)?;
+
+                let forgotten = capture.retry_agent_process(
+                    "proof".into(), None, Some(primary.clone()), None,
+                );
+                assert_eq!(forgotten.unwrap_err().to_string(), "AgentProcess retry must retain its thread", "{source}");
+                assert_eq!(capture.session_attachment(), Some((session.clone(), original)));
+                if failover {
+                    capture.retry_agent_process("proof".into(), None, Some(fallback), None)?;
+                } else {
+                    capture.retry_agent_process("proof".into(), None, Some(primary), Some(&thread))?;
+                }
+                capture.finish("completed")?;
+            }
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
+    fn provider_observation_recovers_then_stops_repeating() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+        let sql = rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap();
+        sql.execute_batch(
+            "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
+             WHEN NEW.kind='observed'
+             BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;",
+        )
+        .unwrap();
+        let account = crate::store::ProviderAccountId::parse("primary").unwrap();
+        capture.observe_provider(Some("thread".into()), Some(account.clone()));
+        assert!(read_provider_session(&dir).unwrap().is_none());
+        sql.execute_batch("DROP TRIGGER reject_observation")
+            .unwrap();
+
+        // A later account-only observation must also recover the lost thread.
+        capture.observe_provider(None, Some(account.clone()));
+        let recorded = read_provider_session(&dir).unwrap().unwrap();
+        assert_eq!(recorded.agent_session, "thread".into());
+        assert_eq!(recorded.account_id, Some(account.clone()));
+        let store = super::row_store(&dir).unwrap();
+        let events = store.input_events(&capture.artifact_key()).unwrap();
+        capture.observe_provider(Some("thread".into()), Some(account));
+        assert_eq!(store.input_events(&capture.artifact_key()).unwrap(), events);
+    }
+
+    #[test]
     fn provider_account_observation_precedes_session_and_preserves_attempts() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
         let facts = || {
             super::row_store(&dir)
@@ -3998,8 +4090,8 @@ mod tests {
         first.subjects = vec![SubjectAttribution::declared(selector.clone())];
         let second = first.clone();
 
-        let first = CaptureHandle::begin_at(home.path(), first).unwrap();
-        let second = CaptureHandle::begin_at(home.path(), second).unwrap();
+        let first = AgentExecution::begin_at(home.path(), first).unwrap();
+        let second = AgentExecution::begin_at(home.path(), second).unwrap();
         let first_id = first.artifact_key();
         let second_id = second.artifact_key();
 
@@ -4015,7 +4107,7 @@ mod tests {
     #[test]
     fn dropping_the_last_capture_settles_unexpected_control_flow_as_failed() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
 
@@ -4027,9 +4119,41 @@ mod tests {
     }
 
     #[test]
+    fn an_interrupt_observer_keeps_execution_alive_until_it_drops() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+        // Interrupt cleanup upgrades a weak reference while handling the exit.
+        let observer = std::sync::Arc::downgrade(&capture.0).upgrade().unwrap();
+        drop(capture);
+        assert!(!dir.join("terminal.json").exists());
+        drop(observer);
+        let terminal: TerminalReceipt =
+            serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
+        assert_eq!(terminal.outcome, "failed");
+    }
+
+    #[test]
+    fn a_panic_during_recording_still_settles_the_execution() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
+        let dir = capture.artifact_dir();
+        let recording = capture.clone();
+        assert!(std::panic::catch_unwind(move || {
+            let _locked = recording.0.lock().unwrap();
+            panic!("recording interrupted");
+        })
+        .is_err());
+        drop(capture);
+        let terminal: TerminalReceipt =
+            serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
+        assert_eq!(terminal.outcome, "failed");
+    }
+
+    #[test]
     fn reader_rejects_an_unsupported_manifest_schema() {
         let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let capture = AgentExecution::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
         capture.finish("completed").unwrap();
         let path = dir.join("manifest.json");

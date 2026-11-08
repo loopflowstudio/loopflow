@@ -32,7 +32,7 @@ use crate::store::ProviderAccountId;
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: Option<AgentConfig>,
-    capture: Option<crate::agent::AgentCapture>,
+    capture: Option<crate::agent::AgentExecution>,
     should_seed_task_prompt: bool,
     skill_input: Option<String>,
     /// Vendor session id captured from the first turn's `system` event; a
@@ -401,7 +401,7 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
-    fn set_capture(&mut self, capture: Option<crate::agent::AgentCapture>) {
+    fn set_capture(&mut self, capture: Option<crate::agent::AgentExecution>) {
         self.capture = capture;
     }
     fn pid(&self) -> Option<u32> {
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots() {
-        use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionGraphMembership};
+        use crate::session_record::{AgentExecution, SessionCaptureSpec, SessionGraphMembership};
 
         async fn observed_input(home: &std::path::Path, text: &str) -> String {
             tokio::time::timeout(Duration::from_secs(5), async {
@@ -773,7 +773,7 @@ mod tests {
             .build()
             .unwrap();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-            let capture = CaptureHandle::begin_at(
+            let capture = AgentExecution::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "claude".into(),
@@ -802,7 +802,7 @@ mod tests {
                     session_attachment: Some((session.clone(), first.clone())),
                     ..AgentConfig::default()
                 });
-                harness.set_capture(Some(capture.clone().into()));
+                harness.set_capture(Some(capture.clone()));
                 harness.send_input("first request").await.unwrap();
                 // Pipe acceptance precedes provider execution. Interrupt only
                 // after this throwaway provider consumed its first request.

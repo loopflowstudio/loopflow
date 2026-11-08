@@ -4,6 +4,14 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
+`AgentExecution` is the invocation's shared lifecycle handle. Native launch and
+headless respawn use the same attachment and settlement state; dispatch and
+history retain their own immutable attachment snapshots. Final settlement belongs
+to the shared state itself, including after a recording panic. Provider identity in
+memory advances before best-effort history writes, so a recording failure cannot
+change which account or thread a retry continues. A later observation retries an
+unrecorded identity; successful repeated observations add no duplicate facts.
+
 ## lf never breaks the conversation
 
 lf is a session manager, context adder and hook interjector on top of a harness,

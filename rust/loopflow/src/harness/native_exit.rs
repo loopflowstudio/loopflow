@@ -93,7 +93,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         }
     }
     if let Some(capture) = &exit.capture {
-        if let Err(error) = crate::session_record::CaptureHandle::adopt(capture.clone())
+        if let Err(error) = crate::session_record::AgentExecution::adopt(capture.clone())
             .and_then(|capture| capture.finish(outcome))
         {
             tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
@@ -213,7 +213,7 @@ mod tests {
 
     use crate::journal::{self, TestLedgerGuard};
     use crate::process::Departure;
-    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionGraphMembership};
+    use crate::session_record::{AgentExecution, SessionCaptureSpec, SessionGraphMembership};
     use crate::store::sqlite::SqliteStore;
 
     use super::{settle, NativeExit};
@@ -223,7 +223,7 @@ mod tests {
         let ledger = TestLedgerGuard::new();
         let home = ledger.home();
         {
-            let capture = CaptureHandle::begin_at(
+            let capture = AgentExecution::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "codex".into(),
@@ -282,9 +282,8 @@ mod tests {
     fn settlement_preserves_takeover_capture_and_new_attachment() {
         let ledger = TestLedgerGuard::new();
         let home = ledger.home();
-        journal::with_process(|| {
-            journal::admit_process(home, &["lf".into(), "-i".into()]);
-            let capture = CaptureHandle::begin_at(
+        journal::with_runtime(home, &["lf".into(), "-i".into()], || {
+            let capture = AgentExecution::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "claude".into(),

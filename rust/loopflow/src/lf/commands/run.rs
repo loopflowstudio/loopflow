@@ -15,7 +15,7 @@ use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::PromptComponents;
 use crate::prompt::Surface;
 use crate::session_record::{
-    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
+    AgentExecution, AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
 };
 use anyhow::{anyhow, bail, Result};
 use std::io::IsTerminal;
@@ -764,7 +764,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
 
 fn run_headless_prompt(
     built: &PromptBuild,
-    capture: &CaptureHandle,
+    capture: &AgentExecution,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
     let context_file_start = Instant::now();
@@ -776,7 +776,7 @@ fn run_headless_prompt(
 
     let mut process = built.process.clone();
     process.context_file = context_file;
-    process.capture = Some(capture.clone().into());
+    process.capture = Some(capture.clone());
 
     // Set up directive relay so agent skills can issue shell directives
     // (e.g. `cd` after `lf wt switch`).
@@ -831,7 +831,7 @@ fn begin_capture(
     surface: &str,
     prepared_config: &AgentConfig,
     resume: Option<&str>,
-) -> Result<CaptureHandle> {
+) -> Result<AgentExecution> {
     let started = Instant::now();
     let cwd = built
         .agent_config
@@ -857,14 +857,14 @@ fn begin_capture(
         work: built.work.clone(),
     };
     let capture = if let Some(session) = resume {
-        CaptureHandle::continue_with_context(
+        AgentExecution::continue_with_context(
             session,
             spec,
             &built.context,
             AgentProcessRequest::from_prepared(prepared_config)?,
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
-        CaptureHandle::start_prepared(
+        AgentExecution::start_prepared(
             &crate::store::lf_home_dir(),
             &id,
             spec,
@@ -873,7 +873,7 @@ fn begin_capture(
         )
     } else {
         let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
-        CaptureHandle::begin_with_context(spec, &built.context, launch)
+        AgentExecution::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")

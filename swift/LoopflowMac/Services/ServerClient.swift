@@ -238,7 +238,7 @@ final class ServerLink: @unchecked Sendable {
                     return nil
                 }
                 if let refused { continuation.resume(throwing: refused); return }
-                do { try send(.request(id: id, operation: operation)) } catch {
+                do { try send(.request(id: id, operation: operation, select: nil)) } catch {
                     if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: error) }
                 }
             }
@@ -257,7 +257,7 @@ final class ServerLink: @unchecked Sendable {
             return nil
         }
         if let refused { throw refused }
-        do { try send(.subscribe(id: subscription.id, operation: query)) } catch {
+        do { try send(.subscribe(id: subscription.id, operation: query, select: nil)) } catch {
             _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }

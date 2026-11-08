@@ -43,9 +43,11 @@ public enum ServerClientMessage: Encodable, Sendable {
     case hello(ServerHello)
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
-    case request(id: String, operation: ServerOperation)
+    /// `select` keeps only those dotted paths of a read's answer; nil keeps it whole.
+    case request(id: String, operation: ServerOperation, select: [String]?)
     /// A read with a subscription: a null `response`, then readings until cancelled.
-    case subscribe(id: String, operation: ServedRead)
+    /// `select` is as for a request; a change outside it sends no reading.
+    case subscribe(id: String, operation: ServedRead, select: [String]?)
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     case checkpoint(id: String, checkpoint: UInt64)
@@ -55,7 +57,7 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// The server answers `bridged`, and the connection then speaks the owner protocol.
     case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, checkpoint, ticket, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, select, checkpoint, ticket, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -65,14 +67,16 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode(hello.minRevision, forKey: .minRevision)
             try box.encode(hello.client, forKey: .client)
         case .status: try box.encode("status", forKey: .type)
-        case .request(let id, let operation):
+        case .request(let id, let operation, let select):
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
-        case .subscribe(let id, let operation):
+            try box.encode(select, forKey: .select)
+        case .subscribe(let id, let operation, let select):
             try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
+            try box.encode(select, forKey: .select)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)

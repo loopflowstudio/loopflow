@@ -80,7 +80,7 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .roadmap(directory: "/", wave: nil, task: nil, all: true))
+            .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
         #expect(try encoded(request) == value("subscribe"))
         guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
@@ -105,7 +105,7 @@ struct ServerProtocolTests {
         #expect(process == trace)
         #expect(issued["expires_in_ms"] == .integer(60000))
         let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(
-            session: "session_5e55105e000040008000000000000001", owner: trace))
+            session: "session_5e55105e000040008000000000000001", owner: trace), select: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
@@ -115,19 +115,19 @@ struct ServerProtocolTests {
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
         let request = ServerClientMessage.request(id: "view-1", operation: .read(
-            .viewPlan(directory: "/repo", expression: "task:INF-123")))
+            .viewPlan(directory: "/repo", expression: "task:INF-123")), select: nil)
         #expect(try encoded(request) == value("view_plan"))
     }
 
     @Test func configurationUsesTheSharedDestinationContract() throws {
         let set = ConfigOperation.set(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
-        #expect(try encoded(.request(id: "config-1", operation: .config(set))) == value("configuration"))
+        #expect(try encoded(.request(id: "config-1", operation: .config(set), select: nil)) == value("configuration"))
     }
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
             .taskFromSession(directory: "/repo", id: "session_5e55105e000040008000000000000001",
-                             title: "Keep the conversation")))
+                             title: "Keep the conversation")), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 
@@ -185,7 +185,7 @@ struct ServerProtocolTests {
                                                                reviewers: ["alice", "org/platform"])),
         ]
         for (name, id, write) in writes {
-            #expect(try encoded(.request(id: id, operation: .command(write))) == value(name), "\(name)")
+            #expect(try encoded(.request(id: id, operation: .command(write), select: nil)) == value(name), "\(name)")
         }
         #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", from: nil, agent: nil, approve: true).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
@@ -222,7 +222,7 @@ struct ServerProtocolTests {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
-        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)))
+        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)), select: nil)
         #expect(try encoded(ci) == value("repo_ci"))
         #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
@@ -237,15 +237,15 @@ struct ServerProtocolTests {
         }
         #expect(checks["state"] == .string("pending"))
         let checksRead = ServerClientMessage.request(id: "checks-1",
-                                                     operation: .read(.prChecks(directory: "/repo", required: true)))
+                                                     operation: .read(.prChecks(directory: "/repo", required: true)), select: nil)
         #expect(try encoded(checksRead) == value("pr_checks"))
         let reviewsRead = ServerClientMessage.request(id: "reviews-1",
-                                                      operation: .read(.prReviews(directory: "/repo", pr: nil)))
+                                                      operation: .read(.prReviews(directory: "/repo", pr: nil)), select: nil)
         #expect(try encoded(reviewsRead) == value("pr_reviews"))
         #expect(ServedRead.prReviews(directory: "/repo", pr: "1813").argv == ["pr", "reviews", "1813", "--json"])
         #expect(ServedWrite.graphRun(directory: "/repo", name: "code", message: nil, agent: nil).argv
             == ["--batch", "graph", "code"])
-        let list = ServerClientMessage.request(id: "list-1", operation: .read(.skillList(directory: "/repo", path: [])))
+        let list = ServerClientMessage.request(id: "list-1", operation: .read(.skillList(directory: "/repo", path: [])), select: nil)
         #expect(try encoded(list) == value("skill_list"))
         guard case .response(_, _, .array(let entries)) = try message("skill_entries") else {
             Issue.record("Missing skill.list result"); return
@@ -254,11 +254,11 @@ struct ServerProtocolTests {
         #expect(ServedWrite.accountUse(provider: "claude", email: "maya@example.com").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
                                                    operation: .read(.accountList(provider: "claude", cached: true,
-                                                                                 details: false)))
+                                                                                 details: false)), select: nil)
         #expect(try encoded(accounts) == value("account_list"))
         let route = ServerClientMessage.request(id: "route-1",
                                                 operation: .read(.accountRoute(directory: "/repo", repo: nil,
-                                                                               default: false)))
+                                                                               default: false)), select: nil)
         #expect(try encoded(route) == value("account_route"))
         guard case .response(_, _, .object(let report)) = try message("account_report") else {
             Issue.record("Missing account.list result"); return
@@ -271,7 +271,7 @@ struct ServerProtocolTests {
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"))
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil)
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")

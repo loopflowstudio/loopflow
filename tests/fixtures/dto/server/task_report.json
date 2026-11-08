@@ -1,1 +1,1 @@
-{"type":"request","id":"report-1","operation":{"kind":"task.report","directory":"/repo","issue":"LOO-1","message":"Demo recorded"}}
+{"type":"request","id":"report-1","operation":{"kind":"task.report","directory":"/repo","issue":"LOO-1","message":"Demo recorded"},"select":null}

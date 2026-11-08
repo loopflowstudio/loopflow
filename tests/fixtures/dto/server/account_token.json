@@ -1,1 +1,1 @@
-{"type":"request","id":"token-1","operation":{"kind":"account.token","provider":"claude","email":"maya@example.com","file":"/Users/maya/.lf/tmp/token","chrome_profile":null}}
+{"type":"request","id":"token-1","operation":{"kind":"account.token","provider":"claude","email":"maya@example.com","file":"/Users/maya/.lf/tmp/token","chrome_profile":null},"select":null}

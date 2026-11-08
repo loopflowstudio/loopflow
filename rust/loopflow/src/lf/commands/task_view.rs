@@ -21,9 +21,15 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
         println!("{}", render(&reading));
         return Ok(());
     }
-    let subscribing =
-        waves::subscribe_task_status(repo, issue, subscribe::Transport::Pull(Box::new(|| {})))?
-            .context("Task subscription did not return its handle")?;
+    let subscribing = waves::subscribe_task_status(
+        repo,
+        issue,
+        subscribe::Transport::Pull {
+            wake: Box::new(|| {}),
+            select: None,
+        },
+    )?
+    .context("Task subscription did not return its handle")?;
     let _terminal = Terminal::enter()?;
     let mut offset = 0usize;
     let mut dirty = true;

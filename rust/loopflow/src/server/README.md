@@ -73,17 +73,17 @@ by a test and every server fixture must decode.
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"]}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false}}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
-→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
 ← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
 ```
@@ -232,7 +232,15 @@ part of what a phone or bot client is offered.
   WorkViewPlan, including the recorded primary Session; planning membership alone
   cannot select one. A missing primary stays absent. Attach to it with
   `session.attach`; no owner lookup comes first.
-- `subscribe {id, operation}` takes a read with a subscription: `desktop.view.list`,
+- `select` on a `request` or `subscribe` keeps only those dotted paths of a
+  read's answer: `["task.identifier","pr.url"]` keeps each path's ancestors as
+  objects, applies a path through an array to each element, and leaves a path
+  the answer lacks absent. `null` keeps the whole answer; a write with a
+  `select` is `invalid`. A subscription compares selected readings, so a
+  change outside the selection sends nothing; `task.wait` always keeps
+  `reached`, which ends it. `lf <read> --json --select task.identifier,pr.url`
+  prints the same projection for the reads that take `--subscribe`.
+- `subscribe {id, operation, select}` takes a read with a subscription: `desktop.view.list`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,frame}` messages wrapping

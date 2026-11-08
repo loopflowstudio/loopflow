@@ -629,7 +629,10 @@ pub fn task_pane(issue: &str, subscribe: bool) -> Result<()> {
         return subscribe_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
     }
     let pane = read_task_pane(&std::env::current_dir()?, issue)?;
-    println!("{}", serde_json::to_string(&pane)?);
+    println!(
+        "{}",
+        serde_json::to_string(&super::subscribe::selected_answer(&pane)?)?
+    );
     Ok(())
 }
 
@@ -679,7 +682,10 @@ pub(crate) fn subscribe_task_pane(
 fn plans(cli: &crate::lf::Cli, subscribe: bool) -> Result<()> {
     if !subscribe {
         let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
-        println!("{}", serde_json::to_string(&plans)?);
+        println!(
+            "{}",
+            serde_json::to_string(&super::subscribe::selected_answer(&plans)?)?
+        );
         return Ok(());
     }
     subscribe_plans(

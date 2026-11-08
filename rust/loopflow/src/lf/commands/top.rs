@@ -512,7 +512,10 @@ fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> Activi
 
 fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(snapshot)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(snapshot)?)?
+        );
     } else {
         print!("{}", render_snapshot(snapshot));
     }

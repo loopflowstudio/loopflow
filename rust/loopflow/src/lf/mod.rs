@@ -62,6 +62,16 @@ pub struct Cli {
     #[arg(long = "setting", global = true)]
     pub settings: Vec<String>,
 
+    /// Keep only these dotted paths of a read's JSON answer or subscription
+    /// frames, comma-separated (`task.identifier,pr.url`)
+    #[arg(
+        long = "select",
+        global = true,
+        value_delimiter = ',',
+        value_name = "PATHS"
+    )]
+    pub select: Vec<String>,
+
     /// Read the skill and its arguments from this captured invocation file, as a Graph step does
     #[arg(long, value_name = "PATH")]
     pub skill_input: Option<std::path::PathBuf>,
@@ -424,6 +434,8 @@ impl Cli {
             clipboard: self.clipboard,
             agent: self.agent.clone(),
             settings: self.settings.clone(),
+            // A selection shapes this invocation's answer, never a step's.
+            select: Vec::new(),
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),

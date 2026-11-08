@@ -1,1 +1,1 @@
-{"type":"request","id":"skill-1","operation":{"kind":"skill.run","directory":"/repo","name":"debug","message":null,"agent":null}}
+{"type":"request","id":"skill-1","operation":{"kind":"skill.run","directory":"/repo","name":"debug","message":null,"agent":null},"select":null}

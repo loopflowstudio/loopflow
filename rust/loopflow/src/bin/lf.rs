@@ -1709,6 +1709,9 @@ fn run() -> anyhow::Result<()> {
     }
     loopflow::installation::canonicalize_selected_home()?;
     let _settings = loopflow::config::settings::select_invocation(cli.setting_values()?);
+    loopflow::lf::commands::subscribe::select_output(
+        (!cli.select.is_empty()).then(|| cli.select.clone()),
+    );
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {

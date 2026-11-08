@@ -1,1 +1,1 @@
-{"type":"request","id":"sync-1","operation":{"kind":"checkout.sync","directory":"/repo","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}}
+{"type":"request","id":"sync-1","operation":{"kind":"checkout.sync","directory":"/repo","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false},"select":null}

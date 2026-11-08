@@ -466,8 +466,8 @@ async fn session(
                     },
                 };
                 let (id, admission) = match message {
-                    ClientMessage::Request { id, operation } => (id, Admission::Request(operation)),
-                    ClientMessage::Subscribe { id, operation } => (id, Admission::Subscribe(operation)),
+                    ClientMessage::Request { id, operation, select } => (id, Admission::Request(operation, select)),
+                    ClientMessage::Subscribe { id, operation, select } => (id, Admission::Subscribe(operation, select)),
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
@@ -504,7 +504,11 @@ async fn session(
                     continue;
                 }
                 let entry = match admission {
-                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact })) => {
+                    Admission::Request(ref operation, Some(_)) if !matches!(operation, Operation::Read(_)) => {
+                        send(&mut lines, &error(Some(id), ErrorCode::Invalid, "select applies to reads")).await?;
+                        continue;
+                    }
+                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact }), None) => {
                         let owner = match attached_owner(session, exact).await {
                             Ok(owner) => owner,
                             Err(refusal) => {
@@ -529,13 +533,13 @@ async fn session(
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
                         continue;
                     }
-                    Admission::Subscribe(query) => {
+                    Admission::Subscribe(query, select) => {
                         let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscribing(id.clone(), query, outgoing.clone(), inbox));
+                        let task = tasks.spawn(subscribing(id.clone(), query, select, outgoing.clone(), inbox));
                         Inflight { task, checkpoints: Some(checkpoints) }
                     }
-                    Admission::Request(operation) => {
-                        let task = tasks.spawn(request(id.clone(), operation, instance.clone(), outgoing.clone()));
+                    Admission::Request(operation, select) => {
+                        let task = tasks.spawn(request(id.clone(), operation, select, instance.clone(), outgoing.clone()));
                         Inflight { task, checkpoints: None }
                     }
                 };
@@ -560,8 +564,8 @@ async fn session(
 
 /// What a request or subscription asks the session to start.
 enum Admission {
-    Request(Operation),
-    Subscribe(Read),
+    Request(Operation, Option<Vec<String>>),
+    Subscribe(Read, Option<Vec<String>>),
 }
 
 /// The owner `session.attach` reaches: the Session's current owner Process,
@@ -679,6 +683,7 @@ fn unavailable(error: impl Into<anyhow::Error>) -> Error {
 async fn request(
     id: String,
     operation: Operation,
+    select: Option<Vec<String>>,
     instance: Arc<str>,
     outgoing: mpsc::Sender<ServerMessage>,
 ) -> String {
@@ -690,7 +695,10 @@ async fn request(
         Ok(result) => ServerMessage::Response {
             id: id.clone(),
             trace_id,
-            result,
+            result: match &select {
+                Some(paths) => crate::engine::select::select(&result, paths),
+                None => result,
+            },
         },
         Err(refusal) => {
             tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
@@ -771,10 +779,11 @@ async fn effect(
 async fn subscribing(
     id: String,
     query: Read,
+    select: Option<Vec<String>>,
     outgoing: mpsc::Sender<ServerMessage>,
     checkpoints: mpsc::Receiver<u64>,
 ) -> String {
-    if let Err(failure) = subscribe(&id, query, &outgoing, checkpoints).await {
+    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
         let _ = outgoing
@@ -808,6 +817,7 @@ impl Drop for Held {
 async fn subscribe(
     id: &str,
     query: Read,
+    select: Option<Vec<String>>,
     outgoing: &mpsc::Sender<ServerMessage>,
     mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
@@ -816,7 +826,7 @@ async fn subscribe(
     let ends = query.clone();
     let subscription = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.subscribe(move || wake.notify_one()))
+            crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
         })
         .await??,
     )));
@@ -1005,6 +1015,7 @@ mod tests {
                     .send(&ClientMessage::Request {
                         id: id.into(),
                         operation: catalog(),
+                        select: None,
                     })
                     .await;
             }
@@ -1024,6 +1035,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "a".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             assert!(matches!(
@@ -1128,6 +1140,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "a".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             desktop.receive().await.unwrap();
@@ -1155,6 +1168,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::MonitorPs,
+                    select: None,
                 })
                 .await;
             assert!(matches!(
@@ -1183,6 +1197,7 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "after".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             // Nothing follows the cancel for `ps`; the sibling still answers.
@@ -1246,12 +1261,70 @@ mod tests {
                 .send(&ClientMessage::Request {
                     id: "next".into(),
                     operation: catalog(),
+                    select: None,
                 })
                 .await;
             let ServerMessage::Response { id, .. } = client.receive().await.unwrap() else {
                 panic!("the connection should still answer")
             };
             assert_eq!(id, "next");
+        });
+    }
+
+    #[test]
+    fn select_keeps_only_the_named_paths_of_a_reads_answer() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            client
+                .send(&ClientMessage::Request {
+                    id: "keys".into(),
+                    operation: catalog(),
+                    select: Some(vec!["key".into()]),
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected the catalog")
+            };
+            let entries = result.as_array().expect("the catalog is a list");
+            assert!(!entries.is_empty());
+            for entry in entries {
+                let fields: Vec<&String> = entry.as_object().unwrap().keys().collect();
+                assert_eq!(fields, ["key"], "{entry}");
+            }
+            client
+                .send(&ClientMessage::Subscribe {
+                    id: "ps".into(),
+                    operation: Read::MonitorPs,
+                    select: Some(vec!["absent".into()]),
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Response { id, .. } if id == "ps"
+            ));
+            let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
+                panic!("expected the first reading")
+            };
+            assert_eq!(frame["body"], serde_json::json!({}), "{frame}");
+            // A write has no answer to select from.
+            client
+                .writer
+                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"]}\n")
+                .await
+                .unwrap();
+            let ServerMessage::Error {
+                id, code, message, ..
+            } = client.receive().await.unwrap()
+            else {
+                panic!("expected a refusal")
+            };
+            assert_eq!(id.as_deref(), Some("w"));
+            assert_eq!(code, ErrorCode::Invalid);
+            assert_eq!(message, "select applies to reads");
         });
     }
 

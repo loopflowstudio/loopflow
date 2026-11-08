@@ -1,1 +1,1 @@
-{"type":"request","id":"land-1","operation":{"kind":"pr.land","directory":"/repo","wait_and_fix":true,"strict":false,"local":false,"worktree":null,"message":null,"title":"Serve the pr namespace","body":null,"agent":null}}
+{"type":"request","id":"land-1","operation":{"kind":"pr.land","directory":"/repo","wait_and_fix":true,"strict":false,"local":false,"worktree":null,"message":null,"title":"Serve the pr namespace","body":null,"agent":null},"select":null}

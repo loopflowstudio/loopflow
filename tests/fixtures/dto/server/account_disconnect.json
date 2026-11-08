@@ -1,1 +1,1 @@
-{"type":"request","id":"disconnect-1","operation":{"kind":"account.disconnect","provider":"claude","email":"maya@example.com"}}
+{"type":"request","id":"disconnect-1","operation":{"kind":"account.disconnect","provider":"claude","email":"maya@example.com"},"select":null}

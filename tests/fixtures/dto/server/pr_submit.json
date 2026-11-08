@@ -1,1 +1,1 @@
-{"type":"request","id":"submit-1","operation":{"kind":"pr.submit","directory":"/repo","strict":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}}
+{"type":"request","id":"submit-1","operation":{"kind":"pr.submit","directory":"/repo","strict":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null},"select":null}

@@ -817,14 +817,23 @@ impl Read {
     }
 
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
-    /// prints it. `wake` is called from any thread when a
+    /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
     /// [`Subscription::pull`] may find a frame; dropping the subscription ends
     /// it. A read whose command takes no `--subscribe` is an error.
     pub fn subscribe(
         self,
+        select: Option<Vec<String>>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> anyhow::Result<Subscription> {
-        let transport = Transport::Pull(Box::new(wake));
+        // What ends a subscription stays in its frames whatever is selected.
+        let select = select.map(|mut paths| {
+            paths.extend(self.ending_paths().iter().map(|path| path.to_string()));
+            paths
+        });
+        let transport = Transport::Pull {
+            wake: Box::new(wake),
+            select,
+        };
         let subscription = match self {
             Self::MonitorPs => super::top::subscribe_ps(transport),
             Self::DesktopPlans { directory } => {
@@ -868,6 +877,14 @@ impl Read {
     /// body: `task.wait` ends once the Task reached what it waits for.
     pub fn ends_after(&self, body: &serde_json::Value) -> bool {
         matches!(self, Self::TaskWait { .. }) && body["reached"] == serde_json::Value::Bool(true)
+    }
+
+    /// The body paths [`Self::ends_after`] reads.
+    fn ending_paths(&self) -> &'static [&'static str] {
+        match self {
+            Self::TaskWait { .. } => &["reached"],
+            _ => &[],
+        }
     }
 
     /// The Sessions a `session list` read lists, its argv's flags parsed
@@ -967,7 +984,7 @@ mod tests {
 
     #[test]
     fn a_read_without_a_subscription_cannot_be_subscribed() {
-        let error = Read::Doctor.subscribe(|| {}).unwrap_err();
+        let error = Read::Doctor.subscribe(None, || {}).unwrap_err();
         assert!(error.to_string().contains("--subscribe"), "{error}");
     }
 }

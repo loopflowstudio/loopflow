@@ -1,1 +1,1 @@
-{"type":"request","id":"interrupt-1","operation":{"kind":"task.interrupt","directory":"/repo","issue":"LOO-1"}}
+{"type":"request","id":"interrupt-1","operation":{"kind":"task.interrupt","directory":"/repo","issue":"LOO-1"},"select":null}

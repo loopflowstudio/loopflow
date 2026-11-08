@@ -702,7 +702,8 @@ pub fn show(
 ) -> Result<()> {
     let directory = std::env::current_dir()?;
     if json {
-        println!("{}", show_json(&directory, wave, task, all, observe)?);
+        let shown = show_json(&directory, wave, task, all, observe)?;
+        println!("{}", super::subscribe::selected_answer(&shown)?);
         return Ok(());
     }
     let rt = tokio::runtime::Runtime::new()?;
@@ -1008,7 +1009,10 @@ pub fn print_task_detail(status: crate::ops::task::TaskStatus) -> Result<()> {
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
         let detail = task_detail(&store, status).await?;
-        println!("{}", serde_json::to_string_pretty(&detail)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(&detail)?)?
+        );
         Ok(())
     })
 }

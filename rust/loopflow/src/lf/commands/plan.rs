@@ -187,7 +187,10 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     crate::ops::planning_sync::configured_destination(store, repo).await?;
     let status = status(Some(store), repo).await?;
     if json {
-        println!("{}", serde_json::to_string(&status.report())?);
+        println!(
+            "{}",
+            serde_json::to_string(&super::subscribe::selected_answer(&status.report())?)?
+        );
         return Ok(());
     }
     let destinations = match status {

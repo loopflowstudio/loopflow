@@ -1,1 +1,1 @@
-{"type":"request","id":"steer-1","operation":{"kind":"task.steer","directory":"/repo","issue":"LOO-1","message":"Keep the API small"}}
+{"type":"request","id":"steer-1","operation":{"kind":"task.steer","directory":"/repo","issue":"LOO-1","message":"Keep the API small"},"select":null}

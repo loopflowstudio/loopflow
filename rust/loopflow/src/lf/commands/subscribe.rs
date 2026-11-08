@@ -61,6 +61,30 @@ pub(crate) const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
 const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 
+thread_local! {
+    static SELECTED: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keep only `paths` of this invocation's JSON answers and subscription
+/// frames: `lf <read> --json --select a.b,c`. Served requests carry their
+/// own `select` and never read this.
+pub fn select_output(paths: Option<Vec<String>>) {
+    SELECTED.with(|selected| *selected.borrow_mut() = paths);
+}
+
+fn selected() -> Option<Vec<String>> {
+    SELECTED.with(|selected| selected.borrow().clone())
+}
+
+/// `answer` as this invocation's `--json` prints it, keeping its `--select`.
+pub fn selected_answer<T: Serialize>(answer: &T) -> Result<serde_json::Value> {
+    let answer = serde_json::to_value(answer)?;
+    Ok(match selected() {
+        Some(paths) => crate::engine::select::select(&answer, &paths),
+        None => answer,
+    })
+}
+
 /// One line of a subscription.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct SubscriptionFrame<'a, T> {
@@ -155,7 +179,8 @@ fn lock<A>(shared: &Shared<A>) -> MutexGuard<'_, Mailbox<A>> {
     shared.0.lock().expect("subscription mailbox poisoned")
 }
 
-/// Print `read(store, args)` as frames until stdin closes or the parent exits.
+/// Print `read(store, args)` as frames, keeping the invocation's `--select`,
+/// until stdin closes or the parent exits.
 /// `store` is `None` until a Loopflow store exists on this Machine.
 pub(crate) fn run<A, T, F, Fut>(args: A, wakes: Wake, read: F) -> Result<()>
 where
@@ -170,7 +195,7 @@ where
     let shared = mailbox();
     let input = shared.clone();
     std::thread::spawn(move || read_requests(&input));
-    let mut reader = Reader::new(shared.clone(), parent, args, wakes, read)?;
+    let mut reader = Reader::new(shared.clone(), parent, args, wakes, read, selected())?;
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
@@ -192,18 +217,24 @@ where
 
 /// Where a subscription's requests come from and its frames go.
 pub enum Transport {
-    /// stdin and stdout, ending with the parent: `lf <read> --json --subscribe`.
+    /// stdin and stdout, ending with the parent: `lf <read> --json --subscribe`,
+    /// keeping the invocation's `--select`.
     Stdio,
-    /// Requests and pulls through the returned [`Subscription`]; the callback
-    /// says, from any thread and carrying nothing, that a pull may find a frame.
-    Pull(Box<dyn Fn() + Send + Sync>),
+    /// Requests and pulls through the returned [`Subscription`]; `wake` says,
+    /// from any thread and carrying nothing, that a pull may find a frame.
+    /// `select` keeps only those dotted paths of each body; a change outside
+    /// them sends no frame.
+    Pull {
+        wake: Box<dyn Fn() + Send + Sync>,
+        select: Option<Vec<String>>,
+    },
 }
 
 impl std::fmt::Debug for Transport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Stdio => "Stdio",
-            Self::Pull(_) => "Pull",
+            Self::Pull { .. } => "Pull",
         })
     }
 }
@@ -224,7 +255,7 @@ where
 {
     match transport {
         Transport::Stdio => run(args, wakes, read).map(|()| None),
-        Transport::Pull(wake) => start_pull(args, wakes, read, wake).map(Some),
+        Transport::Pull { wake, select } => start_pull(args, wakes, read, wake, select).map(Some),
     }
 }
 
@@ -310,6 +341,7 @@ fn start_pull<A, T, F, Fut>(
     wakes: Wake,
     read: F,
     wake: Box<dyn Fn() + Send + Sync>,
+    select: Option<Vec<String>>,
 ) -> Result<Subscription>
 where
     A: DeserializeOwned + Clone + Send + 'static,
@@ -319,7 +351,7 @@ where
 {
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
-    let mut reader = Reader::new(shared.clone(), None, args, wakes, read)?;
+    let mut reader = Reader::new(shared.clone(), None, args, wakes, read, select)?;
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
     std::thread::spawn(move || {
@@ -449,6 +481,8 @@ struct Reader<A, F> {
     cost: Duration,
     failures: u32,
     sent: Option<[u8; 32]>,
+    /// The dotted paths each body keeps; none keeps it whole.
+    select: Option<Vec<String>>,
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -460,7 +494,14 @@ where
 {
     /// Start observing the store for `shared`'s subscription, closing it when
     /// `parent` (when it follows one) exits.
-    fn new(shared: Shared<A>, parent: Option<u32>, args: A, wakes: Wake, read: F) -> Result<Self> {
+    fn new(
+        shared: Shared<A>,
+        parent: Option<u32>,
+        args: A,
+        wakes: Wake,
+        read: F,
+        select: Option<Vec<String>>,
+    ) -> Result<Self> {
         let database = crate::store::database_path_from_env()?;
         if wakes.checkouts {
             // Every reading asks Git the same questions about the same checkouts;
@@ -475,6 +516,7 @@ where
             wakes,
             read,
             args,
+            select,
             runtime: tokio::runtime::Runtime::new()?,
             checkouts: checkouts::Checkouts::default(),
             configuration: observation::Files::default(),
@@ -597,7 +639,13 @@ where
             self.probed = probed;
             self.configuration = configuration;
             self.configuration_checked = Some(began);
-            let (unavailable, body) = match reading {
+            let (unavailable, body) = match reading.and_then(|body| {
+                let body = serde_json::to_value(body)?;
+                Ok(match &self.select {
+                    Some(paths) => crate::engine::select::select(&body, paths),
+                    None => body,
+                })
+            }) {
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
             };
@@ -694,10 +742,10 @@ fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity<T: Serialize>(unavailable: &Option<String>, body: &Option<T>) -> Result<[u8; 32]> {
-    let mut value = serde_json::to_value(body)?;
+fn identity(unavailable: &Option<String>, body: &Option<serde_json::Value>) -> Result<[u8; 32]> {
+    let mut value = body.clone().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
-    // Streamed: a large reading is never held a second time as bytes.
+    // Streamed: a large reading is never held a third time as bytes.
     let mut hash = Sha256::new();
     serde_json::to_writer(&mut hash, unavailable)?;
     serde_json::to_writer(&mut hash, &value)?;
@@ -926,6 +974,7 @@ mod tests {
             Box::new(move || {
                 let _ = sender.send(());
             }),
+            None,
         )
         .unwrap();
         let agent = |expected: &str| {
@@ -1033,6 +1082,7 @@ mod tests {
             Box::new(move || {
                 let _ = sender.send(());
             }),
+            None,
         )
         .unwrap();
         let agent = |expected: serde_json::Value| {

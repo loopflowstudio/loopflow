@@ -208,6 +208,7 @@ lf session usage --task INF-123 --json # the same evidence drilled to one Task
 lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
 lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
 lf process list --json                # one OS-live process frame
+lf session list --json --select id,title,state   # only those fields of each Session
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,

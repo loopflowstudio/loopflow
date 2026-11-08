@@ -119,7 +119,10 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
     }
     let snapshot = snapshot(&window)?;
     if options.json {
-        println!("{}", serde_json::to_string(&snapshot)?);
+        println!(
+            "{}",
+            serde_json::to_string(&super::subscribe::selected_answer(&snapshot)?)?
+        );
     } else {
         print_snapshot(&snapshot);
     }

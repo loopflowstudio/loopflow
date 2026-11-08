@@ -1058,7 +1058,10 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                 workspace_plan(&store.sqlite, &repository, selected)
             }
         },
-        super::super::subscribe::Transport::Pull(Box::new(|| {})),
+        super::super::subscribe::Transport::Pull {
+            wake: Box::new(|| {}),
+            select: None,
+        },
     )?
     .context("Workspace subscription did not start")?;
     let mut seen: BTreeSet<String> = args.seen.iter().cloned().collect();

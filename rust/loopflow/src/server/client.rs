@@ -193,6 +193,7 @@ impl Connection {
         self.socket.send(&ClientMessage::Request {
             id: id.clone(),
             operation,
+            select: None,
         })?;
         Ok(id)
     }
@@ -225,6 +226,7 @@ impl Connection {
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation,
+            select: None,
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),

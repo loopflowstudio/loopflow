@@ -33,10 +33,22 @@ pub enum ClientMessage {
     /// user who requested it; otherwise the answer is `error` and the connection closes.
     Attach { ticket: String },
     /// `id` is 1–128 bytes and unique among this connection's unanswered requests.
-    Request { id: String, operation: Operation },
+    /// `select` keeps only those dotted paths of a read's answer (`task.title`;
+    /// a path through an array applies to each element, a missing path is
+    /// absent); null keeps it whole, and a write refuses one.
+    Request {
+        id: String,
+        operation: Operation,
+        select: Option<Vec<String>>,
+    },
     /// A read with a subscription; answers a null `response`, then `reading` messages
-    /// until cancelled. The id follows the same rules as a request's.
-    Subscribe { id: String, operation: Read },
+    /// until cancelled. The id follows the same rules as a request's. `select`
+    /// is as for a request; a change outside it sends no reading.
+    Subscribe {
+        id: String,
+        operation: Read,
+        select: Option<Vec<String>>,
+    },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     Checkpoint { id: String, checkpoint: u64 },

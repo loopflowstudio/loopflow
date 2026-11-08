@@ -444,7 +444,9 @@ async fn list(
     if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&read_list(store, filter).await?)?
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(
+                &read_list(store, filter).await?
+            )?)?
         );
         return Ok(());
     }

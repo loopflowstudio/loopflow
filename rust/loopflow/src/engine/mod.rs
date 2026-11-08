@@ -16,6 +16,7 @@ pub mod graph;
 pub mod launch;
 pub mod pr;
 pub mod repo;
+pub mod select;
 pub mod session;
 pub mod skill;
 pub mod task;

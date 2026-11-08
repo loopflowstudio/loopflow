@@ -1669,13 +1669,22 @@
         },
         {
           "additionalProperties": false,
-          "description": "`id` is 1–128 bytes and unique among this connection's unanswered requests.",
+          "description": "`id` is 1–128 bytes and unique among this connection's unanswered requests.\n`select` keeps only those dotted paths of a read's answer (`task.title`;\na path through an array applies to each element, a missing path is\nabsent); null keeps it whole, and a write refuses one.",
           "properties": {
             "id": {
               "type": "string"
             },
             "operation": {
               "$ref": "#/$defs/Operation"
+            },
+            "select": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "type": {
               "const": "request",
@@ -1685,19 +1694,29 @@
           "required": [
             "type",
             "id",
-            "operation"
+            "operation",
+            "select"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "A read with a subscription; answers a null `response`, then `reading` messages\nuntil cancelled. The id follows the same rules as a request's.",
+          "description": "A read with a subscription; answers a null `response`, then `reading` messages\nuntil cancelled. The id follows the same rules as a request's. `select`\nis as for a request; a change outside it sends no reading.",
           "properties": {
             "id": {
               "type": "string"
             },
             "operation": {
               "$ref": "#/$defs/Read"
+            },
+            "select": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "type": {
               "const": "subscribe",
@@ -1707,7 +1726,8 @@
           "required": [
             "type",
             "id",
-            "operation"
+            "operation",
+            "select"
           ],
           "type": "object"
         },

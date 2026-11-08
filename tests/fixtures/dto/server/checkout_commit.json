@@ -1,1 +1,1 @@
-{"type":"request","id":"commit-1","operation":{"kind":"checkout.commit","directory":"/repo","message":"Serve the checkout namespace","push":false,"no_add":false,"paths":[],"agent":null}}
+{"type":"request","id":"commit-1","operation":{"kind":"checkout.commit","directory":"/repo","message":"Serve the checkout namespace","push":false,"no_add":false,"paths":[],"agent":null},"select":null}

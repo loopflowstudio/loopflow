@@ -3,8 +3,11 @@
   "id": "config-1",
   "operation": {
     "kind": "config.set",
-    "destination": { "kind": "personal_global" },
+    "destination": {
+      "kind": "personal_global"
+    },
     "key": "theme",
     "value": "Hearth"
-  }
+  },
+  "select": null
 }

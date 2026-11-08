@@ -1,1 +1,1 @@
-{"type":"request","id":"checks-1","operation":{"kind":"pr.checks","directory":"/repo","required":true}}
+{"type":"request","id":"checks-1","operation":{"kind":"pr.checks","directory":"/repo","required":true},"select":null}

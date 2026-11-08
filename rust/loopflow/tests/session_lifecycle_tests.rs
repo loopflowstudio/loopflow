@@ -938,6 +938,11 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .collect::<Vec<_>>(),
         ["inventory-110", "inventory-111"]
     );
+    // `--select` keeps only the named paths of each listed Session.
+    assert_eq!(
+        fixture.json(&["session", "list", "--json", "--limit", "2", "--select", "id"]),
+        serde_json::json!([{"id": "inventory-110"}, {"id": "inventory-111"}])
+    );
     let output = fixture
         .command(&list)
         .current_dir(&worktree)

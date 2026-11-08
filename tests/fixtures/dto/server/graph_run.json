@@ -1,1 +1,1 @@
-{"type":"request","id":"graph-1","operation":{"kind":"graph.run","directory":"/repo","name":"code","message":"Serve the graph namespace","agent":"claude"}}
+{"type":"request","id":"graph-1","operation":{"kind":"graph.run","directory":"/repo","name":"code","message":"Serve the graph namespace","agent":"claude"},"select":null}

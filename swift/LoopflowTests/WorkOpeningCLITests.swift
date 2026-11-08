@@ -18,7 +18,7 @@ struct WorkOpeningCLITests {
         }
 
         let router = WorkLinkRouter()
-        await #expect(throws: RegistryQueryError.self) {
+        await #expect(throws: ServerError.self) {
             _ = try await fixture.query.workLink(URL(string: "loopflow://alpha")!)
         }
         #expect(router.inspect().openings.isEmpty, "an ambiguous address changes nothing")

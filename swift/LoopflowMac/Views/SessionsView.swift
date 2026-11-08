@@ -1481,6 +1481,24 @@ private struct SessionsReconciler: View {
     }
 }
 
+/// Asks which agent the open Sessions whose login cannot take their model move to.
+private struct BlockedSessionsAlert: ViewModifier {
+    @Binding var presented: Bool
+    @Binding var target: String
+    let move: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Move blocked Sessions", isPresented: $presented) {
+            TextField("harness[:model], such as claude:opus", text: $target)
+            Button("Move") { move(target) }
+                .disabled(target.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Open Sessions whose login cannot take their model now continue on this agent: idle ones at their next open, busy ones after their turn. Nothing is written to your preferences.")
+        }
+    }
+}
+
 struct SessionsContentView: View {
     @Environment(\.theme) private var theme
     let machineId: String
@@ -1599,14 +1617,8 @@ struct SessionsContentView: View {
             focusTerminal: multiplexer.focusedPane.terminal.map { terminal in { workspaces.surfaces.focus(terminal) } },
             moveBlockedSessions: { movingBlockedSessions = true },
             context: { actionContext }, failed: { actionFailed($0) }))
-        .alert("Move blocked Sessions", isPresented: $movingBlockedSessions) {
-            TextField("harness[:model], such as claude:opus", text: $blockedSessionsTarget)
-            Button("Move") { moveBlockedSessions(to: blockedSessionsTarget) }
-                .disabled(blockedSessionsTarget.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Open Sessions whose login cannot take their model now continue on this agent: idle ones at their next open, busy ones after their turn. Nothing is written to your preferences.")
-        }
+        .modifier(BlockedSessionsAlert(presented: $movingBlockedSessions, target: $blockedSessionsTarget,
+            move: moveBlockedSessions))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
                 .keyboardShortcut("/", modifiers: .command)

@@ -2997,7 +2997,10 @@ impl AccountCommand {
         let cmd = cmd?;
         if let Some(target) = target {
             let spelling = match cmd.login() {
-                Some(login) if !login.contains('=') && !target.contains('=') => {
+                Some(login)
+                    if !login.contains('=')
+                        && target.parse::<crate::provider_auth::Provider>().is_ok() =>
+                {
                     format!("lf account {} {target}={login}", cmd.verb())
                 }
                 Some(login) => format!("lf account {} {login}", cmd.verb()),
@@ -3702,6 +3705,12 @@ mod tests {
             old_spelling.contains("lf account use codex=jack@"),
             "{old_spelling}"
         );
+        // A login before the verb is not a provider to fold into the login.
+        let login_first = Cli::try_parse_from(["lf", "ops", "account", "alice@", "use", "bob@"])
+            .and_then(Cli::checked)
+            .unwrap_err()
+            .to_string();
+        assert!(login_first.contains("lf account use bob@"), "{login_first}");
         let flags_first = Cli::try_parse_from(["lf", "ops", "account", "--json", "next"])
             .and_then(Cli::checked)
             .unwrap_err()

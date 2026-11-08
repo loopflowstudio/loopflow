@@ -549,7 +549,7 @@ esac
     let unknown_text = String::from_utf8_lossy(&unknown.stdout);
     assert!(unknown_text.contains("active (verified)"));
     assert!(!unknown_text.contains("recover: lf account connect codex=active@example.com"));
-    assert!(unknown_text.contains("observed plan: team"));
+    assert!(unknown_text.contains("team observed"), "{unknown_text}");
     assert!(unknown_text.contains("usage response has no recognized percentage windows"));
     let window_line = unknown_text
         .lines()

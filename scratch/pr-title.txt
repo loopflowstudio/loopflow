@@ -1,1 +1,0 @@
-CI: catch Desktop launch and quit hangs before merge

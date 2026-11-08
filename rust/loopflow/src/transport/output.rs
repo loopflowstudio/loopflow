@@ -69,7 +69,12 @@ impl Output {
         {
             bytes.extend(report.as_bytes());
         }
-        if let Some(title) = &terminal.title {
+        // The launcher can publish its title before the Session lookup finishes.
+        if let Some(title) = terminal
+            .title
+            .as_deref()
+            .or_else(|| terminal.terminal.title())
+        {
             bytes.extend(title_report(title));
         }
         bytes.extend(terminal.terminal.program_status().replay());
@@ -261,6 +266,21 @@ mod tests {
     use super::{directory_report, local_directory_report, Output};
     use crate::ghostty_vt::Terminal;
     use crate::program_status::{Kind, Records, Report, State};
+
+    #[test]
+    fn attachment_replays_launch_title_before_session_name_lookup() {
+        let mut output = Output::new(true).unwrap();
+        output.process(1, b"\x1b]0;checkout\x07", false);
+        let mut viewer = Terminal::new(80, 24).unwrap();
+        viewer.write(&output.snapshot().unwrap().unwrap());
+        assert_eq!(viewer.title(), Some("checkout"));
+
+        output.title("checkout");
+        assert!(output.take_reports().is_none());
+        output.title("Resume repair");
+        viewer.write(&output.take_reports().unwrap());
+        assert_eq!(viewer.title(), Some("Resume repair"));
+    }
 
     #[test]
     fn session_renames_wait_for_complete_sequences_and_replay_on_attach() {

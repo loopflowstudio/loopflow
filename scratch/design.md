@@ -29,8 +29,9 @@ A known-live owner may wait longer than the unknown grace. This is not an
 overall command deadline. Show the served-client recovery path next; the
 concept review does not replace that check.
 
-Remaining: review, sync with current `origin/main` and gate, then publication,
-CI repair if needed, merge and completion. Real served-client QA is recorded in
+Remaining: delivery cleanup, hosted CI and repair if needed, merge and completion.
+PR #1859 is published; final review, sync and gate passed at `a35986a95`
+(see `scratch/publish-checks.md`). Real served-client QA is recorded in
 `scratch/qa.html`: registry loss returned uncertainty in 5.05 seconds for a Task;
 restoring it and resuming the original command produced exactly one completed
 Graph, found through `task status` and `task runs`. Direct Graphs also recovered,
@@ -39,8 +40,9 @@ repair was needed. Troubleshooting now includes finished direct Graph history.
 Gate reaches
 `test(engine::launch::tests::) | binary(served_reads) | test(documented_commands::)`
 plus architecture and website checks from `scripts/test.py --list`; the served
-suite covers launch refusals through the client API. Formatting and clippy
-remain required before the next code commit. No product decision is open.
+suite covers launch refusals through the client API. All 19 targeted Rust tests,
+73 website tests, architecture, formatting and clippy passed. No product decision
+is open.
 
 `cargo build -p loopflow --bin lf`: passed; branch CLI used for real socket QA.
 `uv run python scratch/qa_task_launch.py`: normal and late Task scenarios passed;

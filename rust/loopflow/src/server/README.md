@@ -355,14 +355,22 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-This planned contract depends on LOO-718's remote admission; this build only
-admits local clients. Remote attachment uses the `session.attach` and separate
-bridge flow above, including Session owner resolution and control claims.
+Planned for the authenticated endpoint in [Phone access](../../../../docs/server.md#phone-access);
+this build supports local attachment only.
 
-Both connections must authenticate as the same remote identity. A `hello`
-name, `client_id`, or proxy's Unix UID cannot supply that identity. Local and
-remote admission cannot redeem each other's tickets. Each ticket opens one
-bridge and expires 60 seconds after issue, including time the host spends asleep.
+To attach a phone to a running Session, request `session.attach` on its
+authenticated client connection. Open a separate authenticated bridge connection
+and send `{"type":"attach","ticket":"<returned ticket>"}` as its first message.
+After `bridged {owner_lf_process_id}`, use the binary owner protocol described
+above. The ticket itself does not take input or geometry control from another
+viewer; request control through the owner protocol.
+
+Both connections must authenticate as the same Tailscale node and user, using
+the transport's node stable ID and user ID. The same account on a different
+device does not match. A `hello` name, `client_id`, login text or proxy's Unix UID
+cannot supply that identity. Local and remote connections cannot redeem each
+other's tickets. Each ticket opens one bridge and expires after 60 seconds,
+including host sleep.
 
 An unknown, spent, expired or foreign ticket returns `not_found` with a null
 `id` and closes the bridge connection. Presenting a ticket consumes it even

@@ -26,6 +26,8 @@ pub(super) enum Tag {
     Out = 0x03,
     /// Stream 2: stderr for a piped command.
     Err = 0x04,
+    /// Final JSON close reason, outside the counted terminal stream.
+    Close = 0x05,
     /// JSON carrying an `id`.
     Request = 0x11,
     /// Keystrokes from the controlling connection.
@@ -48,6 +50,7 @@ impl Tag {
             0x02 => Self::Snapshot,
             0x03 => Self::Out,
             0x04 => Self::Err,
+            0x05 => Self::Close,
             0x11 => Self::Request,
             0x12 => Self::Input,
             _ => return None,
@@ -107,6 +110,24 @@ impl Decoder {
 
 // ---------------------------------------------------------------------------
 // Requests and replies
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CloseReason {
+    /// The owner is yielding to a replacement. Reattach by Session.
+    Replaced,
+    /// Execution finished. Stop automatic reattachment.
+    Finished,
+    /// Lifetime policy ended this owner. Deliberate resume remains available.
+    Retired,
+}
+
+/// The last frame before an orderly owner disconnect. No stream offset or
+/// control claim transfers to a replacement owner.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub(crate) struct Close {
+    pub reason: CloseReason,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -188,6 +209,8 @@ pub(super) enum Request {
     /// Whether some viewer holds input control, asked before opening another.
     /// On an attached connection this also refreshes the viewer's liveness.
     Controlled,
+    /// End this owner for a replacement; available on its private local socket.
+    Replace,
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {
         key: String,

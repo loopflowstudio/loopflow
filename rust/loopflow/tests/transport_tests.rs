@@ -456,6 +456,7 @@ const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;
 const ERR: u8 = 0x04;
+const CLOSE: u8 = 0x05;
 const REQUEST: u8 = 0x11;
 const INPUT: u8 = 0x12;
 
@@ -485,6 +486,7 @@ fn read_frame(reader: &mut impl Read) -> Option<(u8, Vec<u8>)> {
 #[derive(Debug, Clone, PartialEq)]
 enum Item {
     Reply(Value),
+    Close(Value),
     Snapshot(Vec<u8>),
     Out(Vec<u8>),
     Err(Vec<u8>),
@@ -548,10 +550,11 @@ impl Viewer {
     fn next(&mut self) -> Option<Item> {
         let (tag, payload) = read_frame(&mut self.socket)?;
         self.wire += 5 + payload.len() as u64;
-        if tag != REPLY {
+        if matches!(tag, SNAPSHOT | OUT | ERR) {
             self.received += payload.len() as u64;
         }
         Some(match tag {
+            CLOSE => Item::Close(serde_json::from_slice(&payload).unwrap()),
             REPLY => Item::Reply(serde_json::from_slice(&payload).unwrap()),
             SNAPSHOT => Item::Snapshot(payload),
             ERR => Item::Err(payload),
@@ -582,6 +585,15 @@ impl Viewer {
         loop {
             if let Item::Reply(reply) = self.next().expect("owner closed before replying") {
                 return reply;
+            }
+        }
+    }
+    #[track_caller]
+    fn until_close(&mut self) -> Value {
+        loop {
+            if let Item::Close(close) = self.next().expect("owner closed without a reason") {
+                assert_eq!(self.next(), None, "close must be the final frame");
+                return close;
             }
         }
     }
@@ -4608,8 +4620,8 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     first.input("done\n");
     first.finish();
     second.finish();
-    assert!(first.next().is_none());
-    assert!(second.next().is_none());
+    assert_eq!(first.until_close(), json!({"reason":"finished"}));
+    assert_eq!(second.until_close(), json!({"reason":"finished"}));
 }
 
 #[test]
@@ -4708,7 +4720,7 @@ fn an_immediate_resume_can_reclaim_input_and_resize() {
     until_out(&mut resumed, "35 110");
     resumed.input("done\n");
     resumed.finish();
-    assert!(resumed.next().is_none());
+    assert_eq!(resumed.until_close(), json!({"reason":"finished"}));
 }
 
 #[test]
@@ -5201,6 +5213,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "{}",
         String::from_utf8_lossy(&close.stderr)
     );
+    assert_eq!(returning.until_close(), json!({"reason":"retired"}));
     fixture.ends(&owner);
     let settled: bool = fixture
         .sql()
@@ -5450,6 +5463,40 @@ fn viewer_stream_backpressure_releases_bridge_and_owner_keeps_draining() {
         "attached"
     );
     fixture.ends(&owner);
+}
+
+#[test]
+fn viewer_stream_close_passes_reason_unchanged() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "read -r line; printf 'last\\033]'; exit 7"],
+    ));
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let mut child = fixture
+        .command(&["session", "attach", &owner])
+        .env("LF_VIEWER_STREAM", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(&frame(REQUEST, br#"{"id":1,"kind":"attach","control":true,"replace":false,"own":null,"rows":24,"cols":80}"#)).unwrap();
+    let mut output = child.stdout.take().unwrap();
+    assert_eq!(read_frame(&mut output).unwrap().0, REPLY);
+    input.write_all(&frame(INPUT, b"finish\n")).unwrap();
+    let mut ending = None;
+    while let Some((tag, payload)) = read_frame(&mut output) {
+        assert!(ending.is_none(), "close must be the final frame");
+        if tag == CLOSE {
+            ending = Some(payload);
+        }
+    }
+    assert_eq!(ending.unwrap(), br#"{"reason":"finished"}"#);
+    assert!(wait_for_viewer(child, Duration::from_secs(5))
+        .status
+        .success());
 }
 
 #[test]
@@ -5977,6 +6024,74 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
         }
     }
     drop(subscription);
+}
+
+#[test]
+fn server_close_replaced_reattaches_by_session_then_finished_stops() {
+    let fixture = Fixture::new();
+    let service = ServerProof::start(&fixture, false);
+    let command = [
+        "/bin/sh",
+        "-c",
+        "printf 'started\\n' >> launches; read -r line; printf '%s\\n' \"$line\" >> answers",
+    ];
+    let owner = fixture.start(&command);
+    let _stop = ShellOwnerGuard(&fixture, owner.clone());
+    let session = fixture.bound_session(&owner);
+    let attach = || {
+        let socket = loopflow::server::client::attach(
+            &fixture.endpoint("machine"),
+            &session.as_str().into(),
+            None,
+        )
+        .unwrap();
+        Viewer::new(socket).attach(json!({"kind":"attach","control":true,"replace":false,"own":"request","rows":24,"cols":80}))
+    };
+    let mut viewer = attach();
+    let mut observer = fixture.viewer(&owner, false);
+    // Replacement ends the existing stream; it neither launches nor sends input.
+    let mut control = fixture.connect(&owner);
+    control.request(json!({"kind":"replace"}));
+    assert_eq!(control.until_reply()["kind"], "accepted");
+    for viewer in [&mut viewer, &mut observer] {
+        assert_eq!(viewer.until_close(), json!({"reason":"replaced"}));
+    }
+    fixture.ends(&owner);
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("launches")).unwrap(),
+        "started\n"
+    );
+    assert!(!fixture.repo.path().join("answers").exists());
+    assert!(loopflow::server::client::attach(
+        &fixture.endpoint("machine"),
+        &session.as_str().into(),
+        None
+    )
+    .is_err());
+
+    // Only the replacement operation creates execution. A later attachment finds it.
+    let successor = fixture.start(&command);
+    let _successor_stop = ShellOwnerGuard(&fixture, successor.clone());
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET agent_process_id=?1, transport_lf_process_id=?1 WHERE id=?2",
+            [&successor, &session],
+        )
+        .unwrap();
+    let mut viewer = attach();
+    viewer.input("once\n");
+    assert_eq!(viewer.until_close(), json!({"reason":"finished"}));
+    fixture.ends(&successor);
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("launches")).unwrap(),
+        "started\nstarted\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("answers")).unwrap(),
+        "once\n"
+    );
+    drop(service);
 }
 
 #[test]

@@ -65,3 +65,40 @@ Show what you did in `scratch/qa.html`: each scenario, what you did, what you sa
 with screenshots or transcripts, and what you fixed. Finish with what works now,
 what you could not reach and why, and what is still wrong, worst first. Do not
 publish, land or choose the next Graph step from here.
+
+## Terminal and server QA
+
+Build `cargo build -p loopflow --bin lf`, then drive that executable. Use a
+temporary Git repository and an isolated `LF_HOME`; clear inherited `LF_*`
+before setting that home and `LF_BIN`. Clear terminal-host placement variables
+when creating a separate PTY. Never run a QA rollover against the working Machine.
+
+`lf session serve [--terminal] -- /bin/sh -c '…'` starts a real owner and prints
+its Process ID. Its socket is under `/tmp/lf-<uid>-<sha256(canonical LF_HOME)[:16]>/`.
+Use the protocol in `rust/loopflow/src/transport/README.md` to attach independent
+clients. `LF_VIEWER_STREAM=1 lf session attach OWNER` exercises the raw relay;
+ordinary `lf resume SESSION` belongs on a PTY, since its startup can paint a
+saved screen before attachment. Do not treat those startup bytes as framed output.
+
+Run `lf server run` with the same home and wait for a successful handshake, not
+just the socket file. Use `hello`, `session.attach`, then the returned ticket on
+a second connection as documented in `rust/loopflow/src/server/README.md`.
+`LF_SERVER=1 LF_SERVER_STATUS=/tmp/PRIVATE/status.json lf session attach OWNER
+--session SESSION` reaches Desktop's decoded relay and status mailbox. An initial
+free-input attachment can refuse while another viewer controls the Session;
+use an explicit takeover when that is the scenario.
+
+Create provider history through a real interactive `lf -i -a codex : MESSAGE`
+on a PTY, using configured authentication. A minimal no-tools reply is enough.
+Exercise replacement with `lf resume` or `lf process rollover`, retaining the
+same Session ID; a manually rebound database row does not establish that path.
+For native slash commands, type the text, let completion render, then press
+Enter. Check the resulting screen rather than assuming a pasted command ran.
+
+The shell runtime is headless: in the sandbox, `lf wt create NAME` and
+`lf task create --worktree PATH --title TITLE` provide a real Task checkout
+without starting a Graph. Use `lf desktop shell TASK --checkout PATH --id ID
+--create`, then the same command with `--close`. Inspect both the final frame
+and background-job cleanup. Stop every owner, relay and server started by QA.
+Mailbox checks establish relay behavior; mounted Desktop presentation still
+belongs to a display-capable check.

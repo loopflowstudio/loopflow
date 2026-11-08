@@ -20,12 +20,14 @@ pub fn describe() -> Value {
     let server = generator.subschema_for::<ServerMessage>();
     generator.subschema_for::<Hello>();
     generator.subschema_for::<Welcome>();
+    let close = generator.subschema_for::<crate::transport::wire::Close>();
     let mut schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Loopflow server protocol",
         "x-revision": REVISION,
         "x-min-revision": MIN_REVISION,
         "oneOf": [client, server],
+        "x-owner-close": {"tag": 5, "payload": close},
         "$defs": generator.take_definitions(true),
     });
     add_examples(&mut schema);
@@ -262,12 +264,19 @@ pub fn summary() -> String {
             .expect("an operation enum is a oneOf of its kinds")
             .len()
     };
+    let reasons = schema["$defs"]["CloseReason"]["oneOf"]
+        .as_array()
+        .expect("close reasons are a oneOf of string constants")
+        .iter()
+        .map(|reason| reason["const"].as_str().expect("reason is a string"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let counted = |name: &str, one: &str, many: &str| match count(name) {
         1 => format!("1 {one}"),
         n => format!("{n} {many}"),
     };
     format!(
-        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {}, {}, {}. `--json` prints its JSON Schema.",
+        "Server protocol revision {REVISION} (oldest {MIN_REVISION}): {}, {}, {}. `--json` prints its JSON Schema. Owner close (0x05): {reasons}.",
         counted("Read", "read", "reads"),
         counted("Write", "write", "writes"),
         counted("ServerOperation", "server operation", "server operations"),
@@ -468,6 +477,22 @@ mod tests {
         let wire = serde_json::to_value(time::OffsetDateTime::UNIX_EPOCH).unwrap();
         let tuple: TimeTuple = serde_json::from_value(wire).unwrap();
         assert_eq!(tuple, (1970, 1, 0, 0, 0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn owner_close_schema_describes_every_reason_and_requires_one() {
+        let schema = describe();
+        assert_eq!(schema["x-owner-close"]["tag"], 5);
+        let validator = validator(&schema, &schema["x-owner-close"]["payload"]);
+        for reason in ["replaced", "finished", "retired"] {
+            let close = serde_json::json!({"reason":reason});
+            assert!(validator.is_valid(&close));
+            let decoded: crate::transport::wire::Close =
+                serde_json::from_value(close.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), close);
+        }
+        assert!(!validator.is_valid(&serde_json::json!({})));
+        assert!(!validator.is_valid(&serde_json::json!({"reason":"unknown"})));
     }
 
     #[test]

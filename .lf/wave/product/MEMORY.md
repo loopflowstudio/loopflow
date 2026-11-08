@@ -1159,6 +1159,14 @@ Rendered continuity remains unproved. Viewer loss never restarts execution;
 text-grid snapshots don't prove renderer restoration. Earlier tmux/LOO-280–283:
 `f8fe8aff0:wave/product/MEMORY.md`, this heading.
 
+LOO-774 (November 8): ending execution and losing a bridge need different client
+behavior. Final Close is outside counted terminal bytes, so an unfinished terminal
+escape cannot swallow its reason. A bounded drain may still lose Close; EOF alone
+remains unknown. Replacement attachment resolves the same Session without replaying
+input or starting execution. The fixture passed with a manually supplied successor;
+it does not establish production rollover or native Desktop continuity. Keep those
+checks separate from byte-forwarding proof.
+
 ## Learnings
 
 - Adapt proven components; rewriting the sidebar lost established behavior

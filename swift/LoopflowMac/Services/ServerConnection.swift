@@ -16,7 +16,7 @@ struct ServerConnectionReading: Decodable, Equatable {
         case .moving: "Moving input here… Input paused."
         case .reconnecting: "Reconnecting… Input paused; last screen may be stale."
         case .unavailable: message ?? "Session unavailable. Last screen is stale."
-        case .ended: "Session ended."
+        case .ended: message ?? "Session ended."
         }
     }
 }

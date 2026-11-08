@@ -93,8 +93,10 @@ pub enum ServerOperation {
     /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
     /// expires_in_ms}`. A new connection presents the ticket as its first
     /// message (`attach`) and becomes the bridge; this connection stays a
-    /// client. When the owner ends, the bridge closes; attaching again by the
-    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// client. An orderly owner sends a final `0x05` frame with JSON
+    /// `{reason: replaced|finished|retired}` (see `x-owner-close`) before closing.
+    /// After `replaced`, attaching by the same Session reaches its next owner.
+    /// Bare EOF leaves the reason unknown. With `owner_lf_process_id`, the
     /// Session must still be owned by exactly that LfProcess, for a client that
     /// reconnects only to the owner it had.
     #[serde(rename = "session.attach")]

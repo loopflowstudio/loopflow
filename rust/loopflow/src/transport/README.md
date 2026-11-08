@@ -33,7 +33,7 @@ took control, recovery observes it without replacing input or geometry. Choose
 **Move here** in the read-only pane's connection row to edit the same running
 Session. Input stays paused until its owner acknowledges; a lost reply never
 repeats that takeover. Eight attempts with capped backoff lead to **Session
-unavailable** and a native **Retry** action. Only an owner exit event means ended.
+unavailable** and a native **Retry** action. An owner close frame ends recovery and names why.
 Closing the surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface creates a private temporary mailbox directory and passes
@@ -110,7 +110,8 @@ moves it.
 
 `lf process rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
-ends idle owners directly; existing viewers may close and need `lf resume` again.
+asks idle owners to announce `replaced` and end; existing viewers need a fresh
+attachment by Session.
 Rollover names the same retention reasons. Resume, rollover and the detached
 limit share this judgment; work holds independent of reachability. Only resume asks
 whether the owner answers, and only for no open Session.
@@ -171,6 +172,7 @@ message is a frame: `tag u8 · len u32 BE · payload`. Stream frames carry at mo
 | `0x02` snapshot | owner → viewer | the terminal snapshot a fresh stream begins with |
 | `0x03` out | owner → viewer | stream 1: PTY output, or stdout of a piped command |
 | `0x04` err | owner → viewer | stream 2: stderr of a piped command |
+| `0x05` close | owner → viewer | final JSON: `{"reason":"replaced"}`, `finished` or `retired` |
 | `0x11` request | viewer → owner | JSON with `id` and `kind` |
 | `0x12` input | viewer → owner | keystrokes from the connection holding input control |
 
@@ -204,6 +206,17 @@ A connection that ends without a `leave` request keeps its stream for 60 s.
 snapshot; a byte the spool no longer holds answers `reconnect_required`, and the
 viewer attaches afresh. Input control and ownership release when the connection
 ends; a resume asks for them again.
+
+Before an orderly owner shutdown, the owner queues one final `close` frame for
+each attached viewer and drains for a bounded interval. A slow or lost connection
+may miss it. The frame does not count toward the stream byte offset. The
+`child_exited` event carries the exit code; wait for `close` before ending the
+attachment. Clients use it to distinguish a replacement owner from
+finished execution or policy retirement; a bare EOF leaves the reason unknown.
+The server bridge and Desktop relay forward the frame unchanged. See
+[Terminal bridge endings](../server/README.md#terminal-bridge-endings) for reason
+values and recovery. Stream continuation belongs to one owner; attaching to its
+replacement never replays input or starts a provider.
 
 Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
 who receives `owner` with `held: false` and stays attached; `own: "request"`

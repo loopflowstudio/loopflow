@@ -5,6 +5,24 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ServerConnectionTests {
+    @Test(arguments: [
+        nil,
+        "Session owner replaced; reattach by Session.",
+        "Session owner retired; resume when needed.",
+    ] as [String?])
+    func orderlyCloseShowsItsReasonWithoutOfferingRecovery(message: String?) async throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        var visible: ServerConnectionReading?
+        try connection.start { visible = $0 }
+        try await publish(connection, generation: 1, state: "ended", input: false, message: message)
+        #expect(visible?.title == (message ?? "Session ended."))
+        #expect(visible?.acceptsInput == false)
+        #expect(visible?.canMoveHere == false)
+        connection.retry()
+        #expect(!FileManager.default.fileExists(atPath: connection.directory.appendingPathComponent("status.retry").path))
+    }
+
     @Test func recoveryPreservesReadingAndRequiresAcknowledgedInput() async throws {
         let connection = ServerConnection()
         defer { connection.stop() }

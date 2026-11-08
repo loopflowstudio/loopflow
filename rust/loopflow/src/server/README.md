@@ -311,9 +311,11 @@ part of what a phone or bot client is offered.
   Session's current owner when it issues the ticket; resolution never starts a
   provider. A Session with no running owner is `not_found {session}`; an owner
   whose endpoint is gone is `not_found {owner_lf_process_id}`: it ended, at
-  issue or when the ticket is presented. When the owner ends, the bridge closes,
-  and attaching again by the same Session reaches its next owner, as after `lf
-  install`. A client that reconnects only to the owner it had passes it as
+  issue or when the ticket is presented. Before an orderly owner shutdown, the
+  bridge carries a final owner-protocol frame naming why it ends; see
+  [Terminal bridge endings](#terminal-bridge-endings). Attaching again by the
+  same Session reaches its next owner, as after `lf install`. A client that
+  reconnects only to the owner it had passes it as
   `owner_lf_process_id`; a Session now owned by another LfProcess is then
   `not_found {owner_lf_process_id, current_lf_process_id}`. Desktop's relays do
   this; `lf session resume` and `server::client::attach` perform both steps.
@@ -352,3 +354,36 @@ arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+### Terminal bridge endings
+
+Suppose a terminal is attached to a Session whose owner is replaced during an
+update. On the final frame with reason `replaced`, request `session.attach`
+again for that same `session`, with `owner_lf_process_id: null`. Present the new
+ticket on a fresh bridge connection and attach to the returned owner. Pinning
+the old owner instead returns `not_found` once the replacement owns the Session.
+
+The owner queues one final frame before closing an orderly connection, with a
+bounded drain so a slow viewer cannot hold execution. A slow or lost connection
+may close before the frame arrives. The server bridge and Desktop's relay pass
+it through unchanged. Its `reason` tells a terminal client what to do. The frame
+is tag `0x05`, followed by the four-byte
+big-endian payload length and UTF-8 JSON, for example `{"reason":"replaced"}`.
+It is outside the counted terminal byte stream and needs no event nonce.
+`lf server describe --json` exposes its schema under `x-owner-close`.
+
+| `reason` | Meaning | Client action |
+| --- | --- | --- |
+| `replaced` | This owner is yielding to a replacement for the same Session. | Reattach by Session with bounded retry while the next owner becomes available. |
+| `finished` | The Session's execution finished. | Stop automatic reattachment; keep the final screen available. |
+| `retired` | Lifetime policy retired the owner without declaring the conversation finished. | Stop automatic reattachment; deliberately resume the Session from saved history when needed. |
+
+Reattachment only finds existing execution. It never starts a provider, replays
+keystrokes or repeats a command. A replacement needs a fresh attachment; the old
+owner's stream continuation and control tokens do not transfer. Request free
+input and geometry claims without replacement so another viewer keeps control.
+
+EOF without a final frame leaves the reason unknown: a crash, network loss or
+server interruption cannot establish that a Session finished. Keep the last
+screen and use connection recovery; do not manufacture a `finished` reason.
+If no owner is available, report that result without starting one automatically.

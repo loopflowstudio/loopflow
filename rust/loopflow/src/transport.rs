@@ -16,7 +16,7 @@ mod stream;
 mod terminal;
 #[cfg(test)]
 mod viewer_tests;
-mod wire;
+pub(crate) mod wire;
 
 use std::collections::VecDeque;
 use std::ffi::CStr;
@@ -38,7 +38,10 @@ use crate::harness::native_exit::{NativeExit, Settled};
 use crate::id::{LfProcessId, LfSessionId};
 use crate::store::sqlite::ViewerHold;
 use input::PendingInput;
-use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
+use wire::{
+    Close, CloseReason, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner,
+    Tag,
+};
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
@@ -950,6 +953,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut execution_directory_reported = false;
     let mut planning = None;
+    let mut replacing = false;
     loop {
         #[cfg(test)]
         input_retry_tests::poll();
@@ -1030,6 +1034,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::InputHint { key, hint } if key == control_key => {
                             viewer.input_hint = Some(hint);
                             hint_due = true;
+                        }
+                        Request::Replace => {
+                            replacing = true;
+                            viewer.reply(answers, Reply::Accepted);
                         }
                         Request::Controlled => {
                             if viewer.attached {
@@ -1490,6 +1498,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
+                close_viewers(&mut viewers, CloseReason::Finished);
                 release_viewer_hold(&id, observed.hold);
                 snapshot::leave(&id, &output);
                 // Records still being written finish before this process exits.
@@ -1516,22 +1525,29 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         #[cfg(test)]
         lifetime_tests::before_judgment();
+        if replacing {
+            let _ = std::fs::remove_file(&path);
+            close_viewers(&mut viewers, CloseReason::Replaced);
+            release_viewer_hold(&id, observed.hold);
+            snapshot::leave(&id, &output);
+            crate::agent::exit_on_interrupt();
+        }
         if let Ok(ending) = ending.try_recv() {
-            let event = lifetime::report_result(
+            let confirmed = lifetime::report_result(
                 &mut ending_failure,
                 "Session ending",
                 ending.confirm(&id, observed, pending_input.holds_owner()),
-            )
-            .flatten();
-            if let Some(event) = event {
+            );
+            if confirmed == Some(true) {
                 if let Some(jobs) = &shell_jobs {
                     jobs.terminate()?;
                     crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
                 }
-                end_viewers(&mut viewers, event);
+                let _ = std::fs::remove_file(&path);
+                close_viewers(&mut viewers, CloseReason::Retired);
                 release_viewer_hold(&id, observed.hold);
                 snapshot::leave(&id, &output);
-                crate::platform::kill_process(std::process::id());
+                crate::agent::exit_on_interrupt();
             }
             // Flush even throttled activity so the applicable quiet interval
             // starts again and a settled owner can eventually end.
@@ -1687,6 +1703,52 @@ fn end_viewers(viewers: &mut [Viewer], event: Event) {
         viewer.event(event.clone());
         let _ = viewer.flush_events();
         let _ = viewer.flush();
+    }
+}
+
+/// End the protocol outside the terminal stream, then give queued output a
+/// bounded chance to drain. Slow or lost connections still end with unknown EOF.
+fn close_viewers(viewers: &mut [Viewer], reason: CloseReason) {
+    let payload = serde_json::to_vec(&Close { reason }).expect("close reason serializes");
+    for viewer in viewers
+        .iter_mut()
+        .filter(|v| v.attached && v.connection.is_open())
+    {
+        let _ = viewer.flush_events();
+        wire::encode(Tag::Close, &payload, &mut viewer.output);
+    }
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        let mut pending = Vec::new();
+        for viewer in viewers.iter_mut().filter(|v| v.attached) {
+            if viewer.flush().is_err() {
+                viewer.drop_connection();
+            }
+            if let Some(socket) = viewer.connection.open() {
+                if !viewer.output.is_empty() {
+                    pending.push(libc::pollfd {
+                        fd: socket.as_raw_fd(),
+                        events: libc::POLLOUT,
+                        revents: 0,
+                    });
+                }
+            }
+        }
+        if pending.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as i32;
+        // SAFETY: poll borrows the live sockets for this call.
+        unsafe {
+            libc::poll(pending.as_mut_ptr(), pending.len() as _, timeout);
+        }
+    }
+    for viewer in viewers.iter_mut().filter(|v| v.attached) {
+        if let Some(socket) = viewer.connection.open() {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
     }
 }
 
@@ -2290,6 +2352,7 @@ fn view(
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
     let mut heartbeat = SystemTime::now() + HEARTBEAT_INTERVAL;
+    let mut child_code = 0;
     'relay: loop {
         if status.as_ref().is_some_and(connection::Status::closed) {
             return Ok(());
@@ -2380,10 +2443,37 @@ fn view(
             };
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
-                if tag != Tag::Reply {
+                if matches!(tag, Tag::Snapshot | Tag::Out | Tag::Err) {
                     output.received += payload.len() as u64;
                 }
                 let pieces = match tag {
+                    Tag::Close => {
+                        let close: Close = serde_json::from_slice(&payload)?;
+                        let message = match close.reason {
+                            CloseReason::Finished => None,
+                            CloseReason::Replaced => {
+                                Some("Session owner replaced; reattach by Session.")
+                            }
+                            CloseReason::Retired => {
+                                Some("Session owner retired; resume when needed.")
+                            }
+                        };
+                        if let Some(status) = &status {
+                            status.ended(message)?;
+                        }
+                        if let Some(message) = message {
+                            write_output(
+                                &mut terminal,
+                                2,
+                                format!("\r\n{message}\r\n").as_bytes(),
+                            )?;
+                        }
+                        return if child_code == 0 {
+                            Ok(())
+                        } else {
+                            Err(crate::process::CommandExit(child_code).into())
+                        };
+                    }
                     Tag::Reply => {
                         let reply: Outgoing = serde_json::from_slice(&payload)?;
                         match reply.reply {
@@ -2536,14 +2626,7 @@ fn view(
                             return Ok(());
                         }
                         Event::ChildExited { code } => {
-                            if let Some(status) = &status {
-                                status.ended()?;
-                            }
-                            return if code == 0 {
-                                Ok(())
-                            } else {
-                                Err(crate::process::CommandExit(code).into())
-                            };
+                            child_code = code;
                         }
                         Event::Detached => {
                             // Detached on purpose: an SSH viewer must not read as lost.
@@ -2810,6 +2893,19 @@ pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
     }
 }
 
+/// Ask the current owner to close its viewers before replacement. The caller
+/// retains its existing signal fallback when an owner cannot answer.
+pub(crate) fn replace(id: &LfProcessId) -> Result<()> {
+    let mut socket = UnixStream::connect(endpoint(id)?)?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    send(&mut socket, Request::Replace)?;
+    match receive_reply(&mut socket)? {
+        Reply::Accepted => Ok(()),
+        other => bail!("unexpected replacement reply {other:?}"),
+    }
+}
+
 /// Read the reply on a control connection that carries no output stream.
 fn receive_reply(socket: &mut UnixStream) -> Result<Reply> {
     let mut decoder = Decoder::default();
@@ -3031,6 +3127,40 @@ mod tests {
         CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
+
+    #[test]
+    fn close_is_one_final_frame_after_output_for_every_reason() {
+        use super::{close_viewers, Close, CloseReason};
+        use std::io::Read;
+        for reason in [
+            CloseReason::Replaced,
+            CloseReason::Finished,
+            CloseReason::Retired,
+        ] {
+            let (socket, mut peer) = UnixStream::pair().unwrap();
+            socket.set_nonblocking(true).unwrap();
+            let mut viewer = Viewer::new(socket);
+            viewer.attached = true;
+            // An incomplete terminal escape cannot swallow the close frame.
+            viewer.stream(wire::Tag::Out, b"last\x1b]").unwrap();
+            close_viewers(std::slice::from_mut(&mut viewer), reason);
+            let mut bytes = Vec::new();
+            peer.read_to_end(&mut bytes).unwrap();
+            let mut decoder = wire::Decoder::default();
+            decoder.extend(&bytes);
+            assert_eq!(
+                decoder.next().unwrap(),
+                Some((wire::Tag::Out, b"last\x1b]".to_vec()))
+            );
+            let (tag, payload) = decoder.next().unwrap().unwrap();
+            assert_eq!(tag, wire::Tag::Close);
+            assert_eq!(
+                serde_json::from_slice::<Close>(&payload).unwrap().reason,
+                reason
+            );
+            assert!(decoder.next().unwrap().is_none());
+        }
+    }
 
     #[test]
     fn taking_ownership_fulfills_a_viewers_queued_request() {

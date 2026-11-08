@@ -12,6 +12,7 @@ use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
+use crate::work::task::comment::TaskCommentAuthor;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TaskUpdate {
@@ -27,7 +28,6 @@ struct TaskObservation {
     runs: HashMap<LfProcessId, RunObservation>,
     /// Comment IDs this conversation has heard about. Observations recorded
     /// before comments were reported have none; they baseline on next read.
-    #[serde(default)]
     comments: Option<BTreeSet<String>>,
 }
 
@@ -127,7 +127,6 @@ impl TaskUpdates {
             .unwrap_or_default();
         let mut facts = HashMap::new();
         let mut lines = Vec::new();
-        let mut quiet = false;
         for task in store.session_task_ids(session_id)? {
             let (overview, graphs) = store.task_overview(&task)?;
             let old = previous.get(&task);
@@ -182,16 +181,20 @@ impl TaskUpdates {
             }
             let thread = store.task_comments(&task)?;
             let heard = old.and_then(|observation| observation.comments.as_ref());
-            let arrived = match heard {
-                Some(heard) if !baseline => thread
-                    .comments
-                    .iter()
-                    .filter(|comment| !heard.contains(&comment.id))
-                    .filter(|comment| !written_here(&comment.author, session_id))
-                    .map(|comment| format!("New comment from {}: {}", comment.author, comment.body))
-                    .collect(),
-                _ => Vec::new(),
-            };
+            // A comment this conversation posted is not news to it.
+            let arrived: Vec<String> = heard
+                .map(|heard| {
+                    thread
+                        .comments
+                        .iter()
+                        .filter(|comment| !heard.contains(&comment.id))
+                        .filter(|comment| !written_here(&comment.author, session_id))
+                        .map(|comment| {
+                            format!("New comment from {}: {}", comment.author, comment.body)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             observation.comments = Some(
                 thread
                     .comments
@@ -199,7 +202,6 @@ impl TaskUpdates {
                     .map(|comment| comment.id)
                     .collect(),
             );
-            let comments_changed = heard != observation.comments.as_ref();
             if position_changed || !changes.is_empty() || !arrived.is_empty() {
                 let identifier = store
                     .task(&task)?
@@ -211,19 +213,15 @@ impl TaskUpdates {
                     changes.join(" ")
                 ));
                 lines.extend(arrived);
-            } else if comments_changed && !baseline {
-                // Only this conversation's own comments arrived: remember them
-                // without interrupting it.
-                quiet = true;
             }
             facts.insert(task, observation);
         }
-        if !baseline && lines.is_empty() && !quiet {
+        if !baseline && lines.is_empty() {
             return Ok(None);
         }
         let observation = serde_json::to_value(&facts)?;
         let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&observation)?));
-        if baseline || lines.is_empty() {
+        if baseline {
             store.record_task_update(session_id, &key, "baseline", &observation)?;
             self.candidates.clear();
             return Ok(None);
@@ -233,12 +231,8 @@ impl TaskUpdates {
     }
 }
 
-/// A comment this conversation posted is not news to it.
-fn written_here(author: &crate::work::task::comment::TaskCommentAuthor, session_id: &str) -> bool {
-    matches!(
-        author,
-        crate::work::task::comment::TaskCommentAuthor::Session { session_id: id, .. } if id == session_id
-    )
+fn written_here(author: &TaskCommentAuthor, session_id: &str) -> bool {
+    matches!(author, TaskCommentAuthor::Session { session_id: id, .. } if id == session_id)
 }
 
 fn position_text(position: Option<&TaskGraphPosition>) -> String {
@@ -360,7 +354,7 @@ mod tests {
     use crate::durable::TaskId;
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::comment::TaskCommentAuthor;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, Instant};
 
@@ -715,7 +709,7 @@ mod tests {
         store
             .append_task_comment(
                 task,
-                &crate::work::task::comment::TaskComment {
+                &TaskComment {
                     id: uuid::Uuid::new_v4().to_string(),
                     body: body.into(),
                     author,

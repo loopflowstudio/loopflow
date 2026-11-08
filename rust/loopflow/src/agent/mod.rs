@@ -1420,7 +1420,6 @@ fn _run_agent_once(
         });
     }
     let mut progress = crate::startup::Startup::new(format!("Preparing {harness}"));
-    crate::agent_input_timing::record("harness_prepare_begin", &harness);
     let invocation = match launch.resume_token.as_ref() {
         Some(session_id) => ProviderInvocation::Resume { session_id },
         None => ProviderInvocation::Terminal { session_id: None },

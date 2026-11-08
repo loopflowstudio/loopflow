@@ -2,23 +2,12 @@
 //! a slow launch can be explained afterwards; never readiness or authority.
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const FILE_NAME: &str = "launch-timing.jsonl";
 /// The live file rolls to `.1` past this size, so both stay near 2 MiB.
 const ROLL_BYTES: u64 = 1024 * 1024;
-
-/// `LOOPFLOW_AGENT_INPUT_TRACE` redirects the log for benchmarks, unrotated.
-fn destination() -> (PathBuf, bool) {
-    match std::env::var_os("LOOPFLOW_AGENT_INPUT_TRACE") {
-        Some(path) => (PathBuf::from(path), false),
-        None => (
-            crate::store::lf_home_dir().join("logs").join(FILE_NAME),
-            true,
-        ),
-    }
-}
 
 fn load_average() -> Option<f64> {
     let mut loads = [0f64; 3];
@@ -39,16 +28,23 @@ pub(crate) fn record(phase: &str, subject: &str) {
         "version": env!("CARGO_PKG_VERSION"),
         "load1": load_average(),
     });
-    let (path, rotate) = destination();
     // One small append, with no arguments, prompt, environment or terminal text.
-    // Missing/unwritable diagnostic output must not change a native launch, and
-    // the log never creates a home that previews and reads leave untouched.
-    if rotate && !path.parent().is_some_and(std::path::Path::is_dir) {
-        return;
-    }
-    if rotate && std::fs::metadata(&path).is_ok_and(|meta| meta.len() > ROLL_BYTES) {
-        let _ = std::fs::rename(&path, path.with_extension("jsonl.1"));
-    }
+    // Missing/unwritable diagnostic output must not change a native launch.
+    let path = match std::env::var_os("LOOPFLOW_AGENT_INPUT_TRACE") {
+        // Benchmarks redirect the log, unrotated.
+        Some(path) => PathBuf::from(path),
+        None => {
+            let path = crate::store::lf_home_dir().join("logs").join(FILE_NAME);
+            // The log never creates a home that previews and reads leave untouched.
+            if !path.parent().is_some_and(Path::is_dir) {
+                return;
+            }
+            if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > ROLL_BYTES) {
+                let _ = std::fs::rename(&path, path.with_extension("jsonl.1"));
+            }
+            path
+        }
+    };
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let line = format!("{event}\n");
         let _ = file.write_all(line.as_bytes());
@@ -57,9 +53,14 @@ pub(crate) fn record(phase: &str, subject: &str) {
 
 #[cfg(test)]
 mod tests {
-    fn with_env<T>(name: &str, value: &std::path::Path, run: impl FnOnce() -> T) -> T {
+    use std::ffi::OsStr;
+
+    fn with_env<T>(name: &str, value: Option<&OsStr>, run: impl FnOnce() -> T) -> T {
         let previous = std::env::var_os(name);
-        std::env::set_var(name, value);
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
         let result = run();
         match previous {
             Some(value) => std::env::set_var(name, value),
@@ -75,7 +76,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("events.ndjson");
-        with_env("LOOPFLOW_AGENT_INPUT_TRACE", &path, || {
+        with_env("LOOPFLOW_AGENT_INPUT_TRACE", Some(path.as_os_str()), || {
             super::record("launch_lock_acquired", "session-fixture")
         });
         let event: serde_json::Value =
@@ -94,24 +95,21 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let home = tempfile::tempdir().unwrap();
         let log = home.path().join("logs").join(super::FILE_NAME);
-        let trace = std::env::var_os("LOOPFLOW_AGENT_INPUT_TRACE");
-        std::env::remove_var("LOOPFLOW_AGENT_INPUT_TRACE");
-        with_env("LF_HOME", home.path(), || {
-            super::record("connect_begin", "no logs directory yet");
-            assert!(!log.parent().unwrap().exists());
-            std::fs::create_dir(log.parent().unwrap()).unwrap();
-            super::record("connect_begin", "first");
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(&log)
-                .unwrap()
-                .set_len(super::ROLL_BYTES + 1)
-                .unwrap();
-            super::record("connect_begin", "second");
+        with_env("LOOPFLOW_AGENT_INPUT_TRACE", None, || {
+            with_env("LF_HOME", Some(home.path().as_os_str()), || {
+                super::record("connect_begin", "no logs directory yet");
+                assert!(!log.parent().unwrap().exists());
+                std::fs::create_dir(log.parent().unwrap()).unwrap();
+                super::record("connect_begin", "first");
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&log)
+                    .unwrap()
+                    .set_len(super::ROLL_BYTES + 1)
+                    .unwrap();
+                super::record("connect_begin", "second");
+            })
         });
-        if let Some(trace) = trace {
-            std::env::set_var("LOOPFLOW_AGENT_INPUT_TRACE", trace);
-        }
         assert!(log.with_extension("jsonl.1").exists());
         let live = std::fs::read_to_string(&log).unwrap();
         assert_eq!(live.lines().count(), 1);

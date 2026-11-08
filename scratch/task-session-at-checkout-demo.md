@@ -42,9 +42,9 @@ Default agent on this Machine: `claude:haiku` (set with
   `a3a4a8ce-f4e8-4bb2-9a44-551c8cbfdd2e`), claude PID 29983 (agent process
   `0a8fd464-56b1-4053-9c6b-264c5be0f410`), task-updates observer PID 31991.
   With no Graph running it is expected to end after the 2-minute detached limit.
-- `harness_prepare_begin` did not appear for the interactive launch; that phase is
-  on the non-native harness path only. Interpretation: the native path's phases
-  (`prompt_*`, `provider_exec_begin`) already bracket it.
+- `harness_prepare_begin` did not appear for the interactive launch; that phase
+  was on the non-native harness path only, so compress removed it. The native
+  path's phases (`prompt_*`, `provider_exec_begin`) bracket the same span.
 - `lf session list` shows the Task conversation under a "Repository" column label.
   Unclear whether that is the scope column or a mislabel.
 
@@ -53,10 +53,31 @@ Default agent on this Machine: `claude:haiku` (set with
 - `lf resume` reattaching to a background conversation held by a running Graph.
 - Comment delivery into a live conversation.
 - `cargo clippy --all-targets -- -D warnings` and the non-`integration` test
-  binaries (not run). `integration`: 532 passed, 2 failed
-  (`machine_commands::task_move_stops_a_live_graph`,
-  `settings_launch_tests::session_and_resume_choices_do_not_select_existing_or_new_task_workers`),
-  both caused by the background start; decision pending on the round 5 results page.
+  binaries (not run before compress; see the compress record below).
+
+## Compress (2026-11-07)
+
+`integration` had 2 failures from the background start, both fixed:
+
+- `settings_launch_tests::session_and_resume_choices_do_not_select_existing_or_new_task_workers`:
+  the stand-in claude ran `lf task run` on every launch, so each background
+  conversation (inheriting `SETTINGS_TASK` through `task run` → checkout) reran
+  the Graph: "Task 2f77da is running graph proof from review". The stand-in now
+  acts only when `SETTINGS_TASK` is set and strips it from the commands it runs.
+- `machine_commands::task_move_stops_a_live_graph`: the fixture's codex stand-in
+  exits 91, so the background launch failed 2 s in ("Codex app-server
+  disconnected before auth completed"); launcher and owner exited, but the
+  AgentProcess row stayed `reserved` with no PID and `lf task move` refused
+  forever with "AgentProcess identity is unknown; resume was not started".
+  Fix in `journal::agent_evidence`: an unidentified agent whose launcher ended is
+  dead (only the launcher records identity). `task move` also waits up to 20 s
+  for a conversation still launching before stopping it.
+
+Checks: `cargo clippy --all-targets -- -D warnings` clean; `cargo fmt` applied;
+lib tests `agent_input_timing::`, `task_updates::`, `sessions::background_task_conversation_tests::`,
+`harness::agent_process::tests::`, `journal::tests::` pass as modules. Pre-existing,
+not from this branch: `journal::tests::a_detached_body_keeps_its_trace_after_its_launcher_is_forgotten`
+fails when run alone (also with the journal edit reverted) and passes with its module.
 
 ## Human observations
 

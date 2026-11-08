@@ -805,10 +805,14 @@ if '--version' in sys.argv:
 args = sys.argv[1:]
 assert '--input-format' not in args, 'Task worker wrongly selected Claude'
 assert not os.environ.get('LF_AGENT_OVERRIDE'), 'Session choice escaped to child policy'
+if 'SETTINGS_TASK' not in os.environ:
+    sys.exit(0)  # a Task conversation checkout started in the background, not a launch under test
 home = Path(os.environ['LF_HOME'])
 db = sqlite3.connect(home / 'loopflow.db')
 def run(*args):
-    result = subprocess.run([os.environ['LF_BIN'], *args], stdin=subprocess.DEVNULL,
+    # Conversations the commands below start inherit this environment; keep them quiet.
+    env = {name: value for name, value in os.environ.items() if name != 'SETTINGS_TASK'}
+    result = subprocess.run([os.environ['LF_BIN'], *args], stdin=subprocess.DEVNULL, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
     if result.returncode:
         raise RuntimeError(str(args) + result.stdout + result.stderr)

@@ -137,7 +137,7 @@ pub(crate) const BACKGROUND_TASK_CONVERSATIONS: usize = 16;
 /// resume` reattaches instead of creating it. Best-effort: a failure is logged
 /// and `lf resume` creates the conversation as before.
 pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::work::task::Task) {
-    let outcome = match start_in_background(store, task).await {
+    let (phase, subject) = match start_in_background(store, task).await {
         Ok(Some(session)) => ("background_start", session),
         Ok(None) => ("background_skip", task.identifier.clone()),
         Err(error) => {
@@ -145,7 +145,7 @@ pub(crate) async fn start_task_conversation(store: &SharedStore, task: &crate::w
             ("background_failed", task.identifier.clone())
         }
     };
-    crate::agent_input_timing::record(outcome.0, &outcome.1);
+    crate::agent_input_timing::record(phase, &subject);
 }
 
 async fn start_in_background(

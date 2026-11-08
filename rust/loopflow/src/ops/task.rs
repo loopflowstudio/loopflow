@@ -1978,8 +1978,8 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
 /// One Task's tracker sync beside a conversation that just started: pending
 /// writes out, then comments made elsewhere in. Nothing else in the repository.
 pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
-    let outbound = task_sync(issue, false).map(|_| ());
-    block_on_task(async {
+    let outbound = task_sync(issue, false);
+    let inbound = block_on_task(async {
         let store = task_store().await?;
         let task = store
             .get_task_by_issue(issue)
@@ -1987,8 +1987,8 @@ pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         super::linear_observe::refresh_task_comments(&store, &task).await
-    })?;
-    outbound
+    });
+    outbound.and(inbound)
 }
 
 pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {

@@ -1239,6 +1239,15 @@ pub(crate) fn agent_evidence(
     let Ok(Some(record)) = store.agent_process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
+    // Only its launcher records an agent's identity, before the provider runs.
+    // A launcher that ended first never started it.
+    if record.pid.is_none() && record.completed_at.is_none() {
+        if let Some(launcher) = &record.parent_lf_process_id {
+            if lf_evidence(store, launcher) == ProcessIdentityEvidence::Dead {
+                return ProcessIdentityEvidence::Dead;
+            }
+        }
+    }
     recorded_process_evidence(
         &crate::process::ProcessEntry::Agent(record),
         &Ok(None),

@@ -246,7 +246,9 @@ fn a_limit_lf_cannot_record_ends_the_hook_cleanly_and_reaches_the_log() {
     hook.stdin
         .take()
         .unwrap()
-        .write_all(br#"{"error":"rate_limit"}"#)
+        .write_all(
+            br#"{"error":"rate_limit","last_assistant_message":"You've hit your weekly limit \u00b7 resets Wed 12:00"}"#,
+        )
         .unwrap();
     success(hook.wait_with_output().unwrap());
 

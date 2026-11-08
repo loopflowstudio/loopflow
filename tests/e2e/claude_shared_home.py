@@ -53,18 +53,16 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST
 
 
-def _login(name: str) -> str:
-    return json.dumps(
-        {
-            "claudeAiOauth": {
-                "accessToken": f"sk-ant-oat01-fixture-{name}",
-                "refreshToken": f"sk-ant-ort01-fixture-{name}",
-                "expiresAt": 4102444800000,
-                "scopes": ["user:inference", "user:profile"],
-                "subscriptionType": "max",
-            }
+def _login(name: str) -> dict:
+    return {
+        "claudeAiOauth": {
+            "accessToken": f"sk-ant-oat01-fixture-{name}",
+            "refreshToken": f"sk-ant-ort01-fixture-{name}",
+            "expiresAt": 4102444800000,
+            "scopes": ["user:inference", "user:profile"],
+            "subscriptionType": "max",
         }
-    )
+    }
 
 
 def _bearer(name: str) -> str:
@@ -75,13 +73,13 @@ def _keychain_service(native: Path) -> str:
     return "Claude Code-credentials-" + hashlib.sha256(str(native).encode()).hexdigest()[:8]
 
 
-def _keychain_login(native: Path, account: str) -> str | None:
+def _keychain_login(native: Path, account: str) -> dict | None:
     found = subprocess.run(
         ["security", "find-generic-password", "-s", _keychain_service(native), "-a", account, "-w"],
         capture_output=True,
         text=True,
     )
-    return found.stdout.rstrip("\n") if found.returncode == 0 else None
+    return json.loads(found.stdout) if found.returncode == 0 else None
 
 
 def _forget_native_login(native: Path) -> None:
@@ -102,7 +100,7 @@ def _forget_native_login(native: Path) -> None:
 
 
 def _seed_keychain_login(native: Path, account: str, name: str) -> None:
-    credential = _login(name)
+    credential = json.dumps(_login(name))
     subprocess.run(
         ["security", "-i"],
         input=(
@@ -113,7 +111,7 @@ def _seed_keychain_login(native: Path, account: str, name: str) -> None:
         capture_output=True,
         check=True,
     )
-    assert _keychain_login(native, account) == credential
+    assert _keychain_login(native, account) == _login(name)
 
 
 def _probe(claude: Path, directory: Path) -> Path:
@@ -178,13 +176,19 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
         assert not check or done.returncode == 0, (args, done.stdout, done.stderr)
         return done
 
+    def assert_login(name: str) -> None:
+        expected = _login(name)
+        if MACOS:
+            for account in ("fixture-current", "fixture-legacy"):
+                assert _keychain_login(native, account) == expected, (
+                    f"{account} did not follow switch to {name}"
+                )
+        else:
+            assert json.loads((native / ".credentials.json").read_text()) == expected
+
     def use(name: str) -> str:
         output = lf("account", "use", f"claude={name}@example.com").stdout
-        if MACOS:
-            # Claude reads its USER item; service-only lookup order can change.
-            assert _keychain_login(native, "fixture-current") == _login(name)
-        else:
-            assert (native / ".credentials.json").read_text() == _login(name)
+        assert_login(name)
         return output
 
     def next_claude() -> dict:
@@ -228,7 +232,8 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
         for name in ("first", "second"):
             profile = profiles / name
             profile.mkdir(parents=True)
-            (profile / ".credentials.json").write_text(_login(name))
+            credential = json.dumps(_login(name))
+            (profile / ".credentials.json").write_text(credential)
             database.execute(
                 "INSERT INTO provider_accounts(provider,account_id,home,"
                 "credential_state,created_at,updated_at,observed_email,"
@@ -241,7 +246,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
                     now,
                     f"{name}@example.com",
                     name,
-                    hashlib.sha256(_login(name).encode()).hexdigest(),
+                    hashlib.sha256(credential.encode()).hexdigest(),
                 ),
             )
     for name in ("first", "second"):
@@ -253,7 +258,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
         )
 
     if MACOS:
-        # The service-only lookup finds the older item; Claude names its USER.
+        # Start with an older legacy item; every switch must update both items.
         _seed_keychain_login(native, "fixture-legacy", "first")
         _seed_keychain_login(native, "fixture-current", "first")
 
@@ -261,20 +266,18 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
     use("first")
     assert plain_claude() == _bearer("first")
     use("second")
-    if MACOS:
-        assert _keychain_login(native, "fixture-legacy") == _login("second")
-        results["two_keychain_items_follow_switch"] = True
     assert plain_claude() == _bearer("second")
     use("first")
     assert plain_claude() == _bearer("first")
     assert "already" in use("first")
+    if MACOS:
+        results["two_keychain_items_follow_every_switch"] = True
     results["store"] = "keychain" if MACOS else "file"
     results["plain_claude_follows_switch"] = True
 
     if MACOS:
         _seed_keychain_login(native, "fixture-third", "first")
         use("second")
-        assert _keychain_login(native, "fixture-legacy") == _login("second")
         assert plain_claude() == _bearer("second")
         results["third_keychain_item_updated"] = _keychain_login(native, "fixture-third") == _login(
             "second"
@@ -307,6 +310,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
     # Naming another account moves the home, and plain Claude with it.
     _, sent = converse("--account", "claude=second@example.com")
     assert sent == _bearer("second"), sent
+    assert_login("second")
     assert plain_claude() == _bearer("second")
     results["launch_switches_home"] = True
 

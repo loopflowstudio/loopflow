@@ -2,74 +2,121 @@
 
 November 8, 2026. Direction in the recovery conversation: "can we get that installed so that loopflow is routing properly again" and "you can do 811".
 
-## Observed before validation
+## Outcome and remaining work
 
-- Installed lf began at 0.15.1+e3c888924, before LOO-747's merge 90a82635fc. `lf install` is downloading the dev package. Subsequent invocations now report 0.15.2+dad2621c1, which contains that merge; the original installer is still downloading its app artifact.
-- The repository-local `account.codex` value was `[manabot-eng]`, overriding the global pool. `lf unset account.codex` removed it from `/Users/jack/src/loopflow/lf.config.local.yaml`.
-- Fresh provider reads accepted jack@loopflow.studio (69% weekly used), loopflow-eng@loopflow.studio (68%), and jackstah@gmail.com (0%). manabot-eng was unavailable/missing, with 99% in its prior usage reading.
-- `lf account next --repo /Users/jack/src/loopflow.loo-811-check-usage-limit --json` now selects jack@loopflow.studio: "31% left before Wed 08:04: the most to spend in the time left".
-- Both Claude logins reported their Fable windows at 100%; account-wide windows were 98% and 80%. `lf account next` reported Claude blocked; model-specific observations follow below.
+Validate LOO-747's recovery against installed lf and native clients with fake or
+idle logins, without paid inference, manufactured exhaustion, credential output
+or disruption to open conversations. Fixture success does not complete the Task.
 
-## Remaining
+Still unobserved:
 
-Carry out this Task's original brief against installed lf and real or idle logins, spending no paid quota on validation probes. Do not exhaust an account to manufacture a limit. Do not print or directly read raw credentials; use supported provider operations and metadata. Avoid disrupting active conversations. Record each actual check and any claim that remains unobserved.
-
-If verification finds a code defect, repair it in this checkout and publish for review; merging has not been requested. The parent conversation is finishing the install. Leave the Competitor architecture research Session alone; it is open in Rex for continued discussion.
-
-## Validation scope (2026-11-08)
-
-The existing native-Claude shared-home fixture covers two real macOS Keychain
-items, a third item, and a held login overriding a repository order. Its local
-endpoint and synthetic credentials establish client behavior without paid quota.
-No runtime change is justified by the observations so far.
-
-Delete — do not maintain: service-only single-item cleanup and the retired
-`account claude use` spelling, replaced in the fixture. The fixture's ambiguous
-`_native_login` reader is replaced by named Keychain reads and a direct file read
-off macOS; each `use` checks the selected USER item. The E2E README owns native
-fixture instructions; the Rust README links there. No deletion remains.
-
-Installed observations: `lf account claude --json` accepted both managed logins
-on November 8 (98%/80% account-wide; Fable 100% on both). `lf session list --all
---on claude --limit 0 --json` reported 22 Opus Sessions; the same selector with
-`--blocked --on claude:opus` returned none. There were no Sonnet Sessions.
-`lf account next -a claude:sonnet --json` warned "This command does not start an
-agent; --agent has no effect." Its model-unspecified Claude result was blocked;
-that does not establish that Sonnet launches are blocked.
-
-Native observation: lf 0.15.2+dad2621c1 and Claude 2.1.319 changed both the
-USER-named item and the older service-only item. A third item retained the
-previous synthetic login, but plain Claude sent the selected login. This used a
-temporary scoped service in the real Keychain, not the production unsuffixed
-service. The fixture records the third item's state without requiring stale
-credentials as product behavior. The first attempt stopped at the obsolete
-`account claude use` syntax before launching Claude; cleanup succeeded.
-
-Compression reruns on November 8 exposed a narrower two-item guarantee: after
-first → second → first, `fixture-legacy` retained the second login while the
-USER item and plain Claude followed first. Three runs with an added assertion
-requiring both items after every switch failed at that return switch; parsed
-JSON comparison still failed, with only accessToken/refreshToken differing.
-The first switch's two-item check remains; subsequent switches check the USER
-item. This does not establish that every item follows every switch. The writer
-updates USER and the first service-only match, which can be USER itself.
-
-Still unobserved, requiring an isolated real-login environment or a naturally
-occurring failure:
-
-- A running Codex refresh after switching the shared home, including whether it
-  rewrites auth.json or loses the other login's rotated token.
-- A no-model spent line paired with account-wide usage below 100%. Current
-  polls alone establish neither the line nor the suspected retry loop.
+- A running Codex refresh after switching the shared home: whether it rewrites
+  auth.json and loses the other login's rotated refresh token.
+- Claude's no-model "You've hit your limit" line paired with every account-wide
+  usage window below 100%, and whether clearing that cooldown repeatedly selects
+  the spent login until the attempt budget runs out. Polls alone establish neither.
 - `resume --account` for running Codex and Claude, `session move`, and running
-  Claude's credential reload. The native fixture starts a fresh Claude each time.
-- Whether refreshing Claude invalidates an earlier access token used by a rental.
+  Claude's credential reload. Check Session identity, retained history and continued
+  input alongside account selection. The native fixture starts fresh Claude clients.
+- Whether refreshing Claude invalidates earlier access tokens used by a rental.
 
-No suitable isolated real-login environment was supplied. Shared production
-logins have open conversations; switching or forcing refresh there conflicts
-with the nondisruption constraint. LOO-811's full acceptance remains open.
-Gate owns the affected architecture check; demo/review owns these live checks.
+The current iteration retains the Task's two-item requirement. Its direction is:
+"implement a focused repair for the existing two-item expectation, with regression
+coverage where lookup order changes and both items must follow every switch."
+The earlier concept-review alternatives do not select a narrower or broader promise.
 
-Check: `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf /Applications/Loopflow.app/Contents/MacOS/lf --output .lf/tmp/loo-811-claude-shared` with inherited LF_* unset and stdin closed — passed November 8; two-item updates, three-item client selection, hold/order/release and shared launches passed; third item unchanged. Cleanup returned successfully and no fixture processes remained. Ruff format/check and `git diff --check` passed.
+No isolated real-login environment was available. Shared production logins had open
+conversations. Demo/review owns the remaining live checks above, using disposable
+or idle logins or a naturally occurring failure. Delivery remains review-only.
 
-Check: same native command with `--output .lf/tmp/loo-811-compress < /dev/null` — passed November 8 after simplification; all eight result fields matched the earlier run, including the unchanged third item. Ruff check/format and `git diff --check` passed; gate owns affected suites, demo owns the remaining live checks.
+## Two-item repair — November 8
+
+Keep activation/save-back, refresh locks, service selection and stdin credential
+writes. Query only metadata for the selected Keychain service; select USER and one
+distinct existing account. With two items this is unambiguous. With more, choose
+the lexically first non-USER account for stable selection independent of lookup
+order; there is no service-wide synchronization. Verify both writes before success.
+No new account concept, persistence or schema is needed. Native metadata search
+uses the existing transitive security-framework dependency directly; password
+reads/writes keep using security(1), retaining its Keychain access behavior.
+
+Delete — do not maintain (all removed; no remaining targets):
+- The service-only single-account metadata lookup and text parser: replace with a
+  service-scoped attributes-only query; preserve default-home unsuffixed fallback.
+- The fixture's fixed lookup order and first-switch-only legacy assertion: replace
+  with alternating lookup order and both-item checks after every switch.
+- The fake security command's metadata output, now unused by the native query.
+
+Compression keeps the two selected items in one reusable iterator for writing and
+verification. Native fixture logins are decoded objects, serialized only for
+storage; every comparison, including the separate third-item observation, ignores
+JSON formatting. The profile and its digest use the same serialized bytes.
+
+Checks on November 8 (inherited LF_* unset):
+- `cargo test -p loopflow --lib provider_auth::tests::keychain_switch_ < /dev/null` — 3 passed; linker warned about large `__eh_frame`.
+- `cargo build -p loopflow --bin lf < /dev/null` — passed.
+- `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf target/debug/lf --output .lf/tmp/loo-811-two-item-repair < /dev/null` — passed with Claude 2.1.319; both items followed every switch, plain Claude followed, hold/order and shared launches passed; third item unchanged. Cleanup completed.
+- `uv run ruff check tests/e2e/claude_shared_home.py` / `uv run ruff format --check tests/e2e/claude_shared_home.py` / `git diff --check` — passed after formatting one long line; native result reused for that whitespace-only change.
+
+Candidate SHA256: `93053e164ac5e2fd4bd4d78df95243f84801a6b93ceb185ecb7e4dcdd79e20c3`.
+Native receipt: `.lf/tmp/loo-811-two-item-repair/results.json`. This proves the
+candidate with synthetic logins, not installed repair or live token rotation.
+Gate owns affected provider_auth, provider_account::activation and account command
+suites plus clippy. Demo/review retains the running-client and refresh checks above.
+
+Compression checks on November 8 (inherited LF_* unset):
+- `cargo test -p loopflow --lib provider_auth::tests::keychain_switch_ < /dev/null` — 3 passed; same large `__eh_frame` linker warning.
+- `cargo build -p loopflow --bin lf < /dev/null` — passed.
+- `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf target/debug/lf --output .lf/tmp/loo-811-two-item-compress < /dev/null` — passed; all eight result fields match the repair run, including both items following every switch and the third unchanged. Cleanup completed.
+- `cargo fmt --check`, Ruff check/format, `git diff --check` — passed; gate retains affected suites and clippy.
+- `lf context` — memory and scratch remain below both token and byte limits.
+
+Compressed candidate SHA256: `8f5c270b27973262028fa1050ab80385fae9799fdc118aebc8e6d9b48376d4fa`.
+
+Proposed Wave memory correction: two-item scope is retained and candidate native
+switching now passes; the historical return-switch failure and all remaining live
+acceptance stay recorded. Wave files were left as inherited in this step.
+
+Historical concept-review alternatives and HTML are retained as review history;
+the repair direction supersedes their "Blocked" status. Earlier full text is in
+`.lf/prompts/20261108-092820-a1268f37-aaa0-49fe-b5c2-e55569938be3-Wds4op-summary.md`.
+
+## Native observations — November 8
+
+Installed lf 0.15.2+dad2621c1 and Claude 2.1.319 passed the shared-home fixture
+using synthetic logins, a local endpoint and a temporary scoped service in the
+real macOS Keychain. Fresh Claude followed the USER item through switches;
+hold/order/release and shared launches passed. The production unsuffixed service
+was not exercised.
+
+Both USER and legacy items changed on the first switch. After first → second →
+first, the legacy item retained second while USER and plain Claude followed first.
+Three compression runs requiring both items after every switch failed there;
+parsed JSON comparison still differed only in accessToken/refreshToken. The pre-repair writer
+updated USER and the first service-only match, which could be USER itself. A third
+item also retained the earlier login while plain Claude used the selected one.
+Staleness is an observation, not required product behavior.
+
+The first attempt stopped at obsolete `account claude use` syntax before launching
+Claude; cleanup succeeded. The repaired fixture and its simplified rerun passed;
+each cleanup returned successfully with no fixture processes left running.
+
+Check: `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf /Applications/Loopflow.app/Contents/MacOS/lf --output .lf/tmp/loo-811-compress < /dev/null` with inherited LF_* unset — passed November 8; all eight fields matched the earlier `.lf/tmp/loo-811-claude-shared` run, including third-item unchanged. This earlier result checked the legacy item only on the first switch; it does not substitute for the stronger candidate check above.
+
+## Routing observations — November 8
+
+At recovery start, installed lf reported 0.15.1+e3c888924; subsequent calls reported
+0.15.2+dad2621c1 containing LOO-747. The app artifact download was still running at
+that observation; this does not establish completed installation of the pair.
+Removing repository-local `account.codex: [manabot-eng]` restored the global pool.
+Provider reads accepted jack@loopflow.studio (69% weekly used),
+loopflow-eng@loopflow.studio (68%) and jackstah@gmail.com (0%); manabot-eng was
+unavailable/missing with 99% in its prior reading. `lf account next` selected
+jack@loopflow.studio: "31% left before Wed 08:04: the most to spend in the time left".
+
+Claude reads accepted both managed logins (98%/80% account-wide; Fable 100% on
+both). Session inventory reported 22 Opus Sessions, none under
+`--blocked --on claude:opus`, and no Sonnet Sessions. `lf account next -a
+claude:sonnet --json` warned "This command does not start an agent; --agent has no
+effect." Its model-unspecified blocked result does not establish blocked Sonnet
+launches.

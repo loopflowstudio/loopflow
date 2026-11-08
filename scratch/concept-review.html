@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-811 · Recovery concepts</title>
+<style>
+  :root { color-scheme: light dark; --ink: #202b31; --paper: #faf9f5; --line: #9badae; --accent: #735322; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 850px; margin: auto; padding: 28px 24px 40px; }
+  header { font-size: 12px; overflow-wrap: anywhere; }
+  h1 { font-size: clamp(25px, 4vw, 34px); line-height: 1.15; margin: 22px 0 12px; }
+  h2 { font-size: 18px; margin: 23px 0 8px; }
+  p { margin: 9px 0; }
+  .decision { border-left: 3px solid var(--accent); padding-left: 15px; }
+  code { font-size: .88em; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  ol { padding-left: 22px; }
+  li p { margin: 6px 0; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e7e9e5; --paper: #182126; --line: #617276; --accent: #e6bd7c; } }
+  @media (max-width: 560px) { main { padding: 20px 16px; } table, tbody, tr, td { display: block; } thead { display: none; } tr { margin-bottom: 12px; } td { border: 0; padding: 2px 0; } td:first-child { font-weight: 600; } }
+</style>
+<main>
+  <header>LOO-811 · concept-review · November 8, 2026<br>
+    Sources: scratch/live-recovery.md; docs/subscriptions.md; tests/e2e/claude_shared_home.py;
+    provider_auth/mod.rs; provider_account.rs; provider_account/activation.rs; engine/account.rs</header>
+  <h1>What must follow a login switch?</h1>
+  <div class="decision">
+    <p><strong>Historical review · superseded by two-item repair direction.</strong> Fresh Claude follows the selected login.
+      A legacy Keychain item can retain the previous one. The current iteration retains USER plus one legacy item after every switch; see live-recovery.md.</p>
+  </div>
+  <h2>Existing interaction → concepts → APIs</h2>
+  <table>
+    <thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
+    <tbody>
+      <tr><td><code>lf account use claude=work@</code></td><td>Machine login + hold</td><td><code>engine::account::activate</code> → <code>activation::activate</code> + <code>hold::hold</code></td></tr>
+      <tr><td><code>lf account use auto</code></td><td>Release hold; route on launch</td><td>Account command → <code>hold::release</code></td></tr>
+      <tr><td><code>lf --account codex=work@ resume &lt;session&gt;</code></td><td>Same conversation, another login</td><td>Resume restarts Codex; Claude switches and attaches</td></tr>
+      <tr><td>A step reaches its limit</td><td>Account/model capacity; retry or wait</td><td><code>record_stated_limit</code> → <code>save_polled_usage</code> → routing</td></tr>
+    </tbody>
+  </table>
+  <h2>Before / proposed after</h2>
+  <p><strong>Observed:</strong> A → B updates both items. B → A updates USER; legacy stays B.
+    Plain Claude sends A. The third item can also remain stale.</p>
+  <p><strong>Proposed, pending choice:</strong> keep the same switch command and define its compatibility promise.
+    No new account concept, table or lifecycle. A Keychain item is a storage address, not another provider login.</p>
+  <p><strong>Draft usage:</strong> “Switch once with <code>lf account use claude=work@</code>.
+    Plain Claude uses that login; running Claude picks it up on its next request.”
+    Running-client behavior remains unverified here.</p>
+  <h2>Recovery must keep the conversation</h2>
+  <p>Save rotated credentials before switching. Keep Session identity, history and input working.
+    A limit may change the login; explicit models stay fixed and completed Graph steps stay done.</p>
+  <p>Still unobserved: old Codex refresh overwriting the new login; a no-model spent line contradicted by a usage poll;
+    live resume/move/reload; and Claude refresh invalidating a rental token.
+    Native fixtures do not settle these. Disposable or idle real logins are still needed.</p>
+  <h2>Decision for the next step</h2>
+  <ol>
+    <li>Which items must agree after <strong>every A → B → A switch</strong>?
+      <p><strong>1a.</strong> Current Claude’s native item. Older items may differ; narrows the original expectation.</p>
+      <p><strong>1b.</strong> USER and the supported legacy item. Keeps the two-item expectation; identify that legacy item when several exist.</p>
+      <p><strong>1c.</strong> Every existing item in the service. Expands scope; needs enumeration and update behavior.</p>
+    </li>
+  </ol>
+</main>
+</html>

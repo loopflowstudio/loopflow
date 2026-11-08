@@ -96,8 +96,11 @@ Keychain must be available: the fixture creates items under a service unique to
 its temporary directory and deletes those exact items afterwards.
 
 Checks plain Claude after switches, shared-home launches, a held login overriding
-a repository order, and two Keychain items receiving the first switch. With a third
-item, it records whether that item changed and checks which login Claude sends.
+a repository order, and USER plus the legacy Keychain item following every switch,
+including A → B → A and a launch selecting another login. With a third item, it
+records whether that item changed separately and checks which login Claude sends.
+The writer updates USER and one distinct item (first by account name when several
+exist); it does not synchronize the whole service.
 This does not exercise OAuth rotation, an already-running Claude reloading its
 login, or `resume --account` and `session move` on live conversations.
 

@@ -20,36 +20,38 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (c0b373, reconciled 2026-11-07)
+## Limit recovery (LOO-747/811, reconciled 2026-11-08)
 
-c0b373 (PR #1828): work moves on when an account or model runs out.
-`provider_rate_limited` types the failure. Limits keep the
-provider's window name and scope; a model-suffixed window cools one model.
-Every launch takes the login with the most weekly quota left per hour until
-reset. A Graph step recovers inside its own Process (no step replays): another
-account carrying its thread, another model (bare harness only), the next
-`default_agent` provider, then a wall-clock wait. An explicit `harness:model`
-changes accounts only. `lf task run` restarts at a step that died waiting;
-`restarts_by_itself` decides sweep and status. Running Claude re-reads its
-login only on a `.credentials.json` mtime change (2.1.318), so `activate`
-touches it. One selector (`--blocked`, `--on`) serves `session list` and
-`session move -a`; `lf account pause` on the active login switches away, and
-`lf account use` holds, over any order, until that login is full or `use auto`.
-`lf resume --account` restarts a running Codex on another login; a running
-Claude's login switches, then it attaches. Busy
-Sessions move at their Stop hook; moves never write preferences; the repo pins
-no provider.
+LOO-747 (PR #1828, merge `90a82635fc`) recovers within the Graph step's
+Process without replaying done steps. Explicit models change accounts only;
+bare harnesses may fall back across models/providers, then wait by wall clock.
+Holds override scoped order until full or `use auto`. One shared home
+per provider means a login switch affects every open Session on that Machine.
 
-One shared home and login per provider per Machine, no isolation; a login
-switch moves (and reports) every open Session of that provider. Remote logins
-are fresh; rentals get laptop-refreshed Claude access tokens (~8h), resent
-every 2h by `lf install schedule`; no long-lived tokens. Lessons: a thread
-without a transcript gets a seeded one; provider words cool an account only on
-a failed exit; the pin follows the real launch. Claude's `StopFailure` calls
-every 429 `rate_limit`: only the displayed line tells spent quota and names its
-model; a usage poll then supplies the reset. Jack Heart, November 7: overage
-cooling and unbounded waits stay as built. Open: prompt-cache cost of a switch,
-LOO-435.
+Claude 2.1.318 reloads on `.credentials.json` mtime; activation touches it.
+Source restarts running Codex for `resume --account`, switches Claude before
+attaching, and defers busy Session moves to Stop. These running-client paths
+remain unobserved in LOO-811. Rentals receive laptop-refreshed Claude access
+tokens (~8h), resent every 2h; refresh invalidation of earlier tokens is unknown.
+
+Lessons: a thread without a transcript needs a seeded one; only failed-exit
+provider words cool accounts. Claude StopFailure calls every 429 `rate_limit`;
+the displayed line distinguishes spent quota/model, then polling supplies reset.
+A no-model spent line with every account-wide window below 100% could clear its
+own cooldown; live occurrence/retry remains unobserved. November 7 direction
+kept overage cooling and unbounded waits. Prompt-cache switch cost and LOO-435
+remain open. Earlier detail: `d4941f045600750beffbbfc73934bd4bbf9abfbb:.lf/wave/infrastructure/MEMORY.md`.
+
+November 8 native check: installed lf 0.15.2+dad2621c1 / Claude 2.1.319,
+synthetic logins, local endpoint and temporary Keychain service. Fresh Claude
+followed USER through switches; hold/order/release passed. Both items changed
+on the first switch, but three stronger reruns left the legacy item stale on
+return. Service-only lookup can find USER itself; no all-items guarantee follows.
+The third item stayed stale while Claude selected USER. No production unsuffixed
+service, running-client reload or provider token rotation was exercised.
+Release's installation lesson applies: client/fixture success cannot establish
+those live claims. Shared production conversations prevent nondisruptive refresh
+probes; LOO-811 retains its full acceptance and the two-item compatibility question.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

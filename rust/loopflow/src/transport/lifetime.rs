@@ -2,7 +2,8 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn, pending request, running Graph or headless Run). Completed
+//! holding it (a turn, pending request, running Graph, a Task conversation's
+//! running Task Graph, or a headless Run). Completed
 //! Task retirement can also end eligible owners after its absence grace. Desktop
 //! shells use Close and retirement policy instead of idle-agent ending.
 //! A removed, rebuilt or superseded lf executable leaves its owner serving;
@@ -96,7 +97,7 @@ impl Ending {
                 notice: Some("Shell closed".into()),
             }));
         }
-        if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
+        if !self.may_end(activity, input_queued) || store.idle_retention(owner)?.is_some() {
             return Ok(None);
         }
         if owner_retiring(&store, owner)? {
@@ -256,7 +257,7 @@ fn watch(
         let Some(retention) = report_result(
             &mut retention_failure,
             "Session retention, retrying",
-            store.owner_retention(owner),
+            store.idle_retention(owner),
         ) else {
             continue;
         };

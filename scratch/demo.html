@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Conversation Demo</title>
+<style>
+:root { --bg:#fbfaf7; --ink:#1d1c1a; --muted:#6b675f; --line:#e2ded5; --code:#f1eee7; --accent:#2f5d8a; --warn:#8a4b12; }
+@media (prefers-color-scheme: dark) { :root { --bg:#171716; --ink:#ebe8e1; --muted:#a19c92; --line:#34322e; --code:#23221f; --accent:#8cb4dd; --warn:#e0a46b; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width:760px; margin:0 auto; padding:40px 16px 80px; }
+h1 { font-size:26px; margin:0 0 6px; }
+h2 { font-size:19px; margin:44px 0 10px; }
+.meta { color:var(--muted); font-size:14px; }
+.meta code { font-size:13px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px; }
+pre { background:var(--code); padding:12px 14px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; margin:8px 0; }
+p code, li code, td code { background:var(--code); padding:1px 5px; border-radius:4px; }
+.step { border-top:1px solid var(--line); padding:18px 0 4px; }
+.step h3 { margin:0 0 6px; font-size:17px; }
+.expect { border-left:3px solid var(--accent); padding:2px 0 2px 12px; margin:10px 0; }
+.expect b { color:var(--accent); }
+.proposed { border-left:3px solid var(--warn); padding:2px 0 2px 12px; margin:10px 0; }
+textarea { width:100%; min-height:64px; background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; font-size:15px; }
+label { display:block; color:var(--muted); font-size:14px; margin-top:8px; }
+table { border-collapse:collapse; width:100%; font-size:14px; }
+td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+ol.q li { margin-bottom:12px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Task conversations start at checkout</h1>
+<p class="meta">Task: the lf resume pair session · Step: demo · 2026-11-07<br>
+Built from <code>jack-heart/task-session-at-checkout</code> (uncommitted, base <code>9e11b2307</code>) and
+<code>scratch/task-session-at-checkout-demo.md</code><br>
+Page: <code>/Users/jack/src/loopflow.task-session-at-checkout/scratch/demo.html</code></p>
+
+<p><strong>What this page needs from you:</strong> does <code>lf resume</code> on a running Task now feel instant, and does a comment reach the conversation? Answer the questions at the bottom in the chat, for example "1a 2b".</p>
+
+<p>Everything runs on a private Machine. <code>demo-lf</code> is the branch build with its own <code>LF_HOME</code>, so your real <code>~/.lf</code> and Linear are never touched. Its agent is <code>claude:haiku</code>.</p>
+
+<h2>Already checked before handing over</h2>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Checkout with no agent configured</td><td>Checkout took 0.7 s and logged <code>background_failed</code>; nothing broke.</td></tr>
+<tr><td>Checkout with an agent</td><td>Checkout took 0.9 s. The conversation showed as <code>detached</code>. Claude started 0.91 s after launch began, and the Task-only sync ran at 1.42 s, after Claude.</td></tr>
+<tr><td>Before, on your real Machine</td><td>The same launch took 78 s, 77 of them spent in the repository-wide Linear sync.</td></tr>
+</table>
+
+<h2>Steps</h2>
+
+<div class="step">
+<h3>1. Set up the shortcut</h3>
+<pre>DL=$HOME/.local/share/loopflow/demos/task-session-at-checkout-20261107-runtime/bin/demo-lf
+cd $HOME/.local/share/loopflow/demos/task-session-at-checkout-20261107/repo</pre>
+</div>
+
+<div class="step">
+<h3>2. Start a Task the way you did with ad319b</h3>
+<pre>$DL task create --title "Add a closing line to the README" --notes "Demo"
+$DL task run &lt;ID it printed&gt;
+$DL session list</pre>
+<div class="expect"><b>Expect:</b> <code>task run</code> returns once the Graph has started. Within a few seconds <code>session list</code> shows the Task's conversation as <code>detached</code>, before you have opened anything.</div>
+<label>What you saw</label><textarea></textarea>
+</div>
+
+<div class="step">
+<h3>3. Resume it from the worktree</h3>
+<pre>cd "$($DL task status &lt;ID&gt; | sed -n 's/^  worktree: //p')"
+time $DL resume</pre>
+<div class="expect"><b>Expect:</b> no "Nothing to resume here". Claude is already running, with its reading turn on screen, about a second after you press return. Press Ctrl+] to detach when done.</div>
+<label>What you saw, and how long it took</label><textarea></textarea>
+</div>
+
+<div class="step">
+<h3>4. Leave a comment, then come back</h3>
+<pre>$DL comment &lt;ID&gt; 'Use the word "Goodbye" in the closing line'
+$DL resume</pre>
+<div class="expect"><b>Expect:</b> the conversation receives a Task update containing <code>New comment from jack: Use the word "Goodbye"…</code> and mentions it briefly.</div>
+<label>What you saw</label><textarea></textarea>
+</div>
+
+<div class="step">
+<h3>5. Read the launch log</h3>
+<pre>tail -8 $HOME/.local/share/loopflow/demos/task-session-at-checkout-20261107/home/logs/launch-timing.jsonl</pre>
+<div class="expect"><b>Expect:</b> <code>background_start</code>, then <code>prompt_begin</code>, <code>prompt_end</code>, <code>provider_exec_begin</code>, then <code>task_sync_begin</code> and <code>task_sync_end</code>. Each line has <code>load1</code>.</div>
+<label>Anything missing or surprising</label><textarea></textarea>
+</div>
+
+<div class="step">
+<h3>6. Leave it alone for three minutes while the Graph runs</h3>
+<pre>$DL session list</pre>
+<div class="expect"><b>Expect:</b> the conversation is still <code>detached</code>, not ended, because its Task's Graph is running. A conversation for a Task with no running Graph ends about two minutes after it goes quiet.</div>
+<label>What you saw</label><textarea></textarea>
+</div>
+
+<h2>Known gaps</h2>
+<div class="proposed">
+<p><strong>Not fixed yet:</strong> <code>lf task move</code> refuses a conversation that is still starting, and one test fixture collides with the background launch. Those are the 2 of 534 integration failures. Clippy and the other test binaries have not run.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Did <code>lf resume</code> in step 3 feel instant?<br>a) yes &nbsp; b) no, it took about __ s &nbsp; c) it printed "Nothing to resume here"</li>
+<li>Did the comment from step 4 reach the conversation?<br>a) yes, worded well &nbsp; b) yes, but the wording needs changing &nbsp; c) no</li>
+<li>How should <code>lf task move</code> treat a conversation that is still starting?<br>a) wait up to 20 s for it, then move it (recommended) &nbsp; b) end it without waiting</li>
+<li>When you're done, may the demo conversations be ended and the runtime root removed? The durable root stays either way.<br>a) yes, nothing in them matters &nbsp; b) keep them running for now</li>
+</ol>
+</main>
+</body>
+</html>

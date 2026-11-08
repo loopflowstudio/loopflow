@@ -1,6 +1,6 @@
 //! Native Session updates read existing Task/Graph facts. Receipts live in the
 //! Session history; they are delivery evidence, never another workflow cursor.
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,10 @@ pub(crate) struct TaskUpdate {
 struct TaskObservation {
     position: Option<TaskGraphPosition>,
     runs: HashMap<LfProcessId, RunObservation>,
+    /// Comment IDs this conversation has heard about. Observations recorded
+    /// before comments were reported have none; they baseline on next read.
+    #[serde(default)]
+    comments: Option<BTreeSet<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -123,6 +127,7 @@ impl TaskUpdates {
             .unwrap_or_default();
         let mut facts = HashMap::new();
         let mut lines = Vec::new();
+        let mut quiet = false;
         for task in store.session_task_ids(session_id)? {
             let (overview, graphs) = store.task_overview(&task)?;
             let old = previous.get(&task);
@@ -139,6 +144,7 @@ impl TaskUpdates {
                     old.and_then(|observation| observation.position.clone())
                 },
                 runs: HashMap::new(),
+                comments: None,
             };
             let mut changes = Vec::new();
             for graph in graphs {
@@ -174,7 +180,27 @@ impl TaskUpdates {
                     observation.runs.insert(id, prior.clone());
                 }
             }
-            if position_changed || !changes.is_empty() {
+            let thread = store.task_comments(&task)?;
+            let heard = old.and_then(|observation| observation.comments.as_ref());
+            let arrived = match heard {
+                Some(heard) if !baseline => thread
+                    .comments
+                    .iter()
+                    .filter(|comment| !heard.contains(&comment.id))
+                    .filter(|comment| !written_here(&comment.author, session_id))
+                    .map(|comment| format!("New comment from {}: {}", comment.author, comment.body))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            observation.comments = Some(
+                thread
+                    .comments
+                    .into_iter()
+                    .map(|comment| comment.id)
+                    .collect(),
+            );
+            let comments_changed = heard != observation.comments.as_ref();
+            if position_changed || !changes.is_empty() || !arrived.is_empty() {
                 let identifier = store
                     .task(&task)?
                     .map(|task| task.identifier)
@@ -184,15 +210,20 @@ impl TaskUpdates {
                     position_text(observation.position.as_ref()),
                     changes.join(" ")
                 ));
+                lines.extend(arrived);
+            } else if comments_changed && !baseline {
+                // Only this conversation's own comments arrived: remember them
+                // without interrupting it.
+                quiet = true;
             }
             facts.insert(task, observation);
         }
-        if !baseline && lines.is_empty() {
+        if !baseline && lines.is_empty() && !quiet {
             return Ok(None);
         }
         let observation = serde_json::to_value(&facts)?;
         let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&observation)?));
-        if baseline {
+        if baseline || lines.is_empty() {
             store.record_task_update(session_id, &key, "baseline", &observation)?;
             self.candidates.clear();
             return Ok(None);
@@ -200,6 +231,14 @@ impl TaskUpdates {
         Ok(Some(TaskUpdate { key, observation, text: format!(
             "<lf:task-update>\n{}\nReport this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.\n</lf:task-update>", lines.join("\n")) }))
     }
+}
+
+/// A comment this conversation posted is not news to it.
+fn written_here(author: &crate::work::task::comment::TaskCommentAuthor, session_id: &str) -> bool {
+    matches!(
+        author,
+        crate::work::task::comment::TaskCommentAuthor::Session { session_id: id, .. } if id == session_id
+    )
 }
 
 fn position_text(position: Option<&TaskGraphPosition>) -> String {
@@ -266,6 +305,19 @@ pub(crate) fn watch(
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
         Err(error) => return Err(error.into()),
     }
+    // The launch made no tracker request; bring this conversation's Tasks
+    // current beside it. New comments then arrive through the loop below.
+    for task in store.session_task_ids(&adapter.session)? {
+        if let Some(task) = store.task(&task)? {
+            std::thread::spawn(move || {
+                crate::agent_input_timing::record("task_sync_begin", &task.identifier);
+                if let Err(error) = crate::ops::task::sync_for_conversation(&task.identifier) {
+                    tracing::info!(task = %task.identifier, %error, "Task sync after launch pending");
+                }
+                crate::agent_input_timing::record("task_sync_end", &task.identifier);
+            });
+        }
+    }
     let mut updates = TaskUpdates::default();
     let mut gap = RecordingGap::default();
     loop {
@@ -308,6 +360,7 @@ mod tests {
     use crate::durable::TaskId;
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::TaskCommentAuthor;
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, Instant};
 
@@ -656,6 +709,51 @@ mod tests {
             !at_end.text.contains(older.as_str()),
             "unchanged history isn't repeated for position-only changes"
         );
+    }
+
+    fn comment(store: &SqliteStore, task: &TaskId, body: &str, author: TaskCommentAuthor) {
+        store
+            .append_task_comment(
+                task,
+                &crate::work::task::comment::TaskComment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    body: body.into(),
+                    author,
+                    created_at: Some("2026-11-07T22:00:00Z".into()),
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn comments_after_launch_reach_the_conversation_but_its_own_do_not() {
+        let (_home, store, task) = task_session();
+        let person = || TaskCommentAuthor::Person {
+            name: Some("jack".into()),
+        };
+        comment(&store, &task, "already in the prompt", person());
+        let mut updates = TaskUpdates::default();
+        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        comment(
+            &store,
+            &task,
+            "the conversation's own progress\n<!-- loopflow-session: reader -->",
+            TaskCommentAuthor::Session {
+                session_id: "reader".into(),
+                requester: None,
+            },
+        );
+        assert!(
+            updates.pending(&store, "reader").unwrap().is_none(),
+            "a conversation is not told about its own comment"
+        );
+        comment(&store, &task, "use the staging bucket", person());
+        let update = updates.pending(&store, "reader").unwrap().unwrap();
+        assert!(update
+            .text
+            .contains("New comment from jack: use the staging bucket"));
+        assert!(!update.text.contains("already in the prompt"));
+        assert!(!update.text.contains("own progress"));
     }
 
     #[test]

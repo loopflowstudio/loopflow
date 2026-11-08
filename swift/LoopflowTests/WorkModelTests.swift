@@ -880,6 +880,33 @@ struct WorkModelStreamTests {
         #expect(model.task(id: "issue-now") != nil)
     }
 
+    @Test("Successful frames before repeated failures retain backoff, and cancellation stops retries")
+    func observationRetryBackoff() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1, within: .seconds(5))
+        for attempt in 1...3 {
+            await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
+            try await eventually { model.roadmap.value != nil && model.roadmap.errorMessage == nil }
+            let failed = ContinuousClock.now
+            await feed.fail(RegistryQueryError("part ended"))
+            try await eventually { model.roadmap.errorMessage == "part ended" }
+            #expect(model.task(id: "issue-now") != nil)
+            if attempt < 3 {
+                try await feed.opened(attempt + 1, within: .seconds(5))
+                #expect(ContinuousClock.now - failed >= .seconds(attempt))
+            }
+        }
+        let cancelled = ContinuousClock.now
+        keeping.cancel()
+        await keeping.value
+        #expect(ContinuousClock.now - cancelled < .seconds(1))
+        #expect(await feed.openCount == 3)
+    }
+
     @Test("New turns clear previews and an ended reader recovers without reviving old output")
     func readerEndRecovers() async throws {
         let fixture = try WorkTestFixture.load()
@@ -976,6 +1003,7 @@ private actor Flag {
 private actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
+    var openCount: Int { continuations.count }
 
     nonisolated func open() async -> WorkObservation {
         let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()

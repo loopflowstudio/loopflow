@@ -15,6 +15,17 @@ page in a browser, the API over the network, the simulator or device. Drive it
 with computer use, a browser, a terminal or whatever reaches it the way a person
 would. Internal setters, test-only endpoints, mocks and fixtures do not count.
 
+For Desktop in a headless run, follow `swift/README.md`'s Testing section:
+`scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
+then runs model and production-view checks with WindowServer access denied.
+Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
+`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
+Work and taps the production navigation button. Report these as automated
+checks, not a live-window walkthrough. Hosted window checks remain optional;
+record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
+run-debug` builds and launches the development app; use `lf desktop state --json`
+and the commands in `docs/surfaces.md` to inspect and drive it.
+
 Getting there is your job. Build it, start its services, create accounts and
 realistic data, sign in, set up whatever state a real user would already have.
 When no route exists, make one. Hand back only what truly needs a person, such

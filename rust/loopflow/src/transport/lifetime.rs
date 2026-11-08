@@ -22,7 +22,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
-use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 use crate::ops::task::retirement::owner_retiring;
@@ -87,29 +86,20 @@ impl Ending {
         owner: &LfProcessId,
         activity: Activity,
         input_queued: bool,
-    ) -> Result<Option<Event>> {
+    ) -> Result<bool> {
         let store = crate::journal::process_ledger()?;
         if let Some(may_close) = crate::desktop::shells::close_allowed(&store, owner, input_queued)?
         {
-            return Ok(may_close.then_some(Event::Control {
-                held: false,
-                notice: Some("Shell closed".into()),
-            }));
+            return Ok(may_close);
         }
         if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
-            return Ok(None);
+            return Ok(false);
         }
         if owner_retiring(&store, owner)? {
-            return Ok(Some(Event::Control {
-                held: false,
-                notice: Some("Completed Task workspace retired".into()),
-            }));
+            return Ok(true);
         }
         tracing::info!(%owner, "ending a Session nobody has viewed");
-        Ok(Some(Event::Control {
-            held: false,
-            notice: None,
-        }))
+        Ok(true)
     }
 }
 
@@ -363,10 +353,9 @@ mod tests {
                 rusqlite::params![tools, pending, yielded],
             )
             .unwrap();
-            assert!(candidate
+            assert!(!candidate
                 .confirm(&owner, Activity::default(), false)
-                .unwrap()
-                .is_none());
+                .unwrap());
         }
         conn.execute(
             "UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1",
@@ -376,33 +365,29 @@ mod tests {
         assert!(store
             .try_record_owner_input(&owner, b"unsubmitted draft")
             .unwrap());
-        assert!(candidate
+        assert!(!candidate
             .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
+            .unwrap());
         store.clear_owner_input(&owner).unwrap();
         conn.execute(
             "UPDATE agent_sessions SET interactive=0 WHERE id='session'",
             [],
         )
         .unwrap();
-        assert!(candidate
+        assert!(!candidate
             .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
+            .unwrap());
         conn.execute(
             "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
             [],
         )
         .unwrap();
-        assert!(candidate
+        assert!(!candidate
             .confirm(&owner, Activity::default(), true)
-            .unwrap()
-            .is_none());
+            .unwrap());
         assert!(candidate
             .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_some());
+            .unwrap());
         assert_eq!(
             store.task_retirement(&task).unwrap().unwrap().due_at,
             Some(900)
@@ -422,10 +407,10 @@ mod tests {
             };
             conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
                 .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_none());
+            assert!(!candidate.confirm(&owner, viewed, false).unwrap());
             conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
                 .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_some());
+            assert!(candidate.confirm(&owner, viewed, false).unwrap());
         }
     }
 
@@ -533,7 +518,7 @@ mod tests {
             output: 1,
             ..Activity::default()
         };
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate.confirm(&shell, viewed, false).unwrap());
         // Seed stale intent directly: the final check must protect even if a
         // writer did not atomically cancel it. No sweep runs in this test.
         for hold in ["viewed", "absent"] {
@@ -542,10 +527,10 @@ mod tests {
                 rusqlite::params![viewer, hold],
             )
             .unwrap();
-            assert!(candidate.confirm(&shell, viewed, false).unwrap().is_none());
+            assert!(!candidate.confirm(&shell, viewed, false).unwrap());
         }
         store.close_desktop_shell("shell").unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate.confirm(&shell, viewed, false).unwrap());
         // Unreadable retirement state cannot authorize automatic closure.
         conn.execute("UPDATE desktop_shells SET close_requested=2", [])
             .unwrap();
@@ -554,7 +539,7 @@ mod tests {
             [&viewer],
         )
         .unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate.confirm(&shell, viewed, false).unwrap());
         conn.execute_batch("DROP TABLE task_retirements").unwrap();
         assert!(candidate.confirm(&shell, viewed, false).is_err());
     }

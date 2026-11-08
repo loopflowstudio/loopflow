@@ -58,8 +58,8 @@ impl Status {
         self.publish("connected", input, None)
     }
 
-    pub(super) fn ended(&self) -> Result<()> {
-        self.publish("ended", false, None)
+    pub(super) fn ended(&self, message: Option<&str>) -> Result<()> {
+        self.publish("ended", false, message)
     }
 
     pub(super) fn closed(&self) -> bool {

@@ -1545,15 +1545,18 @@ fn attaches(
     Ok(false)
 }
 
-/// End the execution owner running as `pid`: its signal handler stops the
-/// agent and records the exit. Returns once the owner is gone.
+/// Ask the owner to announce replacement and stop, falling back to a signal
+/// if it cannot answer. Returns once the owner is gone.
 pub(crate) fn end_owner(
     store: &SqliteStore,
     owner: &crate::id::LfProcessId,
     pid: u32,
 ) -> Result<()> {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-    crate::platform::kill_process(pid);
+    if let Err(error) = crate::transport::replace(owner) {
+        tracing::warn!(%owner, %error, "Owner could not announce replacement; closing by signal");
+        crate::platform::kill_process(pid);
+    }
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, owner)? {
         anyhow::ensure!(

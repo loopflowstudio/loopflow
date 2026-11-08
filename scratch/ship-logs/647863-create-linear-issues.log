@@ -1,0 +1,22 @@
+647863: standing in at demo
+
+── graph code
+  implement
+  compress
+  cmd: sync
+  realign
+  loop-or-next
+  concept-review
+  loop-or-next
+  pr-publish
+  demo [interactive]
+  gate
+  cmd: land --wait-and-fix
+  verify [interactive]
+
+[9/12] demo
+task 647863> attached; /status, /interrupt, /detach, or type a message/instruction
+Running the branch's acceptance fixtures as the headless demo (slow Linear stand-in, ~1,000 Tasks, 20 uncertain exports).
+[10/12] gate
+task 647863> attached; /status, /interrupt, /detach, or type a message/instruction
+Reviewed the diff; it's clean and merges cleanly with main. One wording fix, then the gate run.Gate suites are running in the background. I'll pick up when they finish.The gate is still running; the monitor will notify on completion.

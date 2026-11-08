@@ -1,5 +1,6 @@
 ---
-docs: scripts/testing.md
+context:
+  docs: ["scripts/testing.md"]
 requires: intended change and an implementation plan
 produces: working implementation, focused check, and an updated plan
 action_style: procedural

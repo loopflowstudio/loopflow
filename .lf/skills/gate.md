@@ -1,5 +1,6 @@
 ---
-docs: scripts/testing.md
+context:
+  docs: ["scripts/testing.md"]
 requires: code on branch
 produces: corrected code and docs, verification evidence, and delivery context
 action_style: procedural

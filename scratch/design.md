@@ -2,12 +2,12 @@
 
 Reuse the local attach flow and wire shapes. The planned contract lives in
 `rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
-`docs/server.md`; keep client behavior there instead of repeating it here.
+`docs/server.md`.
 
-Implementation, authenticated connection checks and publication wait for
-LOO-718's remote admission; the local UID-only store cannot exercise remote
-identity. Its listener, mobile settings and bulk protocol are outside this Task.
-No product decision is missing. This checkout contains the planned contract only.
+This checkout contains the planned contract only. Implementation, authenticated
+connection checks and publication wait for LOO-718's remote admission. The local
+UID-only store cannot establish remote acceptance. The listener, mobile settings
+and bulk protocol are outside this Task; no product decision is missing.
 
 ## Transport dependency — November 8, 2026
 
@@ -28,7 +28,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8 implement retry reconfirmed the earlier implement and realign findings:
+The November 8 implement recheck reconfirmed the dependency after realign:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -59,6 +59,6 @@ or QA; Desktop opening results are in `questions.md`.
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
 
-Compress consolidated the dependency and acceptance wording; deletion targets
-still await the transport. `git diff --check` — clean; `lf context` — within both
-scratch limits. Plan-only edits need no build or tests.
+Compress consolidated repeated status notes; runtime cuts await the transport.
+`git diff --check` — clean; `lf context` — within both scratch limits. Plan-only
+edits need no build or tests.

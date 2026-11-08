@@ -205,4 +205,4 @@ Gate/CI: `claude_shared_home.py` (writes a Keychain item), `codex_connect.py --s
 ## Concept review (November 7, 2026, headless, after item 14), built
 15. **A capacity 429 retries, in steps as in terminals.** Claude's `Request rejected (429) · this may be a temporary capacity issue` classified as nothing and failed the Graph Blocked; "capacity issue" now reads as `AgentFailure::Capacity` (43c2d6a69). The open doubt here, whether "You're out of usage credits" is the account's line or Fable's, was settled live on November 7: Fable's (five whys, fix 1).
 
-Check, November 7 (fixes 4–5; empty cwd, temp HOME, CARGO_HOME kept, LF_* unset, stdin closed): lib `provider_account::`, `provider_auth::`, `lf::commands::account`, `subscription::` 199 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings` pass. Live spent limits: demo.
+Check, November 7 at 89dcf67b7 (empty cwd, temp HOME, LF_* unset, stdin closed): lib `provider_account::`, `provider_auth::`, `subscription::` 164 pass. Live spent limits: demo.

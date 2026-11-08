@@ -840,8 +840,10 @@ running subscription answers the request with a reading begun after the command,
 the checkpoint follows once all have, even when nothing visibly changed. Session
 commands confirm only the Sessions subscription. Explicit Retry and recovery after sleep
 ask every subscription to read again. If a subscription ends, the window reopens all of them;
-the last readings stay on screen marked unavailable until new ones arrive. Every
-frame names its Loopflow home.
+the last readings stay on screen marked unavailable until new ones arrive. If one
+part keeps failing, automatic retries wait progressively longer, even while other
+parts send updates. The retry delay resets only after the observation stays healthy
+for about 30 seconds. Every frame names its Loopflow home.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never

@@ -313,7 +313,7 @@ part of what a phone or bot client is offered.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
   `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first
-  and only message is `{"type":"attach","ticket"}`; the server answers
+  and only message is `{"type":"attach","ticket":"<ticket>"}`; the server answers
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
   binary owner protocol in `transport/README.md` and `transport/wire.rs`. A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts

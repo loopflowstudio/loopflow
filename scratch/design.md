@@ -28,7 +28,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 8, 21:06 UTC implementation recheck reconfirmed the dependency:
+The November 8, 21:43 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -49,6 +49,9 @@ When the transport lands, replace any remaining UID-only `service.rs::Ticket` /
 Move `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` onto that store,
 retaining identity, single-use, expiry and sweep coverage. Keep the service-level
 bridge rejection test and wire fixtures: they exercise the surviving protocol.
+
+## Remaining implementation
+
 Reconcile wire and lifetime differences against the landed revision. Retain
 consume-on-attempt; replace ticket timing with `SystemTime` so the 60-second
 deadline includes host sleep. Leave unrelated throttles on `Instant`.
@@ -70,8 +73,9 @@ Visual review remains for demo or QA; Desktop opening results are in
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
 
-Compression keeps the wire examples and tightens their explanation; the
-UID-only predecessor stays untouched until its replacement is available.
+Compression fixes the shared attach example to include the ticket value,
+matching the wire fixture and the remote example. The UID-only store remains a
+deletion target until the transport lands.
 
-`git diff --check` — clean; `lf context` — within both scratch limits. Plan-only
+`git diff --check` — clean; `lf context` — within both scratch limits. Prose-only
 edits need no build or tests.

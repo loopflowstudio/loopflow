@@ -55,6 +55,31 @@ fixing.
 Run tests only where they tell you something the real path cannot reach, and
 keep any you add about what a person would notice.
 
+## Loopflow served launches
+
+Build with `cargo build -p loopflow --bin lf`. Use a disposable Git repository
+and separate `HOME` and `LF_HOME`; clear inherited `LF_*`, then set `LF_BIN` to
+the absolute branch-built binary. Start that binary's `server run` there and
+read the socket from `server status`. Never fault the installed Machine's store.
+
+Connect over the Unix socket with newline-delimited JSON: send the revision-2
+hello from `tests/fixtures/dto/server/hello.json`, then requests shaped like
+the adjacent `graph_run.json` or `task_run.json`. A local Graph containing
+`- cmd: help` exercises real execution without a provider. For disposable
+Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
+and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
+then `lf task create --title "Launch QA" --json` creates local planning data.
+Create with stdin closed; `--graph` on creation requires `--run`.
+
+To delay a report, SIGSTOP the launched command before it reports, leaving its
+execution owner running. Check that a live owner waits beyond the unknown grace.
+In this disposable home only, make the registry unavailable and restore it;
+check recovery both before and after the uncertain reply. Resume the command
+and inspect its actual result without launching it again. Find completed direct
+Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
+process list cannot find a finished run. Stop the private server and every
+remaining child after the scenarios.
+
 ## Keep what you learned
 
 How to launch and drive this product belongs in this skill. When you had to work

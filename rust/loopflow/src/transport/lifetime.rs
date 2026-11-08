@@ -2,7 +2,9 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn, pending request, running Graph or headless Run). Completed
+//! holding it (a turn, pending request, running Graph, a Task conversation's
+//! running Task Graph, or a headless Run).
+//! Task abandonment ends unviewed conversations even during a turn. Completed
 //! Task retirement can also end eligible owners after its absence grace. Desktop
 //! shells use Close and retirement policy instead of idle-agent ending.
 //! A removed, rebuilt or superseded lf executable leaves its owner serving;
@@ -92,7 +94,10 @@ impl Ending {
         {
             return Ok(may_close);
         }
-        if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
+        if !activity.viewed && !input_queued && store.owner_task_abandoned(owner)? {
+            return Ok(true);
+        }
+        if !self.may_end(activity, input_queued) || store.idle_retention(owner)?.is_some() {
             return Ok(false);
         }
         if owner_retiring(&store, owner)? {
@@ -167,6 +172,7 @@ fn watch(
     let mut shell_failure = RecordingGap::default();
     let mut repository_failure = RecordingGap::default();
     let mut retention_failure = RecordingGap::default();
+    let mut abandonment_failure = RecordingGap::default();
     let mut retained: Option<OwnerRetention> = None;
     let mut next_poll = Instant::now() + POLL;
     let mut grace = Grace {
@@ -239,14 +245,22 @@ fn watch(
             Some(None) => {}
         }
         let now = SystemTime::now();
+        let abandoned = terminal
+            && !grace.activity.viewed
+            && report_result(
+                &mut abandonment_failure,
+                "Task abandonment",
+                store.owner_task_abandoned(owner),
+            )
+            .unwrap_or(false);
         let retiring = owner_retiring(store, owner).unwrap_or(false);
-        if !retiring && !grace.expired(now) {
+        if !abandoned && !retiring && !grace.expired(now) {
             continue;
         }
         let Some(retention) = report_result(
             &mut retention_failure,
             "Session retention, retrying",
-            store.owner_retention(owner),
+            store.idle_retention(owner),
         ) else {
             continue;
         };
@@ -257,7 +271,7 @@ fn watch(
             retained = retention;
         }
         // Retained work counts as activity: the grace runs again from here.
-        if retention.is_some() {
+        if !abandoned && retention.is_some() {
             grace.quiet_since = now;
             continue;
         }
@@ -305,6 +319,45 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{Activity, DetachedLimit, Ending, Grace};
+
+    #[test]
+    fn abandonment_ends_background_output_but_keeps_viewed_or_queued_input() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,abandoned_at) VALUES(?1,?2,'STOP-1',1,2)", rusqlite::params![task.as_str(), repo.as_str()]).unwrap();
+        let owner = store.test_lf_process();
+        store.test_session("background", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='background'",
+            rusqlite::params![task.as_str(), owner]).unwrap();
+        let candidate = Ending {
+            activity: Activity::default(),
+        };
+        let active = Activity {
+            output: 1,
+            ..Activity::default()
+        };
+        assert!(candidate.confirm(&owner, active, false).unwrap());
+        assert!(!candidate.confirm(&owner, active, true).unwrap());
+        assert!(!candidate
+            .confirm(
+                &owner,
+                Activity {
+                    viewed: true,
+                    ..active
+                },
+                false
+            )
+            .unwrap());
+        conn.execute(
+            "UPDATE tasks SET abandoned_at=NULL WHERE id=?1",
+            [task.as_str()],
+        )
+        .unwrap();
+        assert!(!candidate.confirm(&owner, active, false).unwrap());
+    }
 
     #[test]
     fn queued_endings_require_current_output_and_idle_viewer_evidence() {

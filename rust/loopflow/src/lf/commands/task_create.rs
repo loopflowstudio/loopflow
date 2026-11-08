@@ -39,7 +39,7 @@ pub fn create(
     let id = request_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let receipt = creation::create(
+    let created = creation::create(
         &id,
         TaskCreation {
             directory: repo.into(),
@@ -53,7 +53,18 @@ pub fn create(
             agent: agent.map(str::to_owned),
             approve,
         },
-    )?;
+    );
+    let receipt = match created {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            if *json {
+                if let Some(result) = creation::lookup(&id)?.and_then(|r| r.result) {
+                    writeln!(io.output, "{}", serde_json::to_string_pretty(&result)?)?;
+                }
+            }
+            return Err(error);
+        }
+    };
     if *json {
         writeln!(io.output, "{}", serde_json::to_string_pretty(&receipt)?)?;
     } else {
@@ -62,6 +73,33 @@ pub fn create(
             "{} · {}",
             receipt.task.title, receipt.task.identifier
         )?;
+    }
+    if *run && approve {
+        // Batch callers wait for this exact launch, never whichever Graph is current later.
+        if let Some(launch) = creation::lookup(&id)?.and_then(|r| r.launch) {
+            if let crate::engine::task::TaskRun::Running { graph_process, .. } =
+                serde_json::from_value(launch)?
+            {
+                let store = crate::store::read_existing_registry()?
+                    .ok_or_else(|| anyhow::anyhow!("Machine registry is unavailable"))?;
+                loop {
+                    let process = store.sqlite.lf_process(&graph_process)?.ok_or_else(|| {
+                        anyhow::anyhow!("creation Graph {} is unavailable", graph_process)
+                    })?;
+                    if process.completed_at.is_some() {
+                        if process.exit_code != Some(0) {
+                            bail!(
+                                "Task Graph {} ended with {:?}",
+                                graph_process,
+                                process.exit_code
+                            );
+                        }
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
     }
     if *run && !approve && receipt.session_id.is_some() {
         if !*json && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {

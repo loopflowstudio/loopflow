@@ -388,9 +388,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .skillRun(_, let name, let message, let agent):
             return ["--batch"] + Self.option("--agent", agent) + ["skill", name] + argument(nil, message)
         case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
-            return ["task", "create", "--request-id", requestID] + Self.option("--title", title)
-                + Self.option("--wave", wave) + Self.option("--graph", graph) + Self.option("--session", session)
-                + (run ? ["--run"] : []) + ["--json"] + (request.map { ["--", $0] } ?? [])
+            var argv = ["task", "create", "--request-id", requestID]
+            argv += Self.option("--title", title)
+            argv += Self.option("--wave", wave)
+            argv += Self.option("--graph", graph)
+            argv += Self.option("--session", session)
+            if run { argv.append("--run") }
+            argv.append("--json")
+            if let request { argv += ["--", request] }
+            return argv
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]

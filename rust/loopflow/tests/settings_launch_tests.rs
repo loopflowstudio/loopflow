@@ -877,7 +877,7 @@ with (home / 'session-children.jsonl').open('a') as output:
         "agent: claude\nskills: {implement: {agent: codex}}\n",
     )
     .unwrap();
-    let task: serde_json::Value = serde_json::from_slice(
+    let task: serde_json::Value = serde_json::from_slice::<serde_json::Value>(
         &success(command(
             repo.path(),
             home.path(),
@@ -891,7 +891,8 @@ with (home / 'session-children.jsonl').open('a') as output:
         ))
         .stdout,
     )
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let task = task["id"].as_str().unwrap();
     success(command(
         repo.path(),

@@ -50,12 +50,12 @@ struct ServerProtocolTests {
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
-        let hello = ServerClientMessage.hello(ServerHello(revision: 2, minRevision: 2, client: ServerClientIdentity(
+        let hello = ServerClientMessage.hello(ServerHello(revision: 3, minRevision: 3, client: ServerClientIdentity(
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
-        #expect(welcome.revision == 2)
+        #expect(welcome.revision == 3)
         #expect(welcome.serverRevision == 2)
         #expect(welcome.minRevision == 2)
         #expect(welcome.instance == "service-incarnation")
@@ -69,7 +69,7 @@ struct ServerProtocolTests {
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
-        #expect(status.revision == 2)
+        #expect(status.revision == 3)
         #expect(status.minRevision == 2)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))

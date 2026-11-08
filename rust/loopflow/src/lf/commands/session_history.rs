@@ -177,6 +177,13 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
             &home, &store, &snapshot
         ))
     )?;
+    for transition in store.provider_transitions(&snapshot.session_id)? {
+        writeln!(
+            &mut output,
+            "Provider transition: {}",
+            serde_json::to_string(&transition)?
+        )?;
+    }
     let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
     write!(
         &mut output,

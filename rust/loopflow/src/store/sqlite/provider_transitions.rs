@@ -26,14 +26,47 @@ pub struct ProviderTransition {
     pub observed_at: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct ProviderLineage {
+    source_session: String,
+    provider_session: Option<String>,
+    agent_process: Option<crate::id::AgentProcessId>,
+    original_running: Option<bool>,
+}
+
 pub(crate) fn latest_in(
     conn: &Connection,
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
-    let payload: Option<String> = conn.query_row(
-        "SELECT json_extract(payload,'$.transition') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type')='provider_transition' ORDER BY seq DESC LIMIT 1",
-        [session], |row| row.get(0)).optional()?;
-    Ok(payload.map(|p| serde_json::from_str(&p)).transpose()?)
+    let row = conn.query_row(
+        "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type') IN ('provider_transition','agent_session_selected') ORDER BY seq DESC LIMIT 1",
+        [session], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional()?;
+    row.map(|(payload, at)| decode(&payload, at)).transpose()
+}
+
+// Released history keeps its original payload; only its reader translates it.
+fn decode(payload: &str, at: i64) -> StoreResult<ProviderTransition> {
+    let value: serde_json::Value = serde_json::from_str(payload)?;
+    if value["type"] == "provider_transition" {
+        return Ok(serde_json::from_value(value["transition"].clone())?);
+    }
+    let process: crate::id::AgentProcessId =
+        serde_json::from_value(value["agent_process_id"].clone())?;
+    let forked = value["source"] == "fork";
+    Ok(ProviderTransition {
+        kind: if forked {
+            TransitionKind::Forked
+        } else {
+            TransitionKind::Started
+        },
+        from_provider_session: serde_json::from_value(value["provider_thread"].clone())?,
+        to_provider_session: serde_json::from_value(value["next_provider_thread"].clone())?,
+        from_agent_process: value["provider_thread"].as_str().map(|_| process.clone()),
+        to_agent_process: process,
+        original_running: None,
+        seed: forked.then(|| "native".into()),
+        observed_at: at,
+    })
 }
 
 pub(crate) fn observe_in(
@@ -116,12 +149,30 @@ impl SqliteStore {
         latest_in(&self.conn.lock().expect("store mutex poisoned"), session)
     }
 
-    pub(crate) fn record_provider_lineage(
+    pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare("SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type') IN ('provider_transition','agent_session_selected') ORDER BY seq")?;
+        let rows = statement.query_map([session], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        rows.map(|row| {
+            let (payload, at) = row?;
+            decode(&payload, at)
+        })
+        .collect()
+    }
+
+    pub(crate) fn provider_lineage(
         &self,
-        next: &crate::session::LfSession,
         source: &crate::session::LfSession,
-    ) -> StoreResult<()> {
-        let thread = self.session_thread(&source.id)?.map(|t| t.to_string());
+    ) -> StoreResult<ProviderLineage> {
+        let thread = source
+            .artifact_key
+            .as_deref()
+            .map(|key| self.input_provider_session(key))
+            .transpose()?
+            .flatten()
+            .map(|t| t.agent_session.to_string());
         let summary = self.session_summary(&source.id, crate::store::rows::now_unix())?;
         let process = summary.as_ref().and_then(|s| s.agent_process_id.clone());
         let running = summary.and_then(|s| match s.agent_process_evidence {
@@ -129,12 +180,25 @@ impl SqliteStore {
             crate::journal::ProcessIdentityEvidence::Dead => Some(false),
             crate::journal::ProcessIdentityEvidence::Unknown => None,
         });
+        Ok(ProviderLineage {
+            source_session: source.id.to_string(),
+            provider_session: thread,
+            agent_process: process,
+            original_running: running,
+        })
+    }
+
+    pub(crate) fn record_provider_lineage(
+        &self,
+        next: &crate::session::LfSession,
+        source: &ProviderLineage,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
             SELECT id,'observed',?2,unixepoch(),?3,current_capture FROM agent_sessions WHERE id=?1",
             params![next.id,format!("lineage:{}",next.artifact_key.as_deref().unwrap_or("unknown")),
-                serde_json::to_string(&serde_json::json!({"type":"provider_lineage","source_session":source.id,
-                    "provider_session":thread,"agent_process":process,"original_running":running}))?])?;
+                serde_json::to_string(&serde_json::json!({"type":"provider_lineage","source_session":source.source_session,
+                    "provider_session":source.provider_session,"agent_process":source.agent_process,"original_running":source.original_running}))?])?;
         Ok(())
     }
 }
@@ -144,6 +208,21 @@ mod tests {
     use super::{observe_in, TransitionKind};
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn transition_fixture_and_released_history_keep_their_meaning() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/provider_transition.json");
+        let transition: super::ProviderTransition = serde_json::from_str(fixture).unwrap();
+        assert_eq!(
+            serde_json::to_value(&transition).unwrap(),
+            serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+        );
+        let legacy = super::decode(r#"{"type":"agent_session_selected","agent_process_id":"44444444-4444-4444-8444-444444444444","provider_thread":"earlier","next_provider_thread":"fork","source":"fork"}"#, 42).unwrap();
+        assert_eq!(legacy.kind, TransitionKind::Forked);
+        assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
+        assert_eq!(legacy.observed_at, 42);
+        assert_eq!(legacy.original_running, None);
+    }
 
     #[test]
     fn reservations_do_not_report_success_and_observed_replacements_keep_lineage() {

@@ -26,6 +26,14 @@ struct CreationLookup: Decodable, Sendable {
     }
 }
 
+struct SubmittedCreationError: LocalizedError {
+    let requestID: String
+    let cause: any Error
+    var errorDescription: String? {
+        "Creation \(requestID) is saved for recovery. \(cause.localizedDescription)"
+    }
+}
+
 actor CreationSubmissions {
     static let shared = CreationSubmissions(directory: WorkCache.homeDirectory.appendingPathComponent("submissions"))
     private let directory: URL
@@ -84,7 +92,8 @@ actor CreationSubmissions {
         active.insert(requestID)
         defer { active.remove(requestID) }
         // Saving precedes the first send. A lost answer leaves this exact record.
-        return try await send(record.payload)
+        do { return try await send(record.payload) }
+        catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
     }
 
     func reconcile(_ record: SubmittedCreation) async throws -> CreationLookup? {
@@ -101,7 +110,11 @@ actor CreationSubmissions {
         let receipt = try JSONDecoder().decode(CreationLookup?.self, from: data)
         // Only absence or local milestones preceding/after an external effect
         // permit continuation. run_requested/stopping are never resubmitted.
-        if receipt == nil || receipt?.milestone == "filed" || receipt?.milestone == "started" {
+        let payload = try? JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
+        let needsRun = payload?["run"] as? Bool == true
+        if receipt == nil || (receipt?.milestone == "filed" && needsRun)
+            || receipt?.milestone == "started"
+            || (receipt?.milestone == "admitted" && receipt?.result == nil) {
             _ = try await send(record.payload)
             return try JSONDecoder().decode(CreationLookup.self,
                 from: Data(try await lookup(record.id).utf8))
@@ -117,6 +130,13 @@ final class CreationRecovery {
         let id: String
         let text: String
         let settled: Bool
+        let resource: Resource?
+    }
+    struct Resource {
+        let destination: String
+        let directory: String
+        let task: String?
+        let session: String?
     }
     private(set) var items: [Item] = []
     private var refreshing = false
@@ -133,42 +153,81 @@ final class CreationRecovery {
                     guard let receipt = try await CreationSubmissions.shared.reconcile(record) else { continue }
                     let unknown = ["run_requested", "stopping"].contains(receipt.milestone)
                     let subject = receipt.taskId ?? receipt.sessionId ?? record.id
+                    let payload = try JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
+                    let resource = Resource(destination: record.destination, directory: payload?["directory"] as? String ?? "/",
+                        task: receipt.taskId, session: receipt.sessionId)
                     current.append(Item(id: record.id,
                         text: unknown ? "\(subject): start unconfirmed. No second launch was requested." : "Recovered \(subject) · \(receipt.milestone)",
-                        settled: !unknown))
+                        settled: !unknown, resource: resource))
                 } catch {
-                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", settled: false))
+                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", settled: false, resource: nil))
                 }
             }
             items = current
-        } catch { items = [Item(id: "storage", text: error.localizedDescription, settled: false)] }
+        } catch { items = [Item(id: "storage", text: error.localizedDescription, settled: false, resource: nil)] }
     }
 
     func acknowledge(_ item: Item) async {
         do {
             try await CreationSubmissions.shared.presented(item.id)
             items.removeAll { $0.id == item.id }
-        } catch { items = [Item(id: item.id, text: error.localizedDescription, settled: false)] }
+        } catch { items = [Item(id: item.id, text: error.localizedDescription, settled: false, resource: nil)] }
     }
 }
 
 struct CreationRecoveryView: View {
     private let recovery = CreationRecovery.shared
+    @State private var inspecting: CreationRecovery.Item?
     var body: some View {
         VStack(alignment: .leading) {
             ForEach(recovery.items) { item in
                 HStack {
                     Text(item.text).textSelection(.enabled)
+                    if item.resource != nil { Button("Inspect") { inspecting = item } }
                     if item.settled { Button("Dismiss") { Task { await recovery.acknowledge(item) } } }
                 }
             }
         }
         .padding(recovery.items.isEmpty ? 0 : 12)
+        .sheet(item: $inspecting) { item in
+            if let resource = item.resource { RecoveredCreationInspector(resource: resource) }
+        }
         .task {
             while !Task.isCancelled {
                 await recovery.refresh()
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
+        }
+    }
+}
+
+
+private struct RecoveredCreationInspector: View {
+    let resource: CreationRecovery.Resource
+    @State private var detail = "Reading current work…"
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+            ScrollView { Text(detail).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading) }
+            Button("Done") { dismiss() }
+        }
+        .padding(20).frame(minWidth: 600, minHeight: 400)
+        .task {
+            do {
+                guard try await CreationSubmissions.machine() == resource.destination else {
+                    throw RegistryQueryError("The original Machine is unavailable; this request has not moved.")
+                }
+                if let task = resource.task {
+                    let value = try await ServerClient.read(.desktopTask(directory: resource.directory, issue: task))
+                    let object = try JSONSerialization.jsonObject(with: Data(value.utf8))
+                    detail = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self)
+                } else if let session = resource.session {
+                    detail = try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8))
+                }
+            } catch { detail = error.localizedDescription }
         }
     }
 }

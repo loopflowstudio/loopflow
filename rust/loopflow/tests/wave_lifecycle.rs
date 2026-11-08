@@ -68,7 +68,7 @@ impl Lab {
     }
 
     fn task(&self, wave: &str, title: &str) -> String {
-        self.lf(&["task", "create", "--wave", wave, "--title", title, "--json"])["id"]
+        self.lf(&["task", "create", "--wave", wave, "--title", title, "--json"])["task"]["id"]
             .as_str()
             .unwrap()
             .to_string()

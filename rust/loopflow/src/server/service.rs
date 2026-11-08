@@ -611,6 +611,7 @@ async fn session(
                 let complete = frame.complete || (frame.response && entry.checkpoints.is_none());
                 tokio::time::timeout(SEND, lines.send(frame.line)).await.context("client did not take a message within five seconds")??;
                 drop(frame.reservation);
+                let _ = frame.delivered.send(());
                 if complete { inflight.remove(&frame.id); }
             },
             Some(finished) = tasks.join_next_with_id() => {

@@ -2,7 +2,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
 use super::wire::{ServerMessage, MAX_MESSAGE};
 
@@ -20,6 +20,7 @@ pub(super) struct Outbox {
 
 pub(super) struct Frame {
     pub line: String,
+    pub delivered: oneshot::Sender<()>,
     pub id: String,
     pub task: Option<tokio::task::Id>,
     pub complete: bool,
@@ -125,15 +126,21 @@ impl Outbox {
         drop(message);
         reservation.shrink(bytes.0.len());
         let line = String::from_utf8(bytes.0).expect("JSON is UTF-8");
+        let (delivered, taken) = oneshot::channel();
         self.sender
             .send(Frame {
                 line,
+                delivered,
                 reservation,
                 id,
                 complete,
                 response,
                 task: tokio::task::try_id(),
             })
+            .await
+            .map_err(|_| anyhow::anyhow!("connection closed"))?;
+        // A subscription cannot materialize another reading until this one leaves.
+        taken
             .await
             .map_err(|_| anyhow::anyhow!("connection closed"))
     }
@@ -189,13 +196,18 @@ mod tests {
         );
         let (outbox, receiver) = &mut clients[0];
         let reservation = held.remove(0);
-        outbox
-            .deliver(ServerMessage::Ended { id: "done".into() }, reservation)
-            .await
-            .unwrap();
+        let producer = outbox.clone();
+        let delivering = tokio::spawn(async move {
+            producer
+                .deliver(ServerMessage::Ended { id: "done".into() }, reservation)
+                .await
+                .unwrap();
+        });
         let frame = receiver.recv().await.unwrap();
         assert_eq!(outbox.retained(), MAX_MESSAGE + frame.line.len());
-        drop(frame);
+        frame.delivered.send(()).unwrap();
+        drop(frame.reservation);
+        delivering.await.unwrap();
         assert_eq!(outbox.retained(), MAX_MESSAGE);
         assert!(other.reserve().is_some(), "delivery frees process capacity");
         drop(held);

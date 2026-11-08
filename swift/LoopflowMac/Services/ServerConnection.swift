@@ -1,4 +1,5 @@
 import Foundation
+import Loopflow
 
 /// A surface owns this temporary mailbox; it conveys no Session authority.
 struct ServerConnectionReading: Decodable, Equatable {
@@ -7,16 +8,20 @@ struct ServerConnectionReading: Decodable, Equatable {
     let state: State
     let input: Bool
     let message: String?
+    let transition: ProviderTransition?
 
     var acceptsInput: Bool { state == .connected && input }
     var canMoveHere: Bool { state == .connected && !input }
     var title: String? {
         switch state {
-        case .connected: input ? nil : "Read-only. Move here to type."
-        case .moving: "Moving input here… Input paused."
-        case .reconnecting: "Reconnecting… Input paused; last screen may be stale."
-        case .unavailable: message ?? "Session unavailable. Last screen is stale."
-        case .ended: "Session ended."
+        case .connected:
+            if input { return transition?.explanation }
+            return [transition?.explanation, "Read-only. Move here to type."].compactMap { $0 }.joined(separator: " ")
+
+        case .moving: return "Moving input here… Input paused."
+        case .reconnecting: return "Reconnecting… Input paused; last screen may be stale."
+        case .unavailable: return message ?? "Session unavailable. Last screen is stale."
+        case .ended: return "Session ended."
         }
     }
 }
@@ -26,7 +31,7 @@ final class ServerConnection {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lf-view-" + UUID().uuidString)
     private var statusURL: URL { directory.appendingPathComponent("status.json") }
     var path: String { statusURL.path }
-    private(set) var reading = ServerConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil)
+    private(set) var reading = ServerConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil, transition: nil)
     private var observation: Task<Void, Never>?
     private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var pendingMove: UInt64?
@@ -63,7 +68,7 @@ final class ServerConnection {
             let action = statusURL.deletingPathExtension().appendingPathExtension("move")
             try JSONEncoder().encode(reading.generation).write(to: action, options: .atomic)
             pendingMove = reading.generation
-            reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil)
+            reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil, transition: nil)
             changed?(reading)
         } catch {
             // A removed mailbox means this surface has closed. No action is queued.

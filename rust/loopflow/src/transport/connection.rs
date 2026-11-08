@@ -19,6 +19,7 @@ pub(super) struct Status {
     path: PathBuf,
     attempts: u32,
     generation: u64,
+    transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +28,7 @@ struct Reading<'a> {
     state: &'a str,
     input: bool,
     message: Option<&'a str>,
+    transition: Option<&'a crate::store::sqlite::provider_transitions::ProviderTransition>,
 }
 
 impl Status {
@@ -35,6 +37,7 @@ impl Status {
             path: path.into(),
             attempts: 0,
             generation: 0,
+            transition: None,
         })
     }
 
@@ -45,6 +48,7 @@ impl Status {
             state,
             input,
             message,
+            transition: self.transition.as_ref(),
         })?;
         match std::fs::write(&pending, bytes).and_then(|()| std::fs::rename(pending, &self.path)) {
             // The pane atomically removes its mailbox while a publish can be in flight.
@@ -130,15 +134,37 @@ impl Status {
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
                     let result = crate::server::client::bridge_existing(&session, &owner);
-                    let _ = send.send(result);
+                    // Presentation cannot prevent the terminal from reconnecting.
+                    let transition = crate::store::read_existing_registry()
+                        .ok()
+                        .flatten()
+                        .and_then(|store| {
+                            store
+                                .sqlite
+                                .provider_transition(session.as_str())
+                                .ok()
+                                .flatten()
+                        });
+                    let _ = send.send((result, transition));
                 });
                 loop {
                     if !self.wait(Duration::from_millis(50))? {
                         return Ok(None);
                     }
                     match receive.try_recv() {
-                        Ok(Ok(socket)) => return Ok(Some((socket, recovered))),
-                        Ok(Err(error)) => {
+                        Ok((Ok(socket), mut transition)) => {
+                            if let Some(next) = transition.as_mut() {
+                                if self.transition.as_ref().is_some_and(|old| {
+                                    old.to_agent_process == next.to_agent_process
+                                        && old.to_provider_session == next.to_provider_session
+                                }) {
+                                    next.kind = crate::store::sqlite::provider_transitions::TransitionKind::Retained;
+                                }
+                            }
+                            self.transition = transition;
+                            return Ok(Some((socket, recovered)));
+                        }
+                        Ok((Err(error), _)) => {
                             recovered = true;
                             reason = error.to_string();
                             break;

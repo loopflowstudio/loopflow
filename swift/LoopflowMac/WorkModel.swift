@@ -2334,10 +2334,17 @@ final class WorkModel {
     /// When nothing was filed, the sheet keeps the request and the error. A Task
     /// filed before its run failed is selected with the error at its Start control.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
-        navigation.palette = nil
-        await openTaskConversation(receipt.task.id)
-        try? await confirmWorkUpdate()
+        do {
+            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
+            navigation.palette = nil
+            await openTaskConversation(receipt.task.id)
+            try? await confirmWorkUpdate()
+        } catch is SubmittedCreationError {
+            // The saved submission owns recovery. Keeping a submit button here
+            // would turn a lost answer into another creation identity.
+            navigation.palette = nil
+            await CreationRecovery.shared.refresh()
+        }
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

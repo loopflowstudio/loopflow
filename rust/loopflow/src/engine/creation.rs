@@ -98,7 +98,7 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
     let mut receipt: TaskCreateReceipt = match saved.as_ref().and_then(|r| r.result.as_ref()) {
         Some(result) => serde_json::from_value(result.clone())?,
         None => {
-            let task = crate::ops::task::task_create(
+            crate::ops::task::task_create(
                 &input.directory,
                 input.wave.as_deref(),
                 input.title.clone(),
@@ -109,7 +109,6 @@ pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
                 },
                 Some(identity),
             )?;
-            let _ = task;
             serde_json::from_value(
                 store
                     .sqlite

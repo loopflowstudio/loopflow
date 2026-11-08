@@ -122,7 +122,7 @@ pub enum Write {
     TaskInterrupt { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     #[serde(rename = "task.move")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::task::TaskMoved>()))]
     TaskMove {
         directory: PathBuf,
         issue: String,
@@ -680,17 +680,17 @@ impl Write {
                 issue,
                 machine: Some(machine),
                 ..
-            } => value(&super::session_move::move_task(issue, machine)?),
+            } => value(&task::TaskMoved::Machine(super::session_move::move_task(
+                issue, machine,
+            )?)),
             Self::TaskMove {
                 issue,
                 wave,
                 machine: None,
                 ..
-            } => value(&crate::ops::task::task_move_membership(
-                &task_repo(issue)?,
-                issue,
-                wave.as_deref(),
-            )?),
+            } => value(&task::TaskMoved::Membership(
+                crate::ops::task::task_move_membership(&task_repo(issue)?, issue, wave.as_deref())?,
+            )),
             Self::TaskSave {
                 issue,
                 path,

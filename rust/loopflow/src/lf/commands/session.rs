@@ -782,6 +782,13 @@ async fn restarted(
         &request_id,
     )
     .await?;
+    if let Some(result) = store
+        .sqlite
+        .creation_receipt(&request_id)?
+        .and_then(|r| r.result)
+    {
+        return Ok(serde_json::from_value(result)?);
+    }
     crate::ops::human_session::surface(store, &next).await
 }
 

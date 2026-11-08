@@ -250,7 +250,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
         .create_named_worktree("delivery")
         .canonicalize()
         .unwrap();
-    let task: Value = serde_json::from_str(&read(
+    let task: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
         home.path(),
         &[
@@ -264,7 +264,8 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
         ],
         None,
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let session: Value = serde_json::from_str(&read(
         repo.path(),
         home.path(),
@@ -620,7 +621,7 @@ fn server_operations_match_their_lf_commands() {
     ))
     .unwrap();
     // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
-    let unpublished: Value = serde_json::from_str(&read(
+    let unpublished: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
         home.path(),
         &[
@@ -633,11 +634,12 @@ fn server_operations_match_their_lf_commands() {
         ],
         None,
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let task_id = unpublished["id"].as_str().unwrap().to_owned();
     let unpublished = unpublished["identifier"].as_str().unwrap().to_owned();
     // Unpublished too: abandoning it touches no PR, so needs no GitHub.
-    let abandoned: Value = serde_json::from_str(&read(
+    let abandoned: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
         home.path(),
         &[
@@ -650,7 +652,8 @@ fn server_operations_match_their_lf_commands() {
         ],
         None,
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let abandoned = abandoned["identifier"].as_str().unwrap().to_owned();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     // Planning status also serves a Work folder without Git.
@@ -2690,6 +2693,23 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .unwrap()
         .result;
     assert_eq!(first, second);
+    std::thread::scope(|scope| {
+        let concurrent: Vec<_> = (0..4)
+            .map(|_| {
+                let change = change.clone();
+                scope.spawn(move || {
+                    loopflow::server::client::Connection::open()
+                        .unwrap()
+                        .request(Operation::Write(change))
+                        .unwrap()
+                        .result
+                })
+            })
+            .collect();
+        for retry in concurrent {
+            assert_eq!(retry.join().unwrap(), first);
+        }
+    });
     let found = connection
         .request(Operation::Read(Read::CreationReceipt {
             request_id: "lost-answer".into(),
@@ -2697,12 +2717,12 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .unwrap()
         .result;
     assert_eq!(found["result"], first);
-    let mut changed = change;
+    let mut changed = change.clone();
     if let Write::TaskCreate { title, .. } = &mut changed {
         *title = Some("Different".into());
     }
     let error = connection
-        .request(Operation::Write(changed))
+        .request(Operation::Write(changed.clone()))
         .unwrap_err()
         .downcast::<loopflow::engine::Error>()
         .unwrap();
@@ -2710,6 +2730,51 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    // An unrelated Task graph cannot confirm this creation's interrupted launch.
+    let input = loopflow::engine::creation::TaskCreation {
+        directory: repo.path().into(),
+        title: Some("One Task".into()),
+        request: None,
+        wave: None,
+        graph: None,
+        session: None,
+        worktree: None,
+        run: true,
+        agent: None,
+        approve: false,
+    };
+    use sha2::{Digest, Sha256};
+    let fingerprint = hex::encode(Sha256::digest(
+        serde_json::to_vec(&serde_json::to_value(&input).unwrap()).unwrap(),
+    ));
+    conn.execute("UPDATE creation_receipts SET fingerprint=?1,milestone='run_requested' WHERE request_id='lost-answer'", [fingerprint]).unwrap();
+    conn.execute(
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'demo',1)",
+        rusqlite::params![
+            first["task"]["id"].as_str().unwrap(),
+            r#"{"name":"unrelated","nodes":[]}"#
+        ],
+    )
+    .unwrap();
+    if let Write::TaskCreate { run, .. } = &mut changed {
+        *run = true;
+    }
+    if let Write::TaskCreate { title, .. } = &mut changed {
+        *title = Some("One Task".into());
+    }
+    let unknown = connection
+        .request(Operation::Write(changed))
+        .unwrap_err()
+        .downcast::<loopflow::engine::Error>()
+        .unwrap();
+    assert_eq!(unknown.code, loopflow::engine::ErrorCode::OutcomeUnknown);
+    assert_eq!(unknown.data.unwrap()["milestone"], "run_requested");
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM creation_receipts", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         1
     );

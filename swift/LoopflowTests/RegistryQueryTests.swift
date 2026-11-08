@@ -14,12 +14,12 @@ struct RegistryQueryTests {
             func submit(title: String) throws -> String {
                 attempts += 1
                 if title == "Uncertain" { throw RegistryQueryError("Outcome unknown") }
-                return #"{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"}"#
+                return #"{"task":{"id":"task-retained","identifier":"FIX-1","title":"Keep the conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
             }
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskFromSession(_, _, let title) = change else {
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)

@@ -1364,3 +1364,116 @@ fn opening_any_primary_without_a_request_only_reads() {
         assert!(!skill.contains("without waiting for a greeting"));
     }
 }
+
+#[test]
+fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let original = store.session(&record.id).await.unwrap().unwrap();
+        let identity = crate::engine::creation::identity(
+            "session.new",
+            "interrupted",
+            &serde_json::json!({"id":record.id,"agent":null}),
+        )
+        .unwrap();
+        let artifact = crate::session_record::new_artifact_key();
+        store
+            .sqlite
+            .begin_thread_creation(&identity, &record.id, &artifact)
+            .unwrap();
+        // A crash while stopping is uncertain, even if no provider is live now.
+        let refused = super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::OutcomeUnknown
+        );
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            original.captured
+        );
+
+        let mut next = original.clone();
+        next.artifact_key = Some(artifact.clone());
+        next.input_published = false;
+        let next = store
+            .replace_session_input(original.captured, next, Some("interrupted".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .milestone,
+            "admitted"
+        );
+        // Simulate app/server death after the atomic append, before publication.
+        let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap();
+        assert_eq!(recovered.captured, next.captured);
+        assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
+        assert!(recovered.input_published);
+        let result = store
+            .sqlite
+            .creation_receipt("interrupted")
+            .unwrap()
+            .unwrap()
+            .result;
+        assert!(result.is_some());
+        let mut newer = recovered.clone();
+        newer.request = Some("A later independent input".into());
+        let newer = super::append_input(&store, newer).await.unwrap();
+        super::new_thread(&store, &record.id, None, false, false, "interrupted")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session(&record.id).await.unwrap().unwrap().captured,
+            newer.captured
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .creation_receipt("interrupted")
+                .unwrap()
+                .unwrap()
+                .result,
+            result
+        );
+    });
+}
+
+#[test]
+fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let first = super::new_thread(&store, &record.id, None, false, false, "first")
+            .await
+            .unwrap();
+        let retry = super::new_thread(&store, &record.id, None, false, false, "first")
+            .await
+            .unwrap();
+        assert_eq!(first.captured, retry.captured);
+        assert_eq!(first.request, retry.request);
+        assert!(store
+            .sqlite
+            .provider_transition(&record.id)
+            .unwrap()
+            .is_none());
+    });
+}

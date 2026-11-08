@@ -61,6 +61,14 @@ impl TaskRun {
     }
 }
 
+/// Moving membership and execution destination retain their own result shapes.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum TaskMoved {
+    Membership(crate::ops::task::TaskEdit),
+    Machine(TaskOwnership),
+}
+
 /// What `task.ship` set going.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]

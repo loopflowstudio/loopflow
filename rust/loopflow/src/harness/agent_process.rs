@@ -979,6 +979,45 @@ mod tests {
     }
 
     #[test]
+    fn a_launcher_that_ended_before_recording_identity_never_started_its_agent() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let session = store.test_session("reserved", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        let launcher = LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at,completed_at,exit_code)
+             VALUES(?1,?1,strftime('%s','now'),strftime('%s','now'),1)",
+            [&launcher],
+        )
+        .unwrap();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &launcher, true)
+            .unwrap();
+        assert_eq!(
+            crate::journal::agent_evidence(&store, &attachment.agent_process_id),
+            crate::journal::ProcessIdentityEvidence::Dead
+        );
+        super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal { to: None },
+        )
+        .unwrap();
+        let process = store
+            .agent_process(&attachment.agent_process_id)
+            .unwrap()
+            .unwrap();
+        assert!(process.completed_at.is_some());
+    }
+
+    #[test]
     fn a_stop_records_where_the_conversation_went_for_the_attachment_it_ended() {
         use crate::process::Departure;
         let home = tempfile::tempdir().unwrap();
@@ -1053,9 +1092,11 @@ mod tests {
         .unwrap();
         let parent = LfProcessId::new();
         let next = LfProcessId::new();
+        // Launchers that may still be running; an ended launcher would make
+        // its unidentified agent dead instead.
         for id in [&parent, &next] {
             sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
                 [id],
             )
             .unwrap();

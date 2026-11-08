@@ -15,17 +15,6 @@ page in a browser, the API over the network, the simulator or device. Drive it
 with computer use, a browser, a terminal or whatever reaches it the way a person
 would. Internal setters, test-only endpoints, mocks and fixtures do not count.
 
-For Desktop in a headless run, follow `swift/README.md`'s Testing section:
-`scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
-then runs model and production-view checks with WindowServer access denied.
-Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
-`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
-Work and taps the production navigation button. Report these as automated
-checks, not a live-window walkthrough. Hosted window checks remain optional;
-record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
-run-debug` builds and launches the development app; use `lf desktop state --json`
-and the commands in `docs/surfaces.md` to inspect and drive it.
-
 Getting there is your job. Build it, start its services, create accounts and
 realistic data, sign in, set up whatever state a real user would already have.
 When no route exists, make one. Hand back only what truly needs a person, such
@@ -107,3 +96,34 @@ Show what you did in `scratch/qa.html`: each scenario, what you did, what you sa
 with screenshots or transcripts, and what you fixed. Finish with what works now,
 what you could not reach and why, and what is still wrong, worst first. Do not
 publish, land or choose the next Graph step from here.
+
+## Loopflow Desktop
+
+For Desktop in a headless run, follow `swift/README.md`'s Testing section:
+`scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
+then runs model and production-view checks with WindowServer access denied.
+Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
+`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
+Work and taps the production navigation button. Report these as automated
+checks, not a live-window walkthrough. Hosted window checks remain optional;
+record what was not seen. With a display, `uv run python scripts/loopflow-dev.py
+run-debug` builds and launches the development app; use `lf desktop state --json`
+and the commands in `docs/surfaces.md` to inspect and drive it.
+
+Use a private `LF_HOME` and an explicit branch `LF_BIN` for experiments. Clear
+inherited `LF_*` first; isolate `HOME` and the repository too. Never attach the
+Session running this QA step.
+
+For headless relay checks, `lf resume --prepare --json` creates connection data
+without launching a provider; repeating it keeps the same Session. Start the
+branch's `lf server run` in the private Machine and parse `lf server status` as
+JSON (its output is compact). Wait for `ready` before starting a relay, so its
+initial readiness request does not register a background service. Stop and reap
+the private server and every relay afterward.
+
+A probe compiling `ServerConnection.swift` against real relay publications can
+check mailbox delivery and cancellation without WindowServer. Label this as a
+component probe: it does not establish mounted panes, hidden-pane rendering,
+focus, copy/Find, or Move here interaction. Keep display diagnostics optional in
+headless runs; record those limits and leave the full Swift suite and Xcode
+fallback build to gate. See `swift/README.md` for the supported checks.

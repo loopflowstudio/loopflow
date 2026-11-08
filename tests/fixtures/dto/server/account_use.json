@@ -1,1 +1,1 @@
-{"type":"request","id":"use-1","operation":{"kind":"account.use","provider":"claude","email":"maya@example.com"},"select":null}
+{"type":"request","id":"use-1","operation":{"kind":"account.use","login":"claude=maya@example.com"},"select":null}

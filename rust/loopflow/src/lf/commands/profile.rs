@@ -22,16 +22,17 @@ pub enum NextOutcome {
 }
 
 #[derive(Debug, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NextLaunch {
-    provider: Provider,
+    pub provider: Provider,
     /// `default`, `repository`, `wave:<id>`, or `automatic` with no order.
-    scope: String,
-    outcome: NextOutcome,
-    account_id: Option<ProviderAccountId>,
-    login: Option<String>,
-    reason: String,
+    pub scope: String,
+    pub outcome: NextOutcome,
+    pub account_id: Option<ProviderAccountId>,
+    pub login: Option<String>,
+    pub reason: String,
     /// The login with no order in the way, when the order changes the pick.
-    without_order: Option<String>,
+    pub without_order: Option<String>,
 }
 
 pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> Result<()> {

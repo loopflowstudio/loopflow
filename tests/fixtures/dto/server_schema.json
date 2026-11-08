@@ -72,6 +72,21 @@
         "account_id": {
           "type": "string"
         },
+        "limited_until": {
+          "description": "Set while the window holds launches it affects back.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "The one model this window limits; `None` limits every model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "observed_at": {
           "format": "int64",
           "type": "integer"
@@ -114,13 +129,30 @@
         "resets_at",
         "plan",
         "observed_at",
-        "source"
+        "source",
+        "model",
+        "limited_until"
       ],
       "type": "object"
     },
     "AccountLimitWindow": {
       "description": "One observed subscription rate-limit window: how much of the plan's\n`session`/`weekly`/`weekly:<model>` window an account has consumed.",
       "properties": {
+        "limited_until": {
+          "description": "Set while the window holds launches it affects back.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "The one model this window limits; `None` limits every model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "plan": {
           "type": [
             "string",
@@ -148,7 +180,9 @@
         "window",
         "used_percent",
         "resets_at",
-        "plan"
+        "plan",
+        "model",
+        "limited_until"
       ],
       "type": "object"
     },
@@ -188,6 +222,10 @@
             "null"
           ]
         },
+        "active": {
+          "description": "Signed in to the provider's shared home.",
+          "type": "boolean"
+        },
         "cached_credential_state": {
           "type": "string"
         },
@@ -211,23 +249,20 @@
           ]
         },
         "expires_at": {
+          "description": "When the credential stops working: an ambient token's expiry, or a\nrental's access token, which the laptop renews before then.",
           "format": "int64",
           "type": [
             "integer",
             "null"
           ]
+        },
+        "held": {
+          "description": "Held there by `lf account use`.",
+          "type": "boolean"
         },
         "login": {
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "long_lived_token_expires_at": {
-          "description": "When the long-lived token lf machine connect installs stops working.",
-          "format": "int64",
-          "type": [
-            "integer",
             "null"
           ]
         },
@@ -299,10 +334,11 @@
         "routing",
         "cooldown_until",
         "expires_at",
-        "long_lived_token_expires_at",
         "windows",
         "verified_windows",
-        "reset_credits"
+        "reset_credits",
+        "active",
+        "held"
       ],
       "type": "object"
     },
@@ -4982,6 +5018,101 @@
         }
       ]
     },
+    "MoveReport": {
+      "properties": {
+        "moved": {
+          "items": {
+            "$ref": "#/$defs/Moved"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Busy Sessions; each moves when its turn ends.",
+          "items": {
+            "$ref": "#/$defs/Moved"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/$defs/Skipped"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "moved",
+        "pending",
+        "skipped"
+      ],
+      "type": "object"
+    },
+    "Moved": {
+      "properties": {
+        "how": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/LfSessionId"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "how"
+      ],
+      "type": "object"
+    },
+    "NextLaunch": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "login": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/NextOutcome"
+        },
+        "provider": {
+          "$ref": "#/$defs/Provider"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scope": {
+          "description": "`default`, `repository`, `wave:<id>`, or `automatic` with no order.",
+          "type": "string"
+        },
+        "without_order": {
+          "description": "The login with no order in the way, when the order changes the pick.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "scope",
+        "outcome",
+        "account_id",
+        "login",
+        "reason",
+        "without_order"
+      ],
+      "type": "object"
+    },
     "NextMove": {
       "properties": {
         "owner": {
@@ -5006,6 +5137,32 @@
         "external"
       ],
       "type": "string"
+    },
+    "NextOutcome": {
+      "description": "What `lf account next` found for one provider.",
+      "oneOf": [
+        {
+          "enum": [
+            "ready"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "blocked",
+          "description": "Every login in the route is out or paused for now.",
+          "type": "string"
+        },
+        {
+          "const": "login_needed",
+          "description": "No login in the route has a working credential.",
+          "type": "string"
+        },
+        {
+          "const": "ambient",
+          "description": "No stored login: launches use the provider's own.",
+          "type": "string"
+        }
+      ]
     },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",
@@ -7950,42 +8107,33 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account [<provider>] [--cached] [--details] --json`: every login's\nstate on this Machine.",
+          "description": "`lf account [<login|provider>] [--cached] --json`: every login's\nstate on this Machine.",
           "examples": [
             {
               "cached": true,
-              "details": false,
               "kind": "account.list",
-              "provider": "claude"
+              "target": "claude"
             }
           ],
           "properties": {
             "cached": {
               "type": "boolean"
             },
-            "details": {
-              "type": "boolean"
-            },
             "kind": {
               "const": "account.list",
               "type": "string"
             },
-            "provider": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/Provider"
-                },
-                {
-                  "type": "null"
-                }
+            "target": {
+              "type": [
+                "string",
+                "null"
               ]
             }
           },
           "required": [
             "kind",
-            "provider",
-            "cached",
-            "details"
+            "target",
+            "cached"
           ],
           "type": "object",
           "x-result": {
@@ -7995,18 +8143,19 @@
             "accounts": [
               {
                 "account_id": "claude:maya@example.com",
-                "cached_credential_state": "valid",
+                "active": false,
+                "cached_credential_state": "connected",
                 "configured_plan": null,
                 "cooldown_until": null,
                 "diagnostic": null,
                 "expires_at": 1794614400,
+                "held": false,
                 "login": "maya@example.com",
-                "long_lived_token_expires_at": null,
                 "observed_plan": "max",
                 "provider": "claude",
                 "recovery": null,
                 "reset_credits": null,
-                "routing": "active",
+                "routing": "automatic",
                 "scope": "managed",
                 "source": "managed home",
                 "verification": "not_checked",
@@ -8014,6 +8163,8 @@
                 "windows": [
                   {
                     "account_id": "claude:maya@example.com",
+                    "limited_until": null,
+                    "model": null,
                     "observed_at": 1794009600,
                     "plan": "max",
                     "provider": "claude",
@@ -8030,12 +8181,12 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> account route [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
+          "description": "`lf --cwd <directory> account next [--repo <repo>] [--default]\n--json`: how the repository selects an account for each provider.",
           "examples": [
             {
               "default": false,
               "directory": "/repo",
-              "kind": "account.route",
+              "kind": "account.next",
               "repo": null
             }
           ],
@@ -8047,7 +8198,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "account.route",
+              "const": "account.next",
               "type": "string"
             },
             "repo": {
@@ -8066,37 +8217,28 @@
           "type": "object",
           "x-result": {
             "items": {
-              "$ref": "#/$defs/RouteReport"
+              "$ref": "#/$defs/NextLaunch"
             },
             "type": "array"
           },
           "x-result-example": [
             {
-              "active_account": null,
-              "ambient": false,
-              "candidates": [
-                {
-                  "account_id": "claude:maya@example.com",
-                  "cooldown_until": null,
-                  "credential_state": "valid",
-                  "login": "maya@example.com",
-                  "routing": "active",
-                  "tightest": "weekly 40% used"
-                }
-              ],
-              "diagnostic": null,
-              "isolated": true,
+              "account_id": "engineering",
+              "login": "engineering@example.com",
+              "outcome": "ready",
               "provider": "claude",
-              "scope": "default"
+              "reason": "the only login ready for this launch",
+              "scope": "default",
+              "without_order": null
             },
             {
-              "active_account": null,
-              "ambient": true,
-              "candidates": [],
-              "diagnostic": null,
-              "isolated": false,
+              "account_id": "manabot",
+              "login": "manabot-eng@example.com",
+              "outcome": "ready",
               "provider": "codex",
-              "scope": "automatic"
+              "reason": "this repository's order names only it",
+              "scope": "repository",
+              "without_order": "jack@example.com, 60% left"
             }
           ]
         },
@@ -8837,97 +8979,6 @@
         "shipping",
         "pr",
         "section"
-      ],
-      "type": "object"
-    },
-    "RouteAccount": {
-      "additionalProperties": false,
-      "properties": {
-        "account_id": {
-          "type": "string"
-        },
-        "cooldown_until": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "credential_state": {
-          "type": "string"
-        },
-        "login": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "routing": {
-          "type": "string"
-        },
-        "tightest": {
-          "description": "The account's most-used window that has not reset.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "account_id",
-        "login",
-        "credential_state",
-        "routing",
-        "cooldown_until",
-        "tightest"
-      ],
-      "type": "object"
-    },
-    "RouteReport": {
-      "additionalProperties": false,
-      "description": "How one provider's account is selected for a repository.",
-      "properties": {
-        "active_account": {
-          "description": "The stored account the native home is signed in as; absent when\nisolated or when its login belongs to no stored account.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ambient": {
-          "type": "boolean"
-        },
-        "candidates": {
-          "items": {
-            "$ref": "#/$defs/RouteAccount"
-          },
-          "type": "array"
-        },
-        "diagnostic": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "isolated": {
-          "description": "Each conversation runs in its account's own home rather than the\nprovider's native one.",
-          "type": "boolean"
-        },
-        "provider": {
-          "$ref": "#/$defs/Provider"
-        },
-        "scope": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "provider",
-        "scope",
-        "ambient",
-        "isolated",
-        "active_account",
-        "candidates",
-        "diagnostic"
       ],
       "type": "object"
     },
@@ -9920,7 +9971,7 @@
     "SessionRecord": {
       "properties": {
         "account": {
-          "description": "The login its conversation is pinned to; absent for a shared or\nunrouted conversation.",
+          "description": "The login its conversation last ran on; absent for an unrouted one.",
           "type": [
             "string",
             "null"
@@ -9954,6 +10005,10 @@
           ],
           "description": "Available for a person, judged from current stream or terminal reports; absent when it is\nworking or nothing current says."
         },
+        "blocked": {
+          "description": "Its next message would fail: the login it would use cannot take its\nmodel now. `lf session move --blocked` moves these.",
+          "type": "boolean"
+        },
         "cwd": {
           "type": "string"
         },
@@ -9968,6 +10023,13 @@
         },
         "interactive": {
           "type": "boolean"
+        },
+        "model": {
+          "description": "The model its current input launched with, when one was named.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "open_argv": {
           "items": {
@@ -10097,6 +10159,8 @@
         "detail",
         "provider",
         "account",
+        "model",
+        "blocked",
         "cwd",
         "state",
         "ready_summary",
@@ -10477,6 +10541,25 @@
         "unassigned"
       ],
       "type": "string"
+    },
+    "Skipped": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/LfSessionId"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "reason"
+      ],
+      "type": "object"
     },
     "SlotLayout": {
       "description": "A Dashboard page's fixed slots. Members fill slots by number, in order, and\noverflow to further pages; they never add, remove or resize slots.",
@@ -12152,15 +12235,24 @@
       "type": "object"
     },
     "TaskExecutionState": {
-      "enum": [
-        "idle",
-        "starting",
-        "running",
-        "stalled",
-        "blocked",
-        "unknown"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "idle",
+            "starting",
+            "running",
+            "stalled",
+            "blocked",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "waiting",
+          "description": "Its step is waiting out a usage limit until an account frees up.",
+          "type": "string"
+        }
+      ]
     },
     "TaskFileRecovery": {
       "properties": {
@@ -15234,6 +15326,7 @@
             ],
             "agent_process_id": "44444444-4444-4444-8444-444444444444",
             "availability": "available",
+            "blocked": false,
             "cwd": "/src/loopflow.task",
             "detail": "review-design",
             "graph_membership": {
@@ -15249,6 +15342,7 @@
             },
             "id": "session_5e55105e000040008000000000000001",
             "interactive": true,
+            "model": null,
             "open_argv": [
               "lf",
               "session",
@@ -15405,6 +15499,42 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionRecord"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf --agent <agent> session move --all [--blocked] [--on <on>]\n--json`: the open Sessions the selector names continue on the agent;\nthe report says which moved, which move after their turn, and which\nwere skipped.",
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "blocked": {
+              "type": "boolean"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.move",
+              "type": "string"
+            },
+            "on": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "blocked",
+            "on",
+            "agent"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/MoveReport"
           }
         },
         {
@@ -15911,7 +16041,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account disconnect <provider> [<email>]`: forget the provider's\nlocal credentials, or one managed login's.",
+          "description": "`lf account disconnect <provider>[=<email>]`: forget the provider's\nlocal credentials, or one managed login's.",
           "examples": [
             {
               "email": "maya@example.com",
@@ -15950,7 +16080,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account connect <provider> [<email>] [--chrome-profile] [--import]\n[--api-key]`. Served, no profile is chosen interactively: a login with\nno remembered profile needs `chrome_profile`.",
+          "description": "`lf account connect <provider>[=<email>] [--chrome-profile] [--import]\n[--api-key]`. Served, no profile is chosen interactively: a login with\nno remembered profile needs `chrome_profile`.",
           "examples": [
             {
               "api_key": false,
@@ -16003,7 +16133,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account set <provider> [<email>] …`: a managed login's lifecycle,\ncooldown and browser choices, or the local credentials' browser choices.",
+          "description": "`lf account set <provider>[=<email>] …`: a managed login's lifecycle,\ncooldown and browser choices, or the local credentials' browser choices.",
           "examples": [
             {
               "chrome_profiles": [],
@@ -16016,8 +16146,7 @@
               "login_email": null,
               "paid_through": null,
               "plan": null,
-              "provider": "codex",
-              "routing": "active"
+              "provider": "codex"
             }
           ],
           "properties": {
@@ -16069,12 +16198,6 @@
             },
             "provider": {
               "type": "string"
-            },
-            "routing": {
-              "type": [
-                "string",
-                "null"
-              ]
             }
           },
           "required": [
@@ -16082,7 +16205,6 @@
             "provider",
             "email",
             "login_email",
-            "routing",
             "plan",
             "clear_plan",
             "paid_through",
@@ -16098,55 +16220,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account token <provider> <email> [--file] [--chrome-profile]`: a\nlong-lived Claude token for a managed login. `file` is a path on this\nMachine; the token itself never travels in the request.",
-          "examples": [
-            {
-              "chrome_profile": null,
-              "email": "maya@example.com",
-              "file": "/Users/maya/.lf/tmp/token",
-              "kind": "account.token",
-              "provider": "claude"
-            }
-          ],
-          "properties": {
-            "chrome_profile": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "email": {
-              "type": "string"
-            },
-            "file": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "kind": {
-              "const": "account.token",
-              "type": "string"
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider",
-            "email",
-            "file",
-            "chrome_profile"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Account"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account redeem-reset <provider> <email> [--idempotency-key]\n[--credit-id] --json`: spend one banked Codex reset.",
+          "description": "`lf account redeem-reset <provider>=<email> [--idempotency-key]\n[--credit-id] --json`: spend one banked Codex reset.",
           "examples": [
             {
               "credit_id": null,
@@ -16201,6 +16275,8 @@
               },
               "windows": [
                 {
+                  "limited_until": null,
+                  "model": null,
                   "plan": "pro",
                   "resets_at": 1794614400,
                   "used_percent": 92,
@@ -16217,34 +16293,83 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf account <provider> use <email>`: sign the provider's ordinary home\nin as a stored login.",
+          "description": "Hold one login on this Machine, or release holds with `auto`.",
           "examples": [
             {
-              "email": "maya@example.com",
               "kind": "account.use",
-              "provider": "claude"
+              "login": "claude=maya@example.com"
             }
           ],
           "properties": {
-            "email": {
-              "type": "string"
-            },
             "kind": {
               "const": "account.use",
               "type": "string"
             },
-            "provider": {
+            "login": {
               "type": "string"
             }
           },
           "required": [
             "kind",
-            "provider",
-            "email"
+            "login"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Account"
+            "type": "null"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pause a login's automatic rotation.",
+          "examples": [
+            {
+              "kind": "account.pause",
+              "login": "claude=maya@example.com"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "account.pause",
+              "type": "string"
+            },
+            "login": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "login"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "null"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Return a login to automatic rotation.",
+          "examples": [
+            {
+              "kind": "account.unpause",
+              "login": "claude=maya@example.com"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "account.unpause",
+              "type": "string"
+            },
+            "login": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "login"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "null"
           }
         },
         {

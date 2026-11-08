@@ -283,7 +283,7 @@ pub enum Write {
         preview: bool,
         persistent: bool,
     },
-    /// `lf account disconnect <provider> [<email>]`: forget the provider's
+    /// `lf account disconnect <provider>[=<email>]`: forget the provider's
     /// local credentials, or one managed login's.
     #[serde(rename = "account.disconnect")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
@@ -291,7 +291,7 @@ pub enum Write {
         provider: String,
         email: Option<String>,
     },
-    /// `lf account connect <provider> [<email>] [--chrome-profile] [--import]
+    /// `lf account connect <provider>[=<email>] [--chrome-profile] [--import]
     /// [--api-key]`. Served, no profile is chosen interactively: a login with
     /// no remembered profile needs `chrome_profile`.
     #[serde(rename = "account.connect")]
@@ -303,7 +303,7 @@ pub enum Write {
         import: bool,
         api_key: bool,
     },
-    /// `lf account set <provider> [<email>] …`: a managed login's lifecycle,
+    /// `lf account set <provider>[=<email>] …`: a managed login's lifecycle,
     /// cooldown and browser choices, or the local credentials' browser choices.
     #[serde(rename = "account.set")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
@@ -319,7 +319,7 @@ pub enum Write {
         chrome_profiles: Vec<String>,
         clear_chrome_profiles: bool,
     },
-    /// `lf account redeem-reset <provider> <email> [--idempotency-key]
+    /// `lf account redeem-reset <provider>=<email> [--idempotency-key]
     /// [--credit-id] --json`: spend one banked Codex reset.
     #[serde(rename = "account.redeem_reset")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Redemption>()))]
@@ -1247,7 +1247,7 @@ mod tests {
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
             r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
             r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
-            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"routing":"active","plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
+            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
             r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
             r#"{"kind":"account.use","login":"claude=maya@example.com"}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,

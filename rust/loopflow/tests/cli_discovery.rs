@@ -549,7 +549,7 @@ fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
         normalized(&["lf", "account", "codex", "--cached"]),
-        ["lf", "ops", "account", "codex", "--cached"]
+        ["lf", "account", "codex", "--cached"]
     );
     assert_eq!(
         normalized(&["lf", "account", "codex", "use", "a@example.com"]),

@@ -163,6 +163,79 @@ fn configuration_edits_use_the_server_without_work_processes() {
 }
 
 #[test]
+fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+
+    // Codex puts its Unix socket below HOME; macOS temp roots can exceed SUN_LEN.
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    support::register_codex_login(home.path(), "work");
+    let repo = TestRepo::new();
+    let _server = Server::start(repo.path(), home.path());
+    let report = || {
+        server_read(Read::AccountList {
+            target: Some("codex=work@".into()),
+            cached: true,
+        })
+    };
+    let login = "codex=work@".to_owned();
+    assert!(server_write(Write::AccountPause {
+        login: login.clone()
+    })
+    .is_null());
+    assert_eq!(report()["accounts"][0]["routing"], "explicit_only");
+    read(
+        repo.path(),
+        home.path(),
+        &["account", "unpause", &login],
+        None,
+    );
+    assert_eq!(report()["accounts"][0]["routing"], "automatic");
+    assert!(server_write(Write::AccountUse {
+        login: login.clone()
+    })
+    .is_null());
+    assert_eq!(report()["accounts"][0]["held"], true);
+    let cli: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["account", &login, "--cached", "--json"],
+        None,
+    ))
+    .unwrap();
+    assert_eq!(report(), cli);
+    let next = server_read(Read::AccountNext {
+        directory: repo.path().to_owned(),
+        repo: None,
+        default: true,
+    });
+    let cli: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["account", "next", "--default", "--json"],
+        None,
+    ))
+    .unwrap();
+    assert_eq!(next, cli);
+    assert!(server_write(Write::AccountUse {
+        login: "auto".into()
+    })
+    .is_null());
+    assert_eq!(report()["accounts"][0]["held"], false);
+    read(
+        repo.path(),
+        home.path(),
+        &["account", "pause", &login],
+        None,
+    );
+    assert_eq!(report()["accounts"][0]["routing"], "explicit_only");
+    assert!(server_write(Write::AccountUnpause { login }).is_null());
+    assert_eq!(report()["accounts"][0]["routing"], "automatic");
+}
+
+#[test]
 fn served_binding_moves_the_conversation_to_the_task_checkout() {
     use loopflow::lf::commands::write::Write;
 
@@ -638,7 +711,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::Doctor
         | Read::Ci { .. }
         | Read::AccountList { .. }
-        | Read::AccountRoute { .. }
+        | Read::AccountNext { .. }
         | Read::SkillList { .. }
         | Read::PrChecks { .. }
         | Read::PrReviews { .. }
@@ -949,8 +1022,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::AccountDisconnect { .. }
         | Write::AccountConnect { .. }
         | Write::AccountSet { .. }
-        | Write::AccountToken { .. }
         | Write::AccountRedeemReset { .. }
+        | Write::AccountPause { .. }
+        | Write::AccountUnpause { .. }
         | Write::AccountUse { .. }
         | Write::GraphRun { .. }
         | Write::SkillRun { .. }
@@ -1850,6 +1924,21 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.extend(words(&["--prepare", "--json"]));
             (path(directory), spelled)
         }
+        Write::SessionMove {
+            directory,
+            blocked,
+            on,
+            agent,
+        } => {
+            let mut spelled = words(&["--agent", agent, "session", "move", "--all", "--json"]);
+            if *blocked {
+                spelled.push("--blocked".into());
+            }
+            if let Some(on) = on {
+                spelled.extend(words(&["--on", on]));
+            }
+            (path(directory), spelled)
+        }
         Write::SessionNew {
             directory,
             id,
@@ -1983,8 +2072,11 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             (path(directory), spelled)
         }
         Write::AccountDisconnect { provider, email } => {
-            let mut spelled = words(&["account", "disconnect", provider]);
-            spelled.extend(email.clone());
+            let target = email
+                .as_ref()
+                .map(|email| format!("{provider}={email}"))
+                .unwrap_or_else(|| provider.clone());
+            let spelled = words(&["account", "disconnect", &target]);
             ("/".into(), spelled)
         }
         Write::AccountConnect {
@@ -1994,8 +2086,11 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             import,
             api_key,
         } => {
-            let mut spelled = words(&["account", "connect", provider]);
-            spelled.extend(email.clone());
+            let target = email
+                .as_ref()
+                .map(|email| format!("{provider}={email}"))
+                .unwrap_or_else(|| provider.clone());
+            let mut spelled = words(&["account", "connect", &target]);
             if let Some(profile) = chrome_profile {
                 spelled.extend(words(&["--chrome-profile", profile]));
             }
@@ -2010,7 +2105,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             provider,
             email,
             login_email,
-            routing,
             plan,
             clear_plan,
             paid_through,
@@ -2019,11 +2113,13 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             chrome_profiles,
             clear_chrome_profiles,
         } => {
-            let mut spelled = words(&["account", "set", provider]);
-            spelled.extend(email.clone());
+            let target = email
+                .as_ref()
+                .map(|email| format!("{provider}={email}"))
+                .unwrap_or_else(|| provider.clone());
+            let mut spelled = words(&["account", "set", &target]);
             for (flag, value) in [
                 ("--login-email", login_email),
-                ("--routing", routing),
                 ("--plan", plan),
                 ("--paid-through", paid_through),
             ] {
@@ -2046,28 +2142,13 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             ("/".into(), spelled)
         }
-        Write::AccountToken {
-            provider,
-            email,
-            file,
-            chrome_profile,
-        } => {
-            let mut spelled = words(&["account", "token", provider, email]);
-            if let Some(file) = file {
-                spelled.extend(words(&["--file", &path(file)]));
-            }
-            if let Some(profile) = chrome_profile {
-                spelled.extend(words(&["--chrome-profile", profile]));
-            }
-            ("/".into(), spelled)
-        }
         Write::AccountRedeemReset {
             provider,
             email,
             idempotency_key,
             credit_id,
         } => {
-            let mut spelled = words(&["account", "redeem-reset", provider, email]);
+            let mut spelled = words(&["account", "redeem-reset", &format!("{provider}={email}")]);
             for (flag, value) in [
                 ("--idempotency-key", idempotency_key),
                 ("--credit-id", credit_id),
@@ -2079,9 +2160,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             ("/".into(), spelled)
         }
-        Write::AccountUse { provider, email } => {
-            ("/".into(), words(&["account", provider, "use", email]))
-        }
+        Write::AccountUse { login } => ("/".into(), words(&["account", "use", login])),
+        Write::AccountPause { login } => ("/".into(), words(&["account", "pause", login])),
+        Write::AccountUnpause { login } => ("/".into(), words(&["account", "unpause", login])),
         Write::GraphRun {
             directory,
             name,

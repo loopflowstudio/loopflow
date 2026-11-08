@@ -11,7 +11,7 @@ use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedSt
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Verification {
+pub enum Verification {
     Accepted,
     Rejected,
     Unavailable,
@@ -20,51 +20,54 @@ enum Verification {
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Scope {
+pub enum Scope {
     Managed,
     Local,
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountReport {
     pub accounts: Vec<AccountRow>,
-    browser: Option<BrowserDetails>,
+    pub browser: Option<BrowserDetails>,
 }
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountRow {
-    provider: Provider,
-    account_id: Option<ProviderAccountId>,
-    login: Option<String>,
-    scope: Scope,
-    source: String,
-    cached_credential_state: String,
-    verification: Verification,
-    diagnostic: Option<String>,
-    recovery: Option<String>,
-    observed_plan: Option<String>,
-    configured_plan: Option<String>,
-    routing: Option<String>,
-    cooldown_until: Option<i64>,
+    pub provider: Provider,
+    pub account_id: Option<ProviderAccountId>,
+    pub login: Option<String>,
+    pub scope: Scope,
+    pub source: String,
+    pub cached_credential_state: String,
+    pub verification: Verification,
+    pub diagnostic: Option<String>,
+    pub recovery: Option<String>,
+    pub observed_plan: Option<String>,
+    pub configured_plan: Option<String>,
+    pub routing: Option<String>,
+    pub cooldown_until: Option<i64>,
     /// When the credential stops working: an ambient token's expiry, or a
     /// rental's access token, which the laptop renews before then.
-    expires_at: Option<i64>,
-    windows: Vec<AccountLimitRow>,
-    verified_windows: Vec<String>,
-    reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    pub expires_at: Option<i64>,
+    pub windows: Vec<AccountLimitRow>,
+    pub verified_windows: Vec<String>,
+    pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
     /// Signed in to the provider's shared home.
-    active: bool,
+    pub active: bool,
     /// Held there by `lf account use`.
-    held: bool,
+    pub held: bool,
 }
 
 #[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BrowserDetails {
-    profiles: Vec<AccessProfile>,
-    bindings: Vec<AuthBrowserBinding>,
-    local_choices: Vec<LocalChromeProfile>,
-    discovery_diagnostic: Option<String>,
+    pub profiles: Vec<AccessProfile>,
+    pub bindings: Vec<AuthBrowserBinding>,
+    pub local_choices: Vec<LocalChromeProfile>,
+    pub discovery_diagnostic: Option<String>,
 }
 
 /// Which accounts a read asks the provider about.

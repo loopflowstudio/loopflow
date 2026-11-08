@@ -297,20 +297,19 @@ pub enum Read {
         wave: Option<String>,
         repo: Option<String>,
     },
-    /// `lf account [<provider>] [--cached] [--details] --json`: every login's
+    /// `lf account [<login|provider>] [--cached] --json`: every login's
     /// state on this Machine.
     #[serde(rename = "account.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::account::account_status::AccountReport>()))]
     AccountList {
-        provider: Option<crate::provider_auth::Provider>,
+        target: Option<String>,
         cached: bool,
-        details: bool,
     },
-    /// `lf --cwd <directory> account route [--repo <repo>] [--default]
+    /// `lf --cwd <directory> account next [--repo <repo>] [--default]
     /// --json`: how the repository selects an account for each provider.
-    #[serde(rename = "account.route")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::RouteReport>>()))]
-    AccountRoute {
+    #[serde(rename = "account.next")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::NextLaunch>>()))]
+    AccountNext {
         directory: PathBuf,
         repo: Option<String>,
         default: bool,
@@ -522,27 +521,21 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountList {
-                provider,
-                cached,
-                details,
-            } => {
+            Self::AccountList { target, cached } => {
                 let mut argv = words(&["account"]);
-                argv.extend(provider.map(|provider| provider.as_str().to_owned()));
-                for (flag, on) in [("--cached", cached), ("--details", details)] {
-                    if *on {
-                        argv.push(flag.into());
-                    }
+                argv.extend(target.iter().cloned());
+                if *cached {
+                    argv.push("--cached".into());
                 }
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountRoute {
+            Self::AccountNext {
                 directory,
                 repo,
                 default,
             } => {
-                let mut argv = at(directory, &["account", "route"]);
+                let mut argv = at(directory, &["account", "next"]);
                 if let Some(repo) = repo {
                     argv.extend(words(&["--repo", repo]));
                 }
@@ -788,16 +781,14 @@ impl Read {
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
-            Self::AccountList {
-                provider,
-                cached,
-                details,
-            } => value(&crate::engine::account::list(*provider, !cached, *details)?),
-            Self::AccountRoute {
+            Self::AccountList { target, cached } => {
+                value(&crate::engine::account::list(target.as_deref(), *cached)?)
+            }
+            Self::AccountNext {
                 directory,
                 repo,
                 default,
-            } => value(&crate::engine::account::route(
+            } => value(&crate::engine::account::next(
                 directory,
                 repo.as_deref(),
                 *default,

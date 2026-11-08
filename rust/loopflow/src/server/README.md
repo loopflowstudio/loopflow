@@ -194,8 +194,8 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
 | `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
 | `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
-| `account.list`, `.route` | `lf account [<provider>]`, `lf account route` | read; `engine::account::list`, `route` |
-| `account.connect`, `.disconnect`, `.set`, `.token`, `.use`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `token`, `lf account <provider> use`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `token`, `activate`, `redeem_reset` (none prompts) |
+| `account.list`, `.next` | `lf account [<login|provider>]`, `lf account next` | read; `engine::account::list`, `next` |
+| `account.connect`, `.disconnect`, `.set`, `.use`, `.pause`, `.unpause`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `use`, `pause`, `unpause`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `activate`, `pause`, `redeem_reset` (none prompts) |
 | `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
 | `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |

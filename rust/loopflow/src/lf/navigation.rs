@@ -260,6 +260,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             } else if leading_value(current, &values_before_subcommand, value) {
                 // `lf account codex --cached`: the provider is a value, not an owner.
                 values_before_subcommand.push(value.clone());
+                positions.push(output.len());
                 path.push(value.clone());
                 output.push(value.clone());
             } else {

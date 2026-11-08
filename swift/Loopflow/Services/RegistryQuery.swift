@@ -312,7 +312,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, id: String, agent: String?)
-    /// Move the open Sessions the selector names to an agent or a login.
+    /// Move the open Sessions the selector names to an agent.
     case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
     case waveAdd(directory: String, wave: String, objective: String?)
     case planningRefresh(directory: String, wave: String)

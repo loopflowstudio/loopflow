@@ -18,7 +18,9 @@ receipts and history in `session_record.rs`, with no attachment or process-contr
 operations. Both remain under the same lock so launch, retry and settlement stay
 serialized. The execution retains the store that admitted its attachment; launch,
 retry and exit use that owner directly instead of reopening through the recording
-directory.
+directory. Completion runs attachment cleanup before recording its receipt.
+A failed receipt write remains a caller error; retrying can record the same
+outcome but cannot reopen the execution or change its result.
 
 ## lf never breaks the conversation
 

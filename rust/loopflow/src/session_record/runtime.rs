@@ -824,16 +824,17 @@ impl ExecutionState {
             )));
         }
         if let Some(settled) = &self.settled_outcome {
-            if settled == outcome {
-                return Ok(());
+            if settled != outcome {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("Recorder already settled as {settled}; refusing {outcome}"),
+                ));
             }
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!("Recorder already settled as {settled}; refusing {outcome}"),
-            ));
+        } else {
+            self.settled_outcome = Some(outcome.to_string());
         }
-        self.recorder.finish(outcome)?;
-        self.settled_outcome = Some(outcome.to_string());
+        // Ending the execution cannot depend on writing its receipt. A retry
+        // may record the same outcome, but cannot reopen or relabel this owner.
         if let Some((store, session, attachment)) = self.owner.take() {
             match finish_session_attachment(&store, &session, &attachment, outcome) {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
@@ -842,7 +843,7 @@ impl ExecutionState {
                 }
             }
         }
-        Ok(())
+        self.recorder.finish(outcome)
     }
 }
 

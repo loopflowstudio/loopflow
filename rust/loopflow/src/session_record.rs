@@ -1414,6 +1414,7 @@ struct SessionRecorder {
     /// When the stream's previous event arrived, to record silences.
     previous_event: Option<OffsetDateTime>,
     telemetry_warned: bool,
+    terminal_recorded: bool,
     activity: activity::Observer,
 }
 
@@ -1462,6 +1463,7 @@ impl SessionRecorder {
             history,
             previous_event: None,
             telemetry_warned: false,
+            terminal_recorded: false,
             activity: activity::Observer::default(),
         }
     }
@@ -1614,6 +1616,9 @@ impl SessionRecorder {
     }
 
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
+        if self.terminal_recorded {
+            return Ok(());
+        }
         let terminal = TerminalReceipt {
             schema_version: SCHEMA_VERSION,
             outcome: outcome.to_string(),
@@ -1621,6 +1626,7 @@ impl SessionRecorder {
             result_ref: None,
         };
         let terminal = write_terminal(&self.dir, terminal)?;
+        self.terminal_recorded = true;
         // The receipt file records settlement. A missed store observation
         // must not fail the exit.
         if self.manifest.harness != "loopflow" {

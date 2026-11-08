@@ -216,6 +216,77 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
+    use std::os::unix::process::CommandExt;
+
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+        for takeover in [false, true] {
+            let capture = AgentExecution::begin_at(home, spec(home))?;
+            capture.claim_session_attachment()?;
+            capture.mark_spawn_requested();
+            let (session, attachment) = capture.session_attachment().unwrap();
+            let store = crate::session_record::row_store(&capture.artifact_dir())?;
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.env_clear().arg("60").process_group(0);
+            store.record_agent_process_launch(&session, &attachment, &command, false)?;
+            let mut child = command.spawn()?;
+            let pid = child.id();
+            let birth = crate::journal::process_started_at(pid)?.unwrap();
+            store.record_agent_process_identity(&session, &attachment, pid, birth)?;
+            let replacement = takeover.then(|| {
+                store
+                    .claim_session_attachment(
+                        &session,
+                        Some(&attachment),
+                        &store.test_lf_process(),
+                        false,
+                    )
+                    .unwrap()
+            });
+            // A directory at the receipt path makes the write fail independently
+            // of the store that owns the still-running provider.
+            let receipt = capture.artifact_dir().join("terminal.json");
+            fs::create_dir(&receipt)?;
+            let result = capture.finish("interrupted");
+            let life = crate::journal::process_identity_evidence(pid, birth);
+            let current = store.session_attachment(&session);
+            let _ = child.kill();
+            let _ = child.wait();
+
+            assert!(
+                result.is_err(),
+                "the missing receipt remains a caller error"
+            );
+            let current = current?.unwrap();
+            if let Some(replacement) = replacement {
+                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Live);
+                assert_eq!(current, replacement);
+            } else {
+                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
+                assert!(current.lf_process_id.is_none());
+            }
+            assert!(capture.finish("failed").is_err());
+            assert!(capture
+                .spawn_native_agent(std::process::Command::new("/bin/true"))
+                .is_err());
+            fs::remove_dir(&receipt)?;
+            capture.finish("interrupted")?;
+            let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
+            assert_eq!(recorded.outcome, "interrupted");
+            let history = store.input_events(&capture.artifact_key())?;
+            capture.finish("interrupted")?;
+            assert_eq!(store.input_events(&capture.artifact_key())?, history);
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn inherited_capture_requires_a_recorded_owner_and_matching_payload() {
     let _lock = crate::journal::test_env_lock();
     let home = tempfile::tempdir().unwrap();

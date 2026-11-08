@@ -916,6 +916,9 @@ Retained terminal changes also run Linux Clippy, `transport_tests`,
 the disposable installation proof `declared_agent_can_start_another_tasks_graph`.
 Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
+Transport fixtures that inspect an owner's recorded exit bind a fixture Session
+before ending execution, then wait with `Fixture::ends`. A bare owner's row can
+be forgotten on exit; relay EOF alone does not mean its journal has settled.
 Process ancestry assertions follow the recorded chain through transport owners
 rather than assuming a fixed number of launch processes.
 Terminal-status isolation assertions match the escaped OSC sequence, not its

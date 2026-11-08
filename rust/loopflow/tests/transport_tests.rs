@@ -5472,6 +5472,7 @@ fn viewer_stream_close_passes_reason_unchanged() {
         false,
         &["/bin/sh", "-c", "read -r line; printf 'last\\033]'; exit 7"],
     ));
+    let _session = fixture.session(&owner);
     let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
         .command(&["session", "attach", &owner])
@@ -5497,6 +5498,7 @@ fn viewer_stream_close_passes_reason_unchanged() {
     assert!(wait_for_viewer(child, Duration::from_secs(5))
         .status
         .success());
+    fixture.ends(&owner);
 }
 
 #[test]

@@ -4466,11 +4466,12 @@ mod tests {
             }
         }
         // A restarted ship carries its run's agent to the steps it starts.
-        let ship = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
+        let checked = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
         assert!(
-            ship(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"]).may_launch_agent()
+            checked(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"])
+                .may_launch_agent()
         );
-        assert!(!ship(&["lf", "--task", "LOO-1", "ship", "--stop"]).may_launch_agent());
+        assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
         for argv in [
             vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
             vec![

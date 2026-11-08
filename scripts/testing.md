@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
+These parser and routing checks exercise canonical commands directly; navigation
+aliases are covered separately by the `cli_discovery::` integration suite.
+
 Changes to `scripts/resource_envelope.py` or its imports also include
 `test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
 recovery outside pytest's configured import path. Use the gate's prepared CLI

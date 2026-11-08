@@ -164,7 +164,7 @@ pub(crate) fn write(
         .map(String::as_str)
         .chain(key.iter().copied())
         .collect();
-    super::files::edit(&path, &path_parts, value)
+    super::files::edit(&path, &path_parts, value, super::keys::Root::General)
 }
 
 pub(crate) fn route_location(

@@ -94,7 +94,7 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
         let bytes = super::ssh::request(
             &source,
             &[
-                "--repository".into(),
+                "--repo-id".into(),
                 route.repository_id.to_string(),
                 "session".into(),
                 "send".into(),

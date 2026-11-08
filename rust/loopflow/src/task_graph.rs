@@ -167,7 +167,9 @@ impl CapturedGraph {
         }
         let mut found = None;
         walk(&self.steps, &[], &mut |place, step| {
-            if found.is_none() && names(step).contains(&name) {
+            // A Graph records an operation under its display name.
+            let recorded = matches!(step, ConcreteStep::Command(command) if command.item.display_name() == name);
+            if found.is_none() && (recorded || names(step).contains(&name)) {
                 found = Some(place);
             }
         });
@@ -319,7 +321,7 @@ impl CapturedGraph {
 }
 
 /// A step where a person takes part.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InteractiveStep {
     pub name: String,
     pub skill: String,
@@ -328,14 +330,14 @@ pub struct InteractiveStep {
 }
 
 /// One Task's Graph as `lf task status --json` carries it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskGraph {
     pub name: String,
     pub interactive_steps: Vec<InteractiveStep>,
     pub position: TaskGraphPosition,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskGraphPosition {
     /// The Task stands at `start`, at `end`, or at this interactive step,

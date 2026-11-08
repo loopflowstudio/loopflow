@@ -41,9 +41,9 @@ Each Task has:
 - **Its history.** Every conversation, Graph run and step, and what each cost.
 
 ```bash
-lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
+lf task steer <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
-lf history usage --task <ID>                   # what it cost
+lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
 
@@ -119,14 +119,14 @@ lf task run INF-123
 
 A Skill supplies instructions; a Graph composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Project holds the plan; the Wave names the graph its Tasks take up by default.
+and memory; its planning holds the Tasks, KRs and targets; the Wave names the graph its Tasks take up by default.
 
 Process records an actual lf command process. LfSession keeps the conversation,
 including headless work. A running Graph is one lf process and the step processes
 it starts. A conversation can outlive its command. A Graph whose
 command stopped stays as history; fresh work is launched explicitly.
 
-Read the [contract and cutover status](architecture/reference-cutover.md#cutover-status)
+Read the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the accepted model and remaining implementation, or the [Glossary](glossary.md)
 for a term. The Mac app and CLI read the same owners.
 
@@ -139,8 +139,9 @@ Read in order; each page starts from what the one before it left you with.
 | Install it and take one piece of work to a pull request | [Get started](getting-started.md) |
 | Hand off many Tasks, steer them, and keep a longer objective moving | [Work](work.md) |
 | Come back to any conversation, after a crash or from another terminal | [Sessions](sessions.md) |
-| Land, repair CI, release, and run on other machines and logins | [Ops](ops.md) |
+| Land, repair CI, release, and run on other machines and logins | [PRs, checkouts, machines and accounts](ops.md) |
 | See Work in Desktop, Rex, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
+| Connect Desktop, check its server, and recover after an update | [Connect clients](server.md) |
 | See what agents did and what it cost | [Telemetry](telemetry.md) |
 | Write Skills and Graphs and pick the agent for each step | [Orchestration](orchestration.md) |
 | Fix something that went wrong | [Troubleshooting](troubleshooting.md) |

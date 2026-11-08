@@ -41,9 +41,9 @@ Each Task has:
 - **Its history.** Every conversation, Graph run and step, and what each cost.
 
 ```bash
-lf comment <ID> "keep the retry budget at 3"   # reaches the next step, in its context
+lf task steer <ID> "keep the retry budget at 3"   # reaches the next step, in its context
 lf task status <ID>                            # where it is in its workflow, and what it needs from you
-lf history usage --task <ID>                   # what it cost
+lf session usage --task <ID>                   # what it cost
 lf land --wait-and-fix                         # merge when checks pass; fix them if not
 ```
 
@@ -120,13 +120,13 @@ You want to do something; here's how through `lf`.
 | open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
-| see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
+| see what agents cost, by Task, Wave or week | `lf session usage --weekly` |
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |
-| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf history linear` |
-| cut a release | `lf release run <version>` |
+| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf session history linear` |
+| cut a release | `lf repo release run <version>` |
 
 ## Needs
 
@@ -154,7 +154,7 @@ created with `git worktree remove`.
 
 Each page picks up where the last one stops:
 [Get started](docs/getting-started.md) → [Work](docs/work.md) →
-[Sessions](docs/sessions.md) → [Ops](docs/ops.md) → [Surfaces](docs/surfaces.md) →
+[Sessions](docs/sessions.md) → [PRs, checkouts, machines and accounts](docs/ops.md) → [Surfaces](docs/surfaces.md) →
 [Telemetry](docs/telemetry.md) → [Orchestration](docs/orchestration.md).
 When something breaks: [Troubleshooting](docs/troubleshooting.md). Everything else:
 [For agents](docs/agent-api.md) · [`lf` reference](docs/lf-reference.md).

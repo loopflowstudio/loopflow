@@ -71,6 +71,8 @@ impl Fixture {
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("PATH", path.unwrap())
+            // A routed launch signs the provider's shared home in; keep it in the fixture.
+            .env("CODEX_HOME", home.join(".codex"))
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -642,7 +644,6 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     // its Graph registers, so wait for it to stop there.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
-        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
@@ -698,7 +699,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(history["plan_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -937,6 +938,11 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .map(|s| s["id"].as_str().unwrap())
             .collect::<Vec<_>>(),
         ["inventory-110", "inventory-111"]
+    );
+    // `--select` keeps only the named paths of each listed Session.
+    assert_eq!(
+        fixture.json(&["session", "list", "--json", "--limit", "2", "--select", "id"]),
+        serde_json::json!([{"id": "inventory-110"}, {"id": "inventory-111"}])
     );
     let output = fixture
         .command(&list)
@@ -2458,6 +2464,9 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
         let fixture = Fixture::new(true);
         fixture
             .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
+        fixture
+            .repo
             .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
         fixture.repo.stage_all();
         fixture
@@ -3584,6 +3593,9 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
 fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
     for wave in [false, true] {
         let fixture = Fixture::new(false);
+        fixture
+            .repo
+            .create_file(".lf/config.yaml", "default_agent: opencode\n");
         let scope = if wave {
             let task_path = fixture.repo.create_named_worktree("other-task");
             support::register_task_with_pr(

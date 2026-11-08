@@ -17,7 +17,7 @@ appear. If the starting roster is missing, the baseline is incomplete.
 Read current planning and Task state:
 
 ```bash
-lf wave status <wave> --no-sync --json
+lf wave plan <wave> --json
 lf wave show --json
 ```
 
@@ -47,10 +47,9 @@ data is unknown.
 Lead with what changed for the people using and running the product, by Wave.
 Under that, keep exact claims, dates, counterexamples, Task and PR links, changed
 claims and gaps. Report Task moves and cancellations only where dated records
-show them. Given an exact-ID plan,
-`lf wave new-chapter --all <name> --plan <plan.json> --dry-run --json` shows
-where each Task would go; label that preview separately from what happened. It
-applies nothing. Don't sort Tasks yourself in prose.
+show them. Nothing previews where
+Tasks go next: open work stays where it is until someone moves it (`lf task move`),
+so report open Tasks as open. Don't sort Tasks yourself in prose.
 
 List next-chapter proposals separately: goals worth pursuing, assumptions that
 changed, goals that weren't really priorities, and active work in the wrong Wave

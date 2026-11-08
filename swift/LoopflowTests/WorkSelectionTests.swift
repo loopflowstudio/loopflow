@@ -8,7 +8,7 @@ struct WorkSelectionTests {
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
         let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
-            guard args == ["desktop", "view", "state:backlog", "--plan", "--json"], cwd == "/repo" else {
+            guard args == ["desktop", "view", "show", "state:backlog", "--json"], cwd == "/repo" else {
                 throw RegistryQueryError("Unexpected command while planning")
             }
             return text
@@ -31,8 +31,8 @@ struct WorkSelectionTests {
         #expect(states.contains(.working) && states.contains(.autonomous))
     }
 
-    @Test func queryPlansArriveFromTheirWatch() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    @Test func queryPlansArriveFromTheirSubscription() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let entry = try #require(entries.first { $0["part"] as? String == "selections" })
         let frame = try WorkFrame.decode(

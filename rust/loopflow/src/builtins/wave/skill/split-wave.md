@@ -35,12 +35,12 @@ Each child gets a fresh GOAL, not a slice of the parent's prose:
    every existing issue; active Tasks stay in the parent Wave until they finish.
 
 4. **Create the children.**
-   - `lf wave add <wave>/<child>` registers each child; commit its
+   - `lf wave create <wave>/<child>` registers each child; commit its
      `.lf/wave/<wave>/<child>/` files on the main checkout and edit them there.
    - `GOAL.md`: fresh intent and judgment, with clear scope lines between
      siblings. `MEMORY.md`: what this child inherits. `metrics/*.md`: the
      metrics allocated to it.
-   - `lf wave connect <wave>/<child>` links each child's Linear Initiative. Add
+   - `lf wave plan connect <wave>/<child>` links each child's Linear Initiative. Create
      starts the first Project; check each child's plan after connecting and keep
      existing Project IDs and Planned/Completed history.
    - `lf update-plan --wave <wave>/<child> --plan <plan.json>` replaces the
@@ -56,20 +56,13 @@ Each child gets a fresh GOAL, not a slice of the parent's prose:
      across Waves or restart its worker.
 
 5. **Retire the parent's future planning.**
-   - Chapter rotation is separate from splitting. If a repository-wide rotation
-     is also accepted, preview `lf wave new-chapter --all <name> --dry-run --json`
-     across all Waves, parent and children included; there is no per-Wave or
-     plan-file option. Apply with `lf wave new-chapter --all <name> --json` only
-     after direction and Task dispositions are reviewed.
-   - Rotation keeps started Tasks in their own Wave with worktrees, PRs and runs
-     intact. Untouched backlog is canceled with its issue and history kept;
-     finished Tasks stay as history; anything uncertain stays open. Rotation
-     doesn't move Tasks to child Waves.
-   - Predecessor Projects become Completed. A written Planned successor keeps its
-     content; otherwise only the Graph is copied. New Waves without Projects get
-     an empty `feature` plan. If interrupted, retry with the same name. Keep the
-     parent available while its active work finishes; don't delete its Projects
-     or treat rotation as retiring the Wave.
+   - Writing a plan is separate from splitting: each Wave's plan is written in
+     place with `lf wave update-plan` after the direction is reviewed; see
+     start-chapter. Nothing moves Tasks between Waves on its own.
+   - Move a Task to a child only with `lf task move <issue> --wave <wave>/<child>`,
+     and only unstarted work: a started Task keeps its worktree, PR, Sessions and
+     Graph where they are. Keep the parent available while its active work
+     finishes; don't delete its Projects.
 
 6. **Check.**
    - Each child has `GOAL.md`, `MEMORY.md` and a connected Linear Initiative.

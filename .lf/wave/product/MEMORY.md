@@ -155,13 +155,12 @@ claiming missing proof. LOO-397 owns broader explanations/discovery; LOO-391 nat
 Work-tab/input/read, configured remote panes and running-Flow exchange proof;
 LOO-416 relaunch persistence; LOO-452 richer keys; LOO-453 readiness/events.
 
-## Optional Task membership (LOO-505, accepted 2026-10-17)
+## Optional Task membership (LOO-505, reconciled 2026-11-04)
 
-Jack Heart approved shipping after required checks. His October 17 review correction
+Jack Heart approved shipping after required checks. His October 17 correction
 makes creation standalone even in bound Sessions/checkouts: only explicit `--wave`
 selects membership; `--no-wave` equals omission. Repository identity is required;
-optional Project supplies the derived Wave. The read projection is validated on
-save, not a second owner. No synthetic inbox or query-owned workspace.
+Project membership derives the Wave. No synthetic inbox or query-owned workspace.
 
 AGENTS.md owns current graph selection. Jack Heart's superseded Workflow defaults
 and commands remain at `781e5dc5b4:.lf/wave/product/MEMORY.md`, this heading.
@@ -178,6 +177,10 @@ does not prove unsent provider input. Broader gate, between-Wave and configured
 native proof remain; no external-progress credit follows. LOO-489 owns query UI;
 LOO-416 retains lifecycle scope.
 
+Decisions and evidence:
+`996f16fabb5344d6545bf75d94393117694cd489:.lf/wave/product/MEMORY.md`, this heading.
+Those tests prove neither unsent provider input nor mounted between-Wave continuity.
+Broader native acceptance remains with LOO-489/416; no external-progress credit follows.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
@@ -429,24 +432,21 @@ Jack Heart's October 17 Console approval replaces the sidebar's completion-range
 controls and selected-terminal-Task exception with explicit retained working order.
 The October 2–14 decisions, Growth counterexample, inline-edit semantics and proof
 limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading. Historical
-records survive; navigation/filtering never completes Work or evicts panes and drafts.
+records survive; navigation/filtering never completes Work or evicts panes or drafts.
 
-Preserve provider cancellation separately from successful completion and actual
-completion time. Reopening makes planning current despite an old timestamp;
-snapshot acquisition cannot establish recency. Equal-revision enrichment may fill
-an absent key, never replace an observed null or date. Missing checkouts alone
-cannot establish settlement. CLI subscription fixtures establish neither mounted
-input continuity nor native acceptance. LOO-408 retains installed settlement;
-retired numeric/soak obligations remain historical. No external-progress credit follows.
+Preserve provider cancellation separately from completion and its time. Reopening
+makes planning current despite an old timestamp; snapshots cannot establish recency;
+equal-revision enrichment fills an absent key, never an observed null or date.
+Missing checkouts cannot establish settlement; CLI subscription fixtures prove
+neither mounted input continuity nor native acceptance. LOO-408 retains installed
+settlement; retired numeric/soak obligations are historical.
 
-## Ask removal decision (2026-10-01)
+## Ask removal decision (2026-10-01; reconciled 2026-11-04)
 
-Jack Heart requested ordinary headless failure without an escalation conversation,
-reporting command, notification queue, or required handoff. The responsible Wave
-operator reads existing status and logs, resolves authorized impediments, and
-uses its ongoing Wave chat for necessary judgment. Taskless failure returns to
-its caller without creating a Wave or conversation. Known failed work stays
-stopped until explicit recovery; retry retains the Flow position and conversation.
+Jack Heart removed headless escalation conversations, reporting commands and
+notifications. Failures retain logs/outcomes; judgment belongs in the existing
+Wave conversation. Taskless failure creates no Wave. Jack retained Task Sessions
+and authored reviews; persistent versus one-off Task conversations remained open.
 
 Jack clarified “no, Task sessions stay”: Task conversations and authored human
 reviews retain their feedback and completion contract. Historical Ask rows become
@@ -542,21 +542,16 @@ Attribution and receipts:
 `35e759aaf:wave/product/MEMORY.md`, this heading. AGENTS.md owns the naming rule;
 curation changes neither.
 
-- Personal `user.name`, the current participant and each request's original
-  author are different facts. Repository config cannot name every caller.
-  `LF_USER_NAME` carries launch participation; forwarded empty stays unknown
-  instead of adopting a remote Home owner's name. Detached work starts unnamed.
-  Native resume must deliver corrections and clearing to the model, not merely
-  change its environment; the update grants no review approval.
-- Store each text's author in its existing journal/provider record. Preserve
-  unknown on replay; provider IDs own identity and names are display data.
-  Publishers/editors need not be authors. No second name store, registry,
-  historical backfill or output-replacement filter is needed. Chat projections
-  must not fill absent historical names from the current participant.
-- Capture a name only for authored text. A preference-read failure once blocked
-  a bare Mac interrupt. Control inputs without text must remain independent of
-  display preferences. The repaired production loopback path demonstrated that
-  regression, not just a mock call.
+- Git identity, participant and original author are distinct. `LF_USER_NAME`
+  carries launch participation; forwarded empty stays unknown, and detached work
+  starts unnamed. Native resume must deliver corrections/clearing to the model;
+  changing environment alone is insufficient and grants no review approval.
+- Existing journal/provider records own authorship. Provider IDs identify;
+  names display. Preserve unknown on replay, never backfill from participants or
+  publishers/editors. No second store, registry or output-replacement filter.
+- Names apply to authored text, not control inputs. A preference-read failure
+  blocked a bare Mac interrupt; the repaired production loopback demonstrated
+  that regression. Controls must stay independent of display preferences.
 - A failed-demo conversation is useful evidence, never a success claim.
   Runnable prototyping and Flow alternatives belong to LOO-297.
 - Fixture renders do not prove tab/window interaction or native recovery.
@@ -873,11 +868,6 @@ September 24 hierarchy decisions govern. Historical KR counts and review mechani
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-### Earlier runtime findings (July–August evidence)
-
-Resident-era incidents and Steer-delivery limits: `b908182f5:wave/product/MEMORY.md`.
-October 4 retired automatic recovery; unknown liveness grants no retry.
-
 ## Model (design invariants)
 
 - `lf` and store projections define the product API; Mac and iOS consume it,
@@ -893,7 +883,7 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 - AgentSessionId names opaque provider history, not Work or process authority.
 - Machine-local execution, Work continuity, provider history, and direct process
   control have separate owners. The current boundary is documented in
-  `docs/architecture/{execution,planning,machines}.md`; earlier topology questions
+  `docs/dev/{execution,planning,machines}.md`; earlier topology questions
   are historical, not authority.
 
 ### Planning authority and historical migration lessons
@@ -926,19 +916,55 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ### The `lf` / Machine spine
 
-`lf` owns commands and durable reads. Global `--machine` routes the command to
-the target machine's `lf`; observation grants no execution authority. The retired Discord,
-lfd and resident-cron contracts remain in
-[git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
+Global `--machine` routes to that machine's `lf`; reads grant no execution authority.
+Retired Discord/lfd/resident contracts: `c418953634bd101f51878d2be2b40fb3facafabd:wave/product/MEMORY.md`.
 
 ## Swift data path — RegistryQuery is the single reader
 
-Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. LOO-500 (2026-11-02) removed Desktop's
-filesystem placeholder scan: surviving files resurfaced retired Waves. Explicit
-writes register directories; reads list store rows only.
-AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
-`92d95edfe:wave/product/MEMORY.md`, this heading.
+Jack Heart selected LOO-593's split November 4, 2026 (publication and interactive
+demo, no Auto-Ship): Machine owns execution destinations, server client access,
+installation registration/update and Desktop automation; native Read/Write/Subscription
+use the socket; Work FFI, Swift bridge and exclusive build wiring are deleted;
+Ghostty and execution owners stay separate.
+
+Jack's later November 4 decision replaces served-write CLI subprocesses with the one
+shared Rust mutation path (`2d9c295d8a`): defaults, routing, output and errors share
+dispatch (engine reuse alone allowed lfd drift); request spans use `logs/lf.log` and
+carry settings and diagnostics into nested blocking work; explicit directory/I/O
+replace global mutation; requests create no Process; an admitted write can finish
+after cancellation, and a lost reply stays unknown, never replayed.
+
+#1805 settings and #1807 Session adoption entered at `000c88709f`/`041ca8f1c5`.
+Configuration/status work without opening the registry; client settings ignore
+launcher overrides; explicit bind selects primary/cwd without moving live execution
+or attribution. Shared operations can introduce raw stderr beneath served dispatch
+(adoption's directory warning now uses scoped diagnostics). `b11d49d32f` routes
+non-launching adoption through the shared `task_from_session` write; parity covers
+prepared Session identity, repository-person claims and no fabricated Process/Graph,
+not provider continuity. Earlier passes do not establish merged-build acceptance.
+
+Protocol revision 2 (Task 4877de, November 5, after Jack asked to learn from Rex):
+one connection per client, `hello`/`welcome` negotiating
+the newest common revision, requests multiplexed by id; `attach` keeps its own
+connection so terminal bytes never share the control path's queue or fate; the
+one-byte revision-1 sniff is the whole compatibility layer and leaves with revision 1.
+Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
+leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
+a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
+resolves a harness it never starts, so fixtures name one. No local latency change was
+measured; the Desktop run awaits demo.
+
+Registration migrates OS labels while retaining socket/lock identity and disabled
+choices. Readiness is consumed once even on failure; recovery only observes status;
+exact-owner recovery is in `server/README.md`. Native proof: `0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`, no final-build
+or speed/memory claim. LOO-718 owns remote
+admission/iOS; preserve wire identity/credentials; local trust cannot authenticate
+proxies; unattended hosting and phone takeover remain open. #1822 and LOO-724's contention repair prove no continuity, incident
+cause or configured recovery. Full text: `67a968bf84:.lf/wave/product/MEMORY.md`.
+
+LOO-500 removed the placeholder scan (surviving files revived retired Waves): writes
+register directories, reads list store rows, unknown status stays explicit.
+Transport history: `324a0f6dc45f43b608408b2b4a0f9403c236da20:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 
@@ -1128,9 +1154,9 @@ Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
 ### Shared viewing boundary
 
 Jack Heart accepted per-conversation ownership October 16. LOO-416 integrated
-LOO-415's attach-only transport (`7bfa10fa72`, October 17); Desktop adoption and
-combined continuity are unproved. Viewer loss never restarts execution; text-grid
-snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes:
+LOO-415's attach-only transport (`7bfa10fa72`); LOO-593 adds local Desktop recovery.
+Rendered continuity remains unproved. Viewer loss never restarts execution;
+text-grid snapshots don't prove renderer restoration. Earlier tmux/LOO-280–283:
 `f8fe8aff0:wave/product/MEMORY.md`, this heading.
 
 ## Learnings

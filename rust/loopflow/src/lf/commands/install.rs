@@ -2935,6 +2935,9 @@ pub fn promote(
     let current = fs::canonicalize(std::env::current_exe()?)?;
     let app_target = artifacts.app_target;
     let promoted = promote_from_installation(artifacts, &current, preview_only)?;
+    if !preview_only {
+        crate::installation::server::refresh_after_promotion();
+    }
     if sync_skills && !preview_only {
         if promoted.is_some() {
             if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 const MAX_RECORDS: usize = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum State {
@@ -18,7 +18,7 @@ pub enum State {
     Clear,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Kind {
@@ -27,7 +27,7 @@ pub enum Kind {
     Auth,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Report {
     pub state: State,
     pub id: Option<String>,
@@ -113,7 +113,7 @@ fn valid_text(text: &str, limit: usize) -> bool {
 }
 
 /// Oldest first; replacement moves a record to the end. No heartbeat or clock.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Records {
     pub seen: bool,
     pub records: Vec<Report>,

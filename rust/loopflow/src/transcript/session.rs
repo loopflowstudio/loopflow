@@ -73,7 +73,9 @@ pub struct Retention {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionState {
     /// The provider still has the transcript.
@@ -113,7 +115,7 @@ fn locate_thread(
 ) -> Result<(HarnessKind, Located)> {
     let name = facts.harness.as_deref().unwrap_or_default();
     let harness = HarnessKind::parse(name).ok_or_else(|| anyhow!("no reader for {name:?}"))?;
-    let located = locate(store, harness, &facts.thread, facts.account.as_ref(), cwd)?;
+    let located = locate(store, harness, &facts.thread, cwd)?;
     Ok((harness, located))
 }
 

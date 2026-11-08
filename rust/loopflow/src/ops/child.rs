@@ -3,7 +3,9 @@
 use crate::durable::WorkRef;
 use crate::store::SharedStore;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
     /// An interrupt was recorded; `target` says what it reached and how.

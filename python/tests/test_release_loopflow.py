@@ -40,6 +40,16 @@ def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert (app_macos_dir / "lf").read_bytes() == b"release-lf"
     assert not (app_macos_dir / "lfd").exists()
+    agent = plistlib.loads(
+        (app_macos_dir.parent / "Library/LaunchAgents/com.loopflow.server.plist").read_bytes()
+    )
+    assert agent["BundleProgram"] == "Contents/MacOS/lf"
+    assert agent["ProgramArguments"] == ["lf", "server", "run"]
+    legacy = plistlib.loads(
+        (app_macos_dir.parent / "Library/LaunchAgents/com.loopflow.machine.plist").read_bytes()
+    )
+    assert legacy["Label"] == "com.loopflow.machine"
+    assert legacy["ProgramArguments"] == ["lf", "machine", "service", "run"]
 
 
 def _write_test_app(app_path: Path, script: str) -> None:

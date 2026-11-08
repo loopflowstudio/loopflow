@@ -1161,9 +1161,9 @@ final class WorkModel {
             }
         }
     }
-    /// The latest row from a Task's own watch, current after the Task leaves
+    /// The latest row from a Task's own subscription, current after the Task leaves
     /// the plan (completed, canceled).
-    private var watchedTaskRow: RoadmapTask?
+    private var subscribedTaskRow: RoadmapTask?
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1371,7 +1371,7 @@ final class WorkModel {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
     }
 
-    /// One Wave's detail, from the planning reading the window already watches.
+    /// One Wave's detail, from the planning reading the window already subscriptions.
     func waveDetail(id: String) -> StreamedWaveDetail? {
         guard !roadmap.isLoading else { return nil }
         let wave = roadmap.value?.waves.first { $0.wave.id == id }
@@ -1466,7 +1466,7 @@ final class WorkModel {
         while !Task.isCancelled {
             var observation: WorkObservation?
             do {
-                let opened = try await query.watchWork()
+                let opened = try await query.subscribeWork()
                 observation = opened
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
@@ -1654,8 +1654,8 @@ final class WorkModel {
             }
         case .task(let body):
             // A frame about its own Task stays true after the selection moves on.
-            if let body, let row = body.row, row.task.identifier == body.task, watchedTaskRow != row {
-                watchedTaskRow = row
+            if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
+                subscribedTaskRow = row
             }
             guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
@@ -1860,7 +1860,7 @@ final class WorkModel {
         projectCommands[id] != nil
     }
 
-    /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    /// Add a Wave through `lf wave create`; the planning stream then delivers its row.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
     func addWave(name: String, objective: String? = nil, repo: String) async throws -> WaveAdded {
@@ -2671,7 +2671,7 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let row = watchedTaskRow, row.id == id || row.runtime?.workId == id {
+        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id {
             return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }

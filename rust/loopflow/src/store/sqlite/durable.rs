@@ -1145,7 +1145,7 @@ mod durable_store_tests {
                 ],
             )
             .unwrap();
-        assert!(!store.chapter_task_evidence(&task.id).unwrap().begun);
+        assert!(!store.task_begun(&task.id).unwrap());
         // A Graph run from the checkout begins its Task without an explicit bind.
         store.test_graph(
             "sync",
@@ -1153,7 +1153,7 @@ mod durable_store_tests {
             &[("sync --plan", None)],
             None,
         );
-        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        assert!(store.task_begun(&task.id).unwrap());
         // A Graph is evidence of work, not a claim.
         assert!(!store.task_owned(&task.id).unwrap());
     }
@@ -1306,7 +1306,7 @@ mod durable_store_tests {
         assert_eq!(work.sessions[0].id, session.id.as_str());
         // Allocating the checkout claims the Task; the earlier session does not.
         assert!(store.task_owned(&task.id).unwrap());
-        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        assert!(store.task_begun(&task.id).unwrap());
     }
 
     #[test]
@@ -1321,7 +1321,7 @@ mod durable_store_tests {
         assert_eq!(before.sessions.len(), 1);
         assert_eq!(before.sessions[0].id, session.id.as_str());
         assert_eq!(session.task_id, None);
-        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+        assert!(store.task_begun(&task_id).unwrap());
 
         let successor = ProjectId::new();
         store.conn.lock().unwrap().execute(

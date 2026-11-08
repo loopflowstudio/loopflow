@@ -1,8 +1,5 @@
-// The local macOS registry query: `RegistryQuery` over this Machine. The Work
-// watches, served reads and served writes run in the app through Loopflow's
-// library; other commands, writes `lf` sends to another Machine, and the remote
-// Task file watch run the bundled `lf` off the main actor so a slow one never
-// stalls the UI.
+// Native Work reads, writes and subscriptions use the local server.
+// Execution launches and remote file streams retain their CLI transports.
 
 #if os(macOS)
 import Foundation
@@ -12,11 +9,9 @@ enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, serve: { query in
-        try await LoopflowLibrary.read(query)
+        try await ServerClient.read(query)
     }, write: { change in
-        if let made = try await LoopflowLibrary.write(change) { return made }
-        // `lf` sends this write to another Machine; its command does.
-        return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
+        try await ServerClient.write(change)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {
@@ -30,7 +25,7 @@ enum RegistryQueryLocal {
                 decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
             return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
         }.value
-    }, watchRead: { args, cwd in
+    }, subscribeRead: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
@@ -40,10 +35,10 @@ enum RegistryQueryLocal {
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
                 decode: { $0 })
-            return LineWatch(lines: reader.frames, send: reader.send, cancel: reader.cancel)
+            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
         }.value
-    }, watchWork: {
-        try WorkWatches.observe(launch: LoopflowLibrary.watch)
+    }, subscribeWork: {
+        try WorkSubscriptions.observe { ServerClient.subscribe($0) }
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

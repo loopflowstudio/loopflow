@@ -8,6 +8,8 @@
   "title_source": "generated",
   "detail": "review-design",
   "provider": "codex",
+  "model": null,
+  "blocked": false,
   "cwd": "/Case/Worktree",
   "state": "unknown",
   "ready_summary": "The design now reflects Jack's requested changes.",

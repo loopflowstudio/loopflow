@@ -372,13 +372,7 @@ fn history(store: &SqliteStore, session: &LfSession) -> Result<Option<MovedHisto
         );
     };
     let thread = reference.agent_session;
-    let located = crate::transcript::locate(
-        store,
-        harness,
-        &thread,
-        reference.account_id.as_ref(),
-        &session.cwd,
-    )?;
+    let located = crate::transcript::locate(store, harness, &thread, &session.cwd)?;
     let (path, home) = match located {
         Located::Found {
             source: Source::File(path),
@@ -475,13 +469,9 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     else {
         bail!("unknown provider {provider}");
     };
-    let home = crate::transcript::conversation_home(
-        &store.sqlite,
-        provider,
-        &history.agent_session_id,
-        None,
-    )?
-    .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
+    let home =
+        crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
+            .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
     let base = match provider {
         Provider::Claude => home.join("projects").join(claude_project(&cwd)),
         _ => home,
@@ -541,7 +531,7 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let path = root.join(name);
     anyhow::ensure!(
         !path.exists(),
-        "{} exists but is not repository {repository} here; run `lf repository --bind {repository}` in it, then move again",
+        "{} exists but is not repository {repository} here; run `lf repo --bind {repository}` in it, then move again",
         path.display()
     );
     fs::create_dir_all(&root)?;

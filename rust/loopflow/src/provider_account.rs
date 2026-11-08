@@ -871,13 +871,12 @@ pub(crate) async fn save_polled_usage(
     let cooling = account
         .cooldown_until
         .is_some_and(|until| until > now_unix());
-    let mut account_wide = polled
+    let account_wide: Vec<_> = polled
         .iter()
         .filter(|window| window.model.is_none())
-        .peekable();
-    let read = account_wide.peek().is_some();
-    let spent = account_wide.any(|window| window.used_percent >= 100);
-    if !cooling || !read || spent {
+        .collect();
+    let spent = account_wide.iter().any(|window| window.used_percent >= 100);
+    if !cooling || account_wide.is_empty() || spent {
         return Ok(false);
     }
     store

@@ -432,12 +432,6 @@ impl Drop for AuthMonitor {
     }
 }
 
-#[cfg(target_os = "macos")]
-struct ClaudeKeychainCredential {
-    account: String,
-    blob: SecretString,
-}
-
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("unsupported provider: {0}")]
@@ -2447,7 +2441,7 @@ pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString
     #[cfg(all(target_os = "macos", not(test)))]
     if claude_login_in_keychain(config_dir) {
         if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
-            return Ok(Some(credential.blob));
+            return Ok(Some(credential));
         }
     }
     match fs::read_to_string(config_dir.join(".credentials.json")) {
@@ -2605,8 +2599,8 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
         let deadline = Instant::now() + CLAUDE_KEYCHAIN_WRITE_TIMEOUT;
         loop {
             if let Some(credential) = read_claude_keychain_credential(&service)? {
-                write_claude_profile_credentials(config_dir, &credential.blob)?;
-                return delete_claude_keychain_credential(&service, &credential.account);
+                write_claude_profile_credentials(config_dir, &credential)?;
+                return delete_claude_keychain_credential(&service, &claude_keychain_account());
             }
             if Instant::now() >= deadline {
                 break;
@@ -2645,7 +2639,7 @@ pub fn import_ambient_claude_profile_credentials(config_dir: &Path) -> Result<()
                         .to_string(),
                 )
             })?;
-        write_claude_profile_credentials(config_dir, &credential.blob)
+        write_claude_profile_credentials(config_dir, &credential)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -2701,14 +2695,11 @@ pub(crate) fn write_claude_profile_credentials(
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_credential(
-    service: &str,
-) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
-    let account = claude_keychain_account();
-    let Some(blob) =
-        read_claude_keychain_blob_with_security(service, &account).map_err(|error| {
-            AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-        })?
+fn read_claude_keychain_credential(service: &str) -> Result<Option<SecretString>, AuthError> {
+    let Some(blob) = read_claude_keychain_blob_with_security(service, &claude_keychain_account())
+        .map_err(|error| {
+        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
+    })?
     else {
         return Ok(None);
     };
@@ -2718,16 +2709,13 @@ fn read_claude_keychain_credential(
     if claude_token_from_credentials_json(&blob).is_none() {
         return Ok(None);
     }
-    Ok(Some(ClaudeKeychainCredential {
-        account,
-        blob: SecretString::new(blob),
-    }))
+    Ok(Some(SecretString::new(blob)))
 }
 
 #[cfg(target_os = "macos")]
 fn read_claude_keychain_credential_for_config(
     config_dir: &Path,
-) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+) -> Result<Option<SecretString>, AuthError> {
     let scoped_service = claude_keychain_service(config_dir);
     if let Some(credential) = read_claude_keychain_credential(&scoped_service)? {
         return Ok(Some(credential));
@@ -2835,7 +2823,7 @@ fn read_claude_keychain_token(config_dir: &Path) -> Option<ProviderToken> {
     let credential = read_claude_keychain_credential_for_config(config_dir)
         .ok()
         .flatten()?;
-    claude_token_from_credentials_json(credential.blob.expose_secret())
+    claude_token_from_credentials_json(credential.expose_secret())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -4547,9 +4535,7 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
             None => std::env::remove_var("USER"),
         }
         written.unwrap();
-        let read = read.unwrap().unwrap();
-        assert_eq!(read.account, "jack");
-        assert_eq!(read.blob.expose_secret(), fresh);
+        assert_eq!(read.unwrap().unwrap().expose_secret(), fresh);
         assert_eq!(fs::read_to_string(items.join("jack")).unwrap(), fresh);
         assert_eq!(fs::read_to_string(items.join("unknown")).unwrap(), fresh);
     }

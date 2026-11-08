@@ -293,6 +293,9 @@ pub fn carry_task_run(
         TaskRunMode::Stop
     };
     let (task, start) = crate::ops::task::task_place(repo, issue, options, mode)?;
+    if !cli.interactive {
+        crate::ops::task::start_conversation_beside(&task);
+    }
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| -> Result<()> {
         crate::engine::launch::report(Ok(run));

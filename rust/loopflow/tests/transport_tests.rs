@@ -416,7 +416,7 @@ read -r answer < /dev/tty
         while self.running(owner) || self.endpoint(owner).exists() {
             assert!(
                 Instant::now() < deadline,
-                "{owner} kept running; logs: {:?}",
+                "{owner} did not finish cleanup; logs: {:?}",
                 std::fs::read_to_string(self.home.path().join("logs/transport.log"))
             );
             std::thread::sleep(Duration::from_millis(50));

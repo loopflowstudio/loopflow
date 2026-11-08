@@ -38,7 +38,7 @@ pub enum Write {
     /// `lf task create --session <id> --title <title> --json`, without launching.
     #[serde(rename = "task.create")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
-    TaskFromSession {
+    TaskCreate {
         directory: PathBuf,
         id: String,
         title: String,
@@ -54,7 +54,7 @@ pub enum Write {
     /// `lf task edit <issue> --notes=<notes>`.
     #[serde(rename = "task.update")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
-    TaskNotes {
+    TaskUpdate {
         directory: PathBuf,
         issue: String,
         notes: String,
@@ -200,7 +200,7 @@ pub enum Write {
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveAdded>()))]
-    WaveAdd {
+    WaveCreate {
         directory: PathBuf,
         wave: String,
         objective: Option<String>,
@@ -208,12 +208,12 @@ pub enum Write {
     /// `lf wave sync <wave> --json`: the planning refresh.
     #[serde(rename = "wave.sync")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
-    PlanningRefresh { directory: PathBuf, wave: String },
+    WaveSync { directory: PathBuf, wave: String },
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project
     /// bound as the Wave's current plan.
     #[serde(rename = "wave.plan.bind")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::project::Project>()))]
-    WavePlanningBind {
+    WavePlanBind {
         directory: PathBuf,
         wave: String,
         project: String,
@@ -222,7 +222,7 @@ pub enum Write {
     /// [--team-name <name>] --json`: one receipt per Wave connected.
     #[serde(rename = "wave.plan.connect")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::linear::LinearInitResult>>()))]
-    WavePlanningConnect {
+    WavePlanConnect {
         directory: PathBuf,
         wave: Option<String>,
         all: bool,
@@ -233,7 +233,7 @@ pub enum Write {
     /// repository's Team; a plan without `apply`.
     #[serde(rename = "wave.plan.reteam")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::linear::LinearReteamResult>()))]
-    WavePlanningReteam { directory: PathBuf, apply: bool },
+    WavePlanReteam { directory: PathBuf, apply: bool },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
     #[serde(rename = "graph.customize")]
@@ -243,7 +243,7 @@ pub enum Write {
     /// detached: the Process carrying the release.
     #[serde(rename = "repo.release")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
-    RepositoryRelease {
+    RepoRelease {
         directory: PathBuf,
         version: Option<String>,
         target: Option<String>,
@@ -453,13 +453,13 @@ pub enum Write {
     /// repositories the app shows.
     #[serde(rename = "desktop.portfolio.set")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
-    Portfolio {
+    DesktopPortfolioSet {
         change: crate::portfolio::PortfolioCommand,
     },
     /// `lf desktop dashboard query [--revision <revision>] -- <id> <expression>`.
     #[serde(rename = "desktop.dashboard.query")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
-    DashboardQuery {
+    DesktopDashboardQuery {
         directory: PathBuf,
         id: String,
         expression: String,
@@ -468,7 +468,7 @@ pub enum Write {
     /// `lf desktop dashboard pin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.pin")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
-    DashboardPin {
+    DesktopDashboardPin {
         directory: PathBuf,
         id: String,
         revision: i64,
@@ -476,7 +476,7 @@ pub enum Write {
     /// `lf desktop dashboard unpin <id> --revision <revision>`.
     #[serde(rename = "desktop.dashboard.unpin")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
-    DashboardUnpin {
+    DesktopDashboardUnpin {
         directory: PathBuf,
         id: String,
         revision: i64,
@@ -484,7 +484,7 @@ pub enum Write {
     /// `lf desktop dashboard rename --revision <revision> -- query:<id> <name>`.
     #[serde(rename = "desktop.dashboard.rename")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
-    DashboardRename {
+    DesktopDashboardRename {
         directory: PathBuf,
         id: String,
         name: String,
@@ -493,7 +493,7 @@ pub enum Write {
     /// `lf desktop dashboard hide query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.hide")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
-    DashboardHide {
+    DesktopDashboardHide {
         directory: PathBuf,
         id: String,
         member: String,
@@ -501,7 +501,7 @@ pub enum Write {
     /// `lf desktop dashboard show query:<id>/<member>`.
     #[serde(rename = "desktop.dashboard.show")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
-    DashboardShow {
+    DesktopDashboardShow {
         directory: PathBuf,
         id: String,
         member: String,
@@ -510,7 +510,7 @@ pub enum Write {
     /// `slots` (JSON) on stdin.
     #[serde(rename = "desktop.dashboard.slots")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
-    DashboardSlots {
+    DesktopDashboardSlots {
         directory: PathBuf,
         id: String,
         revision: i64,
@@ -520,7 +520,7 @@ pub enum Write {
     /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
     #[serde(rename = "desktop.dashboard.move")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
-    TileMove {
+    DesktopDashboardMove {
         directory: PathBuf,
         board: String,
         member: String,
@@ -529,7 +529,7 @@ pub enum Write {
     /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
     #[serde(rename = "desktop.layout.save")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::WorkPaneLayout>()))]
-    PaneLayout {
+    DesktopLayoutSave {
         directory: PathBuf,
         work: String,
         layout: String,
@@ -572,7 +572,7 @@ impl Write {
         let directory = self.directory();
         let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
         match self {
-            Self::TaskFromSession { id, title, .. } => value(&crate::ops::task::task_create(
+            Self::TaskCreate { id, title, .. } => value(&crate::ops::task::task_create(
                 &crate::ops::task::task_repository(directory, None)?,
                 None,
                 Some(title.clone()),
@@ -588,7 +588,7 @@ impl Write {
                 None,
             )?),
             Self::TaskReopen { issue, .. } => value(&crate::ops::task::task_reopen(issue, None)?),
-            Self::TaskNotes { issue, notes, .. } => value(&crate::ops::task::task_edit(
+            Self::TaskUpdate { issue, notes, .. } => value(&crate::ops::task::task_edit(
                 &task_repo(issue)?,
                 issue,
                 None,
@@ -680,7 +680,7 @@ impl Write {
                     .expect("a Session preparation has a CLI spelling")?;
                 value(&super::session::prepared(&cli, directory)?)
             }
-            Self::WaveAdd {
+            Self::WaveCreate {
                 wave, objective, ..
             } => {
                 let repo = crate::repo::require_repo_root(directory, "this command")?;
@@ -688,7 +688,7 @@ impl Write {
                     crate::ops::wave_lifecycle::add(&repo, wave, objective.as_deref()),
                 )?)
             }
-            Self::PlanningRefresh { wave, .. } => {
+            Self::WaveSync { wave, .. } => {
                 let refreshed = super::ops::refresh_status(directory, Some(wave))?;
                 Ok(serde_json::from_str(&super::waves::status_json(
                     directory,
@@ -696,10 +696,10 @@ impl Write {
                     false,
                 )?)?)
             }
-            Self::WavePlanningBind { wave, project, .. } => value(
-                &crate::engine::wave::planning_bind(directory, wave, project)?,
-            ),
-            Self::WavePlanningConnect {
+            Self::WavePlanBind { wave, project, .. } => value(&crate::engine::wave::planning_bind(
+                directory, wave, project,
+            )?),
+            Self::WavePlanConnect {
                 wave,
                 all,
                 team_key,
@@ -713,7 +713,7 @@ impl Write {
                 team_name.as_deref(),
                 &crate::engine::Diagnostics,
             )?),
-            Self::WavePlanningReteam { apply, .. } => value(&crate::engine::wave::planning_reteam(
+            Self::WavePlanReteam { apply, .. } => value(&crate::engine::wave::planning_reteam(
                 directory,
                 *apply,
                 &crate::engine::Diagnostics,
@@ -724,7 +724,7 @@ impl Write {
                     &crate::repo::working_directory_in(directory)?,
                 )?,
             }),
-            Self::RepositoryRelease {
+            Self::RepoRelease {
                 version, target, ..
             } => value(&crate::engine::repo::release(
                 directory,
@@ -951,7 +951,9 @@ impl Write {
                 *persistent,
                 &crate::engine::Diagnostics,
             )?),
-            Self::Portfolio { change } => value(&crate::portfolio::change(change, directory)?),
+            Self::DesktopPortfolioSet { change } => {
+                value(&crate::portfolio::change(change, directory)?)
+            }
             Self::ConfigSet {
                 destination,
                 key,
@@ -963,16 +965,16 @@ impl Write {
             Self::ConfigTheme { path, value: theme } => {
                 value(&crate::engine::config::theme(path, theme.as_deref())?)
             }
-            Self::DashboardQuery { .. }
-            | Self::DashboardPin { .. }
-            | Self::DashboardUnpin { .. }
-            | Self::DashboardRename { .. }
-            | Self::DashboardSlots { .. }
-            | Self::PaneLayout { .. } => {
+            Self::DesktopDashboardQuery { .. }
+            | Self::DesktopDashboardPin { .. }
+            | Self::DesktopDashboardUnpin { .. }
+            | Self::DesktopDashboardRename { .. }
+            | Self::DesktopDashboardSlots { .. }
+            | Self::DesktopLayoutSave { .. } => {
                 use crate::lf::{DashboardCommand, DesktopCommand};
                 let dashboard = |cmd| DesktopCommand::Dashboard { cmd };
                 let command = match self {
-                    Self::DashboardQuery {
+                    Self::DesktopDashboardQuery {
                         id,
                         expression,
                         revision,
@@ -982,30 +984,32 @@ impl Write {
                         expression: expression.clone(),
                         revision: *revision,
                     }),
-                    Self::DashboardPin { id, revision, .. } => dashboard(DashboardCommand::Pin {
-                        query: id.clone(),
-                        revision: *revision,
-                    }),
-                    Self::DashboardUnpin { id, revision, .. } => {
+                    Self::DesktopDashboardPin { id, revision, .. } => {
+                        dashboard(DashboardCommand::Pin {
+                            query: id.clone(),
+                            revision: *revision,
+                        })
+                    }
+                    Self::DesktopDashboardUnpin { id, revision, .. } => {
                         dashboard(DashboardCommand::Unpin {
                             query: id.clone(),
                             revision: *revision,
                         })
                     }
-                    Self::DashboardRename {
+                    Self::DesktopDashboardRename {
                         id, name, revision, ..
                     } => dashboard(DashboardCommand::Rename {
                         target: format!("query:{id}"),
                         name: name.clone(),
                         revision: u64::try_from(*revision)?,
                     }),
-                    Self::DashboardSlots { id, revision, .. } => {
+                    Self::DesktopDashboardSlots { id, revision, .. } => {
                         dashboard(DashboardCommand::Slots {
                             query: format!("query:{id}"),
                             revision: *revision,
                         })
                     }
-                    Self::PaneLayout { work, .. } => DesktopCommand::Layout {
+                    Self::DesktopLayoutSave { work, .. } => DesktopCommand::Layout {
                         work: work.clone(),
                         save: true,
                     },
@@ -1014,8 +1018,9 @@ impl Write {
                 let mut input = self.input().unwrap_or_default().as_bytes();
                 super::desktop::save_arrangement(None, directory, &command, &mut input)
             }
-            Self::DashboardHide { id, member, .. } | Self::DashboardShow { id, member, .. } => {
-                let verb = if matches!(self, Self::DashboardHide { .. }) {
+            Self::DesktopDashboardHide { id, member, .. }
+            | Self::DesktopDashboardShow { id, member, .. } => {
+                let verb = if matches!(self, Self::DesktopDashboardHide { .. }) {
                     "hide"
                 } else {
                     "show"
@@ -1029,7 +1034,7 @@ impl Write {
                     &Default::default(),
                 )
             }
-            Self::TileMove {
+            Self::DesktopDashboardMove {
                 board,
                 member,
                 destination,
@@ -1139,19 +1144,19 @@ impl Write {
     pub fn input(&self) -> Option<&str> {
         match self {
             Self::TaskSave { content, .. } => Some(content),
-            Self::DashboardSlots { slots, .. } => Some(slots),
-            Self::PaneLayout { layout, .. } => Some(layout),
+            Self::DesktopDashboardSlots { slots, .. } => Some(slots),
+            Self::DesktopLayoutSave { layout, .. } => Some(layout),
             _ => None,
         }
     }
 
     pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskFromSession { directory, .. }
+            Self::TaskCreate { directory, .. }
             | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
-            | Self::TaskNotes { directory, .. }
+            | Self::TaskUpdate { directory, .. }
             | Self::TaskClaim { directory, .. }
             | Self::TaskUnassign { directory, .. }
             | Self::TaskRun { directory, .. }
@@ -1168,13 +1173,13 @@ impl Write {
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::SessionMove { directory, .. }
-            | Self::WaveAdd { directory, .. }
-            | Self::PlanningRefresh { directory, .. }
-            | Self::WavePlanningBind { directory, .. }
-            | Self::WavePlanningConnect { directory, .. }
-            | Self::WavePlanningReteam { directory, .. }
+            | Self::WaveCreate { directory, .. }
+            | Self::WaveSync { directory, .. }
+            | Self::WavePlanBind { directory, .. }
+            | Self::WavePlanConnect { directory, .. }
+            | Self::WavePlanReteam { directory, .. }
             | Self::GraphCustomize { directory, .. }
-            | Self::RepositoryRelease { directory, .. }
+            | Self::RepoRelease { directory, .. }
             | Self::CheckoutCommit { directory, .. }
             | Self::CheckoutSync { directory, .. }
             | Self::CheckoutCreate { directory, .. }
@@ -1188,16 +1193,16 @@ impl Write {
             | Self::PrAbandon { directory, .. }
             | Self::PrReconcile { directory }
             | Self::PrRequestReview { directory, .. }
-            | Self::DashboardQuery { directory, .. }
-            | Self::DashboardPin { directory, .. }
-            | Self::DashboardUnpin { directory, .. }
-            | Self::DashboardRename { directory, .. }
-            | Self::DashboardHide { directory, .. }
-            | Self::DashboardShow { directory, .. }
-            | Self::DashboardSlots { directory, .. }
-            | Self::TileMove { directory, .. }
-            | Self::PaneLayout { directory, .. } => directory,
-            Self::Portfolio { .. }
+            | Self::DesktopDashboardQuery { directory, .. }
+            | Self::DesktopDashboardPin { directory, .. }
+            | Self::DesktopDashboardUnpin { directory, .. }
+            | Self::DesktopDashboardRename { directory, .. }
+            | Self::DesktopDashboardHide { directory, .. }
+            | Self::DesktopDashboardShow { directory, .. }
+            | Self::DesktopDashboardSlots { directory, .. }
+            | Self::DesktopDashboardMove { directory, .. }
+            | Self::DesktopLayoutSave { directory, .. } => directory,
+            Self::DesktopPortfolioSet { .. }
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }
             | Self::AccountSet { .. }

@@ -91,7 +91,7 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
         #expect(try encoded(request) == value("subscribe"))
         guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
@@ -115,7 +115,7 @@ struct ServerProtocolTests {
         }
         #expect(process == trace)
         #expect(issued["expires_in_ms"] == .integer(60000))
-        let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(
+        let attach = ServerClientMessage.request(id: "terminal-1", operation: .sessionAttach(
             session: "session_5e55105e000040008000000000000001", owner: trace), select: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
@@ -126,18 +126,39 @@ struct ServerProtocolTests {
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
         let request = ServerClientMessage.request(id: "view-1", operation: .read(
-            .viewPlan(directory: "/repo", expression: "task:INF-123")), select: nil)
+            .desktopViewGet(directory: "/repo", expression: "task:INF-123")), select: nil)
         #expect(try encoded(request) == value("view_plan"))
     }
 
     @Test func configurationUsesTheSharedDestinationContract() throws {
-        let set = ConfigOperation.set(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
+        let set = ConfigOperation.configSet(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
         #expect(try encoded(.request(id: "config-1", operation: .config(set), select: nil)) == value("configuration"))
+    }
+
+    @Test func configurationEncodingsKeepTheirKindsAndFields() throws {
+        let destination = JSONValue.object(["kind": .string("personal_global")])
+        let operations: [(ConfigOperation, String)] = [
+            (.configCatalog, #"{"kind":"config.catalog"}"#),
+            (.configGet(destination: destination, key: "theme"),
+             #"{"kind":"config.get","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configExplain(destination: destination, key: "theme"),
+             #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configUnset(destination: destination, key: "theme"),
+             #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configTheme(path: "/theme.yaml", value: nil),
+             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
+            (.configTheme(path: "/theme.yaml", value: "Hearth"),
+             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+        ]
+        for (operation, json) in operations {
+            let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
+            #expect(try encoded == JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)))
+        }
     }
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskFromSession(directory: "/repo", id: "session_5e55105e000040008000000000000001",
+            .taskCreate(directory: "/repo", id: "session_5e55105e000040008000000000000001",
                              title: "Keep the conversation")), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
@@ -152,12 +173,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
-            ("wave_plan_bind", "bind-1", .wavePlanningBind(directory: "/repo", wave: "product",
+            ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
-            ("wave_plan_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
+            ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
-            ("wave_plan_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
-            ("repo_release", "release-1", .repositoryRelease(directory: "/repo", version: "minor", target: nil)),
+            ("wave_plan_reteam", "reteam-1", .wavePlanReteam(directory: "/repo", apply: false)),
+            ("repo_release", "release-1", .repoRelease(directory: "/repo", version: "minor", target: nil)),
             ("checkout_commit", "commit-1", .checkoutCommit(directory: "/repo", message: "Serve the checkout namespace",
                                                             push: false, noAdd: false, paths: [], agent: nil)),
             ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
@@ -233,9 +254,9 @@ struct ServerProtocolTests {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
-        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)), select: nil)
+        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.repoCi(since: "7d", wave: "product", repo: nil)), select: nil)
         #expect(try encoded(ci) == value("repo_ci"))
-        #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
+        #expect(ServedRead.repoCi(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
                                    message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
             == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])
@@ -315,17 +336,20 @@ struct ServerProtocolTests {
         let described = try ["ServerOperation", "Read", "Write"].reduce(into: [String: Set<String>]()) { all, definition in
             all.merge(try arms(definition, tag: "kind", of: schema)) { first, _ in first }
         }
-        let registry = try source("swift/Loopflow/Services/RegistryQuery.swift")
-        let call = #"TaggedFields\(\s*(?:\w+ \? )?"([a-z_.]+)"(?: : "([a-z_.]+)")?(?:,\s*\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*\)"#
-        let calls = try matches(call, in: registry)
-        #expect(calls.count == registry.components(separatedBy: "TaggedFields(").count - 1, "A TaggedFields call has a shape this test cannot read")
+        let protocolSource = try source("swift/Loopflow/Services/ServerProtocol.swift")
+        let operations = try source("swift/Loopflow/Services/RegistryQuery.swift") + protocolSource
+        let call = #"case \.(\w+)(?:\([^)]*\))?:\s*TaggedFields\("([a-z_.]+)"(?:,\s*\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*\)"#
+        let calls = try matches(call, in: operations)
+        #expect(calls.count == operations.components(separatedBy: "TaggedFields(").count - 1, "A TaggedFields call has a shape this test cannot read")
         for groups in calls {
             let fields = try Set(matches(#""(\w+)":"#, in: groups[3] ?? "").compactMap { $0[1] })
-            for kind in groups[1...2].compactMap({ $0 }) {
-                #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
-            }
+            let kind = try #require(groups[2])
+            let words = kind.split { $0 == "." || $0 == "_" }
+            let name = String(try #require(words.first)) + words.dropFirst().map { $0.capitalized }.joined()
+            #expect(groups[1] == name, "\(kind) must be named \(name) in Swift")
+            #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
         }
-        for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: source("swift/Loopflow/Services/ServerProtocol.swift")) {
+        for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: protocolSource) {
             let kind = try #require(groups[1])
             #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
         }

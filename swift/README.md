@@ -678,7 +678,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; CLI execution launches
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; terminal launches and remote file streams through the CLI
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other
@@ -798,19 +798,24 @@ library; GhosttyKit remains its native renderer.
 
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections
-only reconnect. CLI commands and served writes use the same Rust mutation
-dispatcher for routing, defaults, effects and formatting, with an explicit
-directory and input/output/error streams. Each served write runs in a
-request-scoped worker, starts no ordinary CLI child and creates no Process row.
-Its response trace correlates diagnostics and effects in `logs/lf.log`; it grants
-no execution ownership or permission to retry. Canceling releases the client's
-wait, but an admitted mutation may still complete. A lost response is an unknown
-outcome: refresh authoritative state before another deliberate edit. Desktop
-never automatically resubmits it. Session-to-Task adoption uses this shared write
-path without launching work. Create-and-run and other execution launches retain
-their ordinary CLI path and existing Session/Graph owners;
-remote Machine streams retain their CLI transports. Desktop's UI automation
-remains app-owned.
+only reconnect. CLI commands and served writes call the same Rust operations,
+which return typed values. Each served mutation runs in a request-scoped worker
+with its directory and `CommandIo`; it creates no Process row for the request.
+Its response trace correlates diagnostics and effects in `logs/lf.log`.
+Task run and ship dispatch detached execution under existing Graph owners.
+Terminal launches and remote Task file streams retain their CLI transports;
+Desktop's UI automation remains app-owned.
+
+Canceling releases the client's wait, but an admitted mutation may still complete.
+After a lost response, refresh authoritative state before another deliberate edit.
+Task creation (including Session adoption) and new Session threads additionally
+have creation receipts. `CreationSubmissions` saves the exact submitted payload,
+request ID, original Machine and protocol version before sending; the payload
+contains the original repository directory. A single app recovery owner looks up
+receipts after restart and continues only absent or safely resumable submissions.
+Unknown launches remain inspectable. It keeps unresolved records until a confirmed
+result is presented and dismissed; it stores no local milestone ledger.
+See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
@@ -838,8 +843,9 @@ Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
 automatically repeated.
 
-Local subscriptions use server sockets off the main actor. Cancellation closes
-the connection; reconnect opens a fresh subscription without replaying revisions.
+Local subscriptions share one server connection off the main actor. Canceling a
+subscription sends its cancellation on that connection; reconnect opens fresh
+subscriptions without replaying revisions.
 Remote Task file subscriptions retain their CLI pipes, drained off the main actor;
 cancellation closes stdin, then terminates and reaps only the owned reader if
 necessary. A subscription that speaks only on change is not stalled merely by silence.
@@ -876,7 +882,7 @@ and placement JSON fields retain their existing bytes across these source rename
 
 Definition search keeps Graph and Workflow destinations separate, even for the
 same name. Planning selectors list only Workflows. Task reads expose
-`workflow_name`, `latest_graph_process`, `execution`, and `run_control` separately;
+`graph_name`, `latest_graph_process`, `execution`, and `run_control` separately;
 completed Graph processes retain their graph and identity. The Task subscription part
 supplies `graph_processes`, using the same execution details as CLI inspection.
 

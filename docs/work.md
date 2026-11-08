@@ -29,13 +29,17 @@ lf task create --request-id terminal-recovery-42 --no-wave --title "Keep the ter
 ```
 
 Save a unique request ID before sending a creation you may need to recover.
-Repeat the exact command on the same Machine and repository with that ID after
-a lost reply: it returns the original creation rather than filing a second Task.
+Inspect `lf server receipt terminal-recovery-42 --json` after a lost reply.
+This read needs no running server and starts no work. A missing receipt is `null`;
+an unavailable lookup is an error, not absence. Repeating the exact creation on
+the same Machine and repository with that ID returns the original creation or
+continues its safe unfinished work rather than filing a second Task.
 Changing the payload while reusing the ID returns `conflict`. A new creation
 needs a new ID. Without `--request-id`, the CLI generates one for that invocation;
 rerunning the command without it is a new submission.
 
-The JSON creation receipt contains `task`, `graph`, `session_id` and `milestone`.
+The JSON creation result contains `task`, `graph`, `session_id` and `milestone`,
+including without `--run`. Scripts read the identifier at `.task.identifier`.
 For `--run`, an interrupted launch can return `outcome_unknown` with the created
 Task and `run_requested` milestone. Inspect `lf task status <ID>` before starting
 anything: recovery never launches a second Graph when the first launch is

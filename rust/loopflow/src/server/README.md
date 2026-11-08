@@ -31,7 +31,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 2
+## Local protocol, revision 3
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Messages are
@@ -71,8 +71,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":33554432}}
+→ {"type":"hello","revision":3,"min_revision":3,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":3,"server_revision":3,"min_revision":3,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"]}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -95,7 +95,7 @@ executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized) and limits. What the server can do is its
 revision and `lf server describe`, not a list in the welcome. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 2 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 3 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -158,6 +158,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
+| `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |
@@ -176,6 +177,8 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
+| `wave.rename`, `.remove` | `lf wave rename`, `lf wave remove` | write |
+| `wave.machine` | `lf --wave <wave> set machine <machine>` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
@@ -186,6 +189,7 @@ the shared kinds; `wire::ServerOperation` owns the server's own:
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `process.get` | `lf process show <id>` | read |
+| `process.history` | `lf history show <process-id>` | read; rendered history |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `process.list` | `lf process list` | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
@@ -401,6 +405,12 @@ answers through socket delivery. Reserve before dispatch or subscription
 materialization, and include pending producers. A process-wide budget also
 bounds retention across clients. This accounting is not a process-RSS limit.
 Clients use advertised limits rather than hardcoding server defaults.
+
+The initial limits are 256 open requests/subscriptions, 16 concurrent writes,
+64 MiB retained per connection and 256 MiB process-wide. A producer reserves
+one maximum-size message (32 MiB) before work starts, then holds the serialized
+answer through delivery. These provisional limits bound retained output, not
+the size of the store or total process memory.
 
 Writes have a separate admission cap. A refused write has not run; an admitted
 write finishes even if its answer can no longer be delivered. Backpressure

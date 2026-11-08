@@ -232,8 +232,10 @@ The provider's AgentProcess resolves to its attached LfProcess at child admissio
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
-Every Graph naming a Task, or run in its checkout, is equally its work;
-none is privileged. `task run` always runs a fresh one.
+Every Graph naming a Task, or run in its checkout, is part of its work.
+Only `lf task run` and `lf ship` advance the Task's captured graph position;
+independent Graphs leave that position unchanged. Each launch starts a fresh
+Graph process.
 Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
@@ -300,13 +302,13 @@ lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product
 ```
 
-`task run` places the Task, then runs a fresh Graph in its checkout exactly as
-`lf --task ISSUE graph GRAPH` does, returning when the Graph ends; it never
-continues an earlier one. A plan is replaced in place, preserving active Task
-identity and execution. Direct
-questions and helpers use attributed LfSessions without gaining Graph
-authority. Graphs hold autonomous steps only; review happens in the Task
-conversation.
+`task run` places the Task and starts a fresh Graph process from its saved
+position, returning once the process registers. It stops at the next interactive
+step for review in the Task conversation. `-b` waits and runs those steps headless;
+`lf ship` approves continuation through delivery. A stopped process stays history.
+A direct `lf --task ISSUE graph GRAPH` uses the same runner without moving the
+Task's graph position. Replanning keeps existing Task identity and execution.
+See [Task workflows](../orchestration.md#where-a-person-takes-part).
 
 ### Another machine
 

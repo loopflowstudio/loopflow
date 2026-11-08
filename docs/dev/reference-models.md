@@ -48,7 +48,8 @@ boundary executors remain domain-specific because their settlement rules differ.
 - **Skill runner:** execute one reusable instruction set through one provider
   harness and leave local evidence.
 - **Graph composition:** sequence Skill and mechanical Command nodes, route Xor
-  branches and follow backward edges. Every step is autonomous.
+  branches and follow backward edges. `interactive:` marks the steps where a
+  person takes part; Task runs stop there for their conversation.
 - **Durable planning:** preserve Wave and Task intent across crashes;
   each Task Graph is a fresh Graph process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
@@ -133,7 +134,7 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | --- | --- |
 | Repository | Wave membership |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
-| Task | Worktree, optional PR and every associated Session, Graph and Process; no Graph is privileged |
+| Task | Worktree, optional PR, captured graph and position, and every associated Session, Graph and Process; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |

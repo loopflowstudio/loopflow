@@ -79,8 +79,9 @@ lf task run ISSUE [GRAPH] -> place the worktree, take up GRAPH, the Wave's, the 
                          -> current, completed or stopped
 ```
 
-Every Graph naming a Task is equally its work; none is selected over
-another. `task run` returns to its launcher once its Graph process registers,
+Every Graph naming a Task is part of its work. Only a Task run advances its
+captured graph position; independent Graphs do not. `task run` returns to its
+launcher once its Graph process registers,
 leaving output in `logs/graph-<id>.log`; `-b` blocks and prints. The Graph process holds the cursor in memory and
 advances it from each step's exit; the position a step ran at is on that step
 Process's argv.

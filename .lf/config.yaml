@@ -1,5 +1,6 @@
-exclude:
-- uv.lock
+context:
+  exclude:
+    - uv.lock
 skills:
   explore:
     agent: claude

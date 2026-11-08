@@ -1,0 +1,24 @@
+LOO-673: standing in at explore
+
+── graph feature
+  kickoff
+  explore [interactive]
+  implement
+  compress
+  cmd: sync
+  realign
+  loop-or-next
+  concept-review
+  loop-or-next
+  pr-publish
+  demo [interactive]
+  gate
+  cmd: land --wait-and-fix
+  verify [interactive]
+
+[2/14] explore
+task LOO-673> attached; /status, /interrupt, /detach, or type a message/instruction
+I'm checking how the tile's hover strip is laid out so the visions are concrete.
+[3/14] implement
+task LOO-673> attached; /status, /interrupt, /detach, or type a message/instruction
+Fixing item 16 (pane hover-control inset). Checking whether the Wave view tile is `DashboardSlotGrid` rather than the pane strip.Wave tiles reuse the same pane strip (compact). Applying B and adding an inspection test next to the existing geometry test.Now the edit.

@@ -44,6 +44,23 @@ Make the scenario as real as you can reach:
 - Look at it. Read the output, check the screenshot, notice what is confusing,
   slow or ugly, not only what is wrong.
 
+## Launching Loopflow Desktop
+
+The snapshot and quit probe below needs a display; use the headless checks above
+when WindowServer is unavailable.
+
+- Build the CLI and local server: `cargo build -p loopflow --bin lf`.
+- Build the debug app: `swift build --package-path swift -Xswiftc -gnone`
+  (a few seconds when the build cache is warm). Binary: `swift/.build/debug/LoopflowMac`.
+- `uv run python scripts/check_desktop_launch.py` launches it with
+  `-ui-test-mode empty-workspaces`, waits for the snapshot and the quit, and
+  prints the sampled stacks if it hangs. That mode renders fixture data and
+  reads no registry, so it runs safely beside the person's live Loopflow.app.
+- To look at the frame, call `check_launch(executable, dir)` from that script
+  with a directory you keep. `snapshot.png` is written there.
+- `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
+  release build.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience

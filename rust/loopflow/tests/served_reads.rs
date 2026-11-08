@@ -409,7 +409,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     assert_eq!(receive().unwrap()["type"], "welcome");
 
     write(
-        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}}),
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null}),
         true,
     );
     let answer = receive().unwrap();
@@ -420,7 +420,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}}),
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null}),
         true,
     );
     let mut subscribed = false;
@@ -451,7 +451,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
-        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}}),
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null}),
         false,
     );
     let refused = loop {
@@ -470,7 +470,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null}),
         true,
     );
     let after = loop {

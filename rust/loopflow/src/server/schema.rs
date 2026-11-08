@@ -448,7 +448,7 @@ mod tests {
         let operations = operations(&describe());
         let wire = |value: Value| value["kind"].as_str().unwrap().to_owned();
         for kind in [
-            wire(serde_json::to_value(Read::Doctor).unwrap()),
+            wire(serde_json::to_value(Read::MachineDoctor).unwrap()),
             wire(
                 serde_json::to_value(Write::TaskComplete {
                     directory: "/".into(),

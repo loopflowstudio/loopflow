@@ -33,6 +33,28 @@ Make the scenario as real as you can reach:
 - Look at it. Read the output, check the screenshot, notice what is confusing,
   slow or ugly, not only what is wrong.
 
+## Loopflow's local server
+
+Build `cargo build -p loopflow --bin lf` and use that binary for branch QA.
+For write scenarios, use a temporary Git repository with a local Git identity,
+an isolated `HOME` and `LF_HOME`, and no inherited `LF_*` caller variables.
+Set `default_agent: codex` in its `.lf/config.yaml`. Create real records with
+`lf task create --title ... --json` and `lf session resume --prepare --json`;
+`--prepare` creates connection data without starting a provider. For an upgrade
+scenario, prepare a Session with the installed binary before opening the same
+state with the branch binary.
+
+Run `lf server run` as a child with closed stdin; get its socket from
+`lf server status`. Use the revision-2 newline JSON protocol in
+`rust/loopflow/src/server/README.md` over that Unix socket. Exercise Swift
+encoding with the built `Loopflow` library's `ServerClientMessage` and
+`ServerOperation`; this checks live interoperability, not Desktop UI behavior.
+Check the resulting state through the CLI as well as the socket. Dashboard
+queries accept `task:<id>`; hide/show members use that same selector.
+`lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.
+Session pages return `entries` and `next`. Stop and reap every server child,
+including on failure; no service installation is needed for this isolated run.
+
 ## Launching Loopflow Desktop
 
 The snapshot and quit probe below needs a display; use the headless checks above

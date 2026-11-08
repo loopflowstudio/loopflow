@@ -9,7 +9,7 @@ use crate::lf::output::Colors;
 use crate::process::ProcessEntry;
 use crate::store::contention::read_contention;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Status {
@@ -18,7 +18,7 @@ pub enum Status {
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct Check {
     pub name: &'static str,
     pub status: Status,
@@ -51,14 +51,14 @@ impl Check {
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
 /// What `lf doctor --json` prints.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct DoctorReport {
     store: StoreReport,
     rows: usize,
     checks: Vec<Check>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
     build_label: Option<String>,

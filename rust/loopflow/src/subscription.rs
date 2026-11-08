@@ -471,14 +471,18 @@ fn ensure_claude_credential_unchanged(
 // -- Codex -------------------------------------------------------------------
 
 /// Wire fields from `account/rateLimits/read`. Missing details are not an empty list.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredits {
     pub available_count: u64,
     pub credits: Option<Vec<RateLimitResetCredit>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredit {
     pub id: String,

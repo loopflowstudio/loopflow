@@ -1,6 +1,6 @@
 ---
 requires: accepted direction, and the dated chapter review when there is one
-produces: an exact-ID chapter plan, the rotation result, and Task candidate notes
+produces: each participating Wave's next plan applied, and Task candidate notes
 ---
 Open a new chapter from accepted direction: plan each Wave's next Project, create them, then add the new Tasks.
 
@@ -22,12 +22,11 @@ proposal, giving it the accepted direction and prior results. Proposals change
 nothing. Merge them into one `scratch/chapter-plan.json`:
 
 ```json
-{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}]}
+{"name":"October","waves":[{"wave_id":"<Wave UUID>","project_id":"<Project UUID>","project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}]}
 ```
 
-Generate each new successor's UUID v4 once and keep it. For a chosen existing
-Project, use its UUID with `create:false`. Names never select Projects. Every
-destination needs written KRs; the Graph may be empty. Keep existing names and
+A Wave's plan lands in its current Linear Project. Names never select Projects.
+Every plan needs written KRs; the Graph may be empty. Keep existing names and
 unrelated content. Targets go on Projects; instruments and readings stay on
 Waves.
 
@@ -38,36 +37,21 @@ issue ID once created. These are notes, not a Task list to complete.
 Preview:
 
 ```bash
-lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --dry-run --json
+lf wave edit-plan <wave> --name "October — reliability"
+lf wave update-plan --wave <wave> --plan scratch/<wave>-plan.json   # {"metric_targets":[],"krs":[]}
+lf wave sync <wave> --json
 ```
 
-Show KRs, targets, predecessor and successor IDs, carried work, kept backlog and
-open questions. The plan must be accepted before applying; a significant change
-needs acceptance again. Record each decision with its date.
+`update-plan` replaces the current plan's whole content, so supply every KR and
+target. `wave sync` refreshes the plan from Linear and shows what landed; keep
+its output and exit status. After a partial failure, retry that Wave with the
+same plan; one failed Wave doesn't stop an unrelated one. Started work keeps its
+Task, checkout, PR, Session and Graph. Unreviewed backlog stays where it is until
+someone decides. Planning launches nothing and completes no Task or KR.
 
-## Create the chapter Projects
-
-```bash
-lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --json
-```
-
-It checks every Wave and reserves the exact destinations before writing to
-Linear, and it sorts and moves the Tasks. Started work keeps its Task, checkout,
-PR, Session and Graph. Unreviewed backlog stays in its old Project until someone
-decides. Rotation launches nothing and completes no Task or KR.
-
-Keep the output and exit status. After a partial failure, retry with the same
-IDs and the same create/existing choices, including Waves already done. Never
-match by name, make new UUIDs, or imitate rotation with single Linear edits.
-Report conflicting outside changes. One failed Wave doesn't stop an unrelated
-one.
-
-For one Wave only:
-
-```bash
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --json
-```
+Show KRs, targets, carried work, kept backlog and open questions. The plan must
+be accepted before applying; a significant change needs acceptance again. Record
+each decision with its date.
 
 ## Add new Tasks separately
 
@@ -80,11 +64,11 @@ creation, look in Linear for the existing issue; don't create it twice. Leave
 ambiguous matches open.
 
 Tasks can be added all at once or gradually. A failure here leaves the new
-Projects and KRs usable; keep the remaining candidates for retry. Never roll back
-rotation, and never call pending Tasks done.
+Projects and KRs usable; keep the remaining candidates for retry. Never call
+pending Tasks done.
 
 Before `scratch/` is cleared, move lasting decisions to where they belong.
-Repository edits go through the usual PR; rotation itself is not a Git change.
+Repository edits go through the usual PR; applying a plan is not a Git change.
 
 ## Task briefs
 

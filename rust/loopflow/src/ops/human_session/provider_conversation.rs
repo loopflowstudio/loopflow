@@ -130,13 +130,18 @@ struct NativeConversation {
 
 /// Admit the conversation a provider started on its own, attributed to no
 /// Task. `None` when no provider home holds a conversation with this id.
-pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSession>> {
+pub(crate) async fn admit(
+    store: &SharedStore,
+    id: &str,
+    directory: &Path,
+) -> Result<Option<LfSession>> {
     // Provider conversation ids are UUIDs; nothing else names a transcript.
     if uuid::Uuid::parse_str(id).is_err() {
         return Ok(None);
     }
     let lock_id = format!("provider-conversation:{id}");
-    let _admission = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let _admission =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(session) = recorded(store, id).await? {
         return Ok(Some(session));
     }
@@ -155,7 +160,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
     };
     let cwd = match conversation.cwd.clone().filter(|cwd| cwd.is_dir()) {
         Some(cwd) => cwd,
-        None => crate::repo::working_directory()?,
+        None => crate::repo::working_directory_in(directory)?,
     };
     let session = store
         .create_session(LfSession {

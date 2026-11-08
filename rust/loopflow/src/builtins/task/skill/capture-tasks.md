@@ -52,7 +52,7 @@ launches no work.
 
 From the destination repository, file with `lf task create --wave <wave>`
 without `--run`. Pass the title with `--title` and the full brief on stdin or
-with `--notes`; refine a filed Task with `lf task edit`. Return each Task as one
+with `--notes`; refine a filed Task with `lf task update`. Return each Task as one
 link from `lf --task <issue> open --link --format markdown`
 (`[ID · title](loopflow://…)`), with its repository and Wave; keep the provider
 issue link separate. Run `lf open '<url>'` only when asked to open a Task now,
@@ -63,7 +63,7 @@ leave the unfiled brief in the conversation and say why. Report provider
 failures as they are. Every `lf task create` makes a new Task, even with
 identical input, so after a write that may have failed, check
 `lf wave status <wave> --json` in that repository before anything else. If the
-Task exists, refine it with `lf task edit`; if you still can't tell, report it
+Task exists, refine it with `lf task update`; if you still can't tell, report it
 rather than creating again. Report each Task separately. Keep successful filings
 when another fails; never refile the batch or fall back to the starting
 repository.

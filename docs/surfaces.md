@@ -80,18 +80,29 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation
-lf desktop query attention 'state:available or state:blocked'   # save it as "attention"
+lf desktop dashboard query attention 'state:available or state:blocked'   # save it as "attention"
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
 means AND, and `or` and parentheses compose.
 
+### Connection recovery
+
+Desktop uses the local Loopflow server to read Work and attach Session terminals.
+Installation prepares the connection. Check availability with `lf server status`.
+The native connection row shows recovery while keeping the screen and local
+reading actions available; input waits for acknowledgement. **Retry** reconnects;
+**Move here** explicitly requests control when another viewer has it. Recovery
+never replays uncertain input. See [Connect clients](server.md) for updates,
+background access and the distinction from Machine execution destinations.
+
 ## Drive Desktop from a script
 
 `lf desktop` is Desktop's own pane API, the same kind of thing as tmux's,
 cmux's, Herdr's or Rex's. Use theirs directly in those hosts; use this one in
-Desktop. Every key and menu item is a verb here by the same name.
+Desktop. Every key and menu item is a verb here by the same name. This automation
+endpoint lives with the app; the client server has an independent lifetime.
 
 ```bash
 lf desktop run 'cargo test -p loopflow'           # a new shell tab in the Task's checkout; focus stays put
@@ -119,51 +130,59 @@ real shell tab, so the tab outlives the command.
 ## Build your own view
 
 A herdr, tmux or other GUI pane uses the reads below. Each streams with
-`--watch --json`: one JSON line now, another each time its answer changes,
+`--subscribe --json`: one JSON line now, another each time its answer changes,
 until stdin closes.
 
 ```bash
-lf wave show --all --watch --json         # every Wave's plan and Tasks
-lf task list --watch --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
-lf session list --watch --json            # conversations, with which ones are available for you
-lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
-lf ps --watch --json                      # live lf call trees
-lf planning status --watch --json         # planning sync; keeps it exchanged while it runs
-lf desktop plans --watch --json           # every plan a repository window shows
+lf wave show --all --subscribe --json         # every Wave's plan and Tasks
+lf task list --subscribe --json               # open Tasks, as your sidebar would list them
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf session list --subscribe --json            # conversations, with which ones are available for you
+lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
+lf process list --subscribe --json                      # live lf call trees
+lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
+lf desktop view list --subscribe --json           # every plan a repository window shows
 ```
 
 ```json
 {"answers": null, "unavailable": null, "body": {…}}
 ```
 
-Every Task read prints the same Task row, each fact once:
+Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
+`lf plan list`) prints the same Task record the server sends:
 
 ```json
-{"id": "task_…", "identifier": "LOO-12", "title": "Search transcripts", "wave": "infra",
- "project": "Search", "state": "active", "reason": "…", "workflow": {"name": "code", "stage": "review"},
- "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
+{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", …},
+ "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
+ "next_move": {"owner": "task", "reason": "…"},
+ "condition": {"state": "clear", "reason": "…", …},
+ "graph_name": "code", "pr": {"phase": "open", …}, "section": "now", …}
 ```
 
-`state` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`; `next` is the command that moves the Task
-on, `null` while it moves by itself.
+`runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
+`shipping`, `done` or `abandoned` (`runtime` is `null` before a first run);
+`next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
+on. `lf task status <issue> --json` prints one
+Task as a row, each fact once, with its Sessions, Graph processes and
+thread.
 
-A Session row:
+A Session record:
 
 ```json
 {"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
- "state": "active", "available": true, "task": "task_…", "wave": "infra",
- "cwd": "/src/loopflow.loo-12", "agent_process_id": "…"}
+ "state": "active", "availability": "available", "work": {"kind": "task", "id": "task_…"},
+ "task_ids": ["task_…"], "wave_id": "…", "cwd": "/src/loopflow.loo-12", "actions": [{"kind": "open", …}], …}
 ```
 
 `state` is what its agent process shows (`active`, `detached`, `closed`,
-`unknown`); `available` says it is ready for your next turn. `lf resume <id>`
-opens it.
+`unknown`); `availability` is `"available"` when it is ready for your next
+turn and `null` while it works. `lf resume <id>` opens it.
 
-Desktop's own presentation (sections, conditions, controls) is
-`lf desktop plan`, `lf desktop task`, `lf desktop wave`, `lf desktop done` and
-`lf desktop sessions`, with the same `--watch`.
+Desktop reads the same records through `lf plan list`, `lf task show`,
+`lf wave plan`, `lf task list --closed` and `lf session list`, with the
+same `--subscribe`. `lf wave status` and `lf wave show` exchange planning with the
+tracker first; `lf wave plan` and `lf plan list` read what the store
+records, and `lf wave sync` refreshes it.
 
 `body` is what the same command prints with `--json` alone. Write
 `{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
@@ -174,13 +193,13 @@ A development build with unreleased migrations reads a preview copy; its
 One-shot reads for everything else:
 
 ```bash
-lf desktop view 'wave:product' --plan     # what a Dashboard would show, for your own host; opens nothing
+lf desktop view show 'wave:product'     # what a Dashboard would show, for your own host; opens nothing
 lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
 lf desktop events --json                  # Desktop's window and pane changes, one line each
 lf help desktop --all --json              # every Desktop command's arguments and result schema
 ```
 
-`desktop view --plan`, `query`, `pin`, `rename` and `layout` work without macOS
+`desktop view show`, `desktop dashboard` and `desktop layout` work without macOS
 or a running Desktop; they read and write the same saved Dashboards Desktop
 uses. A program running in a Desktop shell can report its own state with
 Program Status (OSC 7501, Rex's protocol); a blocked report marks the pane available.

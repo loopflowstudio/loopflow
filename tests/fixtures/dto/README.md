@@ -9,13 +9,13 @@ state, reason, Workflow stage, PR, next command) with its Sessions, Graph
 processes and comments. `lf task list`, `lf wave show` and `lf wave status`
 print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 
-`task_status.json` pins `lf desktop task --json`: the planning/execution envelope
+`task_status.json` pins `lf task show --json`: the planning/execution envelope
 for available, unavailable, invalid, removed and absent planning, with the Task's
 overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
 overview, Graph processes, comments and recorded work from
-`lf desktop task --watch` (`watch_frames.json`). These cases have no execution.
+`lf task show --subscribe` (`subscribe_frames.json`). These cases have no execution.
 
-`watch_frames.json` pins one `--watch` frame per read a window runs:
+`subscribe_frames.json` pins one `--subscribe` frame per read a window runs:
 `{answers, unavailable, body}`, where `body` is what the
 read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
 against its read's type; Swift decodes each through its part.
@@ -41,25 +41,25 @@ backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 
-`activity_snapshot.json` pins `lf ps --json`: exact live Process and provider
+`activity_snapshot.json` pins `lf process list --json`: exact live Process and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Desktop receives the same wire type through
-the Work observation stream; it does not poll `lf ps`.
+the Work observation stream; it does not poll `lf process list`.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
-shape used by `lf usage --json` and Wave detail. Captured event sequences
+shape used by `lf session usage --json` and Wave detail. Captured event sequences
 and native thread/turn references retain distinct outcomes. Optional counters,
 missing capture/start membership, stream finality and evidence gaps stay explicit.
 The optional `task_pr_id` retains the PR captured by the managed Graph;
 `first_provider_attempt_at` differs from capture/import observation time.
 
-`work_activity_snapshot.json` pins `lf history --json`: durable Work creation,
+`work_activity_snapshot.json` pins `lf session history --json`: durable Work creation,
 Session capture/provider history, PR and Steer facts retain their original
 identities. Rust and Swift round-trip this shared history.
 
 `task_execution_stalled.json` retains stalled Session evidence; `task_execution_waiting.json` a step held by a usage limit. `graph_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
 
-`task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
+`task_files.json` pins `lf task changes`, `lf diff`, `lf file` and `lf save` JSON:
 exact comparison bases,
 rename paths, scratch listing, and lossless content with a byte revision and
 explicit file state, Save outcome, recovery access and late-change disclosure.
@@ -73,7 +73,7 @@ include the derived interaction stages and route references alongside steps.
 `ask_session.json` keeps the caller capture separate from the Ask conversation.
 A waiting Ask is available before its summary permits Complete.
 
-`context_report.json` pins `lf usage --context --json`: each recorded step's
+`context_report.json` pins `lf task context --json`: each recorded step's
 submitted input by source, flagged against budgets, with Task totals. One step
 is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
@@ -100,7 +100,7 @@ shared legal actions and unavailable evidence without client acquisition.
 
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
 
-`repo_people.json` pins `lf ops people --json`: each Task owner's claim email and
+`repo_people.json` pins `lf repository people --json`: each Task owner's claim email and
 name, with a GitHub identity that is null when unresolved.
 
 `task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.
@@ -122,7 +122,7 @@ it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
-Rust round-trips it; Swift decodes the same plan directly and from `lf desktop plans --watch` in `watch_frames.json`.
+Rust round-trips it; Swift decodes the same plan directly and from `lf desktop view list --subscribe` in `subscribe_frames.json`.
 
 `pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
 members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
@@ -130,15 +130,14 @@ base recovery. Shell identity is independent of its tool pane; saved intent neve
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
 
-`session_rows.json` pins `lf session list --json`: one row per Session, each
-fact once, every field required. Desktop reads `lf desktop sessions`
-(`sessions.json`).
+`sessions.json` pins `lf session list --json`: one Session record each, as the
+server sends it.
 
-`closed_task_page.json` pins `lf task list --done --json`: one page of closed
-Tasks as `lf wave status` Task rows, most recently closed first, and the `next` Task to pass as
+`closed_task_page.json` pins `lf task list --closed --json`: one page of closed
+Tasks as `lf wave status` Task records, most recently closed first, and the `next` Task to pass as
 `--after`. Open Tasks come from the plan; closed ones only from these pages.
 
-`retention_summary.json` pins `lf history retention --json`: Sessions by harness,
+`retention_summary.json` pins `lf session retention --json`: Sessions by harness,
 account, age and retention state (`provider`, `facts`, `unknown`), the soonest
 removals ahead, and each home's expiry policy. Rust and Swift decode it; the
 Desktop Retention card renders it.

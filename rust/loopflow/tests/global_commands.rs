@@ -746,7 +746,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         .unwrap();
     for (flag, value) in [
         ("--repo", selected.path().to_str().unwrap()),
-        ("--repository", repository.as_str()),
+        ("--repo-id", repository.as_str()),
     ] {
         let status: serde_json::Value = serde_json::from_str(&success(
             command(
@@ -1026,7 +1026,7 @@ fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
         serde_json::from_str(&success(run(&["open", "--explain", "--json"]))).unwrap();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(plain["links"][0]["url"], format!("loopflow://{folder}"));
-    assert!(plain["links"][0]["target"]["repository_id"].is_null());
+    assert!(plain["links"][0]["target"]["repo_id"].is_null());
     let invalid = run(&["open", "--diff", "--explain", "--json"]);
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("--diff needs a Task"));
     assert!(success(run(&["open", "--explain"])).contains("Nothing was executed"));
@@ -1911,7 +1911,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         command(
             target_home.path(),
             target.path(),
-            &["--repository", &id, "config", "repository", "--json"],
+            &["--repo-id", &id, "config", "repository", "--json"],
         )
         .output()
         .unwrap(),
@@ -1929,7 +1929,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
             target_home.path(),
             source.path(),
             &[
-                "--repository",
+                "--repo-id",
                 &id,
                 "task",
                 "run",
@@ -2185,7 +2185,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
             "title cannot be empty",
         ),
         (
-            vec!["task", "comment", "INF-123", "  ", "--explain", "--json"],
+            vec!["task", "report", "INF-123", "  ", "--explain", "--json"],
             "comment cannot be empty",
         ),
     ] {
@@ -2201,10 +2201,9 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     }
     let comment = read(&[
         "task",
-        "comment",
+        "steer",
         "INF-123",
         "  Keep the draft  ",
-        "--steer",
         "--explain",
         "--json",
     ]);
@@ -2212,13 +2211,8 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
         comment["action"],
         serde_json::json!({"kind":"comment", "message":"Keep the draft", "steer":true, "refresh":false})
     );
-    let thread = read(&["task", "comment", "INF-123", "--explain", "--json"]);
-    assert!(thread["action"]["message"].is_null());
-    assert_eq!(thread["action"]["refresh"], true);
-    assert!(thread["effects"][0]
-        .as_str()
-        .unwrap()
-        .contains("Refresh Linear"));
+    let report = read(&["task", "report", "INF-123", "Landed", "--explain", "--json"]);
+    assert_eq!(report["action"]["steer"], false);
     let created = read(&[
         "task",
         "create",
@@ -2291,7 +2285,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
             "--explain",
             "--json",
         ],
-        vec!["task", "comment", "INF-123", "Hello", "--explain", "--json"],
+        vec!["task", "report", "INF-123", "Hello", "--explain", "--json"],
     ] {
         let refused = read(&args);
         assert!(refused["action"].is_null());

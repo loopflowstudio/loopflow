@@ -457,6 +457,7 @@ impl Harness for CodexHarness {
             self.requested_account_id.as_ref(),
             crate::work::wave::context::ambient_wave_id().as_ref(),
             model.as_deref(),
+            config.cwd.as_deref(),
         )
         .await?;
         self.account_route = account_route;

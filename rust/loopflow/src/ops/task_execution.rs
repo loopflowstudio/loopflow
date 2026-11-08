@@ -19,7 +19,7 @@ use crate::work::task::Task;
 
 use super::error::{OpsError, OpsResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskExecutionState {
     Idle,
@@ -32,7 +32,7 @@ pub enum TaskExecutionState {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskExecutionSnapshot {
     pub state: TaskExecutionState,
     pub reason: String,

@@ -1,6 +1,6 @@
 ---
 requires: a named Wave and accepted direction
-produces: a successor Project proposal by exact ID, KRs, separate Task candidates and gaps
+produces: this Wave's next plan proposal, KRs, separate Task candidates and gaps
 ---
 Shape this Wave's next chapter from accepted direction and dated findings.
 
@@ -18,29 +18,22 @@ Ordinary Projects need no chapter or KRs.
 Return one entry for the chapter plan:
 
 ```json
-{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
+{"wave_id":"<Wave UUID>","project_id":"<Project UUID>","project_name":"October — reliability","metric_targets":[],"krs":[{"text":"Observable improvement","holds":false}]}
 ```
 
-Generate a UUID v4 once, or reuse a chosen existing Project's UUID with
-`create:false`. Keep Task candidates separate, keyed locally and grouped by
+The plan lands in the Wave's current Linear Project (`lf wave plan <wave> --json`
+names it). Keep Task candidates separate, keyed locally and grouped by
 destination UUID, each with title, brief and acceptance. Candidates are optional
-and are filed only after the chapter Projects exist.
+and are filed only after the plan has landed.
 
-With a complete plan, preview this Wave on its own:
+Return agree or challenge, the exact input and any gaps. Started work keeps its
+identity and runs; unreviewed backlog stays in its Project; anything uncertain
+stays open. Keep earlier KRs and history.
 
-```bash
-lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
-```
-
-Return agree or challenge, the exact input, the dated preview and any gaps.
-Started work keeps its identity and runs; unreviewed backlog stays in its
-Project; anything uncertain stays open. `new-chapter` classifies Tasks; don't
-write your own cancellation rules. Keep earlier KRs and history.
-
-This step only proposes. The caller confirms acceptance and applies it through
-repository or Wave `new-chapter` with this plan. Never write the future plan
-into the current Project, rotate on a read, or create successors with empty
-KRs to plan later. Filing Tasks keeps candidate notes and created issue IDs so
+This step only proposes. The caller confirms acceptance and applies it with
+`lf wave edit-plan`, `lf wave update-plan --plan` and `lf wave sync`. Never write
+the future plan into the current Project from a read, or leave a plan with empty
+KRs to fill in later. Filing Tasks keeps candidate notes and created issue IDs so
 a failed run resumes without duplicates.
 
 ## Task briefs

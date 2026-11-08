@@ -48,12 +48,12 @@ watch, check back or follow up.
 
 ## Begin work in a Wave
 
-When opening a Wave or starting new planning, run `lf wave add <wave> --json`.
+When opening a Wave or starting new planning, run `lf wave create <wave> --json`.
 An existing Wave keeps its Project; a new one gets its first. Ordinary Projects
 need no chapter or workflow. An outage is not absence: report the cause and
 retry the same command. Status and operating passes only read; don't add on
 every poll. Started Tasks in earlier Projects keep running. Chapter changes go
-through start-chapter. Never rotate just to make ordinary work possible.
+through start-chapter. Never replan just to make ordinary work possible.
 
 ## Develop direction
 

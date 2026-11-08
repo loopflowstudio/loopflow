@@ -633,7 +633,7 @@ fn remote_open(
         .find(|entry| entry.id.as_str() == machine)
         .context("Task execution Machine has no configured route")?;
     let mut argv = vec![
-        "--repository".into(),
+        "--repo-id".into(),
         repository.into(),
         "open".into(),
         "--host".into(),
@@ -1047,20 +1047,23 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     )?;
     let mut remotes = Placement::parse(&args.remote)?;
     println!("Loopflow workspace\nNewly started Tasks appear without taking focus. Close this tab to stop following.");
-    let watched = repository.clone();
-    let subscription = super::super::watch::start(
+    let subscribed = repository.clone();
+    let subscribing = super::super::subscribe::start(
         selected.clone(),
-        super::super::watch::Watched::every(super::super::watch::ACTIVITY_CLOCK),
+        super::super::subscribe::Wake::every(super::super::subscribe::ACTIVITY_CLOCK),
         move |store, selected| {
-            let repository = watched.clone();
+            let repository = subscribed.clone();
             async move {
-                let store = super::super::watch::require_store(store)?;
+                let store = super::super::subscribe::require_store(store)?;
                 workspace_plan(&store.sqlite, &repository, selected)
             }
         },
-        super::super::watch::Transport::Pull(Box::new(|| {})),
+        super::super::subscribe::Transport::Pull {
+            wake: Box::new(|| {}),
+            select: None,
+        },
     )?
-    .context("Workspace watch did not start")?;
+    .context("Workspace subscription did not start")?;
     let mut seen: BTreeSet<String> = args.seen.iter().cloned().collect();
     let mut templates = Templates {
         store: &store,
@@ -1080,7 +1083,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
         {
             return Ok(());
         }
-        if let Some(bytes) = subscription.pull() {
+        if let Some(bytes) = subscribing.pull() {
             let frame: Value = serde_json::from_slice(&bytes)?;
             if let Some(error) = frame["unavailable"].as_str() {
                 eprintln!("Work selection unavailable: {error}");
@@ -1127,7 +1130,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
         // Work snapshot. Re-read periodically.
         if refresh.elapsed() >= std::time::Duration::from_secs(15) {
             request_id += 1;
-            subscription.request(format!("{{\"id\":{request_id}}}").as_bytes());
+            subscribing.checkpoint(request_id);
             refresh = std::time::Instant::now();
         }
         let mut fd = libc::pollfd {

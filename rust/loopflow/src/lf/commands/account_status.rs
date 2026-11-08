@@ -9,62 +9,65 @@ use crate::provider_account::{account_login, acquire_managed_login_lock, open_ac
 use crate::provider_auth::{Provider, ProviderAuthService};
 use crate::store::{AccountLimitRow, CredentialState, ProviderAccountId, SharedStore};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Verification {
+pub enum Verification {
     Accepted,
     Rejected,
     Unavailable,
     NotChecked,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Scope {
+pub enum Scope {
     Managed,
     Local,
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
-#[derive(Debug, Serialize, Deserialize)]
-struct AccountReport {
-    accounts: Vec<AccountRow>,
-    browser: Option<BrowserDetails>,
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountReport {
+    pub accounts: Vec<AccountRow>,
+    pub browser: Option<BrowserDetails>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AccountRow {
-    provider: Provider,
-    account_id: Option<ProviderAccountId>,
-    login: Option<String>,
-    scope: Scope,
-    source: String,
-    cached_credential_state: String,
-    verification: Verification,
-    diagnostic: Option<String>,
-    recovery: Option<String>,
-    observed_plan: Option<String>,
-    configured_plan: Option<String>,
-    routing: Option<String>,
-    cooldown_until: Option<i64>,
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountRow {
+    pub provider: Provider,
+    pub account_id: Option<ProviderAccountId>,
+    pub login: Option<String>,
+    pub scope: Scope,
+    pub source: String,
+    pub cached_credential_state: String,
+    pub verification: Verification,
+    pub diagnostic: Option<String>,
+    pub recovery: Option<String>,
+    pub observed_plan: Option<String>,
+    pub configured_plan: Option<String>,
+    pub routing: Option<String>,
+    pub cooldown_until: Option<i64>,
     /// When the credential stops working: an ambient token's expiry, or a
     /// rental's access token, which the laptop renews before then.
-    expires_at: Option<i64>,
-    windows: Vec<AccountLimitRow>,
-    verified_windows: Vec<String>,
-    reset_credits: Option<crate::subscription::RateLimitResetCredits>,
+    pub expires_at: Option<i64>,
+    pub windows: Vec<AccountLimitRow>,
+    pub verified_windows: Vec<String>,
+    pub reset_credits: Option<crate::subscription::RateLimitResetCredits>,
     /// Signed in to the provider's shared home.
-    active: bool,
+    pub active: bool,
     /// Held there by `lf account use`.
-    held: bool,
+    pub held: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct BrowserDetails {
-    profiles: Vec<AccessProfile>,
-    bindings: Vec<AuthBrowserBinding>,
-    local_choices: Vec<LocalChromeProfile>,
-    discovery_diagnostic: Option<String>,
+#[derive(Debug, Clone, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserDetails {
+    pub profiles: Vec<AccessProfile>,
+    pub bindings: Vec<AuthBrowserBinding>,
+    pub local_choices: Vec<LocalChromeProfile>,
+    pub discovery_diagnostic: Option<String>,
 }
 
 /// Which accounts a read asks the provider about.
@@ -95,6 +98,44 @@ fn newest_reading<'a>(windows: impl IntoIterator<Item = &'a AccountLimitRow>) ->
 
 /// `lf account` and `lf account <login|provider>`.
 pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool) -> Result<()> {
+    let detail = target.is_some();
+    let (report, store, only) = project(target, cached).await?;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if detail {
+        let width = std::env::var("COLUMNS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(80);
+        let text = if only.is_some() {
+            render_login(&report, width, now)
+        } else {
+            render(&report, width, now)
+        };
+        print!("{text}");
+    } else {
+        let notes = match &store {
+            Some(store) => route_notes(store).await?,
+            None => vec![],
+        };
+        print!("{}", render_table(&report, &notes, now));
+    }
+    Ok(())
+}
+
+pub(crate) async fn report(target: Option<super::Target>, cached: bool) -> Result<AccountReport> {
+    Ok(project(target, cached).await?.0)
+}
+
+async fn project(
+    target: Option<super::Target>,
+    cached: bool,
+) -> Result<(
+    AccountReport,
+    Option<SharedStore>,
+    Option<ProviderAccountId>,
+)> {
     let detail = target.is_some();
     let refresh = match (cached, detail) {
         (true, _) => Refresh::None,
@@ -157,28 +198,7 @@ pub(super) async fn run(target: Option<super::Target>, cached: bool, json: bool)
         accounts: rows,
         browser,
     };
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else if detail {
-        let width = std::env::var("COLUMNS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(80);
-        let text = if only.is_some() {
-            render_login(&report, width, now)
-        } else {
-            render(&report, width, now)
-        };
-        print!("{text}");
-    } else {
-        let notes = match &store {
-            Some(store) => route_notes(store).await?,
-            None => vec![],
-        };
-        print!("{}", render_table(&report, &notes, now));
-    }
-    Ok(())
+    Ok((report, store, only))
 }
 
 /// A route that leaves stored logins out: worth fixing when unintended.
@@ -191,7 +211,7 @@ struct RouteNote {
 }
 
 async fn route_notes(store: &SharedStore) -> Result<Vec<RouteNote>> {
-    let repo = crate::provider_account::current_repo_id()?;
+    let repo = crate::provider_account::launch_repo_id(None)?;
     let today = OffsetDateTime::now_utc().date();
     let mut notes = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {

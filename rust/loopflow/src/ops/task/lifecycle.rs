@@ -124,10 +124,10 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     }
     .await;
     if let Err(error) = cleanup {
-        eprintln!(
+        crate::journal::request::diagnostic(format_args!(
             "{} is canceled; retained checkout/PR: {error}",
             task.identifier
-        );
+        ));
     }
     Ok(task.identifier)
 }

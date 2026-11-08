@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf monitor ps` once or `--watch`ed, `lf monitor top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once or `--subscribe`ed, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -23,7 +23,7 @@ const SCHEMA_VERSION: u32 = 1;
 const COMMAND_WIDTH: usize = 82;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityNodeKind {
@@ -31,7 +31,7 @@ pub enum ActivityNodeKind {
     AgentProcess,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityState {
@@ -52,7 +52,7 @@ impl ActivityState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivityNode {
     pub id: String,
     pub parent_id: Option<String>,
@@ -62,12 +62,13 @@ pub struct ActivityNode {
     pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
     pub state: ActivityState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct ActivitySnapshot {
     pub nodes: Vec<ActivityNode>,
 }
@@ -140,10 +141,12 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees: Process rows change with the store, liveness and
 /// activity state only on the clock.
-pub fn watch_ps(transport: super::watch::Transport) -> Result<Option<super::watch::Subscription>> {
-    super::watch::start(
+pub fn subscribe_ps(
+    transport: super::subscribe::Transport,
+) -> Result<Option<super::subscribe::Subscription>> {
+    super::subscribe::start(
         (),
-        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         {
             let mut reader = ActivityReader::default();
             move |_, ()| {
@@ -393,7 +396,16 @@ pub(crate) fn lf_command_label(command: Option<&str>) -> String {
         return "lf".to_string();
     };
     let grouped = [
-        "machine", "ops", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "machine",
+        "repository",
+        "repo",
+        "pm",
+        "pr",
+        "project",
+        "radio",
+        "task",
+        "wave",
+        "work",
     ];
     let operation = grouped
         .contains(&command.as_str())
@@ -500,7 +512,10 @@ fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> Activi
 
 fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(snapshot)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&super::subscribe::selected_answer(snapshot)?)?
+        );
     } else {
         print!("{}", render_snapshot(snapshot));
     }
@@ -926,7 +941,7 @@ mod tests {
         assert_eq!(after.unwrap(), before);
     }
 
-    /// A watch shows new rows and exits as they commit, and reads a row proven
+    /// A subscription shows new rows and exits as they commit, and reads a row proven
     /// dead only once: its receipt and PID are never read again.
     #[test]
     #[cfg(unix)]

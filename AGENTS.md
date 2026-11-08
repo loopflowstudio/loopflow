@@ -157,8 +157,8 @@ Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep th
 across replanning, and unreviewed backlog stays until someone decides.
 
 The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,
-is in [Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
-the [Architecture Reference](docs/architecture-reference.md) indexes the rest.
+is in [Core models and APIs](docs/dev/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/dev/reference.md) indexes the rest.
 
 # Development Environment
 
@@ -289,6 +289,8 @@ them.
 - Every `unsafe` block gets a `// SAFETY:` comment. Keyword clashes use `r#type` or `type_`.
 - `#[non_exhaustive]` on public enums that may grow.
 - SQLite read helpers that join statements use savepoints so they work inside the Work reader's pinned snapshot and standalone. Write transactions stay at their command boundaries.
+- Served mutations take a directory and `CommandIo`; never redirect process cwd, env or file descriptors. Nested blocking operations use `journal::request::spawn_blocking` to keep request attribution and diagnostics. A request trace is not an OS Process; execution launches keep their owners.
+- Forward stdin only to commands that consume it; a mutation with no body must finish while terminal stdin stays open.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
 
 **Rust tests:**
@@ -314,6 +316,7 @@ them.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
+- macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
@@ -380,6 +383,10 @@ Required checks run headless, with no display, permission dialog or person.
 Desktop uses app builds and view tests. A check that can't run here goes to
 gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later.
+
+Swift async process fixtures install `terminationHandler` before `run()` and
+await its completion. Don't call blocking `waitUntilExit()` on a cooperative
+executor; it can stay in Foundation's run loop after the child has exited.
 
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.

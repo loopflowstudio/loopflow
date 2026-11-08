@@ -94,7 +94,9 @@ pub struct WorkLink {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkLinkTarget {
     pub kind: WorkWorkspaceKind,
+    #[serde(rename = "repo_path")]
     pub repository_path: String,
+    #[serde(rename = "repo_id")]
     pub repository_id: Option<String>,
     /// The Task's readable identifier, such as LOO-507.
     pub task: Option<String>,

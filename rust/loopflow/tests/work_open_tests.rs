@@ -334,7 +334,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
         "emitted links keep the qualifier"
     );
     assert_eq!(
-        Path::new(links[0]["target"]["repository_path"].as_str().unwrap())
+        Path::new(links[0]["target"]["repo_path"].as_str().unwrap())
             .canonicalize()
             .unwrap(),
         path.canonicalize().unwrap()

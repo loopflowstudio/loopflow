@@ -1063,7 +1063,15 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None, None, None).await
+    resolve_provider_account_exact(
+        provider,
+        agent_session,
+        None,
+        None,
+        None,
+        Some(Path::new("/")),
+    )
+    .await
 }
 
 const LIMIT_REASON_ENV: &str = "LF_LIMIT_REASON";
@@ -1147,7 +1155,7 @@ async fn record_native_limit(
         return Ok(());
     }
     let wave = crate::work::wave::context::ambient_wave_id();
-    match select_route(provider, None, None, wave.as_ref(), None).await {
+    match select_route(provider, None, None, wave.as_ref(), None, None).await {
         Ok(Some(route)) => {
             activation::activate(
                 &store,
@@ -1189,17 +1197,27 @@ pub(crate) async fn names_another_account(
 }
 
 /// The route a launch in `wave_id`'s work takes, if any. A conversation it resumes is brought into the
-/// route's home first, whichever account held it before.
+/// route's home first, whichever account held it before. `directory` is where
+/// the launch runs, which names the repository whose route applies; `None`
+/// means it runs in this process's directory.
 pub(crate) async fn resolve_provider_account_exact(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     model: Option<&str>,
+    directory: Option<&Path>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id, model)
-        .await?
-        .map(|route| route.launching(model));
+    let route = select_route(
+        provider,
+        agent_session,
+        exact_account_id,
+        wave_id,
+        model,
+        directory,
+    )
+    .await?
+    .map(|route| route.launching(model));
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
@@ -1216,6 +1234,7 @@ async fn select_route(
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
     model: Option<&str>,
+    directory: Option<&Path>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -1234,6 +1253,7 @@ async fn select_route(
             wave_id,
             store,
             model,
+            directory,
         )
         .await;
     }
@@ -1259,7 +1279,7 @@ async fn select_route(
         }
     }
 
-    let routed_repo_id = current_repo_id()?;
+    let routed_repo_id = launch_repo_id(directory)?;
     let candidates = provider_route_account_ids(&store, routed_repo_id.as_ref(), wave_id, provider)
         .await?
         .unwrap_or_default();
@@ -1395,8 +1415,9 @@ async fn resolve_selected_provider_account(
     wave_id: Option<&WaveId>,
     local_store: Option<SharedStore>,
     model: Option<&str>,
+    directory: Option<&Path>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let repo_id = current_repo_id()?;
+    let repo_id = launch_repo_id(directory)?;
     let Some(candidates) = ordered_selected_candidates(
         provider,
         LaunchAsk {
@@ -1676,10 +1697,19 @@ pub(crate) fn match_account<'a>(
     }
 }
 
-pub(crate) fn current_repo_id() -> Result<Option<CanonicalRepo>, ProviderAccountError> {
-    let current = std::env::current_dir()
-        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    Ok(CanonicalRepo::discover(&current).ok())
+/// The repository a launch in `directory` belongs to; a served launch's
+/// directory is not the server's.
+pub(crate) fn launch_repo_id(
+    directory: Option<&Path>,
+) -> Result<Option<CanonicalRepo>, ProviderAccountError> {
+    match directory {
+        Some(directory) => Ok(CanonicalRepo::discover(directory).ok()),
+        None => {
+            let current = std::env::current_dir()
+                .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+            Ok(CanonicalRepo::discover(&current).ok())
+        }
+    }
 }
 
 /// Read the launch candidate order without selecting an account or acquiring credentials.
@@ -1875,6 +1905,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
     model: Option<String>,
+    directory: Option<PathBuf>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
@@ -1883,6 +1914,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             exact_account_id.as_ref(),
             wave_id.as_ref(),
             model.as_deref(),
+            directory.as_deref(),
         ))
     })
 }
@@ -2598,6 +2630,65 @@ mod account_first_tests {
         account
     }
 
+    /// A served launch runs in its own directory, not the server's; the
+    /// repository there decides the route.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_launch_takes_the_route_of_its_own_directory() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", temp.path());
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            temp.path().join("loopflow.db"),
+        ))
+        .await
+        .unwrap();
+        let accounts = temp.path().join("accounts/codex");
+        let machine = account(Provider::Codex, "machine", &accounts);
+        let project = account(Provider::Codex, "project", &accounts);
+        for account in [&machine, &project] {
+            store.upsert_provider_account(account).await.unwrap();
+        }
+        let repository = temp.path().join("repository");
+        fs::create_dir_all(&repository).unwrap();
+        for (scope, account) in [
+            (RouteScope::Default, &machine),
+            (
+                RouteScope::Repo(CanonicalRepo::discover(&repository).unwrap()),
+                &project,
+            ),
+        ] {
+            store
+                .set_provider_route(&ProviderRoute {
+                    scope,
+                    provider: Provider::Codex,
+                    accounts: vec![account.account_id.clone()],
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        let selected = |directory: PathBuf| async move {
+            resolve_provider_account_exact(
+                Provider::Codex,
+                None,
+                None,
+                None,
+                None,
+                Some(&directory),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .account_id()
+            .clone()
+        };
+        assert_eq!(selected(repository).await, project.account_id);
+        assert_eq!(selected(PathBuf::from("/")).await, machine.account_id);
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn codex_routing_skips_mismatched_identity_and_readiness_rechecks_it() {
@@ -2879,6 +2970,7 @@ mod account_first_tests {
 
         let mut dynamic = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
+            cwd: Some(temp.path().to_path_buf()),
             ..crate::agent::AgentConfig::default()
         };
         crate::agent::pin_provider_account_id_blocking(&mut dynamic).unwrap();
@@ -2886,6 +2978,7 @@ mod account_first_tests {
 
         let mut exact = crate::agent::AgentConfig {
             agent: Some("codex".to_string()),
+            cwd: Some(temp.path().to_path_buf()),
             provider_account_id: Some(requested.account_id.clone()),
             ..crate::agent::AgentConfig::default()
         };
@@ -4086,11 +4179,17 @@ mod account_first_tests {
         let launch = |model: &'static str| {
             let native = native.clone();
             async move {
-                let route =
-                    resolve_provider_account_exact(Provider::Codex, None, None, None, Some(model))
-                        .await
-                        .unwrap()
-                        .unwrap();
+                let route = resolve_provider_account_exact(
+                    Provider::Codex,
+                    None,
+                    None,
+                    None,
+                    Some(model),
+                    Some(Path::new("/")),
+                )
+                .await
+                .unwrap()
+                .unwrap();
                 route.launch_as(&mut Command::new("codex")).await.unwrap();
                 codex_login(&native)
             }
@@ -4236,6 +4335,7 @@ mod account_first_tests {
             Some(&began),
             None,
             None,
+            Some(Path::new("/")),
         )
         .await
         .unwrap()

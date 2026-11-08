@@ -631,6 +631,7 @@ fn launch_streaming_times_out() {
 fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
     let home = TempDir::new().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
+    let _directory = support::InDirectory::enter(home.path());
     let bin = home.path().join("bin");
     support::install_native_codex(&bin);
     let path = std::env::var_os("PATH").unwrap();

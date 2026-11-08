@@ -15,7 +15,7 @@ use crate::store::SharedStore;
 use crate::work::wave::Wave;
 
 /// One effective setting; `value` is absent when nothing chooses one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetupValue {
     pub value: Option<String>,
     pub source: ConfigSource,
@@ -26,7 +26,7 @@ pub struct SetupValue {
 /// The accounts a provider's launches try in order; empty means no route, so
 /// launches try every account eligible for automatic routing, else the
 /// provider's own login.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AccountSetup {
     pub accounts: Vec<String>,
     pub source: ConfigSource,
@@ -34,7 +34,7 @@ pub struct AccountSetup {
     pub locator: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveSetup {
     pub graph: SetupValue,
     pub agent: SetupValue,

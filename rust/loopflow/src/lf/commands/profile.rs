@@ -9,9 +9,9 @@ use crate::repository::CanonicalRepo;
 use crate::store::{CredentialState, ProviderAccount, ProviderAccountId, SharedStore};
 
 /// What `lf account next` found for one provider.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, schemars::JsonSchema, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
-enum NextOutcome {
+pub enum NextOutcome {
     Ready,
     /// Every login in the route is out or paused for now.
     Blocked,
@@ -21,17 +21,18 @@ enum NextOutcome {
     Ambient,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct NextLaunch {
-    provider: Provider,
+#[derive(Debug, schemars::JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NextLaunch {
+    pub provider: Provider,
     /// `default`, `repository`, `wave:<id>`, or `automatic` with no order.
-    scope: String,
-    outcome: NextOutcome,
-    account_id: Option<ProviderAccountId>,
-    login: Option<String>,
-    reason: String,
+    pub scope: String,
+    pub outcome: NextOutcome,
+    pub account_id: Option<ProviderAccountId>,
+    pub login: Option<String>,
+    pub reason: String,
     /// The login with no order in the way, when the order changes the pick.
-    without_order: Option<String>,
+    pub without_order: Option<String>,
 }
 
 pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
@@ -40,11 +41,7 @@ pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> 
     } else {
         resolve_repo_id(repo)?
     };
-    let store = crate::provider_account::read_account_store()?;
-    let mut launches = Vec::new();
-    for provider in [Provider::Claude, Provider::Codex] {
-        launches.push(next_launch(store.as_ref(), repo_id.as_ref(), provider).await?);
-    }
+    let launches = next(repo_id.as_ref()).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&launches)?);
     } else {
@@ -79,6 +76,15 @@ pub(super) async fn show_next(repo: Option<&str>, default: bool, json: bool) -> 
         Some(code) => Err(crate::process::CommandExit(code).into()),
         None => Ok(()),
     }
+}
+
+pub(crate) async fn next(repo_id: Option<&CanonicalRepo>) -> Result<Vec<NextLaunch>> {
+    let store = crate::provider_account::read_account_store()?;
+    let mut launches = Vec::new();
+    for provider in [Provider::Claude, Provider::Codex] {
+        launches.push(next_launch(store.as_ref(), repo_id, provider).await?);
+    }
+    Ok(launches)
 }
 
 async fn next_launch(

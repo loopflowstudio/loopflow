@@ -45,8 +45,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
             )?;
-            let opened = super::open(&store, &session.id, false, true, false).await;
-            let forked = super::open(&store, &session.id, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, false, true, false).await;
+            let forked = super::open(&store, home, &session.id, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -1061,9 +1061,16 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         .unwrap();
         assert_eq!(retry(&refused), retry(&listed));
         // The click prepares the launch that `open_waiting` gives a new attempt.
-        let prepared = super::open(&store, &record.id, false, false, false)
-            .await
-            .unwrap();
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &record.id,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(!prepared.open_argv.contains(&"--start-if-free".into()));
         let after = store.session(&record.id).await.unwrap().unwrap();
         assert_eq!(after.captured, session.captured);

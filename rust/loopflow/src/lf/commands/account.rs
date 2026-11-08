@@ -1,5 +1,5 @@
 #[path = "account_status.rs"]
-pub(super) mod account_status;
+pub(crate) mod account_status;
 #[path = "auth_input.rs"]
 mod auth_input;
 
@@ -63,7 +63,7 @@ struct AccountLifecycleUpdate<'a> {
 /// What an `lf account` argument names: a provider (`claude`, `linear`) or a
 /// login, with its provider when written `claude=work@`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Target {
+pub(crate) enum Target {
     Provider(Provider),
     Login {
         provider: Option<Provider>,
@@ -72,7 +72,7 @@ pub(super) enum Target {
 }
 
 impl Target {
-    pub(super) fn parse(raw: &str) -> Result<Self> {
+    pub(crate) fn parse(raw: &str) -> Result<Self> {
         let raw = raw.trim();
         if let Some((provider, login)) = raw.split_once('=') {
             let provider = parse_managed_provider(provider.trim())?;
@@ -119,6 +119,38 @@ pub(crate) async fn resolve_on(store: &SharedStore, raw: &str) -> Result<Provide
     super::profile::resolve_login(store, provider, &login, "--on").await
 }
 
+tokio::task_local! {
+    /// Set while the server runs an account operation: no person is at this
+    /// process's terminal, and its stdout is not an API.
+    static SERVED: ();
+}
+
+/// Run `operation` for the server. Narration goes to `logs/lf.log`, and a step
+/// that would ask at a terminal refuses instead of waiting on the server's stdin.
+pub(crate) fn served<T>(operation: impl FnOnce() -> T) -> T {
+    SERVED.sync_scope((), operation)
+}
+
+fn is_served() -> bool {
+    SERVED.try_with(|()| ()).is_ok()
+}
+
+macro_rules! narrate {
+    ($($line:tt)*) => {
+        if is_served() {
+            tracing::info!($($line)*);
+        } else {
+            println!($($line)*);
+        }
+    };
+}
+
+macro_rules! diagnose {
+    ($($line:tt)*) => {
+        if is_served() { tracing::info!($($line)*); } else { eprintln!($($line)*); }
+    };
+}
+
 pub fn run(
     cmd: Option<&AccountCommand>,
     target: Option<&str>,
@@ -135,7 +167,7 @@ pub fn run(
     }
 }
 
-async fn run_async(cmd: &AccountCommand) -> Result<()> {
+pub(crate) async fn run_async(cmd: &AccountCommand) -> Result<()> {
     match cmd {
         AccountCommand::Next { repo, default, json } => {
             super::profile::show_next(repo.as_deref(), *default, *json).await
@@ -191,14 +223,23 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
             json,
         } => {
             let (provider, login) = Target::parse_login(login, "redeem-reset")?;
-            redeem_reset(
-                provider.unwrap_or(Provider::Codex),
-                &login,
-                idempotency_key.as_deref(),
-                credit_id.as_deref(),
-                *json,
-            )
-            .await
+            let redemption = redeem_reset(
+                provider.unwrap_or(Provider::Codex).as_str(), &login,
+                idempotency_key.as_deref(), credit_id.as_deref(),
+            ).await?;
+            if *json {
+                narrate!("{}", serde_json::to_string_pretty(&redemption)?);
+            } else {
+                narrate!("{}: {} (attempt {})", redemption.login, redemption.outcome, redemption.idempotency_key);
+                narrate!("Before:");
+                print_reset_usage(&redemption.before);
+                narrate!("After:");
+                match (&redemption.after, &redemption.refresh_error) {
+                    (Some(usage), _) => print_reset_usage(usage),
+                    (None, error) => narrate!("  unknown; {}", error.as_deref().unwrap_or("")),
+                }
+            }
+            Ok(())
         }
         AccountCommand::Set {
             target,
@@ -273,7 +314,7 @@ async fn use_login(raw: &str) -> Result<()> {
         };
         for provider in providers {
             if crate::provider_account::hold::release(provider)? {
-                println!("{provider} launches go to the login with the most to spend again");
+                narrate!("{provider} launches go to the login with the most to spend again");
             }
         }
         return Ok(());
@@ -284,14 +325,14 @@ async fn use_login(raw: &str) -> Result<()> {
         match super::profile::resolve_login(&store, provider, &login, "lf account use").await {
             Ok(account) => account,
             Err(error) => {
-                eprintln!("{error}");
+                diagnose!("{error}");
                 return Err(crate::process::CommandExit(EXIT_BLOCKED).into());
             }
         };
     let provider: Provider = account.provider.parse()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     if account.credential_state != CredentialState::Connected {
-        eprintln!(
+        diagnose!(
             "{provider} {} needs a login: lf account connect {provider}={}",
             account_login(&account),
             account_login(&account)
@@ -299,7 +340,7 @@ async fn use_login(raw: &str) -> Result<()> {
         return Err(crate::process::CommandExit(EXIT_LOGIN_NEEDED).into());
     }
     if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
-        eprintln!(
+        diagnose!(
             "{provider} {} is out until {}; lf account next shows what can launch",
             account_login(&account),
             account_status::local_time(until)
@@ -313,13 +354,13 @@ async fn use_login(raw: &str) -> Result<()> {
                 Some(crate::provider_account::ProviderAccountError::NoAuthenticatedAccount { .. })
             ) =>
         {
-            eprintln!("{error}");
+            diagnose!("{error}");
             return Err(crate::process::CommandExit(EXIT_LOGIN_NEEDED).into());
         }
         result => result?,
     }
     crate::provider_account::hold::hold(provider, &account.account_id)?;
-    println!(
+    narrate!(
         "{provider} stays on {} until it fills up, or lf account use auto",
         account_login(&account)
     );
@@ -346,13 +387,13 @@ async fn set_rotation(raw: &str, routing: RoutingState) -> Result<()> {
         .await
         .map_err(|error| account_store_error(provider, account_login(&account), error))?;
     if routing == RoutingState::Automatic {
-        println!("{provider} {} is back in rotation", account_login(&account));
+        narrate!("{provider} {} is back in rotation", account_login(&account));
         return Ok(());
     }
     if crate::provider_account::hold::held(provider).as_ref() == Some(&account.account_id) {
         crate::provider_account::hold::release(provider)?;
     }
-    println!(
+    narrate!(
         "{provider} {} is out of rotation; --account {provider}={} still launches it",
         account_login(&account),
         account_login(&account)
@@ -381,7 +422,7 @@ pub(crate) async fn switch_to_named_login(store: &SharedStore, provider: Provide
         .get_provider_account(provider.as_str(), &named)
         .await?
         .ok_or_else(|| anyhow!("{provider} login {named} disappeared"))?;
-    eprintln!(
+    diagnose!(
         "{}",
         install_login(store, provider, &account, &native).await?
     );
@@ -397,7 +438,7 @@ async fn switch_login(
     account: &ProviderAccount,
 ) -> Result<()> {
     let native = crate::provider_account::activation::native_home(provider, None);
-    println!(
+    narrate!(
         "{}",
         install_login(store, provider, account, &native).await?
     );
@@ -452,7 +493,7 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
         return Ok(());
     }
     if !matches!(daemon_has_running_turn(native).await, Ok(false)) {
-        println!(
+        narrate!(
             "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its turns to finish or become readable before restarting it",
             CODEX_DAEMON_TURN_WAIT.as_secs() / 60
         );
@@ -468,14 +509,14 @@ async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
         .await
         .is_err();
         if expired {
-            println!(
+            narrate!(
                 "Codex daemon grace period expired; restarting now may interrupt remaining turns"
             );
         }
     }
     restart_daemon(native).await?;
     match daemon_login(native).await? {
-        Some(now) if now.eq_ignore_ascii_case(login) => println!(
+        Some(now) if now.eq_ignore_ascii_case(login) => narrate!(
             "Restarted Codex's background app-server, which was still signed in as {held}"
         ),
         now => bail!(
@@ -506,8 +547,8 @@ async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
             .context("provider launch / URL discovery")?;
         let result = async {
             let url = flow.verification_uri_complete.as_deref().unwrap_or(&flow.verification_uri);
-            println!("Connecting local {} through profile '{}'...", provider.display_name(), profile.id);
-            if matches!(flow.completion, AuthCompletion::Manual) { println!("Manual authorization is required."); }
+            narrate!("Connecting local {} through profile '{}'...", provider.display_name(), profile.id);
+            if matches!(flow.completion, AuthCompletion::Manual) { narrate!("Manual authorization is required."); }
             open_chrome_profile(&chrome, url).context("browser launch")?;
             let manual = async {
                 if service.pending_supports_authorization_code(provider).await {
@@ -529,7 +570,7 @@ async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
         if remember {
             remember_browser_profile(&store, provider, None, &profile).await?;
         }
-        println!("Connected local {}", provider.display_name());
+        narrate!("Connected local {}", provider.display_name());
         return Ok(());
     }
     Err(anyhow!(
@@ -577,14 +618,14 @@ async fn browser_profiles(
     let login = account
         .map(|a| format!("={}", account_login(a)))
         .unwrap_or_default();
-    if !std::io::stdin().is_terminal() {
+    if is_served() || !std::io::stdin().is_terminal() {
         return Err(anyhow!("No saved Chrome profile. Run lf account connect {provider}{login} --chrome-profile <profile>"));
     }
     let choices = crate::profile::local_chrome_profiles().map_err(anyhow::Error::msg)?;
     for (index, choice) in choices.iter().enumerate() {
-        println!("{}. {} ({})", index + 1, choice.name, choice.directory);
+        narrate!("{}. {} ({})", index + 1, choice.name, choice.directory);
     }
-    println!("Choose a Chrome profile number (remembered after successful login):");
+    narrate!("Choose a Chrome profile number (remembered after successful login):");
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;
     let choice = line
@@ -615,15 +656,15 @@ async fn remember_browser_profile(
     Ok(())
 }
 
-async fn redeem_reset(
-    provider: Provider,
+pub(crate) async fn redeem_reset(
+    provider: &str,
     email: &str,
     key: Option<&str>,
     credit_id: Option<&str>,
-    json: bool,
-) -> Result<()> {
+) -> Result<crate::engine::account::Redemption> {
+    use crate::engine::account::{Redemption, UsageSnapshot};
     anyhow::ensure!(
-        provider == Provider::Codex,
+        parse_managed_provider(provider)? == Provider::Codex,
         "banked resets are available only for Codex"
     );
     anyhow::ensure!(
@@ -650,40 +691,16 @@ async fn redeem_reset(
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     // Print before the request so a lost reply can be retried without another spend.
-    eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    if is_served() {
+        tracing::info!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    } else {
+        diagnose!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    }
     let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
         .await
         .with_context(|| {
             format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
         })?;
-    if json {
-        let snapshot = |usage: &SubscriptionUsage| {
-            serde_json::json!({
-                "windows": usage.windows, "reset_credits": usage.reset_credits,
-            })
-        };
-        let report = serde_json::json!({
-            "provider": "codex", "account_id": account.account_id, "login": account_login(account),
-            "idempotency_key": key, "outcome": redemption.outcome,
-            "before": snapshot(&redemption.before),
-            "after": redemption.after.as_ref().ok().map(snapshot),
-            "refresh_error": redemption.after.as_ref().err().map(ToString::to_string),
-        });
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!(
-            "{}: {} (attempt {key})",
-            account_login(account),
-            redemption.outcome
-        );
-        println!("Before:");
-        print_reset_usage(&redemption.before);
-        println!("After:");
-        match &redemption.after {
-            Ok(usage) => print_reset_usage(usage),
-            Err(error) => println!("  unknown; {error}"),
-        }
-    }
     for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
         crate::provider_account::save_polled_usage(&store, account, &usage.windows)
             .await
@@ -694,16 +711,29 @@ async fn redeem_reset(
                 )
             })?;
     }
-    Ok(())
+    let snapshot = |usage: &SubscriptionUsage| UsageSnapshot {
+        windows: usage.windows.clone(),
+        reset_credits: usage.reset_credits.clone(),
+    };
+    Ok(Redemption {
+        provider: Provider::Codex,
+        account_id: account.account_id.clone(),
+        login: account_login(account).to_string(),
+        idempotency_key: key,
+        outcome: redemption.outcome,
+        before: snapshot(&redemption.before),
+        after: redemption.after.as_ref().ok().map(snapshot),
+        refresh_error: redemption.after.as_ref().err().map(ToString::to_string),
+    })
 }
 
-fn print_reset_usage(usage: &SubscriptionUsage) {
+fn print_reset_usage(usage: &crate::engine::account::UsageSnapshot) {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     for window in &usage.windows {
         if window.resets_at.is_some_and(|reset| reset <= now) {
-            println!("  {}: usage unknown; reset passed", window.window);
+            narrate!("  {}: usage unknown; reset passed", window.window);
         } else {
-            println!(
+            narrate!(
                 "  {}: {}% used, {}% left",
                 window.window,
                 window.used_percent,
@@ -711,7 +741,7 @@ fn print_reset_usage(usage: &SubscriptionUsage) {
             );
         }
     }
-    println!(
+    narrate!(
         "  banked resets: {}",
         usage
             .reset_credits
@@ -828,7 +858,7 @@ async fn connect_managed_account(
         _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     }
     register_managed_account(store, provider, account_id, account_home, identity, plan).await?;
-    println!(
+    narrate!(
         "Connected {} login '{}' through profile '{}'",
         provider.display_name(),
         account_login(account),
@@ -852,7 +882,7 @@ async fn read_first_usage(
         Ok(usage) => {
             crate::provider_account::save_polled_usage(store, &account, &usage.windows).await?;
         }
-        Err(error) => println!("Usage not read yet ({error}); `lf account` reads it"),
+        Err(error) => narrate!("Usage not read yet ({error}); `lf account` reads it"),
     }
     Ok(())
 }
@@ -898,7 +928,7 @@ async fn approve_in_chrome(
         .verification_uri_complete
         .clone()
         .unwrap_or_else(|| flow.verification_uri.clone());
-    println!(
+    narrate!(
         "Connecting {} login '{}' through profile '{}'...",
         provider.display_name(),
         account_login(account),
@@ -913,9 +943,9 @@ async fn approve_in_chrome(
         std::future::pending::<Result<()>>().await
     };
     if matches!(flow.completion, AuthCompletion::Manual) {
-        println!("Manual authorization is required; approve in Chrome, then enter the code here.");
+        narrate!("Manual authorization is required; approve in Chrome, then enter the code here.");
     } else {
-        println!("Approve authorization in Chrome; login completes automatically.");
+        narrate!("Approve authorization in Chrome; login completes automatically.");
     }
     open_chrome_profile(chrome_profile, &verification_url).context("browser launch")?;
     let completion = wait_for_browser_confirmation(
@@ -997,7 +1027,7 @@ pub(super) async fn fresh_opencode_login(
                 .find(|word| word.starts_with("https://") && word.contains("/device?"))
             {
                 open_chrome_profile(&chrome, url)?;
-                println!("Approve the OpenCode login in Chrome; it completes automatically.");
+                narrate!("Approve the OpenCode login in Chrome; it completes automatically.");
             }
         }
         let status = child.wait().await?;
@@ -1049,7 +1079,7 @@ where
                 ));
             }
             _ = heartbeat.tick() => {
-                println!(
+                narrate!(
                     "Still waiting for browser approval ({}s elapsed); the login listener is still running. Press Ctrl-C to cancel.",
                     started_at.elapsed().as_secs()
                 );
@@ -1299,7 +1329,7 @@ async fn import_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         install_claude_login(staged_home.path(), &account_home)?;
     }
     register_managed_account(&store, provider, &account_id, account_home, identity, plan).await?;
-    println!(
+    narrate!(
         "Imported {} login '{}'",
         provider.display_name(),
         expected_login
@@ -1346,6 +1376,9 @@ async fn manual_authorization(
     flow: &AuthFlowResponse,
     profile: &LocalChromeProfile,
 ) -> Result<SecretString> {
+    if is_served() {
+        return std::future::pending().await;
+    }
     let Some(mut terminal) = auth_input::AuthInput::open()? else {
         return std::future::pending().await;
     };
@@ -1353,7 +1386,7 @@ async fn manual_authorization(
         let Some(url) = manual_uri.as_deref() else {
             return std::future::pending().await;
         };
-        println!(
+        narrate!(
             "If callback completion is unavailable, type m then Enter to open the manual route."
         );
         loop {
@@ -1363,7 +1396,7 @@ async fn manual_authorization(
             }
         }
     }
-    println!("Paste the one-time authorization code, then Enter (input hidden).");
+    narrate!("Paste the one-time authorization code, then Enter (input hidden).");
     loop {
         let code = terminal.line().await?;
         if !code.expose_secret().trim().is_empty() {
@@ -1392,7 +1425,7 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
-    println!("Disconnected local {}", provider.display_name());
+    narrate!("Disconnected local {}", provider.display_name());
     Ok(())
 }
 
@@ -1423,7 +1456,7 @@ async fn disconnect_account(store: &SharedStore, mut account: ProviderAccount) -
     account.cooldown_reason = None;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
-    println!(
+    narrate!(
         "Disconnected {} login '{}'",
         provider.display_name(),
         account_login(&account)
@@ -1454,7 +1487,7 @@ async fn set_browser_profiles(
     store
         .set_auth_browser_profiles(provider, account.map(|a| &a.account_id), &profiles)
         .await?;
-    println!(
+    narrate!(
         "Updated {provider} browser choices for {}",
         account.map(account_login).unwrap_or("local credentials")
     );
@@ -1510,7 +1543,7 @@ async fn set_account_lifecycle(
         .update_provider_account_lifecycle(&account)
         .await
         .map_err(|error| account_store_error(provider, account_login(&account), error))?;
-    println!("Updated {}", format_account(&account));
+    narrate!("Updated {}", format_account(&account));
     Ok(())
 }
 
@@ -1531,7 +1564,7 @@ async fn switch_away(
     {
         Some(next) => switch_login(store, provider, &next).await,
         None => {
-            println!(
+            narrate!(
                 "{} stays signed in as {}: no other login can take its work; `lf account use <login>` switches by hand",
                 provider.display_name(),
                 account_login(account)
@@ -1561,7 +1594,7 @@ async fn clear_account_cooldown(store: &SharedStore, account: &ProviderAccount) 
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
         .map_err(|error| account_store_error(provider, account_login(account), error))?;
-    println!(
+    narrate!(
         "Cleared {} login '{}' cooldown",
         provider.display_name(),
         account_login(account)
@@ -1659,9 +1692,9 @@ async fn configure(raw_provider: &str) -> Result<()> {
         .await?;
 
     if provider.api_key_bills_per_token() {
-        println!("API key auth bills per token. OAuth uses your existing subscription.");
+        narrate!("API key auth bills per token. OAuth uses your existing subscription.");
     }
-    println!("Stored {} API key", provider.display_name());
+    narrate!("Stored {} API key", provider.display_name());
     Ok(())
 }
 

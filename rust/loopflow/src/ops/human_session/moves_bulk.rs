@@ -28,7 +28,7 @@ pub(crate) fn parse_target(agent: Option<&str>) -> Result<String> {
     Ok(agent.to_owned())
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct MoveReport {
     pub moved: Vec<Moved>,
     /// Busy Sessions; each moves when its turn ends.
@@ -36,14 +36,14 @@ pub(crate) struct MoveReport {
     pub skipped: Vec<Skipped>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct Moved {
     pub id: LfSessionId,
     pub title: String,
     pub how: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct Skipped {
     pub id: LfSessionId,
     pub title: String,

@@ -75,7 +75,7 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf submit` leaves the exact-head merge to a person;
+is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
 `land` requests GitHub auto-merge. GitHub remains authoritative for
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
@@ -131,6 +131,19 @@ own file key without an unlocked Keychain.
 SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`. Arbitrary
 Doppler secret exports and automatic ambient-token forwarding are removed. Set up
 other services on the target explicitly. No Doppler master credential is sent.
+
+## Keep client access separate from Machine logins
+
+The local Loopflow server accepts the same OS user through a private Unix socket.
+It exposes existing Work operations and bridges Session owners; those owners
+still grant input control. A connection or reconnect does not give a viewer the
+right to replace another viewer's claim.
+
+Do not expose this socket through a network proxy: the proxy's local identity
+cannot authenticate a remote client. Authenticated phone access is separate
+work, with its own client credentials. Adding an SSH Machine grants an execution
+destination, independently of client access. Installation owns server registration
+and respects disabled background items. See [Connect clients](server.md).
 
 ## Account for stored and transmitted data
 

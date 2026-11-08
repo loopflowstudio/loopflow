@@ -1210,7 +1210,7 @@ pub(super) async fn prepare_launch(
         None
     };
     if let Some(provider) = launch_provider {
-        let repo_id = crate::provider_account::current_repo_id()?;
+        let repo_id = crate::provider_account::launch_repo_id(None)?;
         if let Some(accounts) = crate::provider_account::inspect_provider_route(
             Some(&store),
             repo_id.as_ref(),

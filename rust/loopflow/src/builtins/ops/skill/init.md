@@ -44,7 +44,7 @@ lf --version
 lf account --cached          # last known state; no provider request
 lf account --json            # managed account status
 lf account next
-lf id --json
+lf machine self --json
 lf wave list --json
 command -v claude codex opencode
 test -f .lf/config.yaml && echo "repo config: present"
@@ -115,7 +115,7 @@ chosen and the provider flow completes.
 
 **Existing Wave.** Read `.lf/wave/<name>/GOAL.md`, `lf wave status <wave> --json`
 and `lf wave show <wave> --json`. If Linear is connected and the Wave isn't
-bound, offer `lf wave connect <wave>`. The first Wave picks the repository's
+bound, offer `lf wave plan connect <wave>`. The first Wave picks the repository's
 Linear Team (key from the repository name, `--team-key <KEY>` to override), and
 that choice needs a person; later Waves reuse it. Never create another Team,
 Initiative, Project or KR.
@@ -123,7 +123,7 @@ Initiative, Project or KR.
 **New Wave.** Ask for one outcome and a short name:
 
 ```bash
-lf wave add <name> --objective "<outcome>"
+lf wave create <name> --objective "<outcome>"
 ```
 
 This starts the first chapter and commits `.lf/wave/<name>/` on the main
@@ -132,9 +132,10 @@ out of scope, and when to stop or ask. KRs and Tasks go in the chapter plan;
 lasting decisions go in `MEMORY.md`. Then offer Linear binding as above; it
 links the Initiative and creates no Project.
 
-With no current (In Progress) Project, say so. A chapter needs accepted
-direction for the whole repository: `lf wave new-chapter --all <name> --dry-run --json`,
-then without `--dry-run`. Don't rotate every Wave just to set up one. For an
+With no current (In Progress) Project, say so: `lf wave sync <wave>` adopts an
+existing Linear Project, and `lf wave plan bind <wave> <Project UUID>` picks
+one explicitly. A new plan needs accepted direction for the whole repository;
+start-chapter writes each Wave's plan in place. For an
 existing current Project, `lf update-plan --wave <wave> --plan <plan.json>`
 replaces its content, e.g. `{"metric_targets":[],"krs":[]}`. Write future plans
 in the Planned Linear Project. Never guess a plan from the newest name.
@@ -160,7 +161,6 @@ one, use the ids the commands print:
 lf machine add <ssh-target> --label <label>
 lf --machine <machine-id> account --cached
 lf --machine <machine-id> account next
-
 lf --wave <wave> set machine <machine-label>   # this Wave's new Tasks
 lf --repo <repo> set machine <machine-label>   # this repository's new Tasks
 lf task move <issue> --machine <machine-label> # one Task, with its Session
@@ -180,7 +180,7 @@ Keychain.
 ## 6. Check it works
 
 Run the smallest reads that show the chosen path works: `lf account --cached`,
-`lf id --json`, plus `lf wave status <wave> --json` for a Wave or
+`lf machine self --json`, plus `lf wave status <wave> --json` for a Wave or
 `lf task status <ISSUE-ID> --json` for a Task. Skip the roadmap and doctor; both
 are large and doctor reports old, unrelated problems. Don't start work as a test.
 

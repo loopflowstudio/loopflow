@@ -531,7 +531,7 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let path = root.join(name);
     anyhow::ensure!(
         !path.exists(),
-        "{} exists but is not repository {repository} here; run `lf repository --bind {repository}` in it, then move again",
+        "{} exists but is not repository {repository} here; run `lf repo --bind {repository}` in it, then move again",
         path.display()
     );
     fs::create_dir_all(&root)?;

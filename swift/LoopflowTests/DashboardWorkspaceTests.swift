@@ -77,8 +77,8 @@ struct DashboardWorkspaceTests {
         let moved = try plan(["task_c", "task_a", "task_b"])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "move", "-p", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
-            case ["desktop", "view", "--plan", "--json"]: return moved
+            case ["desktop", "dashboard", "move", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "view", "show", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
@@ -138,9 +138,9 @@ struct DashboardWorkspaceTests {
         let query = RegistryQuery { args, _ in
             switch args {
             // Rust applies the same move as the repository order and decides the mode.
-            case ["desktop", "move", "-p", "query:picked/task:task_c", "--destination", "task:task_a"]:
+            case ["desktop", "dashboard", "move", "query:picked/task:task_c", "--destination", "task:task_a"]:
                 return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
-            case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
+            case ["desktop", "view", "show", "query:picked", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
@@ -293,7 +293,7 @@ struct DashboardWorkspaceTests {
         let expression = saved ? "query:picked" : "state:backlog or task:LOO-497"
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
         let query = RegistryQuery { args, _ in
-            if args == ["desktop", "view", expression, "--plan", "--json"] { return String(decoding: bytes, as: UTF8.self) }
+            if args == ["desktop", "view", "show", expression, "--json"] { return String(decoding: bytes, as: UTF8.self) }
             if args.starts(with: ["desktop", "layout"]) { return "null" }
             throw RegistryQueryError("Unexpected execution")
         }

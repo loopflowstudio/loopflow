@@ -36,7 +36,7 @@ scope's operating instructions.
 An unviewed, settled conversation ends its processes after two minutes of quiet;
 `session.end_detached_after` changes the grace or disables it with `off`.
 Returning paints its saved screen while the provider reopens its history, without
-replaying input. Active turns, watches, running Graphs, drafts and pending requests
+replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
 Edited, pasted or unacknowledged native input can retain the owner until the
 provider exits; saved history and screens cannot restore an editor or request.
@@ -54,6 +54,14 @@ starts from that log and current instructions, and the old thread stays in
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
 
+## When Desktop loses its connection
+
+Desktop reconnects to the same live owner automatically and shows connection
+status outside the terminal. Typing pauses while the screen remains available.
+A newer viewer keeps control until an explicit **Move here** request. **Retry**
+repairs connectivity; it does not resume a new provider or replay input.
+[Connect clients](server.md) covers server updates and connection diagnosis.
+
 ## After a crash or reboot
 
 ```bash
@@ -68,7 +76,7 @@ Other conversations stay stopped until opened.
 |---|---|
 | interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
 | Task worktrees, branches, PRs | untouched |
-| comments and steers | saved; delivered at the agent's next boundary |
+| steers and reports | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
 `lf resume` takes Sessions. A Run (`-b`, a Graph step), running or finished, is
@@ -102,14 +110,14 @@ tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 ## Steer without interrupting
 
 ```bash
-lf steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
-lf steer "freeze merges until 3pm"                   # every Session in this repository
-lf --wave billing steer "invoices before refunds"    # every Session on the Wave
-lf session steers <session>                          # was it delivered?
+lf session steer <session> "use the existing retry helper"   # saved; delivered at its next boundary
+lf session steer "freeze merges until 3pm"                   # every Session in this repository
+lf --wave billing session steer "invoices before refunds"    # every Session on the Wave
+lf session steers <session>                                  # was it delivered?
 ```
 
 A steer starts no turn. Each Session receives it at its next supported provider
-boundary; idle ones stay idle until they next run. For a Task, `lf comment`
+boundary; idle ones stay idle until they next run. For a Task, `lf task steer`
 does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.
@@ -203,4 +211,4 @@ usage and completion receipts.
 
 Every flag: [`lf session`](lf-reference.md#lf-session).
 
-Next: [Ops](ops.md), landing what those conversations built.
+Next: [Pull requests](ops.md#pull-requests), landing what those conversations built.

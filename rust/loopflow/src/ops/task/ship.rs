@@ -47,7 +47,7 @@ pub enum ShipStep {
 
 /// What a shipping Task is doing, derived from its ship process, its state
 /// and its landing. Nothing here waits on a person.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ShippingSnapshot {
     /// When the Task was handed off.
     pub shipped_at: i64,
@@ -56,7 +56,7 @@ pub struct ShippingSnapshot {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ShippingState {
@@ -87,6 +87,20 @@ pub(crate) fn starter(
     };
     let person = crate::config::participant_name_in(repo).ok().flatten();
     sqlite.process_starter(process, person.as_deref())
+}
+
+/// A served stop retains the person at admission, independent of later settings.
+pub(crate) fn stopper(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    repo: &std::path::Path,
+    stop: &crate::store::sqlite::task_work::ShipStop,
+) -> crate::store::StoreResult<crate::process::Starter> {
+    match stop.by.as_ref() {
+        Some(process) => starter(sqlite, repo, Some(process)),
+        None => Ok(crate::process::Starter::Person {
+            name: stop.person.clone(),
+        }),
+    }
 }
 
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
@@ -299,8 +313,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 /// merge request Loopflow armed on GitHub. The stop stands until `lf ship`: a
 /// run reaching `end` no longer approves it. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| task_error("lf ship --stop requires a registered Process"))?;
+    let process = crate::journal::current_lf_process_id();
     withdraw(issue, Withdrawal::Stop { process, note })
 }
 
@@ -313,7 +326,7 @@ pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
 
 enum Withdrawal<'a> {
     Stop {
-        process: LfProcessId,
+        process: Option<LfProcessId>,
         note: Option<&'a str>,
     },
     Halt {
@@ -329,12 +342,22 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
         let (note, stopped_by) = match &withdrawal {
             Withdrawal::Stop { process, note } => {
                 let repo = super::repository_for_task(&store, &task)?;
-                let by = starter(&store.sqlite, &repo, Some(process)).map_err(task_error)?;
+                let person = if process.is_none() {
+                    crate::config::participant_name_in(&repo).ok().flatten()
+                } else {
+                    None
+                };
+                let stop = crate::store::sqlite::task_work::ShipStop {
+                    at: crate::store::rows::now_unix(),
+                    by: process.clone(),
+                    person,
+                };
+                let by = stopper(&store.sqlite, &repo, &stop).map_err(task_error)?;
                 let note = match note {
                     Some(note) => format!("{by}: {note}"),
                     None => by.to_string(),
                 };
-                (note, Some(process))
+                (note, Some(stop))
             }
             Withdrawal::Halt { cause } => (format!("Loopflow: {cause}"), None),
         };

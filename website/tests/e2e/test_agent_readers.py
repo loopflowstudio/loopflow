@@ -53,6 +53,8 @@ def test_llms_txt_is_spec_shaped(page: Page, base_url: str):
     assert "## Docs" in body
     assert "/docs/agent-api.md)" in body
     assert "/docs/architecture" not in body
+    assert "/docs/dev/" not in body
+    assert "/docs/server.md)" in body
     assert "/llms-full.txt" in body
 
 
@@ -65,11 +67,11 @@ def test_llms_full_txt(page: Page, base_url: str):
     assert "# Architecture" not in body
 
 
-def test_internal_architecture_markdown_is_not_in_public_docs(
-    page: Page, base_url: str
-):
+def test_internal_architecture_markdown_is_not_in_public_docs(page: Page, base_url: str):
     public = page.request.get(f"{base_url}/docs/architecture.md")
     assert public.status == 404
+    moved_source = page.request.get(f"{base_url}/docs/dev/index.md")
+    assert moved_source.status == 404
 
     internal = page.request.get(f"{base_url}/architecture/execution.md")
     assert internal.status == 200

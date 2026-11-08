@@ -9,6 +9,25 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
+/// `path` without the harnesses installed on this Machine, so a stand-in is the
+/// one `lf` finds. Stand-ins live under the temporary directory.
+pub fn path_without_installed_harnesses(path: &str) -> String {
+    let stand_ins = std::env::temp_dir();
+    let stand_ins = stand_ins.canonicalize().unwrap_or(stand_ins);
+    std::env::split_paths(path)
+        .filter(|entry| {
+            entry
+                .canonicalize()
+                .is_ok_and(|entry| entry.starts_with(&stand_ins))
+                || !["claude", "codex", "opencode", "pi"]
+                    .iter()
+                    .any(|harness| entry.join(harness).exists())
+        })
+        .map(|entry| entry.display().to_string())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// An unfinished `lf` Process row. A running parent keeps its finished
 /// children, so a child command's row stays readable after it exits.
 #[derive(Debug)]

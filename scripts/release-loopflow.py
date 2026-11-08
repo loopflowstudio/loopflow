@@ -247,6 +247,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     release_binary = os.environ.get("LF_RELEASE_BINARY")
     if release_binary:
         bin_dir = Path(release_binary).parent
@@ -403,15 +405,6 @@ def release() -> int:
         return _notarize_dmg(dmg_path)
     print("Building Loopflow release...", flush=True)
 
-    # The app links Loopflow's Rust library from target/release.
-    result = run(
-        ["cargo", "build", "--locked", "-p", "loopflow-ffi", "--lib", "--release"],
-        cwd=REPO_ROOT,
-        check=False,
-        timeout=20 * 60,
-    )
-    if result.returncode != 0:
-        return result.returncode
     result = run(
         ["swift", "build", "-c", "release"],
         cwd=SWIFT_DIR,

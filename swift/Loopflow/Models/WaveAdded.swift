@@ -1,6 +1,6 @@
 import Foundation
 
-/// `lf wave add --json`: the Wave's id, whether this call created it, and
+/// `lf wave create --json`: the Wave's id, whether this call created it, and
 /// `summary`, what the add left to finish (its files uncommitted on main),
 /// rendered verbatim so the CLI and Desktop say the same thing. The receipt's
 /// `project` is the Wave's first Project; Desktop reads Projects from the

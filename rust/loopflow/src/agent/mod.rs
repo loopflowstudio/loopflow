@@ -428,6 +428,7 @@ fn resolve_account_route_blocking(
                 .agent
                 .as_deref()
                 .and_then(|agent| parse_agent(agent).1),
+            launch.cwd.clone(),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),

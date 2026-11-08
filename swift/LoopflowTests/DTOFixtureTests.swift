@@ -937,8 +937,8 @@ struct DTOFixtureTests {
     }
 
     @Test("Watch frames decode through their part and keep the wire text a saved workspace needs")
-    func watchFramesDecode() throws {
-        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+    func subscribeFramesDecode() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
             as? [[String: Any]])
         let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
                               activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
@@ -1066,7 +1066,7 @@ func sessionInputHistoryFixture() throws {
 // Written by the Rust composed lifecycle test from one disposable Home.
 struct TaskLifecycleCapture {
     let row: RoadmapTask
-    /// `lf task status FIX-1 --json` as its watch would carry it.
+    /// `lf task status FIX-1 --json` as its subscription would carry it.
     let status: [String: Any]
 
     static func load(_ data: Data) throws -> [String: TaskLifecycleCapture] {

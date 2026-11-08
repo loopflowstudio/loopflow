@@ -43,7 +43,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
             requester: Some("Maya".into())
         }
     );
-    // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
+    // What `lf task steer ISSUE MESSAGE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
         serde_json::to_value(&thread).unwrap(),
@@ -413,7 +413,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(status).unwrap(), value);
-    for field in ["planning_stale", "graph_processes"] {
+    for field in ["plan_stale", "graph_processes"] {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
@@ -566,10 +566,10 @@ fn selection_states_fixture_lists_every_state() {
 }
 
 #[test]
-fn watch_frames_carry_each_reads_json_result() {
-    use loopflow::lf::commands::watch::WatchFrame;
+fn subscribe_frames_carry_each_reads_json_result() {
+    use loopflow::lf::commands::subscribe::SubscriptionFrame;
     let entries: Vec<serde_json::Value> = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/watch_frames.json"
+        "../../../tests/fixtures/dto/subscribe_frames.json"
     ))
     .unwrap();
     let envelope = |frame: &serde_json::Value| {
@@ -577,7 +577,7 @@ fn watch_frames_carry_each_reads_json_result() {
         keys.sort();
         keys
     };
-    let written = serde_json::to_value(WatchFrame::<()> {
+    let written = serde_json::to_value(SubscriptionFrame::<()> {
         answers: None,
         unavailable: Some("gone".into()),
         body: None,
@@ -598,7 +598,7 @@ fn watch_frames_carry_each_reads_json_result() {
         match entry["part"].as_str().unwrap() {
             "planning" => read::<RoadmapSnapshot>(&body),
             "selections" => read::<Vec<loopflow::work::selection::ViewPlan>>(&body),
-            // Desktop's Session rows are pinned by `sessions.json`; the watch carries them as listed.
+            // Desktop's Session rows are pinned by `sessions.json`; the subscription carries them as listed.
             "sessions" => assert!(body
                 .as_array()
                 .unwrap()
@@ -613,7 +613,7 @@ fn watch_frames_carry_each_reads_json_result() {
                 read::<Vec<loopflow::store::PeerPlanningStatus>>(&body["destinations"]);
                 assert_eq!(body["transport"], "git");
             }
-            other => panic!("unknown watch {other}"),
+            other => panic!("unknown subscription {other}"),
         }
     }
 }
@@ -1212,23 +1212,6 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
         serde_json::to_value(&page).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
-}
-
-#[test]
-fn session_rows_say_each_fact_once_and_require_every_field() {
-    use loopflow::lf::commands::session::SessionRow;
-    let fixture = include_str!("../../../tests/fixtures/dto/session_rows.json");
-    let value: serde_json::Value = serde_json::from_str(fixture).unwrap();
-    let rows: Vec<SessionRow> = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(serde_json::to_value(&rows).unwrap(), value);
-    for field in ["id", "title", "interactive", "state", "available", "cwd"] {
-        let mut missing = value[0].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<SessionRow>(missing).is_err(),
-            "{field}"
-        );
-    }
 }
 
 #[test]

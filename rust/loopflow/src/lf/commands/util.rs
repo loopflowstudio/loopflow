@@ -523,6 +523,7 @@ fn run_native_session(
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
                 native_model_argument(&command.args),
+                Some(command.cwd.clone()),
             )
         })
         .transpose()
@@ -731,6 +732,7 @@ fn observe_client(
             endpoint: endpoint.clone(),
             thread: thread.clone(),
             account: account.clone(),
+            cwd: command.cwd.clone(),
             client: (client, born),
             input: command.input.clone(),
         },

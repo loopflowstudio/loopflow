@@ -326,7 +326,7 @@ pub(crate) fn recorded_cwd(transcript: &Path) -> Option<PathBuf> {
 const CLAUDE_CLEANUP_DAYS: u32 = 30;
 
 /// How long a provider keeps a transcript in one home.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExpiryPolicy {
     /// Claude removes conversations idle longer than `cleanupPeriodDays`,

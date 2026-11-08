@@ -392,6 +392,11 @@ mod tests {
 
     #[test]
     fn a_resolving_sync_admits_other_agents_until_it_publishes() {
+        // The sync reads Task authority from a store; never the developer's.
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
         let fixture = conflicting_feature();
         let repo = fixture.path();
         let options = SyncOptions {
@@ -420,6 +425,10 @@ mod tests {
             "both"
         );
         assert!(!operation_path(repo).unwrap().exists());
+        match previous {
+            Some(previous) => std::env::set_var("LF_HOME", previous),
+            None => std::env::remove_var("LF_HOME"),
+        }
     }
 
     #[test]

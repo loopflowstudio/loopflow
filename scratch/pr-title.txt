@@ -1,0 +1,1 @@
+Preserve Sessions across provider switches and keep terminal titles current

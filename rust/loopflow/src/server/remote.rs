@@ -653,7 +653,7 @@ mod tests {
             ("status", ServerOperation::MobileStatus),
             (
                 "configure",
-                ServerOperation::ConfigureRemote {
+                ServerOperation::MobileConfigure {
                     configuration: None,
                 },
             ),

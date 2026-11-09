@@ -242,7 +242,7 @@ final class MachineConnection {
 
     /// Resolve the Session’s current owner and open its unchanged terminal protocol.
     func attach(session: String) async throws -> MachineSocket {
-        guard case .string(let ticket) = try await request(.attach(session: session, owner: nil))["ticket"] else {
+        guard case .string(let ticket) = try await request(.sessionAttach(session: session, owner: nil))["ticket"] else {
             throw RegistryQueryError("The Machine did not attach the Session")
         }
         return try await Self.redeem(endpoint: endpoint, ticket: ticket, terminal: true)
@@ -267,7 +267,7 @@ final class MachineConnection {
     /// One request too large for the control connection; its answer still
     /// arrives here under the request's id.
     private func upload(_ line: String) async throws {
-        guard case .string(let ticket) = try await request(.upload(bytes: line.utf8.count))["ticket"] else {
+        guard case .string(let ticket) = try await request(.requestUpload(bytes: line.utf8.count))["ticket"] else {
             throw RegistryQueryError("The Machine issued no upload ticket")
         }
         let bulk = try await Self.redeem(endpoint: endpoint, ticket: ticket)

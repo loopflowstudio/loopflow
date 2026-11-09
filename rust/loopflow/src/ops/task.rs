@@ -1,4 +1,5 @@
 pub(crate) mod adoption;
+pub(crate) mod limit_recovery;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
@@ -734,8 +735,12 @@ pub(crate) fn select_task_run(
                 graph.describe_steps()
             ))
         })?),
-        // A run that stopped starts again from where it began.
-        (None, Some((cursor, _))) => graph.place_of(cursor),
+        // A run that stopped starts again from where it began, or from the
+        // step it was waiting at on a usage limit: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .and_then(|wait| graph.find(&wait.step))
+            .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {
             return Err(task_error(format!(
@@ -2015,6 +2020,35 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
+/// Start the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
+pub fn start_conversation_beside(task: &Task) {
+    let started = block_on_task(async {
+        let store = task_store().await?;
+        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        Ok(())
+    });
+    if let Err(error) = started {
+        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    }
+}
+
+/// One Task's tracker sync beside a conversation that just started: pending
+/// writes out, then comments made elsewhere in. Nothing else in the repository.
+pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
+    let outbound = task_sync(issue, false);
+    let inbound = block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        super::linear_observe::refresh_task_comments(&store, &task).await
+    });
+    outbound.and(inbound)
+}
+
 pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2571,7 +2605,9 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
-            TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
+            TaskExecutionState::Running
+            | TaskExecutionState::Stalled
+            | TaskExecutionState::Waiting => Some(format!("at {step}")),
             TaskExecutionState::Starting => Some(format!("between steps after {step}")),
             TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
             TaskExecutionState::Idle | TaskExecutionState::Blocked => None,

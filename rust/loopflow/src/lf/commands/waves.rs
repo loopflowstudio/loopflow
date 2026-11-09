@@ -1340,8 +1340,8 @@ impl SharedTaskReads {
 }
 
 /// Git is asked about each existing checkout in turn by the Task details. A
-/// process that retains answers asks about several checkouts at once first,
-/// so the details find them waiting; any other process would only ask twice.
+/// subscription reading asks about several checkouts at once first,
+/// so the details find them waiting; an ordinary read would only ask twice.
 fn ask_checkouts_ahead(
     checkouts: &[crate::store::sqlite::TaskCheckout],
     local_machine: &crate::durable::MachineId,
@@ -1359,7 +1359,7 @@ fn ask_checkouts_ahead(
     let next = std::sync::atomic::AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for _ in 0..AT_ONCE.min(existing.len()) {
-            scope.spawn(|| {
+            scope.spawn(crate::git::inherit_reads(|| {
                 while let Some(worktree) =
                     existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                 {
@@ -1369,7 +1369,7 @@ fn ask_checkouts_ahead(
                     let _ = crate::git::worktree_root(worktree);
                     let _ = crate::git::worktrees::git_common_dir(worktree);
                 }
-            });
+            }));
         }
     });
 }
@@ -1651,7 +1651,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                scope.spawn(crate::config::observation::inherit(|| {
+                let read = crate::config::observation::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1666,7 +1666,8 @@ fn snapshot_task_details(
                         ));
                         details.push((index, detail));
                     }
-                }))
+                });
+                scope.spawn(crate::git::inherit_reads(read))
             })
             .collect();
         handles
@@ -2176,7 +2177,9 @@ fn derive_task_condition(
         execution.filter(|execution| execution.state != TaskExecutionState::Idle)
     {
         let state = match execution.state {
-            TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
+            TaskExecutionState::Starting
+            | TaskExecutionState::Running
+            | TaskExecutionState::Waiting => TaskConditionState::Clear,
             TaskExecutionState::Blocked | TaskExecutionState::Stalled => {
                 TaskConditionState::Blocked
             }

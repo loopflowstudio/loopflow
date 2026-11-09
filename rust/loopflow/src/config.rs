@@ -111,6 +111,17 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 /// Agents Loopflow can drive; listing order grants no preference.
 const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
 
+/// Claude model families a launch can name with `claude:<family>` and a
+/// scoped Claude limit can name in its `rate_limit_type` suffix.
+pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
+
+/// The family Claude Code runs when a launch names no model.
+pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
+
+/// The models a bare `claude` step falls through to when the one it runs
+/// hits a scoped limit, best first.
+pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
+
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
@@ -491,13 +502,40 @@ pub struct LogConfig {
 }
 
 impl Config {
-    /// Resolve authored preferences, or the sole installed harness.
+    /// Resolve authored preferences, or the sole installed harness. A
+    /// `default_agent` list (`claude,codex`) selects its first entry.
     ///
     /// # Errors
     /// Returns `AgentSelection` when no preference resolves and installation is ambiguous or absent.
     pub fn agent(&self) -> Result<&str, LoadError> {
-        select_agent(self.agent.as_deref().or(self.default_agent.as_deref()))
+        select_agent(
+            self.agent
+                .as_deref()
+                .or_else(|| self.default_agent.as_deref().map(first_agent)),
+        )
     }
+
+    /// The agents a headless step may fall through to when every account for
+    /// its own is held back: the rest of the `default_agent` list, in order.
+    /// An explicit `agent` choice has none; it is followed within itself.
+    pub fn fallback_agents(&self) -> Vec<String> {
+        match (&self.agent, &self.default_agent) {
+            (None, Some(list)) => agent_list(list).skip(1).map(str::to_owned).collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The entries of an ordered agent preference, `harness[:model]` each.
+pub fn agent_list(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+}
+
+fn first_agent(value: &str) -> &str {
+    agent_list(value).next().unwrap_or(value)
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).

@@ -115,7 +115,7 @@ pub enum ServerOperation {
     /// local socket only. Answers `{configuration}`.
     #[serde(rename = "mobile.configure")]
     #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"configuration": generator.subschema_for::<Option<super::mobile::Configuration>>()}, "required": ["configuration"], "additionalProperties": false}))) ]
-    ConfigureRemote {
+    MobileConfigure {
         configuration: Option<super::mobile::Configuration>,
     },
     /// A ticket for a connection that carries one request of `bytes` bytes,
@@ -123,7 +123,7 @@ pub enum ServerOperation {
     /// request is answered here under its own id.
     #[serde(rename = "request.upload")]
     #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"ticket": {"type": "string"}}, "required": ["ticket"], "additionalProperties": false}))) ]
-    Upload { bytes: usize },
+    RequestUpload { bytes: usize },
 }
 
 /// What `session.attach` answers: a ticket that opens one bridge.
@@ -289,13 +289,14 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_list.json"),
-            include_str!("../../../../tests/fixtures/dto/server/account_route.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_next_request.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_disconnect.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_connect.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_set.json"),
-            include_str!("../../../../tests/fixtures/dto/server/account_token.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_redeem_reset.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_use.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_pause.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_unpause.json"),
             include_str!("../../../../tests/fixtures/dto/server/graph_run.json"),
             include_str!("../../../../tests/fixtures/dto/server/skill_run.json"),
             include_str!("../../../../tests/fixtures/dto/server/skill_list.json"),
@@ -343,7 +344,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/checkout_syncing.json"),
             include_str!("../../../../tests/fixtures/dto/server/checkout_created.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_report.json"),
-            include_str!("../../../../tests/fixtures/dto/server/account_routes.json"),
+            include_str!("../../../../tests/fixtures/dto/server/account_next.json"),
             include_str!("../../../../tests/fixtures/dto/server/account.json"),
             include_str!("../../../../tests/fixtures/dto/server/account_redeemed.json"),
             include_str!("../../../../tests/fixtures/dto/server/skill_entries.json"),

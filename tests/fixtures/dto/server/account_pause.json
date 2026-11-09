@@ -1,0 +1,1 @@
+{"type":"request","id":"pause-1","operation":{"kind":"account.pause","login":"claude=maya@example.com"},"select":null}

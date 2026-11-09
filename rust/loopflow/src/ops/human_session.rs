@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::WorkRef;
 use crate::lf::commands::write::SessionOpenIntent;
+use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
 use crate::store::sqlite::sessions::OwnerRetention;
@@ -27,6 +28,7 @@ use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod moves;
+pub(crate) mod moves_bulk;
 pub(crate) mod primary;
 pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
@@ -410,9 +412,13 @@ pub struct SessionRecord {
     /// The provider its current input launched with; absent until a review's
     /// first launch records one.
     pub provider: Option<String>,
-    /// The login its conversation is pinned to; absent for a shared or
-    /// unrouted conversation.
+    /// The login its conversation last ran on; absent for an unrouted one.
     pub account: Option<crate::store::ProviderAccountId>,
+    /// The model its current input launched with, when one was named.
+    pub model: Option<String>,
+    /// Its next message would fail: the login it would use cannot take its
+    /// model now. `lf session move --blocked` moves these.
+    pub blocked: bool,
     pub cwd: String,
     pub state: SessionState,
     pub ready_summary: Option<String>,
@@ -437,6 +443,10 @@ pub(crate) fn session_state(session: &crate::session::SessionSummary) -> Session
         crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
         crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
     }
+}
+
+fn is_running(state: SessionState) -> bool {
+    matches!(state, SessionState::Active | SessionState::Detached)
 }
 
 fn session_availability(session: &crate::session::SessionSummary) -> Option<SessionAvailability> {
@@ -515,19 +525,28 @@ pub(crate) async fn list(
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
     // Checkout resolution must precede Task filtering and pagination: SQL path
-    // prefixes cannot recognize symlink aliases or nested repositories.
-    let association_filter = filter.orphan || filter.task.is_some();
+    // prefixes cannot recognize symlink aliases or nested repositories. Neither
+    // can they judge capacity.
+    let association_filter =
+        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
         selection.orphan = false;
+        selection.blocked = false;
+        selection.on = None;
         selection.limit = 0;
         selection.offset = 0;
     }
+    let on = match &filter.on {
+        Some(raw) => Some(SessionOn::resolve(store, raw).await?),
+        None => None,
+    };
     let mut sessions = Vec::new();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let capacity = LaunchCapacity::read(&store.sqlite)?;
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session));
+        sessions.push(summary_surface(&session, &capacity));
     }
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
@@ -542,6 +561,8 @@ pub(crate) async fn list(
                     || task
                         .as_ref()
                         .is_some_and(|task| session.task_ids.contains(task)))
+                && (!filter.blocked || session.blocked)
+                && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
         let offset = if filter.after.is_some() {
             0
@@ -581,15 +602,83 @@ fn graph_occurrence(
 /// One Session as `list` reads it; `None` once it is gone.
 pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let capacity = LaunchCapacity::read(&store.sqlite)?;
     Ok(store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session)))
+        .map(|session| summary_surface(&session, &capacity)))
+}
+
+/// What `--on <account|harness[:model]>` names, resolved once before filtering.
+enum SessionOn {
+    /// A bare harness selects every model on it.
+    Agent {
+        harness: crate::harness::HarnessKind,
+        model: Option<String>,
+    },
+    Login {
+        provider: String,
+        account_id: crate::store::ProviderAccountId,
+    },
+}
+
+impl SessionOn {
+    async fn resolve(store: &SharedStore, raw: &str) -> Result<Self> {
+        let (harness, model) = crate::config::parse_agent(raw);
+        match crate::harness::HarnessKind::parse(&harness) {
+            Some(harness) if !raw.contains('@') => Ok(Self::Agent { harness, model }),
+            _ => {
+                let login = crate::lf::commands::account::resolve_on(store, raw).await?;
+                Ok(Self::Login {
+                    provider: login.provider,
+                    account_id: login.account_id,
+                })
+            }
+        }
+    }
+
+    fn selects(&self, session: &SessionRecord, capacity: &LaunchCapacity) -> bool {
+        let Some(provider) = session.provider.as_deref() else {
+            return false;
+        };
+        match self {
+            Self::Agent { harness, model } => {
+                provider == harness.as_str() && (model.is_none() || *model == session.model)
+            }
+            Self::Login {
+                provider: selected,
+                account_id,
+            } => capacity
+                .login(
+                    provider,
+                    session.account.as_ref(),
+                    is_running(session.state),
+                )
+                .is_some_and(|login| {
+                    login.provider == *selected && login.account_id == *account_id
+                }),
+        }
+    }
+}
+
+fn is_blocked(
+    capacity: &LaunchCapacity,
+    provider: Option<&str>,
+    account: Option<&crate::store::ProviderAccountId>,
+    state: SessionState,
+    model: Option<&str>,
+) -> bool {
+    provider
+        .and_then(|provider| capacity.login(provider, account, is_running(state)))
+        .is_some_and(|login| capacity.blocks(login, model))
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
-fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
+fn summary_surface(
+    session: &crate::session::SessionSummary,
+    capacity: &LaunchCapacity,
+) -> SessionRecord {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -665,6 +754,14 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
         account: session.account.clone(),
+        model: session.model.clone(),
+        blocked: is_blocked(
+            capacity,
+            session.provider.as_deref(),
+            session.account.as_ref(),
+            state,
+            session.model.as_deref(),
+        ),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -902,20 +999,17 @@ pub(crate) async fn open(
         session
     };
     drop(progress);
-    // Naming another login moves the conversation: its agent on the old login
-    // stops, and it relaunches here rather than attaching to that one.
+    // A running Codex keeps the login it started with, so naming another one
+    // stops it and relaunches here. A running Claude follows the Machine's
+    // login, so that moves below and the resume attaches.
     let moving = match (&provider_session, session.provider.as_deref()) {
-        (Some(native), Some(provider)) if resume => match provider.parse() {
-            Ok(provider) => {
-                crate::provider_account::names_another_account(
-                    store,
-                    provider,
-                    &native.agent_session,
-                )
-                .await?
-            }
-            Err(_) => None,
-        },
+        (Some(native), Some("codex")) if resume => {
+            let provider = crate::provider_auth::Provider::Codex;
+            let ran_on = store
+                .provider_session_account(provider, &native.agent_session)
+                .await?;
+            crate::provider_account::names_another_account(store, provider, ran_on).await?
+        }
         _ => None,
     };
     // An agent that already exited, whose identity was never recorded, has
@@ -939,6 +1033,13 @@ pub(crate) async fn open(
                 },
             )?;
         }
+    }
+    if resume && session.provider.as_deref() == Some("claude") && running()? {
+        crate::lf::commands::account::switch_to_named_login(
+            store,
+            crate::provider_auth::Provider::Claude,
+        )
+        .await?;
     }
     if resume {
         if session.interactive && moving.is_none() {
@@ -1107,13 +1208,13 @@ pub(crate) async fn open_without_replacing(
             .map(|()| record);
     };
     if let Some(provider) = session.provider.as_deref() {
-        if crate::provider_account::names_another_account(
-            store,
-            provider.parse()?,
-            &native.agent_session,
-        )
-        .await?
-        .is_some()
+        let provider = provider.parse()?;
+        let ran_on = store
+            .provider_session_account(provider, &native.agent_session)
+            .await?;
+        if crate::provider_account::names_another_account(store, provider, ran_on)
+            .await?
+            .is_some()
         {
             bail!("Changing account requires an explicit open");
         }
@@ -1555,6 +1656,16 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         detail: launch_model(session),
         provider: session.provider.clone(),
         account: metadata.account.clone(),
+        model: session.model.clone(),
+        blocked: LaunchCapacity::read(&store.sqlite).is_ok_and(|capacity| {
+            is_blocked(
+                &capacity,
+                session.provider.as_deref(),
+                metadata.account.as_ref(),
+                state,
+                session.model.as_deref(),
+            )
+        }),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),

@@ -71,6 +71,8 @@ impl Fixture {
             .env("LF_HOME", home)
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("PATH", path.unwrap())
+            // A routed launch signs the provider's shared home in; keep it in the fixture.
+            .env("CODEX_HOME", home.join(".codex"))
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "off");
         command
@@ -642,7 +644,6 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     // its Graph registers, so wait for it to stop there.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
-        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
@@ -2560,7 +2561,17 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
                     }
                     assert_eq!(session_state(), before);
                     assert_eq!(fixture.run_parents(&capture), history);
-                    assert_eq!(fixture.launches().len(), 1);
+                    // Running independent Tasks may start their conversations,
+                    // but never restarts or borrows the originating conversation.
+                    for launched in fixture.launches() {
+                        if launched != capture {
+                            let other = fixture.session_row(&launched).0;
+                            let owner: String = fixture.db().query_row(
+                                "SELECT task_id FROM agent_sessions WHERE id=?1", [&other],
+                                |row| row.get(0)).unwrap();
+                            assert!(tasks.contains(&owner), "unexpected conversation {other}");
+                        }
+                    }
                 }
             }
             assert_eq!(fixture.count("tasks"), 4 + i64::from(owned));
@@ -2576,6 +2587,20 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
                 loopflow::git::current_branch(&root).unwrap().as_deref(),
                 Some("prototype")
             );
+            for task in &tasks {
+                fixture.json(&["task", "abandon", task, "--json"]);
+            }
+            let deadline = Instant::now() + PATIENCE;
+            for task in &tasks {
+                loop {
+                    let running: i64 = fixture.db().query_row(
+                        "SELECT count(*) FROM agent_sessions s JOIN processes p ON p.id=s.transport_lf_process_id
+                         WHERE s.task_id=?1 AND p.completed_at IS NULL", [task], |row| row.get(0)).unwrap();
+                    if running == 0 { break; }
+                    assert!(Instant::now() < deadline, "Task conversation did not stop");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
         });
     }
 }

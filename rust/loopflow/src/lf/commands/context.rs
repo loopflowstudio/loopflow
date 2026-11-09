@@ -332,9 +332,30 @@ pub fn emit_block(
         if let Err(error) = acquire_planning(&delivery) {
             tracing::warn!(%error, "planning refresh unavailable at this turn boundary");
         }
+        // A move asked of this Session while it was busy happens once its turn
+        // has ended. The hook only peeks and starts the applier; it never
+        // stops the provider it runs inside.
+        if let (Some(adapter), Some(thread)) = (&adapter, input["session_id"].as_str()) {
+            let started = hook_store(&delivery.home)
+                .map_err(anyhow::Error::from)
+                .and_then(|store| {
+                    crate::ops::human_session::moves_bulk::start_pending_move(
+                        &store,
+                        &adapter.session,
+                    )
+                });
+            if let Err(error) = started {
+                recording_gap(&delivery.home, thread).note("pending Session move", &error);
+            }
+        }
         return Ok(());
     }
     emit_context(delivery, input, moment, adapter.as_ref())
+}
+
+/// The applier a Stop hook started for a pending Session move.
+pub fn apply_session_move() -> Result<()> {
+    crate::ops::human_session::moves_bulk::apply_pending_move()
 }
 
 fn hook_store(

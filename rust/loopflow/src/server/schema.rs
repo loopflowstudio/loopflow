@@ -79,10 +79,11 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../../tests/fixtures/dto/server/account_disconnect.json"),
     include_str!("../../../../tests/fixtures/dto/server/account_list.json"),
     include_str!("../../../../tests/fixtures/dto/server/account_redeem_reset.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_route.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_next_request.json"),
     include_str!("../../../../tests/fixtures/dto/server/account_set.json"),
-    include_str!("../../../../tests/fixtures/dto/server/account_token.json"),
     include_str!("../../../../tests/fixtures/dto/server/account_use.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_pause.json"),
+    include_str!("../../../../tests/fixtures/dto/server/account_unpause.json"),
     include_str!("../../../../tests/fixtures/dto/server/attach.json"),
     include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
     include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
@@ -142,9 +143,9 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../../tests/fixtures/dto/server/account_report.json"),
     ),
     (
-        "account_routes",
-        "account.route",
-        include_str!("../../../../tests/fixtures/dto/server/account_routes.json"),
+        "account_next",
+        "account.next",
+        include_str!("../../../../tests/fixtures/dto/server/account_next.json"),
     ),
     (
         "checkout_committed",
@@ -468,7 +469,7 @@ mod tests {
         let operations = operations(&describe());
         let wire = |value: Value| value["kind"].as_str().unwrap().to_owned();
         for kind in [
-            wire(serde_json::to_value(Read::Doctor).unwrap()),
+            wire(serde_json::to_value(Read::MachineDoctor).unwrap()),
             wire(
                 serde_json::to_value(Write::TaskComplete {
                     directory: "/".into(),

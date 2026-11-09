@@ -55,6 +55,8 @@ Run this check when changing transport ownership or process journaling: every
 added CLI process pays connection and schema setup costs, including at exit.
 Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
+Transport cleanup checks wait for both the recorded exit and socket removal:
+the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
 failed placement, failed shipping and a Graph held at landing.
@@ -292,18 +294,17 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
-in as one stored account at a time: switching, saved-back logins, isolation,
-and provider conversation IDs in `lf session`.
+in as one stored account at a time: switching, saved-back logins and provider
+conversation IDs in `lf session`.
 `tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
 target/debug/lf --output <dir>` proves the same for Claude with synthetic
 logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, a shared launch gets no account home or credential
-variable, and an isolated launch stays in its account's home. On macOS it
-writes and removes one Keychain item scoped to its temporary config directory.
-The fixture copies the candidate, uses private Machines and stops only its identified
-provider process children. Native execution uses synthetic Responses, not configured
-accounts or installed data. Ordinary retry, usage, binding and review behavior
-belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
+Loopflow installed, and a launch gets no account home or credential variable.
+On macOS it writes and removes one Keychain item scoped to its temporary config
+directory. The fixture copies the candidate, uses private Machines and stops
+only its identified provider process children. Native execution uses synthetic
+Responses, not configured accounts or installed data. Ordinary retry, usage,
+binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
 `ops::linear::adoption_tests`.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
@@ -931,6 +932,9 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 The [server boundary](../../../docs/dev/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
 composed test must continue to prove both with existing execution owners live.
+Draft-preservation fixtures observe terminal echo or provider acknowledgement
+before disconnecting a viewer. A socket write alone does not establish delivery;
+reconnection must never replay uncertain input to make such a test pass.
 
 ```bash
 cargo test -p loopflow --lib server::

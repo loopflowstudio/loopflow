@@ -21,8 +21,8 @@ use crate::work::task::Task;
 use super::mutation::CommandIo;
 
 /// What `lf task create --run --json` prints whenever the Task was filed: the
-/// Task, the graph it took up and its admitted conversation. A headless (`-b`)
-/// run admits no conversation; a run that failed leaves both absent and the
+/// Task, the graph it took up and the conversation to open. A headless (`-b`)
+/// caller opens no conversation; a run that failed leaves both absent and the
 /// command still exits non-zero, so callers never file the request twice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskCreateReceipt {
@@ -113,7 +113,7 @@ pub fn start(
     if json {
         return Ok(());
     }
-    // A headless run has no conversation to open.
+    // A headless caller does not open the background conversation.
     if receipt.session_id.is_none() {
         return Ok(());
     }
@@ -150,6 +150,8 @@ fn launch(
     json: bool,
 ) -> Result<TaskCreateReceipt> {
     let issue = &task.identifier;
+    // Save the first turn before task run can start the conversation beside its Graph.
+    let session_id = prepare_conversation(cli, repo, task, request)?;
     let mut run = Command::new(std::env::current_exe()?);
     run.args(cli.step_args());
     if let Some(agent) = &cli.agent {
@@ -172,7 +174,16 @@ fn launch(
         )
         .into());
     }
-    let (graph, session_id) = admit(cli, repo, task, request)?;
+    let graph = tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_store(&storage_config_from_env()?).await?;
+        Ok::<_, anyhow::Error>(
+            store
+                .sqlite
+                .task_graph(&task.id)?
+                .context("the run did not take up a graph")?
+                .name,
+        )
+    })?;
     Ok(TaskCreateReceipt {
         task: task.clone(),
         graph: Some(graph),
@@ -365,33 +376,23 @@ pub fn recoverable(
     Ok(outcome)
 }
 
-/// The graph the run took up and, unless headless, the Task's primary
-/// conversation with `request` as its first turn.
-fn admit(
+/// Unless headless, prepare the Task's primary conversation with its first turn.
+fn prepare_conversation(
     cli: &Cli,
     repo: &Path,
     task: &Task,
     request: Option<&str>,
-) -> Result<(String, Option<crate::id::LfSessionId>)> {
+) -> Result<Option<crate::id::LfSessionId>> {
+    if cli.batch {
+        return Ok(None);
+    }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
-        let graph = store
-            .sqlite
-            .task_graph(&task.id)?
-            .context("the run did not take up a graph")?
-            .name;
-        // A headless run has no one to talk to; its conversation is not admitted.
-        let session_id = if cli.batch {
-            None
-        } else {
-            let request = request.map(str::to_owned);
-            Some(
-                primary::ensure_task(&store, repo, &task.identifier, request)
-                    .await?
-                    .0
-                    .id,
-            )
-        };
-        Ok((graph, session_id))
+        Ok(Some(
+            primary::ensure_task(&store, repo, &task.identifier, request.map(str::to_owned))
+                .await?
+                .0
+                .id,
+        ))
     })
 }

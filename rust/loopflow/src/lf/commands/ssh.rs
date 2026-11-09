@@ -143,8 +143,9 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => current_repository(directory)?,
     };
-    // Preview forwards only authored selectors. Account lookup/connection and
-    // isolation preparation belong to launch, on neither side of this read.
+    // Preview forwards only authored selectors. Account lookup and connection
+    // belong to launch, on neither side of this read. The target launches in
+    // its own shared home.
     let selection = if preview || resident_operation {
         None
     } else {
@@ -173,7 +174,6 @@ pub(super) fn run_with_io(
             crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
             selection,
         ));
-        extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
     let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
@@ -393,7 +393,6 @@ fn resident_args(
     let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
     let mut remove_repo = routed && cli.repo.is_some();
     let mut remaining = cli.account.len() + cli.only_account.len();
-    let mut shared = cli.shared;
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -414,9 +413,6 @@ fn resident_args(
             && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
         {
             remaining -= 1;
-        } else if shared && arg == "--shared" {
-            result.push("--isolate".into());
-            shared = false;
         } else if let Some(source) = source.filter(|_| {
             (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
                 || task_flag.as_ref() == Some(arg)
@@ -727,17 +723,16 @@ mod tests {
 
     #[test]
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
-        let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
+        let args = ["--account", "person@", "skill", "implement"].map(str::to_string);
         assert_eq!(
             resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["--isolate", "skill", "implement"]
+            ["skill", "implement"]
         );
     }
     #[test]
-    fn remote_prompt_preserves_literal_account_and_home_flags() {
+    fn remote_prompt_preserves_literal_account_flags() {
         let args = [
             "--only-account=codex=person@",
-            "--shared",
             "skill",
             "implement",
             "--",
@@ -747,14 +742,7 @@ mod tests {
         .map(str::to_string);
         assert_eq!(
             resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            [
-                "--isolate",
-                "skill",
-                "implement",
-                "--",
-                "--shared",
-                "--account=other@"
-            ]
+            ["skill", "implement", "--", "--shared", "--account=other@"]
         );
     }
     #[test]

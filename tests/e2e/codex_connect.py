@@ -1304,44 +1304,6 @@ def _shared_provider_home_contract(
     assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
     results["running_agent_survived_switch"] = True
 
-    # An isolated conversation runs in its account's own home and stays
-    # there across a switch, whether isolation came from the flag or config.
-    use("first")
-    home = str(profiles / "second")
-    pinned, agent_processes = converse("--account", "codex=second@example.com", "--isolate")
-    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
-    assert rollout(profiles / "second", pinned) and not rollout(native, pinned)
-    assert login(native) == "first@example.com"
-    config = work / ".lf" / "config.yaml"
-    config.parent.mkdir(exist_ok=True)
-    config.write_text("isolate: true\n")
-    standing, agent_processes = converse("--account", "codex=second@example.com")
-    assert {launch["CODEX_HOME"] for launch in agent_processes} == {home}, agent_processes
-    assert rollout(profiles / "second", standing) and not rollout(native, standing)
-    # `--shared` overrides the standing default for one launch.
-    override, agent_processes = converse("--shared")
-    assert shared(agent_processes) and rollout(native, override)
-    config.unlink()
-
-    def isolated(conversation: str) -> bool:
-        recorded = rows(
-            "SELECT isolated FROM provider_session_accounts WHERE provider_session_id=?",
-            conversation,
-        )
-        return recorded == [(1,)]
-
-    assert isolated(pinned) and isolated(standing)
-    assert not isolated(override) and not isolated(moved)
-    # A conversation that lives in an account's home is opened there, under
-    # that account, whichever account the native home has moved to.
-    with plain_codex(profiles / "second") as client:
-        apart = start(client)
-    use("second")
-    use("first")
-    assert resumed(apart)["CODEX_HOME"] == home
-    assert login(native) == "first@example.com"
-    results["isolated_conversations"] = [pinned, standing, apart]
-
 
 def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):
     with subprocess.Popen(

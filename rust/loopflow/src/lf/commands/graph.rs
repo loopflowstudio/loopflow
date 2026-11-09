@@ -238,6 +238,18 @@ pub fn run_task_graph_for(
             let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
         }
+        // A run that ended waiting out a limit starts again at the reset, by
+        // the recovery sweep; starting it now would only wait again.
+        if let Some(wait) = crate::ops::task::limit_recovery::waiting_on_limit(store, &task.id)?
+            .filter(|wait| failed && wait.retry_at > crate::store::rows::now_unix())
+        {
+            eprintln!(
+                "The run of {run} is waiting on a limit until {}; it starts again at {} then.",
+                crate::lf::output::format_time(wait.retry_at),
+                wait.step
+            );
+            return Err(exit_of(status).into());
+        }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 if let Some(cause) = repeated {
@@ -281,6 +293,9 @@ pub fn carry_task_run(
         TaskRunMode::Stop
     };
     let (task, start) = crate::ops::task::task_place(repo, issue, options, mode)?;
+    if !cli.interactive {
+        crate::ops::task::start_conversation_beside(&task);
+    }
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| -> Result<()> {
         crate::engine::launch::report(Ok(run));
@@ -925,6 +940,10 @@ impl RunningGraph<'_> {
         // An interrupt during an operation takes effect once it has finished.
         if signalled || self.interrupted() {
             eprintln!("Graph {} interrupted at {label}.", self.graph);
+            // Someone stopped it: a wait it was in no longer starts it again.
+            if let Some(step) = &step {
+                self.store.sqlite.end_agent_limit_wait(step)?;
+            }
             return Ok((StepExit::Interrupted, step));
         }
         match status.code() {

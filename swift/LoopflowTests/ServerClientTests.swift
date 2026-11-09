@@ -29,7 +29,7 @@ struct ServerClientTests {
             }
             return true
         }
-        let request = Task { try await ServerClient.read(.machineId, location: peer.location) }
+        let request = Task { try await ServerClient.read(.machineSelf, location: peer.location) }
         peer.waitForMessage { $0["type"] as? String == "request" }
         request.cancel()
         do {
@@ -37,7 +37,7 @@ struct ServerClientTests {
             Issue.record("A cancelled read returned a reading")
         } catch { #expect(error is CancellationError) }
         // The connection stays open; the dropped late answer does not corrupt it.
-        let reading = try await ServerClient.read(.machineId, location: peer.location)
+        let reading = try await ServerClient.read(.machineSelf, location: peer.location)
         #expect(reading.contains("home_fixture"))
         #expect(!reading.contains("late"))
     }
@@ -55,7 +55,7 @@ struct ServerClientTests {
         peer.waitForMessage { $0["type"] as? String == "subscribe" }
         for _ in 0..<ServerLink.stalledReads {
             do {
-                _ = try await ServerClient.read(.machineId, location: peer.location, deadline: .milliseconds(20))
+                _ = try await ServerClient.read(.machineSelf, location: peer.location, deadline: .milliseconds(20))
                 Issue.record("An unanswered read returned")
             } catch {
                 #expect(error.localizedDescription.contains("did not answer in time"))
@@ -102,8 +102,8 @@ struct ServerClientTests {
         peer.serve { message, _ in
             message["type"] as? String != "request" || seen.increment() < 2
         }
-        let first = Task { try await ServerClient.read(.machineId, location: peer.location) }
-        let second = Task { try await ServerClient.read(.portfolio, location: peer.location) }
+        let first = Task { try await ServerClient.read(.machineSelf, location: peer.location) }
+        let second = Task { try await ServerClient.read(.desktopPortfolio, location: peer.location) }
         for pending in [first, second] {
             do {
                 _ = try await pending.value
@@ -118,7 +118,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/again")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
     }
 
     @Test func stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() async throws {
@@ -126,7 +126,7 @@ struct ServerClientTests {
         peer.stall()
         let started = Date()
         do {
-            _ = try await ServerClient.read(.machineId, location: peer.location)
+            _ = try await ServerClient.read(.machineSelf, location: peer.location)
             Issue.record("A stalled handshake produced a reading")
         } catch {
             #expect(error.localizedDescription == "Loopflow server did not answer within 10s; check `lf server status`")
@@ -139,7 +139,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
     @Test func bulkAnswersAndOversizeRequestsTravelByTicket() async throws {
@@ -163,8 +163,8 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == big)
-        let output = try await ServerClient.configuration(.theme(path: "/unused", value: big), location: peer.location)
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == big)
+        let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
 
@@ -204,7 +204,7 @@ struct ServerClientTests {
             #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
-        #expect(try await ServerClient.read(.repositoryPath(id: "repo_1"), location: peer.location) == "still here")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "still here")
         await subscription.cancel()
     }
 
@@ -240,7 +240,7 @@ struct ServerClientTests {
         """.write(to: installer, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installer.path)
         let location = ServerLocation { try await lf.run($0, executable: installer.path) }
-        let query = ServedRead.roadmap(directory: root.path, wave: nil, task: nil, all: true)
+        let query = ServedRead.planList(directory: root.path, wave: nil, task: nil, all: true)
         do {
             _ = try await ServerClient.read(query, location: location)
             Issue.record("Initial setup must report its failure")

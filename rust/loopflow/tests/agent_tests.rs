@@ -4,7 +4,7 @@ use base64::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::agent::{run_agent, AgentConfig, ProcessConfig};
+use loopflow::agent::{run_agent, AgentConfig, AgentProcessResult, ProcessConfig};
 use loopflow::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -209,64 +209,28 @@ fn launch_nonzero_exit() {
     assert_ne!(result.exit_code, 0);
 }
 
-#[test]
-fn release_acceptance_recovers_from_a_revoked_selected_account() {
-    let home = TempDir::new().expect("lf home");
-    let codex = support::codex_socket_script(
-        r#"#!/bin/sh
-thread="thread-${CODEX_HOME##*/}"
-read -r initialize
-echo '{"jsonrpc":"2.0","id":1,"result":{}}'
-read -r initialized
-read -r thread_start
-case "$thread_start" in
-  *'"method":"thread/start"'*) ;;
-  *) echo "failover attempted to resume the old account" >&2; exit 10;;
-esac
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
-read -r turn_start
-echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
-case "$CODEX_HOME" in
-  */revoked)
-    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}';;
-  */fallback)
-    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}';;
-  *) echo "unexpected CODEX_HOME" >&2; exit 9;;
-esac
-if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
-while read -r line; do :; done
-"#,
-    );
-    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
-    let _directory = support::InDirectory::enter(home.path());
-    // Isolated launches run in the routed account's own home.
-    std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
-    struct RestoreLfBin(Option<std::ffi::OsString>);
-    impl Drop for RestoreLfBin {
-        fn drop(&mut self) {
-            match &self.0 {
-                Some(value) => std::env::set_var("LF_BIN", value),
-                None => std::env::remove_var("LF_BIN"),
-            }
-        }
-    }
-    let _lf_bin = RestoreLfBin(std::env::var_os("LF_BIN"));
-    std::env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
-    let revoked_home = home.path().join("accounts/codex/revoked");
-    let fallback_home = home.path().join("accounts/codex/fallback");
-    std::fs::create_dir_all(&revoked_home).expect("revoked home");
-    std::fs::create_dir_all(&fallback_home).expect("fallback home");
-    let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
-    let fallback_id = ProviderAccountId::parse("fallback").expect("fallback id");
+/// A store routing Codex through `first`, then `second`, each with a login.
+fn two_codex_accounts(
+    home: &std::path::Path,
+    first: &str,
+    second: &str,
+) -> (
+    tokio::runtime::Runtime,
+    loopflow::store::Store,
+    ProviderAccountId,
+) {
+    let first_id = ProviderAccountId::parse(first).expect("first id");
+    let second_id = ProviderAccountId::parse(second).expect("second id");
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let account = |account_id: ProviderAccountId, path: std::path::PathBuf| {
+    let account = |account_id: ProviderAccountId| {
+        let path = home.join("accounts/codex").join(account_id.as_str());
+        std::fs::create_dir_all(&path).expect("account home");
         let email = format!("{account_id}@example.com");
         let claims = BASE64_URL_SAFE_NO_PAD
             .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
-        std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
+        // The access token names the account so a stand-in can tell which login
+        // the shared home carries.
+        std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":format!("fixture-{account_id}"), "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
         ProviderAccount {
             provider: "codex".to_string(),
             account_id,
@@ -291,24 +255,231 @@ while read -r line; do :; done
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime
         .block_on(loopflow::store::open_ephemeral_store(
-            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+            &StorageConfig::sqlite(home.join("loopflow.db")),
         ))
         .expect("account store");
-    runtime
-        .block_on(store.upsert_provider_account(&account(revoked_id.clone(), revoked_home)))
-        .expect("revoked account");
-    runtime
-        .block_on(store.upsert_provider_account(&account(fallback_id.clone(), fallback_home)))
-        .expect("fallback account");
+    for id in [&first_id, &second_id] {
+        runtime
+            .block_on(store.upsert_provider_account(&account(id.clone())))
+            .expect("account");
+    }
     runtime
         .block_on(store.set_provider_route(&ProviderRoute {
             scope: RouteScope::Default,
             provider: Provider::Codex,
-            accounts: vec![revoked_id.clone(), fallback_id],
+            accounts: vec![first_id.clone(), second_id],
             created_at: now,
             updated_at: now,
         }))
         .expect("codex route");
+    (runtime, store, first_id)
+}
+
+/// A Codex provider whose every launch keeps one thread with a transcript in
+/// its home. `$LIMITED` lists the accounts that hit a limit on their turn,
+/// each resetting `$RESET_IN` seconds from then, once.
+const LIMITED_CODEX: &str = r#"#!/bin/sh
+account=$(sed -n 's/.*"access_token":"fixture-\([^"]*\)".*/\1/p' "$CODEX_HOME/auth.json")
+thread="0199a213-81c0-7800-8aa1-bbab2a035a53"
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_open
+case "$thread_open" in
+  *'"method":"thread/start"'*) echo "start $account" >> "$LAUNCHES";;
+  *'"method":"thread/resume"'*) echo "resume $account" >> "$LAUNCHES";;
+esac
+mkdir -p "$CODEX_HOME/sessions/2026/11/05"
+echo '{"type":"session_meta"}' >> "$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T10-00-00-$thread.jsonl"
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
+case " $LIMITED " in
+  *" $account "*)
+    if [ ! -e "$CODEX_HOME/limited-once-$account" ]; then
+      touch "$CODEX_HOME/limited-once-$account"
+      reset=$(( $(date +%s) + RESET_IN ))
+      echo '{"jsonrpc":"2.0","method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":'"$reset"'},"rateLimitReachedType":"rate_limit_reached"}}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}'
+      while read -r line; do :; done
+      exit 0
+    fi;;
+esac
+echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"finished on '"$account"'"}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#;
+
+struct RestoreEnv(&'static str, Option<std::ffi::OsString>);
+
+impl RestoreEnv {
+    fn set(name: &'static str, value: &str) -> Self {
+        let restore = Self(name, std::env::var_os(name));
+        std::env::set_var(name, value);
+        restore
+    }
+}
+
+impl Drop for RestoreEnv {
+    fn drop(&mut self) {
+        match &self.1 {
+            Some(value) => std::env::set_var(self.0, value),
+            None => std::env::remove_var(self.0),
+        }
+    }
+}
+
+fn branch_lf() -> RestoreEnv {
+    RestoreEnv::set("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+}
+
+fn run_limited_step(
+    home: &std::path::Path,
+    limited: &str,
+    reset_in: u32,
+) -> (AgentProcessResult, String) {
+    let launches = home.join("launches");
+    let launch = AgentConfig {
+        task_prompt: "finish the operation".to_string(),
+        agent: Some("codex".to_string()),
+        skip_permissions: true,
+        env: BTreeMap::from([
+            ("LAUNCHES".into(), launches.display().to_string()),
+            ("LIMITED".into(), limited.to_string()),
+            ("RESET_IN".into(), reset_in.to_string()),
+        ]),
+        ..Default::default()
+    };
+    let step = ProcessConfig {
+        wait_for_capacity: true,
+        ..base_process()
+    };
+    let result = run_agent(&launch, &step).expect("limited step");
+    (result, std::fs::read_to_string(launches).unwrap())
+}
+
+/// The November 2 shape: a limit event on the first account, an eligible second.
+#[test]
+fn a_limit_moves_the_step_and_its_conversation_to_the_next_account() {
+    let home = TempDir::new().expect("lf home");
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _lf = branch_lf();
+    let (runtime, store, primary) = two_codex_accounts(home.path(), "primary", "backup");
+
+    let (result, launches) = run_limited_step(home.path(), "primary", 3_600);
+
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert!(result.stdout.contains("finished on backup"));
+    assert_eq!(launches, "start primary\nresume backup\n");
+    let cooled = runtime
+        .block_on(store.get_provider_account("codex", &primary))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        cooled.cooldown_reason.as_deref(),
+        Some("rate_limit_reached")
+    );
+    // The conversation moved on in the one shared home, now signed in as backup.
+    let shared = std::path::PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
+    assert!(shared.join("sessions/2026/11/05").is_dir());
+    assert!(std::fs::read_to_string(shared.join("auth.json"))
+        .unwrap()
+        .contains("fixture-backup"));
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (account, retry_at): (String, Option<i64>) = db
+        .query_row(
+            "SELECT (SELECT account_id FROM provider_session_accounts), retry_at FROM agent_limit_recoveries",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(account, "backup");
+    assert_eq!(retry_at, None);
+}
+
+/// Both accounts run out; the step waits, then goes on where the reset frees it.
+#[test]
+fn with_every_account_exhausted_the_step_waits_for_a_reset_and_finishes() {
+    let home = TempDir::new().expect("lf home");
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _lf = branch_lf();
+    let (_runtime, _store, _) = two_codex_accounts(home.path(), "primary", "backup");
+
+    let (result, launches) = run_limited_step(home.path(), "primary backup", 1);
+
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert!(result.stdout.contains("finished on"));
+    let launches: Vec<_> = launches.lines().collect();
+    assert_eq!(launches[..2], ["start primary", "resume backup"]);
+    assert_eq!(launches.len(), 3, "{launches:?}");
+    assert!(launches[2].starts_with("resume "));
+}
+
+/// A wait keeps the explicit choice its step ran under, for whatever restarts it.
+#[test]
+fn a_limit_wait_records_the_explicit_agent() {
+    let home = TempDir::new().expect("lf home");
+    let codex = support::codex_socket_script(LIMITED_CODEX);
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _lf = branch_lf();
+    let (_runtime, _store, _) = two_codex_accounts(home.path(), "primary", "backup");
+    let _selected = loopflow::config::settings::select_invocation(
+        serde_yaml_ng::from_str("agent: codex").unwrap(),
+    );
+
+    let (result, _) = run_limited_step(home.path(), "primary backup", 1);
+
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let agent: Option<String> = db
+        .query_row("SELECT agent FROM agent_limit_recoveries", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(agent.as_deref(), Some("codex"));
+}
+
+#[test]
+fn release_acceptance_recovers_from_a_revoked_selected_account() {
+    let home = TempDir::new().expect("lf home");
+    let codex = support::codex_socket_script(
+        r#"#!/bin/sh
+account=$(sed -n 's/.*"access_token":"fixture-\([^"]*\)".*/\1/p' "$CODEX_HOME/auth.json")
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_open
+case "$thread_open" in
+  *'"method":"thread/start"'*) thread="thread-$account";;
+  *'"method":"thread/resume"'*)
+    thread=$(printf '%s' "$thread_open" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+    if [ "$account" = revoked ]; then echo "resumed on the revoked login" >&2; exit 10; fi;;
+  *) echo "unexpected thread request" >&2; exit 10;;
+esac
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
+case "$account" in
+  revoked)
+    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}';;
+  fallback)
+    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}';;
+  *) echo "unexpected login in CODEX_HOME" >&2; exit 9;;
+esac
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#,
+    );
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex)], home.path());
+    let _lf = branch_lf();
+    let (runtime, store, revoked_id) = two_codex_accounts(home.path(), "revoked", "fallback");
 
     let launch = AgentConfig {
         task_prompt: "finish the operation".to_string(),
@@ -350,7 +521,8 @@ while read -r line; do :; done
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(thread, "thread-fallback");
+    // The shared home carries the conversation on to the fallback login.
+    assert_eq!(thread, "thread-revoked");
     let observations = db
         .prepare("SELECT payload FROM session_events WHERE session_id=?1 ORDER BY seq")
         .unwrap()
@@ -361,7 +533,6 @@ while read -r line; do :; done
         .join("\n");
     for retained in [
         "thread-revoked",
-        "thread-fallback",
         "revoked",
         "fallback",
         &agents[0].0,
@@ -374,7 +545,7 @@ while read -r line; do :; done
     }
     for (thread, account) in [
         ("thread-revoked", "revoked"),
-        ("thread-fallback", "fallback"),
+        ("thread-revoked", "fallback"),
     ] {
         let retained: bool = db
             .query_row(
@@ -469,7 +640,6 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
     );
     support::register_codex_account(home.path());
-    std::env::set_var("LF_ACCOUNT_ISOLATION", "isolated");
     let launch = AgentConfig {
         agent: Some("codex:model".into()),
         system_prompt: "Keep these instructions".into(),
@@ -486,12 +656,15 @@ fn direct_native_codex_launch_preserves_account_policy_and_literal_input() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    let args = launches
+    assert!(launches
         .iter()
-        .find(|args| args.contains(&"--remote".into()))
-        .unwrap();
-    let remote = args.iter().position(|arg| arg == "--remote").unwrap();
-    assert!(args[..remote].contains(&"cli_auth_credentials_store=\"file\"".into()));
+        .any(|args| args.contains(&"--remote".into())));
+    // The shared home is signed in as the selected account.
+    let shared = std::path::PathBuf::from(std::env::var_os("CODEX_HOME").unwrap());
+    assert_eq!(
+        std::fs::read(shared.join("auth.json")).unwrap(),
+        std::fs::read(home.path().join("accounts/codex/fixture/auth.json")).unwrap()
+    );
     assert_eq!(
         std::fs::read_to_string(home.path().join("native-thread")).unwrap(),
         result.agent_session.as_ref().unwrap().as_str()

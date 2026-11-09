@@ -126,7 +126,7 @@ fn configure(configuration: Option<Configuration>) -> Result<Option<Configuratio
     let mut connection = Connection::open()?;
     // Initial Tailscale certificate issuance can outlast an ordinary read.
     connection.set_read_timeout(Some(Duration::from_secs(60)))?;
-    let answer = connection.request(Operation::Server(ServerOperation::ConfigureRemote {
+    let answer = connection.request(Operation::Server(ServerOperation::MobileConfigure {
         configuration,
     }))?;
     serde_json::from_value(answer.result["configuration"].clone())

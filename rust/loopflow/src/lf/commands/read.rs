@@ -82,17 +82,17 @@ pub enum Read {
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
-    MonitorPs,
+    ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
-    DesktopPlans { directory: PathBuf },
+    DesktopViewList { directory: PathBuf },
     /// `lf desktop view list --all [--expression <expression>]`: one selection
     /// across the portfolio repositories, as the phone lists open Tasks.
     #[serde(rename = "view.select")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
-    AllViewPlans { expression: Option<String> },
-    /// `lf --cwd <directory> desktop sessions`, with `--interactive all`
+    ViewSelect { expression: Option<String> },
+    /// `lf --cwd <directory> session list`, with `--interactive all`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a subscription.
@@ -109,7 +109,7 @@ pub enum Read {
     /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
-    DesktopTask { directory: PathBuf, issue: String },
+    TaskGet { directory: PathBuf, issue: String },
     /// `lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.
     #[serde(rename = "task.changes")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskChangesSnapshot>()))]
@@ -136,15 +136,15 @@ pub enum Read {
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
-    Waves,
+    WaveList,
     /// `lf machine id`: this Machine's identity.
     #[serde(rename = "machine.self")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::Machine>()))]
-    MachineId,
+    MachineSelf,
     /// `lf desktop portfolio`: the repositories this Machine's windows show.
     #[serde(rename = "desktop.portfolio")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
-    Portfolio,
+    DesktopPortfolio,
     /// `lf config catalog --json`: every typed setting and its policies.
     #[serde(rename = "config.catalog")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::config::catalog::Definition>>()))]
@@ -153,7 +153,7 @@ pub enum Read {
     /// [--step]] --json`: effective settings and their sources.
     #[serde(rename = "config.settings")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::engine::config::Inspection>>()))]
-    Settings {
+    ConfigSettings {
         directory: PathBuf,
         wave: Option<String>,
         skill: Option<String>,
@@ -178,20 +178,20 @@ pub enum Read {
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     #[serde(rename = "desktop.layout")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopLayoutRecord>()))]
-    PaneLayout { directory: PathBuf, work: String },
+    DesktopLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> repo people`: who owns the repository's Tasks.
     #[serde(rename = "repo.people")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::people::RepoPerson>>()))]
-    People { directory: PathBuf },
+    RepoPeople { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
     #[serde(rename = "graph.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::graph::compiled::GraphCatalogEntry>>()))]
-    Graphs { directory: PathBuf },
+    GraphList { directory: PathBuf },
     /// `lf --cwd <directory> desktop view show [expression]`: what a view
     /// shows; no expression is the repository's own.
     #[serde(rename = "desktop.view.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::ViewPlan>()))]
-    ViewPlan {
+    DesktopViewGet {
         directory: PathBuf,
         expression: Option<String>,
     },
@@ -199,7 +199,7 @@ pub enum Read {
     /// the Graphs that ran for a Task.
     #[serde(rename = "task.runs")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessPage>()))]
-    GraphProcesses {
+    TaskRuns {
         directory: PathBuf,
         task: String,
         after: Option<String>,
@@ -207,12 +207,12 @@ pub enum Read {
     /// `lf process show <id>`: one Graph that ran, with its steps.
     #[serde(rename = "process.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::GraphProcessDetail>()))]
-    GraphProcess { id: String },
+    ProcessGet { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
     #[serde(rename = "session.usage")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::session_record::SessionHistory>>()))]
-    Usage {
+    SessionUsage {
         days: u32,
         wave: Option<String>,
         project: Option<String>,
@@ -227,13 +227,13 @@ pub enum Read {
     /// Tasks, after syncing its repository with the tracker.
     #[serde(rename = "wave.plan")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
-    WaveDetail { directory: PathBuf, wave: String },
+    WavePlan { directory: PathBuf, wave: String },
     /// `lf --cwd <directory> task list --closed --wave <wave> [--after
     /// <after>]`: one page of a Wave's closed Tasks. Only `closed` lists
     /// exist; open Tasks are `plan.list`'s.
     #[serde(rename = "task.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::ClosedTaskPageSnapshot>()))]
-    ClosedTasks {
+    TaskList {
         directory: PathBuf,
         wave: String,
         after: Option<String>,
@@ -242,17 +242,17 @@ pub enum Read {
     /// `lf machine list`: your registered Machines.
     #[serde(rename = "machine.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::machine::MachineListing>>()))]
-    Machines,
+    MachineList,
     /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
-    History(HistoryWindow),
+    SessionHistory(HistoryWindow),
     /// `lf --cwd <directory> plan list [wave] [--task <task>] [--all]`:
     /// Waves and Tasks. Read once, it first asks the tracker about each
     /// repository read; its subscription reads the store.
     #[serde(rename = "plan.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::RoadmapSnapshot>()))]
-    Roadmap {
+    PlanList {
         directory: PathBuf,
         wave: Option<String>,
         task: Option<String>,
@@ -262,16 +262,16 @@ pub enum Read {
     /// planning is exchanged. Its subscription exchanges it while it runs.
     #[serde(rename = "repo.plan")]
     #[schemars(extend("x-result" = generator.subschema_for::<super::plan::PlanStatus>()))]
-    PlanStatus { directory: PathBuf },
+    RepoPlan { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::open::WorkLink>>()))]
-    WorkLink { directory: PathBuf, url: String },
+    WorkResolve { directory: PathBuf, url: String },
     /// `lf --repo-id <id> repo path`: a repository plan's
     /// checkout on this Machine.
     #[serde(rename = "repo.path")]
     #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
-    RepositoryPath { id: RepositoryId },
+    RepoPath { id: RepositoryId },
     /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
     /// new Task there would take up.
     #[serde(rename = "wave.graph")]
@@ -283,41 +283,40 @@ pub enum Read {
     /// `lf --cwd <directory> repo tokens [--days <days>]`: the codebase's size.
     #[serde(rename = "repo.tokens")]
     #[schemars(extend("x-result" = (crate::server::schema::either::<crate::lf::commands::tokens::CodeNode, Vec<crate::lf::commands::tokens::CodeSnapshot>>(generator))))]
-    Tokens {
+    RepoTokens {
         directory: PathBuf,
         days: Option<u32>,
     },
     /// `lf session retention`: how much Session history providers keep.
     #[serde(rename = "session.retention")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::transcript::summary::RetentionSummary>()))]
-    Retention,
+    SessionRetention,
     /// `lf machine doctor`: the ledger's self-audit.
     #[serde(rename = "machine.doctor")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::doctor::DoctorReport>()))]
-    Doctor,
+    MachineDoctor,
     /// `lf repo ci --since <since> [--wave <wave>] [--repo <repo>]`:
     /// how failed CI was detected, repaired and landed on this Machine.
     #[serde(rename = "repo.ci")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::ci::CiReportDto>()))]
-    Ci {
+    RepoCi {
         since: String,
         wave: Option<String>,
         repo: Option<String>,
     },
-    /// `lf account [<provider>] [--cached] [--details] --json`: every login's
+    /// `lf account [<login|provider>] [--cached] --json`: every login's
     /// state on this Machine.
     #[serde(rename = "account.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::account::account_status::AccountReport>()))]
     AccountList {
-        provider: Option<crate::provider_auth::Provider>,
+        target: Option<String>,
         cached: bool,
-        details: bool,
     },
-    /// `lf --cwd <directory> account route [--repo <repo>] [--default]
+    /// `lf --cwd <directory> account next [--repo <repo>] [--default]
     /// --json`: how the repository selects an account for each provider.
-    #[serde(rename = "account.route")]
-    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::RouteReport>>()))]
-    AccountRoute {
+    #[serde(rename = "account.next")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::profile::NextLaunch>>()))]
+    AccountNext {
         directory: PathBuf,
         repo: Option<String>,
         default: bool,
@@ -359,11 +358,11 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
-            Self::MonitorPs => words(&["process", "list", "--json"]),
-            Self::DesktopPlans { directory } => {
+            Self::ProcessList => words(&["process", "list", "--json"]),
+            Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
-            Self::AllViewPlans { expression } => {
+            Self::ViewSelect { expression } => {
                 let mut argv = words(&["desktop", "view", "list", "--all", "--json"]);
                 argv.extend(optional("--expression", expression.as_ref()));
                 argv
@@ -385,9 +384,7 @@ impl Read {
                 argv.extend(optional("--task", task.as_ref()));
                 argv
             }
-            Self::DesktopTask { directory, issue } => {
-                at(directory, &["task", "show", issue, "--json"])
-            }
+            Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
             Self::TaskChanges { issue, base, head } => {
                 let mut argv = words(&["task", "changes", issue, "--base", base, "--json"]);
                 argv.extend(optional("--head", head.as_ref()));
@@ -410,9 +407,9 @@ impl Read {
                 argv
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
-            Self::Waves => words(&["wave", "list", "--all", "--json"]),
-            Self::MachineId => words(&["machine", "self", "--json"]),
-            Self::Portfolio => words(&["desktop", "portfolio", "--json"]),
+            Self::WaveList => words(&["wave", "list", "--all", "--json"]),
+            Self::MachineSelf => words(&["machine", "self", "--json"]),
+            Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
@@ -420,7 +417,7 @@ impl Read {
             Self::ConfigExplain { destination, key } => {
                 destination_argv(destination, &["config", "explain", key, "--json"])
             }
-            Self::Settings {
+            Self::ConfigSettings {
                 directory,
                 wave,
                 skill,
@@ -435,10 +432,10 @@ impl Read {
                 argv
             }
             // `desktop layout` always prints JSON.
-            Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
-            Self::People { directory } => at(directory, &["repo", "people", "--json"]),
-            Self::Graphs { directory } => at(directory, &["graph", "list", "--json"]),
-            Self::ViewPlan {
+            Self::DesktopLayout { directory, work } => at(directory, &["desktop", "layout", work]),
+            Self::RepoPeople { directory } => at(directory, &["repo", "people", "--json"]),
+            Self::GraphList { directory } => at(directory, &["graph", "list", "--json"]),
+            Self::DesktopViewGet {
                 directory,
                 expression,
             } => {
@@ -447,7 +444,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::GraphProcesses {
+            Self::TaskRuns {
                 directory,
                 task,
                 after,
@@ -457,8 +454,8 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::GraphProcess { id } => words(&["process", "show", id, "--json"]),
-            Self::Usage {
+            Self::ProcessGet { id } => words(&["process", "show", id, "--json"]),
+            Self::SessionUsage {
                 days,
                 wave,
                 project,
@@ -472,10 +469,8 @@ impl Read {
                 argv
             }
             Self::TaskContext { task } => words(&["task", "context", task, "--json"]),
-            Self::WaveDetail { directory, wave } => {
-                at(directory, &["wave", "plan", wave, "--json"])
-            }
-            Self::ClosedTasks {
+            Self::WavePlan { directory, wave } => at(directory, &["wave", "plan", wave, "--json"]),
+            Self::TaskList {
                 directory,
                 wave,
                 after,
@@ -488,13 +483,13 @@ impl Read {
                 argv.extend(optional("--after", after.as_ref()));
                 argv
             }
-            Self::Machines => words(&["machine", "list", "--json"]),
-            Self::History(window) => {
+            Self::MachineList => words(&["machine", "list", "--json"]),
+            Self::SessionHistory(window) => {
                 let mut argv = window.argv();
                 argv.push("--json".into());
                 argv
             }
-            Self::Roadmap {
+            Self::PlanList {
                 directory,
                 wave,
                 task,
@@ -509,23 +504,25 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::PlanStatus { directory } => at(directory, &["repo", "plan", "--json"]),
-            Self::WorkLink { directory, url } => at(directory, &["open", url, "--link", "--json"]),
-            Self::RepositoryPath { id } => words(&["--repo-id", &id.to_string(), "repo", "path"]),
+            Self::RepoPlan { directory } => at(directory, &["repo", "plan", "--json"]),
+            Self::WorkResolve { directory, url } => {
+                at(directory, &["open", url, "--link", "--json"])
+            }
+            Self::RepoPath { id } => words(&["--repo-id", &id.to_string(), "repo", "path"]),
             Self::WaveGraph { directory, wave } => {
                 let mut argv = at(directory, &["wave", "graph", "show"]);
                 argv.push(wave.clone().unwrap_or_else(|| "--no-wave".into()));
                 argv.push("--json".into());
                 argv
             }
-            Self::Tokens { directory, days } => {
+            Self::RepoTokens { directory, days } => {
                 let mut argv = at(directory, &["repo", "tokens", "--json"]);
                 argv.extend(optional("--days", *days));
                 argv
             }
-            Self::Retention => words(&["session", "retention", "--json"]),
-            Self::Doctor => words(&["machine", "doctor", "--json"]),
-            Self::Ci { since, wave, repo } => {
+            Self::SessionRetention => words(&["session", "retention", "--json"]),
+            Self::MachineDoctor => words(&["machine", "doctor", "--json"]),
+            Self::RepoCi { since, wave, repo } => {
                 let mut argv = words(&["repo", "ci", "--since", since]);
                 if let Some(wave) = wave {
                     argv.extend(words(&["--wave", wave]));
@@ -536,27 +533,21 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountList {
-                provider,
-                cached,
-                details,
-            } => {
+            Self::AccountList { target, cached } => {
                 let mut argv = words(&["account"]);
-                argv.extend(provider.map(|provider| provider.as_str().to_owned()));
-                for (flag, on) in [("--cached", cached), ("--details", details)] {
-                    if *on {
-                        argv.push(flag.into());
-                    }
+                argv.extend(target.iter().cloned());
+                if *cached {
+                    argv.push("--cached".into());
                 }
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountRoute {
+            Self::AccountNext {
                 directory,
                 repo,
                 default,
             } => {
-                let mut argv = at(directory, &["account", "route"]);
+                let mut argv = at(directory, &["account", "next"]);
                 if let Some(repo) = repo {
                     argv.extend(words(&["--repo", repo]));
                 }
@@ -620,11 +611,11 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Self::MonitorPs => value(&super::top::load_snapshot()?),
-            Self::DesktopPlans { directory } => {
+            Self::ProcessList => value(&super::top::load_snapshot()?),
+            Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
             }
-            Self::AllViewPlans { expression } => {
+            Self::ViewSelect { expression } => {
                 value(&super::desktop::read_all_view_plans(expression.as_deref())?)
             }
             Self::SessionList {
@@ -640,7 +631,7 @@ impl Read {
                     &self.session_filter(directory)?,
                 )?)
             }
-            Self::DesktopTask { directory, issue } => {
+            Self::TaskGet { directory, issue } => {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
             Self::TaskChanges { issue, base, head } => {
@@ -660,13 +651,13 @@ impl Read {
                 draft.as_deref(),
             )?),
             Self::TaskFile { issue, path } => value(&task_file(issue, path, false)?),
-            Self::Waves => {
+            Self::WaveList => {
                 let waves = block_on(list_waves(true))??;
                 value(&waves.unwrap_or_default())
             }
-            Self::MachineId => value(&block_on(local_machine())??),
-            Self::Portfolio => value(&crate::portfolio::read()?),
-            Self::Settings {
+            Self::MachineSelf => value(&block_on(local_machine())??),
+            Self::DesktopPortfolio => value(&crate::portfolio::read()?),
+            Self::ConfigSettings {
                 directory,
                 wave,
                 skill,
@@ -686,14 +677,14 @@ impl Read {
             Self::ConfigExplain { destination, key } => {
                 value(&crate::engine::config::explain(destination, key)?)
             }
-            Self::PaneLayout { directory, work } => {
+            Self::DesktopLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }
-            Self::People { directory } => value(&super::people::people(directory)?.0),
-            Self::Graphs { directory } => value(&crate::graph::compiled::graph_catalog(
+            Self::RepoPeople { directory } => value(&super::people::people(directory)?.0),
+            Self::GraphList { directory } => value(&crate::graph::compiled::graph_catalog(
                 &crate::repo::working_directory_in(directory)?,
             )?),
-            Self::ViewPlan {
+            Self::DesktopViewGet {
                 directory,
                 expression,
             } => {
@@ -708,7 +699,7 @@ impl Read {
                 }
                 value(&plan)
             }
-            Self::GraphProcesses {
+            Self::TaskRuns {
                 directory,
                 task,
                 after,
@@ -721,8 +712,8 @@ impl Read {
                     ..Default::default()
                 },
             )?),
-            Self::GraphProcess { id } => value(&graph_inventory::detail(id)?),
-            Self::Usage {
+            Self::ProcessGet { id } => value(&graph_inventory::detail(id)?),
+            Self::SessionUsage {
                 days,
                 wave,
                 project,
@@ -744,13 +735,13 @@ impl Read {
                 };
                 value(&usage::context_report(&usage::sessions(0, filter, None)?)?)
             }
-            Self::WaveDetail { directory, wave } => {
+            Self::WavePlan { directory, wave } => {
                 value(&super::waves::desktop_status(directory, wave)?)
             }
-            Self::ClosedTasks { closed: false, .. } => {
+            Self::TaskList { closed: false, .. } => {
                 Err(invalid("only closed Tasks are listed; read plan.list for open ones").into())
             }
-            Self::ClosedTasks {
+            Self::TaskList {
                 directory,
                 wave,
                 after,
@@ -760,18 +751,18 @@ impl Read {
                 wave,
                 after.as_deref(),
             )?),
-            Self::Machines => value(&block_on(machines())??),
-            Self::History(window) => value(&super::activity::snapshot(window)?),
-            Self::Roadmap {
+            Self::MachineList => value(&block_on(machines())??),
+            Self::SessionHistory(window) => value(&super::activity::snapshot(window)?),
+            Self::PlanList {
                 directory,
                 wave,
                 task,
                 all,
             } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
-            Self::PlanStatus { directory } => value(&super::plan::read_status(directory)?),
-            Self::WorkLink { directory, url } => value(&super::open::url_links(directory, url)?),
+            Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
+            Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
-            Self::RepositoryPath { id } => {
+            Self::RepoPath { id } => {
                 let checkout = super::work_route::repository_path(id)?;
                 let repo =
                     crate::repository::CanonicalRepo::containing(&checkout)?.ok_or_else(|| {
@@ -790,31 +781,29 @@ impl Read {
                     wave.is_some(),
                 ))??)
             }
-            Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
-            Self::Retention => value(&super::history_transcript::retention_summary()?.ok_or_else(
-                || {
+            Self::RepoTokens { directory, days } => super::tokens::codebase(directory, *days),
+            Self::SessionRetention => value(
+                &super::history_transcript::retention_summary()?.ok_or_else(|| {
                     not_found(
                         "No Sessions recorded.",
                         serde_json::json!({ "resource": "sessions" }),
                     )
-                },
-            )?),
-            Self::Doctor => value(&super::doctor::report()?),
-            Self::Ci { since, wave, repo } => value(&crate::engine::repo::ci(
+                })?,
+            ),
+            Self::MachineDoctor => value(&super::doctor::report()?),
+            Self::RepoCi { since, wave, repo } => value(&crate::engine::repo::ci(
                 since,
                 wave.as_deref(),
                 repo.as_deref(),
             )?),
-            Self::AccountList {
-                provider,
-                cached,
-                details,
-            } => value(&crate::engine::account::list(*provider, !cached, *details)?),
-            Self::AccountRoute {
+            Self::AccountList { target, cached } => {
+                value(&crate::engine::account::list(target.as_deref(), *cached)?)
+            }
+            Self::AccountNext {
                 directory,
                 repo,
                 default,
-            } => value(&crate::engine::account::route(
+            } => value(&crate::engine::account::next(
                 directory,
                 repo.as_deref(),
                 *default,
@@ -852,11 +841,11 @@ impl Read {
             select,
         };
         let subscription = match self {
-            Self::MonitorPs => super::top::subscribe_ps(transport),
-            Self::DesktopPlans { directory } => {
+            Self::ProcessList => super::top::subscribe_ps(transport),
+            Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
-            Self::AllViewPlans { expression } => {
+            Self::ViewSelect { expression } => {
                 super::desktop::subscribe_all_view_plans(expression, transport)
             }
             Self::SessionList {
@@ -865,17 +854,17 @@ impl Read {
                 after: None,
                 ..
             } => super::session::subscribe_list(self.session_filter(directory)?, transport),
-            Self::DesktopTask { directory, issue } => {
+            Self::TaskGet { directory, issue } => {
                 super::desktop::subscribe_task_pane(&directory, &issue, transport)
             }
-            Self::History(window) => super::activity::subscribe(window, transport),
-            Self::Roadmap {
+            Self::SessionHistory(window) => super::activity::subscribe(window, transport),
+            Self::PlanList {
                 directory,
                 wave,
                 task,
                 all,
             } => super::waves::subscribe_show(directory, wave, task, all, transport),
-            Self::PlanStatus { directory } => super::plan::subscribe_status(
+            Self::RepoPlan { directory } => super::plan::subscribe_status(
                 &super::plan::status_repository(&directory)?,
                 transport,
             ),
@@ -1004,7 +993,7 @@ mod tests {
 
     #[test]
     fn a_read_without_a_subscription_cannot_be_subscribed() {
-        let error = Read::Doctor.subscribe(None, || {}).unwrap_err();
+        let error = Read::MachineDoctor.subscribe(None, || {}).unwrap_err();
         assert!(error.to_string().contains("--subscribe"), "{error}");
     }
 }

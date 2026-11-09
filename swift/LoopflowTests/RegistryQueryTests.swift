@@ -19,7 +19,7 @@ struct RegistryQueryTests {
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskFromSession(_, _, let title) = change else {
+            guard case .taskCreate(_, _, let title) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)
@@ -38,7 +38,7 @@ struct RegistryQueryTests {
 
     @Test("Settings inspection retains skill and authored occurrence selectors")
     func settingsInspection() throws {
-        let read = ServedRead.settings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
+        let read = ServedRead.configSettings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
         #expect(read.argv == ["config", "settings", "--json", "--graph", "release", "--step", "write-code"])
         let data = try JSONEncoder().encode(read)
         let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -94,17 +94,20 @@ struct RegistryQueryTests {
         func object(_ json: String) throws -> NSDictionary {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
-        #expect(try object(ServedRead.history(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
+        #expect(try object(ServedRead.sessionHistory(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
             == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
-        let sessions = ServedRead.desktopSessions(directory: "/r", headless: true)
+        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil, task: nil)
         #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null,"task":null}"#))
         #expect(sessions.argv == ["session", "list", "--interactive", "all", "--json"])
+        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100, task: nil)
+        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100,"task":null}"#))
+        #expect(page.argv == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100", "--after", "cursor"])
         #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", head: nil, draft: nil))
             == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","head":null,"draft":null}"#))
-        let view = ServedRead.viewPlan(directory: "/r", expression: "state:backlog")
+        let view = ServedRead.desktopViewGet(directory: "/r", expression: "state:backlog")
         #expect(try object(view) == object(#"{"kind":"desktop.view.get","directory":"/r","expression":"state:backlog"}"#))
         #expect(view.cwd == "/r")
-        #expect(ServedRead.waves.cwd == nil)
+        #expect(ServedRead.waveList.cwd == nil)
     }
 
     /// The JSON `write::tests::desktop_encodings_name_their_writes` decodes in Rust.
@@ -127,15 +130,11 @@ struct RegistryQueryTests {
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
         #expect(save.input == "text")
-        let pin = ServedWrite.dashboardPin(directory: "/r", id: "picked", pinned: false, revision: 3)
-        #expect(try object(pin) == object(
-            #"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#))
-        #expect(pin.argv == ["desktop", "dashboard", "unpin", "--revision=3", "--", "picked"])
-        let query = ServedWrite.dashboardQuery(directory: "/r", id: "picked", expression: "-state:done", revision: nil)
+        let query = ServedWrite.desktopDashboardQuery(directory: "/r", id: "picked", expression: "-state:done", revision: nil)
         #expect(try object(query) == object(
             #"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
         #expect(query.argv == ["desktop", "dashboard", "query", "--", "picked", "-state:done"])
-        let portfolio = ServedWrite.portfolio(change: ["remove", "/r"])
+        let portfolio = ServedWrite.desktopPortfolioSet(change: ["remove", "/r"])
         #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["desktop", "portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
@@ -151,6 +150,32 @@ struct RegistryQueryTests {
         #expect(try object(restart) == object(
             #"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#))
         #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--prepare", "--json"])
+    }
+
+    @Test("Paired task and dashboard actions keep distinct wire kinds")
+    func pairedWriteEncodings() throws {
+        let writes: [(ServedWrite, String, [String], String)] = [
+            (.taskClaim(directory: "/r", issue: "FIX-1"), "task.claim",
+             ["task", "claim", "FIX-1", "--json"], #"{"directory":"/r","issue":"FIX-1"}"#),
+            (.taskUnassign(directory: "/r", issue: "FIX-1"), "task.unassign",
+             ["task", "unassign", "FIX-1", "--json"], #"{"directory":"/r","issue":"FIX-1"}"#),
+            (.desktopDashboardPin(directory: "/r", id: "picked", revision: 3), "desktop.dashboard.pin",
+             ["desktop", "dashboard", "pin", "--revision=3", "--", "picked"], #"{"directory":"/r","id":"picked","revision":3}"#),
+            (.desktopDashboardUnpin(directory: "/r", id: "picked", revision: 3), "desktop.dashboard.unpin",
+             ["desktop", "dashboard", "unpin", "--revision=3", "--", "picked"], #"{"directory":"/r","id":"picked","revision":3}"#),
+            (.desktopDashboardHide(directory: "/r", id: "picked", member: "task:FIX-1"), "desktop.dashboard.hide",
+             ["desktop", "dashboard", "hide", "query:picked/task:FIX-1"], #"{"directory":"/r","id":"picked","member":"task:FIX-1"}"#),
+            (.desktopDashboardShow(directory: "/r", id: "picked", member: "task:FIX-1"), "desktop.dashboard.show",
+             ["desktop", "dashboard", "show", "query:picked/task:FIX-1"], #"{"directory":"/r","id":"picked","member":"task:FIX-1"}"#),
+        ]
+        for (write, kind, argv, fields) in writes {
+            var expected = try #require(JSONSerialization.jsonObject(with: Data(fields.utf8)) as? [String: Any])
+            expected["kind"] = kind
+            let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(write)) as? NSDictionary
+            #expect(encoded == expected as NSDictionary)
+            #expect(write.argv == argv)
+            #expect(write.cwd == "/r")
+        }
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])

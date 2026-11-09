@@ -1,13 +1,15 @@
-//! Session names projected into their attached terminal. Only the pre-spawn
-//! write uses OSC: writing alongside a native provider can split escape frames.
+//! Session names projected into their attached terminal. The transport owner
+//! serializes OSC renames between complete provider sequences; direct launches
+//! write OSC only before spawning, while they still own terminal output.
 //! cmux and tmux have separate control channels for their workspace, tab and
-//! window names, so those follow renames. A cmux workspace belongs to its Task
+//! window names. A cmux workspace belongs to its Task
 //! and follows only the Task title, unless someone renamed it by hand; tabs and
 //! tmux windows follow the Session.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::os_process::wait_for_exit;
@@ -394,6 +396,83 @@ pub(crate) struct ViewerTitle {
     checked: Option<Instant>,
 }
 
+/// The serving owner's Session name, sent through its serialized terminal stream.
+/// Host-specific names remain with each viewer, including remote viewers.
+#[derive(Debug)]
+pub(crate) struct OutputTitle {
+    requests: mpsc::SyncSender<()>,
+    names: mpsc::Receiver<String>,
+    checked: Option<Instant>,
+}
+
+impl OutputTitle {
+    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+        let owner = owner.clone();
+        let path = crate::store::database_path_from_env();
+        let (requests, requested) = mpsc::sync_channel(1);
+        let (names, received) = mpsc::sync_channel(1);
+        // Store reads must never hold up provider output or terminal input.
+        // Dropping the owner disconnects both channels and ends this worker.
+        std::thread::spawn(move || {
+            let Ok(path) = path else { return };
+            let mut store = None;
+            while requested.recv().is_ok() {
+                let mut read = || -> anyhow::Result<Option<String>> {
+                    if store.is_none() {
+                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                    }
+                    output_title(store.as_ref().expect("opened above"), &owner)
+                };
+                if let Ok(Some(name)) = read()
+                    .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
+                {
+                    let _ = names.try_send(name);
+                }
+            }
+        });
+        Self {
+            requests,
+            names: received,
+            checked: None,
+        }
+    }
+
+    pub(crate) fn tick(&mut self) -> Option<String> {
+        if self
+            .checked
+            .is_none_or(|checked| checked.elapsed() >= Duration::from_millis(500))
+        {
+            self.checked = Some(Instant::now());
+            let _ = self.requests.try_send(());
+        }
+        self.names.try_recv().ok()
+    }
+
+    pub(crate) fn deadline(&self) -> Instant {
+        self.checked.unwrap_or_else(Instant::now) + Duration::from_millis(500)
+    }
+}
+
+fn output_title(
+    store: &SqliteStore,
+    owner: &crate::id::LfProcessId,
+) -> anyhow::Result<Option<String>> {
+    let Some(id) = store.transport_session(owner)? else {
+        return Ok(None);
+    };
+    let Some(session) = store.session(&id)? else {
+        return Ok(None);
+    };
+    // A departing attachment no longer owns publication to this terminal.
+    if store
+        .session_attachment(&id)?
+        .is_none_or(|attachment| attachment.lf_process_id.is_none())
+    {
+        return Ok(None);
+    }
+    Ok(Some(session_title(store, &session)?.names.terminal))
+}
+
 impl ViewerTitle {
     pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
         Self {
@@ -523,6 +602,13 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id=?2",
+                rusqlite::params![process, session.id],
+            )
+            .unwrap();
         let title = TerminalTitle {
             store,
             session: session.id.to_string(),
@@ -546,6 +632,10 @@ mod tests {
         assert_eq!(
             title.read_names().unwrap().map(|names| names.terminal),
             Some("Release notes".to_string())
+        );
+        assert_eq!(
+            super::output_title(&title.store, &process).unwrap(),
+            Some("Release notes".into())
         );
         title
             .store

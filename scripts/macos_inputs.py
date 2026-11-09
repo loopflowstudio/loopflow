@@ -43,6 +43,7 @@ _SWIFT_TEST_INPUTS = (
     "scripts/desktop_performance.py",
     "scripts/desktop-",
     "scripts/check_swift_multiplatform_boundaries.py",
+    "scripts/check_desktop_launch.py",
     "rust/loopflow/src/server/",
     "rust/loopflow/src/lf/commands/read.rs",
     "rust/loopflow/src/lf/commands/write.rs",

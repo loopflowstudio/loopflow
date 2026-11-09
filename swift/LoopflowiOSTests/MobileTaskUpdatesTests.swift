@@ -225,7 +225,7 @@ final class MobileTaskUpdatesTests: XCTestCase {
         XCTAssertThrowsError(try RemoteTaskObservation.decode(frame: frame(body: [incomplete])).reading.get())
         let bundle = Bundle(for: Self.self)
         let url = try XCTUnwrap(bundle.url(forResource: "view_select", withExtension: "json", subdirectory: "server"))
-        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .allViewPlans(expression: "kind:task state:open"), select: nil)
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil)
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
             try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)))
     }

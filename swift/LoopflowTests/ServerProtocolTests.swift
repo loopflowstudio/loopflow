@@ -91,7 +91,7 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
         #expect(try encoded(request) == value("subscribe"))
         guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
@@ -115,7 +115,7 @@ struct ServerProtocolTests {
         }
         #expect(process == trace)
         #expect(issued["expires_in_ms"] == .integer(60000))
-        let attach = ServerClientMessage.request(id: "terminal-1", operation: .attach(
+        let attach = ServerClientMessage.request(id: "terminal-1", operation: .sessionAttach(
             session: "session_5e55105e000040008000000000000001", owner: trace), select: nil)
         #expect(try encoded(attach) == self.value("attach"))
         // The bridge presents the ticket on a connection of its own.
@@ -131,7 +131,7 @@ struct ServerProtocolTests {
         }
         #expect(ticket == "f06b5872-b113-47e5-be82-4320e33d7a3d")
         #expect(try encoded(.attach(ticket: ticket)) == value("ticket"))
-        #expect(try encoded(.request(id: "save-1", operation: .upload(bytes: 2_097_152), select: nil)) == value("upload"))
+        #expect(try encoded(.request(id: "save-1", operation: .requestUpload(bytes: 2_097_152), select: nil)) == value("upload"))
         guard case .bulk(let id, let bulkTicket, let bytes) = try message("bulk") else { Issue.record("Missing bulk"); return }
         #expect(id == "file-1")
         #expect(bulkTicket == ticket)
@@ -142,28 +142,49 @@ struct ServerProtocolTests {
     @Test func mobileOperationsUseTheSharedFixtures() throws {
         let task = ServedWrite.taskStart(directory: "/repo", requestID: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!, request: "Fix the retry test", wave: nil, graph: nil, terminal: false)
         #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil)) == value("task_start"))
-        #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionPage(
-            directory: "/repo", headless: false, after: nil, task: "task_00000000000000000000000000000001")), select: nil)) == value("session_page"))
+        #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
+            directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil)) == value("session_page"))
         let session = try value("session_start")
         guard case .string(let id) = session["id"], case .string(let sessionID) = session["operation"]["id"] else { Issue.record("Missing session.start fixture"); return }
         #expect(try encoded(.request(id: id, operation: .command(.sessionStart(id: sessionID)), select: nil)) == session)
-        #expect(try encoded(.subscribe(id: "tasks-1", operation: .allViewPlans(expression: "kind:task state:open"), select: nil)) == value("view_select"))
+        #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil)) == value("view_select"))
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
         let request = ServerClientMessage.request(id: "view-1", operation: .read(
-            .viewPlan(directory: "/repo", expression: "task:INF-123")), select: nil)
+            .desktopViewGet(directory: "/repo", expression: "task:INF-123")), select: nil)
         #expect(try encoded(request) == value("view_plan"))
     }
 
     @Test func configurationUsesTheSharedDestinationContract() throws {
-        let set = ConfigOperation.set(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
+        let set = ConfigOperation.configSet(destination: .object(["kind": .string("personal_global")]), key: "theme", value: "Hearth")
         #expect(try encoded(.request(id: "config-1", operation: .config(set), select: nil)) == value("configuration"))
+    }
+
+    @Test func configurationEncodingsKeepTheirKindsAndFields() throws {
+        let destination = JSONValue.object(["kind": .string("personal_global")])
+        let operations: [(ConfigOperation, String)] = [
+            (.configCatalog, #"{"kind":"config.catalog"}"#),
+            (.configGet(destination: destination, key: "theme"),
+             #"{"kind":"config.get","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configExplain(destination: destination, key: "theme"),
+             #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configUnset(destination: destination, key: "theme"),
+             #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
+            (.configTheme(path: "/theme.yaml", value: nil),
+             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
+            (.configTheme(path: "/theme.yaml", value: "Hearth"),
+             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+        ]
+        for (operation, json) in operations {
+            let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
+            #expect(try encoded == JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)))
+        }
     }
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskFromSession(directory: "/repo", id: "session_5e55105e000040008000000000000001",
+            .taskCreate(directory: "/repo", id: "session_5e55105e000040008000000000000001",
                              title: "Keep the conversation")), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
@@ -178,12 +199,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
-            ("wave_plan_bind", "bind-1", .wavePlanningBind(directory: "/repo", wave: "product",
+            ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
-            ("wave_plan_connect", "connect-1", .wavePlanningConnect(directory: "/repo", wave: "product", all: false,
+            ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
                                                                         teamKey: "LOO", teamName: nil)),
-            ("wave_plan_reteam", "reteam-1", .wavePlanningReteam(directory: "/repo", apply: false)),
-            ("repo_release", "release-1", .repositoryRelease(directory: "/repo", version: "minor", target: nil)),
+            ("wave_plan_reteam", "reteam-1", .wavePlanReteam(directory: "/repo", apply: false)),
+            ("repo_release", "release-1", .repoRelease(directory: "/repo", version: "minor", target: nil)),
             ("checkout_commit", "commit-1", .checkoutCommit(directory: "/repo", message: "Serve the checkout namespace",
                                                             push: false, noAdd: false, paths: [], agent: nil)),
             ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
@@ -194,15 +215,15 @@ struct ServerProtocolTests {
             ("account_connect", "connect-1", .accountConnect(provider: "codex", email: "maya@example.com",
                                                              chromeProfile: "Profile 1", import: false, apiKey: false)),
             ("account_set", "set-1", .accountSet(provider: "codex", email: "maya@example.com", loginEmail: nil,
-                                                 routing: "active", plan: nil, clearPlan: false, paidThrough: nil,
+                                                 plan: nil, clearPlan: false, paidThrough: nil,
                                                  clearPaidThrough: false, clearCooldown: true, chromeProfiles: [],
                                                  clearChromeProfiles: false)),
-            ("account_token", "token-1", .accountToken(provider: "claude", email: "maya@example.com",
-                                                       file: "/Users/maya/.lf/tmp/token", chromeProfile: nil)),
             ("account_redeem_reset", "redeem-1", .accountRedeemReset(provider: "codex", email: "maya@example.com",
                                                                      idempotencyKey: "4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b",
                                                                      creditId: nil)),
-            ("account_use", "use-1", .accountUse(provider: "claude", email: "maya@example.com")),
+            ("account_use", "use-1", .accountUse(login: "claude=maya@example.com")),
+            ("account_pause", "pause-1", .accountPause(login: "claude=maya@example.com")),
+            ("account_unpause", "unpause-1", .accountUnpause(login: "claude=maya@example.com")),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",
                                                agent: "claude")),
             ("skill_run", "skill-1", .skillRun(directory: "/repo", name: "debug", message: nil, agent: nil)),
@@ -261,9 +282,9 @@ struct ServerProtocolTests {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
-        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.ci(since: "7d", wave: "product", repo: nil)), select: nil)
+        let ci = ServerClientMessage.request(id: "ci-1", operation: .read(.repoCi(since: "7d", wave: "product", repo: nil)), select: nil)
         #expect(try encoded(ci) == value("repo_ci"))
-        #expect(ServedRead.ci(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
+        #expect(ServedRead.repoCi(since: "7d", wave: nil, repo: nil).argv == ["repo", "ci", "--since", "7d", "--json"])
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
                                    message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
             == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])
@@ -290,15 +311,14 @@ struct ServerProtocolTests {
             Issue.record("Missing skill.list result"); return
         }
         #expect(entries.count == 2)
-        #expect(ServedWrite.accountUse(provider: "claude", email: "maya@example.com").cwd == "/")
+        #expect(ServedWrite.accountUse(login: "claude=maya@example.com").cwd == "/")
         let accounts = ServerClientMessage.request(id: "accounts-1",
-                                                   operation: .read(.accountList(provider: "claude", cached: true,
-                                                                                 details: false)), select: nil)
+                                                   operation: .read(.accountList(target: "claude", cached: true)), select: nil)
         #expect(try encoded(accounts) == value("account_list"))
         let route = ServerClientMessage.request(id: "route-1",
-                                                operation: .read(.accountRoute(directory: "/repo", repo: nil,
+                                                operation: .read(.accountNext(directory: "/repo", repo: nil,
                                                                                default: false)), select: nil)
-        #expect(try encoded(route) == value("account_route"))
+        #expect(try encoded(route) == value("account_next_request"))
         guard case .response(_, _, .object(let report)) = try message("account_report") else {
             Issue.record("Missing account.list result"); return
         }
@@ -344,17 +364,20 @@ struct ServerProtocolTests {
         let described = try ["ServerOperation", "Read", "Write"].reduce(into: [String: Set<String>]()) { all, definition in
             all.merge(try arms(definition, tag: "kind", of: schema)) { first, _ in first }
         }
-        let registry = try source("swift/Loopflow/Services/RegistryQuery.swift")
-        let call = #"TaggedFields\(\s*(?:\w+ \? )?"([a-z_.]+)"(?: : "([a-z_.]+)")?(?:,\s*\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*\)"#
-        let calls = try matches(call, in: registry)
-        #expect(calls.count == registry.components(separatedBy: "TaggedFields(").count - 1, "A TaggedFields call has a shape this test cannot read")
+        let protocolSource = try source("swift/Loopflow/Services/ServerProtocol.swift")
+        let operations = try source("swift/Loopflow/Services/RegistryQuery.swift") + protocolSource
+        let call = #"case \.(\w+)(?:\([^)]*\))?:\s*TaggedFields\("([a-z_.]+)"(?:,\s*\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*\)"#
+        let calls = try matches(call, in: operations)
+        #expect(calls.count == operations.components(separatedBy: "TaggedFields(").count - 1, "A TaggedFields call has a shape this test cannot read")
         for groups in calls {
             let fields = try Set(matches(#""(\w+)":"#, in: groups[3] ?? "").compactMap { $0[1] })
-            for kind in groups[1...2].compactMap({ $0 }) {
-                #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
-            }
+            let kind = try #require(groups[2])
+            let words = kind.split { $0 == "." || $0 == "_" }
+            let name = String(try #require(words.first)) + words.dropFirst().map { $0.capitalized }.joined()
+            #expect(groups[1] == name, "\(kind) must be named \(name) in Swift")
+            #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
         }
-        for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: source("swift/Loopflow/Services/ServerProtocol.swift")) {
+        for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: protocolSource) {
             let kind = try #require(groups[1])
             #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
         }

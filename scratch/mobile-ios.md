@@ -236,3 +236,8 @@ research-recovery, research-runtime-lifecycle, research-shared-sessions,
 research-trust-setup, research-native-mobile, rex-workspace-task-update,
 desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
 `research_notes/`. HTML studies and `demo-assets/` stay in this checkout.
+
+## November 9 sync checks
+
+- `cargo test -p loopflow --lib server::`: 33 passed; stale schema regenerated, then `server::schema::tests::the_checked_in_schema_is_what_describe_prints` passed. macOS linker warned that the unwind table exceeds 16 MiB; gate/CI own static analysis.
+- `swift test --package-path swift --filter 'ServerProtocolTests|RegistryQueryTests|ServerClientTests'`: 47 passed after aligning the mobile operation names with main. Device and host-Tailscale acceptance remain for demo.

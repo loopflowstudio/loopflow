@@ -216,7 +216,7 @@ impl Connection {
             "Server request exceeds {MAX_BULK} bytes"
         );
         let ticket = self
-            .request(Operation::Server(ServerOperation::Upload {
+            .request(Operation::Server(ServerOperation::RequestUpload {
                 bytes: line.len(),
             }))?
             .result;

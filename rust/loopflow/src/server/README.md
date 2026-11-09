@@ -77,7 +77,7 @@ by a test and every server fixture must decode.
 ```text
 → {"type":"hello","revision":2,"min_revision":2,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
 ← {"type":"welcome","client_id":"…","revision":2,"server_revision":2,"min_revision":2,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.get","directory":"/","wave":null,"task":null,"all":true}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null}}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
@@ -122,6 +122,9 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 operation's value: what its CLI spelling prints with `--json`, a ticket
 `{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
 once a subscription is confirmed.
+A completed request's ID can be reused immediately after its response or error. A
+subscription keeps its ID after acknowledgement and readings, until `ended`,
+an error or cancellation.
 `trace_id` names the request in `logs/lf.log`. `cancel {id}` forgets a request's
 answer or ends a subscription; a write already dispatched still completes and
 answers nothing. Closing the connection cancels every subscription and releases
@@ -147,24 +150,88 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
 
+After editing a Task's checkout, request its changed files on the same connection:
+
+```json
+{"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null}
+```
+
+The response reflects Git state read for this request, even while subscriptions
+are active. One-shot reads and served writes consult Git afresh. Only subscription
+readings reuse retained Git answers, shared across subscriptions so listing
+checkouts side by side stays fast. Git observations are not an atomic snapshot
+of a checkout being edited.
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
-the shared kinds; `wire::ServerOperation` owns the server's own:
+the shared kinds; `wire::ServerOperation` owns the server's own.
+
+Rust variants use the kind's PascalCase spelling (`ProcessList`); Swift cases
+use lowerCamelCase (`processList`). Dots and underscores separate words. Each
+case names one operation, including distinct claim/unassign and pin/unpin writes.
 
 | API kind | CLI | Engine |
 | --- | --- | --- |
-| `task` | `task.get`, `task.list` (`closed: true`), `task.changes`, `task.diff`, `task.file`, `task.context`, `task.runs` | `task.start`, `task.create`, `task.update`, `task.move`, `task.claim`, `task.unassign`, `task.hold`, `task.save`, `task.complete`, `task.reopen`, `task.abandon` |
-| `session` | `session.list` (`limit` pages it) | `session.attach`, `session.rename`, `session.bind` (`preview` assigns nothing), `session.resume`, `session.new`, `session.start` |
-| `wave`, `chapter`, `plan` | `wave.list`, `wave.get`, `wave.graph`, `plan.get` | `wave.create`, `wave.sync`, `chapter.start` |
-| `repository` | `repository.planning`, `repository.people`, `repository.tokens`, `repo.path` | |
-| `graph` | `graph.list`, `graph.run` | `graph.customize` |
-| `machine`, `process` | `machine.self`, `machine.list`, `machine.doctor`, `process.list` | |
-| `usage`, `history` | `usage.get`, `history.list`, `history.retention` | |
-| `work`, `view`, `config` | `work.resolve`, `desktop.view.list`, `view.select`, `view.get`, `config.settings` | `config.file` |
-| `desktop.portfolio` | `desktop.portfolio` | `desktop.portfolio.set` |
-| `mobile` | `mobile.status` | `mobile.configure` |
-| `request` | | `request.upload` |
-| `desktop` | `desktop.layout` | `desktop.layout.save`, `desktop.dashboard.query`, `.pin`, `.unpin`, `.rename`, `.hide`, `.show`, `.slots`, `.move` |
+| `task.get` | `lf task show <issue>` | read |
+| `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
+| `task.changes` | `lf task changes <issue>` | read |
+| `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
+| `task.context` | `lf task context <issue>` | read |
+| `task.runs` | `lf task runs <issue>` | read |
+| `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
+| `task.create` | `lf task create --session <id>` | write |
+| `task.run` | `lf task run <issue>` | `engine::task` |
+| `task.ship` | `lf ship` | `engine::task` |
+| `task.hold` | `lf task hold <issue>` | `engine::task` |
+| `task.steer` | `lf task steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.report` | `lf task report <issue> <message>` | `engine::task` |
+| `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
+| `task.update` | `lf task update <issue>` | write |
+| `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
+| `session.list` | `lf session list` | read |
+| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
+| `session.usage` | `lf session usage` (`lf usage`) | read |
+| `session.history` | `lf session history` (`lf history`) | read |
+| `session.retention` | `lf session retention` | read |
+| `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
+| `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
+| `wave.plan` | `lf wave plan <wave>` | read |
+| `wave.create` | `lf wave create` | write |
+| `wave.sync` | `lf wave sync <wave>` | write |
+| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
+| `plan.list` | `lf plan list` | read |
+| `repo.plan` | `lf repo plan` | read |
+| `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
+| `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
+| `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
+| `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
+| `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
+| `process.get` | `lf process show <id>` | read |
+| `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
+| `process.list` | `lf process list` | read |
+| `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
+| `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
+| `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
+| `config.theme` | none; Appearance's theme file | `engine::config` |
+| `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
+| `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
+| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
+| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
+| `account.list`, `.next` | `lf account [<login|provider>]`, `lf account next` | read; `engine::account::list`, `next` |
+| `account.connect`, `.disconnect`, `.set`, `.use`, `.pause`, `.unpause`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `use`, `pause`, `unpause`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `activate`, `pause`, `redeem_reset` (none prompts) |
+| `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
+| `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
+| `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
+| `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
+| `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
+| `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
+| `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
+| `view.select` | `lf desktop view list --all` | read |
+| `task.start` | `lf task create --run --request-id <id>` | delegated, recoverable create/start |
+| `session.start` | `lf session resume --start-only <id>` | delegated |
+| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
+| `request.upload` | none | upload ticket for an oversized request |
 
 `desktop.*` is Desktop's own arrangement state: saved pane layouts and
 Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,

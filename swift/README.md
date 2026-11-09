@@ -133,6 +133,10 @@ Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
+Session panes watch their relay's connection-status mailbox for changes.
+Quiet mailboxes schedule no reads, including in retained hidden panes. Closing
+a pane stops observation and removes its mailbox.
+
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -831,8 +835,10 @@ running subscription answers the request with a reading begun after the command,
 the checkpoint follows once all have, even when nothing visibly changed. Session
 commands confirm only the Sessions subscription. Explicit Retry and recovery after sleep
 ask every subscription to read again. If a subscription ends, the window reopens all of them;
-the last readings stay on screen marked unavailable until new ones arrive. Every
-frame names its Loopflow home.
+the last readings stay on screen marked unavailable until new ones arrive. If one
+part keeps failing, automatic retries wait progressively longer, even while other
+parts send updates. The retry delay resets only after the observation stays healthy
+for about 30 seconds. Every frame names its Loopflow home.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
@@ -1077,6 +1083,21 @@ On a pull request the Swift tests get 5 minutes after the build (161 s on
 2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
 the suite slower fails on its own PR: make the slow test fast or share its setup,
 and raise the budget only with a measured reason.
+
+After the tests, `swift-test` launches the debug app it built and waits for it
+to quit, the same check the release package runs:
+
+```bash
+uv run python scripts/check_desktop_launch.py   # launch, snapshot, quit within 30 s
+```
+
+It runs `LoopflowMac -ui-test-mode empty-workspaces` with the snapshot
+environment, unattended like the rest of the job. Passing means the app wrote a
+non-empty snapshot and exited 0. If the app is still running after 30 s, the check
+samples it, kills its process group and fails with the app's output and the
+sampled stacks, so a hang at launch or quit fails on its own PR
+instead of in `Packages (main)` after merge. Read the stack first: it names the
+frame the app is waiting in (for #1811's hang, `uiTestSnapshot`).
 
 Failed Swift CI runs write the unfinished and slowest tests to the job summary
 (`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`

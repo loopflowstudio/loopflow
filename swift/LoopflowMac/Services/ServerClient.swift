@@ -236,7 +236,7 @@ final class ServerLink: @unchecked Sendable {
         if line.count <= ServerProtocol.maxMessage { return try await answer(id) { try write(line) } }
         // An upload ticket admits a second connection carrying this one request;
         // its answer arrives here under the request's own id.
-        guard case .string(let ticket) = try await request(.upload(bytes: line.count))["ticket"] else {
+        guard case .string(let ticket) = try await request(.requestUpload(bytes: line.count))["ticket"] else {
             throw RegistryQueryError("Server issued no upload ticket")
         }
         return try await answer(id) {

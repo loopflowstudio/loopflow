@@ -30,7 +30,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         try await decode([WorkViewPlan].self, read(Self.taskQuery)).flatMap { try mobileTasks($0) }
     }
 
-    private static let taskQuery = ServedRead.allViewPlans(expression: "kind:task state:open")
+    private static let taskQuery = ServedRead.viewSelect(expression: "kind:task state:open")
 
     func observeTasks() async throws -> any MobileTaskObservation {
         try await RemoteTaskObservation.open(connection: connection(), query: Self.taskQuery)
@@ -44,11 +44,11 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
-        guard case .string(let path) = try await read(.repositoryPath(id: task.work.repository)) else {
+        guard case .string(let path) = try await read(.repoPath(id: task.work.repository)) else {
             throw RegistryQueryError("The Machine did not return the repository path")
         }
         let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await decode(SessionPage.self, read(.sessionPage(directory: directory, headless: false, after: after, task: task.work.id)))
+        return try await decode(SessionPage.self, read(.sessionList(directory: directory, headless: false, after: after, limit: 100, task: task.work.id)))
     }
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
@@ -69,7 +69,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     }
 
     func creationContext() async throws -> MobileCreationContext {
-        let portfolio = try await decode(Portfolio.self, read(.portfolio))
+        let portfolio = try await decode(Portfolio.self, read(.desktopPortfolio))
         if let error = portfolio.error { throw RegistryQueryError(error) }
         let machineID = savedMachine.machineID
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)

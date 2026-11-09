@@ -114,7 +114,10 @@ tail ~/.lf/logs/refresh.log    # what each scheduled update did
 Installing a build schedules `lf install` on your stream: daily at 09:00 local
 time, or the cadence already set. On macOS this is the LaunchAgent
 `com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
-it is a crontab line.
+it is a crontab line. The same schedule renews rental Claude logins every 2
+hours (`com.loopflow.rental-renewal`, the crontab line ending `# loopflow rental
+renewal`; logs in `~/.lf/logs/rental-renewal.log`); with no live rental it does
+nothing.
 
 Turn it off on macOS:
 
@@ -291,7 +294,7 @@ Group machines you own into a pool, and rent more when none is free:
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
-lf account token claude jack@example.com          # once a year: Claude for rented machines
+lf machine connect code-1 claude jack@example.com # once: approve the laptop's Claude login for rentals
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
@@ -320,16 +323,22 @@ Unpushed work refuses the give-back unless you pass `--force`.
 ## Accounts
 
 ```bash
-lf account                                         # access and capacity for every login
-lf account connect codex work@example.com --chrome-profile Work
+lf account                                         # one row per login: weekly room, what to fix
+lf account connect codex=work@example.com --chrome-profile Work
 lf set account.codex work@,personal@               # this repository: work first
-lf account codex use work@                         # sign ~/.codex in as work@, for lf and plain codex
+lf account next                                    # which login the next launch takes, and why
+lf account use work@                               # stay on work@ until it fills up; `use auto` undoes it
+lf account pause personal@                         # out of rotation
 ```
 
 Connect registers a login you already have. It runs the provider's sign-in in
 the Chrome profile you name and refuses a login that doesn't match the email.
-Routes try accounts in order; one at 95% of a usage window drops behind the
-rest. `lf account --cached` reads saved evidence without contacting providers.
+Every launch takes the eligible account on the largest plan with the most
+weekly quota left per hour until its window resets, switching the shared login
+when another account ranks ahead; route order breaks ties. `lf account use`
+holds launches on one login until it fills up or `lf account use auto`.
+`lf account --cached` reads saved evidence without contacting providers.
+
 Unknown capacity stays unknown, never zero.
 
 For one launch, `--account codex=work@` prefers an account and keeps fallback;

@@ -29,6 +29,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .stdin(Stdio::null())
         .current_dir(repo)
         .env("LF_HOME", home)
+        .env("CODEX_HOME", home.join("native-codex"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("HTTPS_PROXY", "http://127.0.0.1:1")
         .env("HTTP_PROXY", "http://127.0.0.1:1");
@@ -53,21 +54,26 @@ fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
-            ("security", "#!/bin/sh\nexit 1\n"),
             ("codex", CODEX_NATIVE),
             (
                 "claude",
                 r#"#!/usr/bin/python3
+import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+# The login the shared home carries: the stand-in Keychain on macOS, else its file.
+stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
+stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -138,7 +144,6 @@ for line in sys.stdin:
             "--yolo",
             "--chrome",
             "on",
-            "--isolate",
             "--task",
             "INF-123",
             "skill",
@@ -151,7 +156,6 @@ for line in sys.stdin:
             "--yolo",
             "--chrome",
             "on",
-            "--isolate",
             "-a",
             "claude:sonnet",
             "--task",
@@ -204,14 +208,19 @@ for line in sys.stdin:
             args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
             "{launch}"
         );
+        // Every step ran in the shared home, signed in as the routed account.
         assert_eq!(
-            Path::new(received["claude_home"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            home.path()
-                .join("accounts/claude/fixture")
-                .canonicalize()
+            received["claude_home"].as_str().map(Path::new),
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .as_deref()
+                .map(Path::new)
+        );
+        assert!(
+            received["claude_login"]
+                .as_str()
                 .unwrap()
+                .contains("fixture-only"),
+            "{launch}"
         );
     }
 
@@ -232,14 +241,10 @@ for line in sys.stdin:
     unbound.stage_all();
     unbound.commit("Define default agent fixtures");
     for owner in ["skill", "graph"] {
-        let output = command(
-            unbound.path(),
-            home.path(),
-            &["-b", "--isolate", owner, "default-proof"],
-        )
-        .env("LF_AGENT_CHILD", "yes")
-        .output()
-        .unwrap();
+        let output = command(unbound.path(), home.path(), &["-b", owner, "default-proof"])
+            .env("LF_AGENT_CHILD", "yes")
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -407,11 +412,7 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[
-            ("claude", CLAUDE_SETTINGS),
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            ("security", "#!/bin/sh\nexit 1\n"),
-        ],
+        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
     let store = tokio::runtime::Runtime::new()
@@ -438,6 +439,7 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
         home.path(),
         r#"
 agent: claude:personal
+# Retired: accepted and ignored; launches share the provider's home.
 isolate: true
 docs: [personal.txt]
 skills:
@@ -630,7 +632,7 @@ graphs:
         )[0]["settings"]["agent"]["value"],
         "claude:cli"
     );
-    write_preferences(home.path(), "isolate: true\n").unwrap();
+    write_preferences(home.path(), "").unwrap();
     repo.create_file(
         ".lf/wave/settings/config.yaml",
         &format!("id: {}\nagent: claude:wave\n", wave.id()),
@@ -650,11 +652,7 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[
-            ("claude", CLAUDE_SETTINGS),
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            ("security", "#!/bin/sh\nexit 1\n"),
-        ],
+        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
     let store = tokio::runtime::Runtime::new()
@@ -675,7 +673,7 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     );
     write_preferences(
         home.path(),
-        "isolate: true\nskills: {probe: {default_agent: claude:personal}}\n",
+        "skills: {probe: {default_agent: claude:personal}}\n",
     )
     .unwrap();
     success(command(
@@ -762,7 +760,7 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     ));
     repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
     check(&[], None, "claude:personal", "default_agent");
-    write_preferences(home.path(), "isolate: true\n").unwrap();
+    write_preferences(home.path(), "").unwrap();
     check(&[], None, "claude:occurrence", "default_agent");
 }
 
@@ -805,10 +803,14 @@ if '--version' in sys.argv:
 args = sys.argv[1:]
 assert '--input-format' not in args, 'Task worker wrongly selected Claude'
 assert not os.environ.get('LF_AGENT_OVERRIDE'), 'Session choice escaped to child policy'
+if 'SETTINGS_TASK' not in os.environ:
+    sys.exit(0)  # a Task conversation checkout started in the background, not a launch under test
 home = Path(os.environ['LF_HOME'])
 db = sqlite3.connect(home / 'loopflow.db')
 def run(*args):
-    result = subprocess.run([os.environ['LF_BIN'], *args], stdin=subprocess.DEVNULL,
+    # Conversations the commands below start inherit this environment; keep them quiet.
+    env = {name: value for name, value in os.environ.items() if name != 'SETTINGS_TASK'}
+    result = subprocess.run([os.environ['LF_BIN'], *args], stdin=subprocess.DEVNULL, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
     if result.returncode:
         raise RuntimeError(str(args) + result.stdout + result.stderr)
@@ -840,7 +842,6 @@ with (home / 'session-children.jsonl').open('a') as output:
             ("claude", claude),
             ("codex", CODEX_NATIVE),
             ("gh", "#!/bin/sh\nexit 1\n"),
-            ("security", "#!/bin/sh\nexit 1\n"),
             ("open", "#!/bin/sh\nexit 0\n"),
         ],
         Some(home.path()),
@@ -877,7 +878,7 @@ with (home / 'session-children.jsonl').open('a') as output:
     support::managed_codex_account(home.path());
     write_preferences(
         home.path(),
-        "agent: claude\nisolate: true\nskills: {implement: {agent: codex}}\n",
+        "agent: claude\nskills: {implement: {agent: codex}}\n",
     )
     .unwrap();
     let task: serde_json::Value = serde_json::from_slice(
@@ -977,11 +978,7 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[
-            ("claude", CLAUDE_SETTINGS),
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            ("security", "#!/bin/sh\nexit 1\n"),
-        ],
+        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
     let store = tokio::runtime::Runtime::new()
@@ -993,7 +990,7 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     connect_fixture_claude(home.path(), &store);
     repo.create_file(
         ".lf/config.yaml",
-        "agent: codex\nisolate: true\ndiff: false\ndiff_files: false\n",
+        "agent: codex\ndiff: false\ndiff_files: false\n",
     );
     repo.create_file(
         ".lf/skills/probe.md",

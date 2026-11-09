@@ -50,7 +50,7 @@ struct WorkObservationTransportTests {
         _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
         _ = try await lf.run(["config", "repo", "--json"])
         let server = LocalServerFixture(lf)
-        let subscription = ServerClient.subscribe(.machineId, location: server.location())
+        let subscription = ServerClient.subscribe(.machineSelf, location: server.location())
         do {
             for try await _ in subscription.lines {}
             Issue.record("An unserved read finished successfully")
@@ -71,7 +71,7 @@ struct WorkObservationTransportTests {
         observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
         // The plan answers from its last reading.
         #expect(try await frames.next()?.answers == 2)
-        #expect(subscriptions.launched.contains(.desktopTask(directory: "/src/loopflow", issue: "LOO-1")))
+        #expect(subscriptions.launched.contains(.taskGet(directory: "/src/loopflow", issue: "LOO-1")))
         #expect(subscriptions.launched.filter { $0 == .allPlans }.count == 1)
         await observation.cancel()
     }
@@ -84,9 +84,9 @@ struct WorkObservationTransportTests {
         observation.request(.checkpoint(id: 5, replay: []))
         try await subscriptions.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(subscriptions.requests(.monitorPs) == [#"{"id":5}"#])
+        #expect(subscriptions.requests(.processList) == [#"{"id":5}"#])
         // The live-process subscription has not answered, so nothing is confirmed yet.
-        try await subscriptions.answer(.monitorPs, 5)
+        try await subscriptions.answer(.processList, 5)
         let answered = try await frames.next()
         #expect(answered?.content.part == "activity")
         let checkpoint = try await frames.next()

@@ -89,8 +89,8 @@ final class MobileSessionListTests: XCTestCase {
 
     func testSessionPageRequestUsesTheSharedTaskScopedFixture() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "session_page", withExtension: "json", subdirectory: "server"))
-        let request = ServerClientMessage.request(id: "sessions-1", operation: .read(.sessionPage(
-            directory: "/repo", headless: false, after: nil, task: "task_00000000000000000000000000000001")), select: nil)
+        let request = ServerClientMessage.request(id: "sessions-1", operation: .read(.sessionList(
+            directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil)
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)))
     }

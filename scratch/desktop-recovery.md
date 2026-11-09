@@ -1,5 +1,55 @@
 # Desktop session recovery
 
+## Recurrence, 2026-11-09 10:04–10:20 local
+
+Jack Heart:
+
+> still having issues wit my open Loopflow
+> Typing stays invisible or does nothing
+> e.g loo-593
+> also Loopflow esktop seying Error: select a repository before reading execution location
+
+- The scheduled `com.loopflow.refresh` job replaced the repaired release at
+  09:15 with base `237a10726`. Its refresh log and installation receipt
+  `switch-37d546ca08074ffb84a693a0ca074ebf` record the change from
+  `7e90dafb1-dirty`. This brought back the repository-location failure and
+  100-row subscription truncation. The matching signed repaired release bundle
+  and CLI were restored through promotion; no migration. Both repository
+  windows subsequently reported current readings and LOO-593's opening usable.
+- Temporarily disabled and unloaded **only** `com.loopflow.refresh`; its plist
+  remains. Re-enable after the installed stream contains these repairs:
+  `launchctl enable gui/$(id -u)/com.loopflow.refresh`, then
+  `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopflow.refresh.plist`.
+  Bootstrap runs the installer immediately because the job has RunAtLoad.
+  Rental renewal was not changed. Local unpublished fixes remain vulnerable to
+  an explicit installation of the older stream.
+- LOO-593's old native client PID 38770 ignored Desktop Escape, Refresh and
+  diagnostic input. The temporary CLI raw-Escape observation was initially
+  mistaken for dismissal: resizing displaced the modal in the passive parser;
+  the full stream and later Desktop capture still contained it. That claim was
+  corrected in conversation. These probes establish no encoding-specific cause.
+- The native transcript's latest turn completed at 2026-11-08T13:43:22.660Z;
+  its visible composer was empty beneath the paused-goal dialog. Verified 38770
+  was not an ancestor of this conversation, then terminated only that client.
+  The first resume raced attachment cleanup and reported `Session attachment
+  changed`; subsequent Desktop Refresh reopened successfully. Provider thread
+  remains `01a1b986-3324-7913-949d-c8054da335b0`. Engineering login freshly
+  verified accepted (2% weekly used). No login, reset-credit use or model turn.
+- After restart, Desktop Escape dismissed the goal dialog. API insertion of
+  `x` and separate Backspace passed before and after closing/refocusing its
+  Session pane. Final capture has an empty composer and paused goal. A first
+  capture during reopening had no surface; the later mounted surface passed.
+  Historical quota output remains in conversation history.
+- **Physical keyboard repaint remains unverified.** CUA lost access after the
+  app replacement and repeatedly returned `noWindowsAvailable`, including after
+  rebinding by path, bundle ID and resetting its runtime. The question about
+  whether the window is visible remains unanswered. API editing is not the
+  physical close/reopen acceptance check. No speculative input patch was made.
+
+Artifacts: `/tmp/loo813-debug/promote-recurrence.log`, `593-native.sample`,
+`593-*.json`, `593-*.vt`, `engineering-recurrence.json`. No remaining diagnostic
+characters or temporary CLI viewers; parent native PID 88257 was untouched.
+
 ## 5whys disposition, 2026-11-09
 
 **The incident remains open.** The 80-Session Loopflow/manabot inventory and

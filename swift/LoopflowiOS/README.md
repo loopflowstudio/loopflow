@@ -200,13 +200,16 @@ with the shared framework resources.
 ## Testing
 
 ```sh
-env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') xcodebuild test \
-  -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -derivedDataPath swift/.build/ios -skipPackagePluginValidation \
-  -parallel-testing-enabled NO \
-  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- < /dev/null
+uv run python scripts/test_ios.py
+uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/OwnerStreamTests
 ```
+
+The runner generates the project, creates an iPhone on the latest installed iOS
+runtime, runs the native tests, then removes only that test device. Existing
+Simulators are untouched. It clears inherited `LF_*` and closes test stdin.
+Extra arguments go directly to `xcodebuild`. The changed-aware local gate selects
+the `ios` suite for phone, shared-model and protocol changes; CI runs it in
+`loopflow-ui-test` and retains failed `.xcresult` bundles.
 
 Xcode 26.2/iOS 26.2 simulator is the tested toolchain; deployment target is iOS 18.
 The pinned package's build plugin only generates source-control version metadata;

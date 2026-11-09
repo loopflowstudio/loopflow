@@ -7,6 +7,19 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func taskCreationOutcomesKeepTheReceiptWhenStartIsUncertain() throws {
+        let data = try loadFixtureData("task_create_outcome.json")
+        let outcomes = try JSONDecoder().decode([TaskCreateOutcome].self, from: data)
+        #expect(outcomes.map(\.state) == [.inProgress, .started, .failed, .unknown])
+        #expect(outcomes[0].receipt == nil)
+        #expect(outcomes[1].receipt?.task.id == outcomes[1].taskId)
+        #expect(outcomes[1].receipt?.sessionId != nil)
+        #expect(outcomes[2].receipt?.task.id == outcomes[2].taskId)
+        #expect(outcomes[2].receipt?.sessionId == nil)
+        #expect(outcomes[3].receipt == outcomes[1].receipt)
+        #expect(try JSONDecoder().decode([TaskCreateOutcome].self, from: JSONEncoder().encode(outcomes)) == outcomes)
+    }
+
     @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
         let data = try loadFixtureData("session_open_intents.json")
         let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)

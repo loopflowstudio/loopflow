@@ -694,6 +694,21 @@ def test_changed_gate_always_runs_architecture_check():
     ]
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "swift/LoopflowiOS/MobileClient.swift",
+        "swift/Loopflow/Services/ServerProtocol.swift",
+        "tests/fixtures/dto/server/welcome.json",
+    ],
+)
+def test_mobile_and_shared_protocol_changes_run_native_ios_tests(path):
+    plans = gate.build_plan(changed=[path], run_all=False, forced=set())
+    ios = next(plan for plan in plans if plan.suite.name == "ios")
+    assert ios.run
+    assert ios.commands[0].argv == ["uv", "run", "python", "scripts/test_ios.py"]
+
+
 def test_all_never_runs_the_optional_host_diagnostic():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")

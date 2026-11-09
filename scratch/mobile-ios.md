@@ -289,10 +289,10 @@ desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
 
 The current branch reaches the new iOS target, shared DTOs, Desktop's server
 adapter, recoverable creation and remote transport. The changed-aware runner
-does not include iOS yet; native iOS checks run directly. Remaining backend
-gate work includes creation/served-read integration after the main sync,
-protocol revision compatibility before distribution, and the live acceptance
-already listed above. This is not a completed release gate.
+now selects native iOS tests for client/shared-protocol changes; CI runs them
+in the macOS app job. Remaining gate work includes protocol revision
+compatibility before distribution and the live acceptance already listed
+above. This is not a completed release gate.
 
 - iOS `LoopflowiOSTests` excluding the three suites already run on this tree: 30 executed, 28 passed, 2 skipped (host-Tailscale setup and physical-device file protection). `LoopflowiOSUITests`: 8 passed, including native editing, foreground recovery, Session switching, landscape and onboarding. Command: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,id=04874CED-476E-4BB0-9B20-55C01F8F17B2' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -skip-testing:LoopflowiOSTests/MachinePairingTests -skip-testing:LoopflowiOSTests/OwnerStreamTests -skip-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`.
 - `swift test --package-path swift --filter ServerClientTests`: 9 passed. Coalescing ticket admission and payload reproduced invalid JSON before the reader fix; the same test passes afterward. The control response limit is also checked when the newline arrives in the final read.
@@ -303,3 +303,9 @@ already listed above. This is not a completed release gate.
 
 All test commands above ran with inherited `LF_*` unset and stdin closed. The
 test Simulator is separate from the open demo and contains no personal input.
+
+### Backend and recurring iOS checks
+
+- Rust inventory, formatting and fixture CLI build passed. Filtered nextest ran 207 tests: 206 passed; `dto_fixtures::task_create_outcome_preserves_recovery_states` failed because its nested Task still used `repository_id` and removed fields. The corrected fixture passes its Rust round-trip and new Swift recovery-outcome test. No production Rust change was needed. Filter: `test(server::) | test(transport::wire::) | test(lf::commands::write::) | test(lf::commands::read::) | test(lf::commands::task_create::) | binary(served_reads) | test(dto_fixtures::) | binary(global_commands) | test(task_create_tests::) | binary(lf) | (binary(transport_tests) & (test(server_) | test(start_only_) | test(simultaneous_session_openers_) | test(an_attach_ticket_) | test(native_program_status_)))`. The run used the prepared `target/debug/lf`, `scripts/test_network.py` runner, four build/test workers and a resolved `TMPDIR`.
+- `uv run pytest python/tests/test_ios_runner.py python/tests/test_macos_inputs.py python/tests/test_gate_bounded.py -q`: 85 passed; runner tests passed again after keeping subprocess diagnostics on stderr. Ruff passed for the changed Python files.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/OwnerStreamTests`: 7 passed; the runner created and removed only Simulator `CCF55B51-1169-42CF-82CF-1D9927C4409E`. The current local gate plan selects `ios`. Workflow YAML parses; hosted CI has not run this new step yet.

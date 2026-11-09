@@ -271,7 +271,11 @@ final class MobileWorkspace {
         sessionID = requested
         state = .loading
         guard let session = requested else {
-            state = .unavailable(task.unavailable.first ?? "No existing Session is recorded")
+            if let machineID, let location = task.location, location.machineID != machineID {
+                state = .unavailable("No Session is recorded here. This Task’s checkout is on another Machine; connect there to look for its conversation.")
+            } else {
+                state = .unavailable(task.unavailable.first ?? "No existing Session is recorded")
+            }
             return
         }
         let opening = generation

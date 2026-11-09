@@ -211,6 +211,13 @@ Machine. Mobile attaches through its connected server; a missing local owner
 must not misrepresent a remote Session as stopped. Multi-Machine routing stays
 outside the current single-Machine slice, but its explanation needs to be clear.
 
+The Work projection's location is the Task checkout, not necessarily its retained
+Session. Keep a recorded Session attachable even when that checkout is elsewhere.
+When no primary Session is recorded and the checkout names another Machine,
+explain that location and suggest connecting there; do not claim its provider is
+stopped or create a local replacement. An explicitly selected local conversation
+from the Sessions sheet remains usable for that Task.
+
 The existing Keys question remains open. Recommended interim: retain the
 collapsed Keys button until contextual controls can replace it. This is a
 proposal, not a recorded answer. Review page: `scratch/concept-review.html`.
@@ -373,3 +380,15 @@ of assuming two immediate responses must finish asynchronous admission.
 - `mobile_machine_native_acceptance --exact --ignored --nocapture`: passed in 98.34 s; native XCTest passed in 80.269 s. Idle viewing exceeded 35 s, service loss was detected in 23.9 ms, creation settled in 2.468 s, and all 32 MiB plus 512 edited-input acknowledgements completed. Input-response p95 was 13.5 ms; main-actor scheduling p95 was 29.3 ms; longest terminal feed was 1.60 ms. These are Simulator measurements, not physical phone latency or energy.
 - Final logs: `/tmp/mobile-native-run-final.log`, `swift/.build/mobile-acceptance.log`. Owned test Simulator `99BA6759-17AE-4F01-A790-0E442C27580D` was removed after completion. The open personal demo and real Machine were not changed.
 - `uv run python scripts/check_architecture.py`, `cargo fmt --check`, `git diff --check`, and `cargo clippy --all-targets -- -D warnings`: passed.
+
+### Remote checkout explanation — November 9
+
+`MobileTerminalTests`: 43 existing cases passed. The new remote-location case
+initially failed because the bundled Task fixture has no location; after supplying
+the remote checkout in the test, its focused run passed. The case exercises the
+missing-Session explanation and continued access to both the recorded primary and
+an explicitly selected local conversation. Commands used `scripts/test_ios.py`
+with the suite, then only `testRemoteCheckoutDoesNotHideARecordedOrSelectedLocalSession`.
+Logs: `/tmp/mobile-session-location-tests.log`,
+`/tmp/mobile-session-location-focused.log`. This does not establish routing or
+attachment to a second Machine.

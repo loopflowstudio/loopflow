@@ -1121,6 +1121,35 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertThrowsError(try missingScreen.inspect().find(button: "Reconnect"))
     }
 
+    func testRemoteCheckoutDoesNotHideARecordedOrSelectedLocalSession() async throws {
+        let client = TestClient()
+        let fixture = try await client.workingTasks()[0]
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? [String: Any])
+        fields["location"] = ["machine_id": "remote-machine", "cwd": "/remote/task"]
+        let task = try JSONDecoder().decode(WorkViewPlan.Content.self,
+            from: JSONSerialization.data(withJSONObject: fields))
+        let workspace = MobileWorkspace(client: client, machineID: "connected-machine")
+        defer { workspace.leave() }
+        await workspace.open(task)
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertTrue(client.starts.isEmpty)
+
+        fields["primary_session"] = NSNull()
+        let withoutPrimary = try JSONDecoder().decode(WorkViewPlan.Content.self,
+            from: JSONSerialization.data(withJSONObject: fields))
+        await workspace.open(withoutPrimary)
+        XCTAssertEqual(workspace.state, .unavailable("No Session is recorded here. This Task’s checkout is on another Machine; connect there to look for its conversation."))
+        XCTAssertFalse(workspace.canStartSession)
+        let screen = MobileSessionView(task: withoutPrimary, workspace: workspace, theme: .light)
+        XCTAssertThrowsError(try screen.inspect().find(button: "Open Session"))
+
+        await workspace.open(withoutPrimary, sessionID: task.primarySession)
+        await settle()
+        XCTAssertEqual(workspace.state, .viewing, "A conversation selected from the local Sessions sheet remains accessible")
+        XCTAssertTrue(client.starts.isEmpty)
+    }
+
     func testMultilinePasteWithoutBracketModeDoesNotSubmit() {
         let view = SessionTerminalView(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
         defer { view.updateUiClosed() }

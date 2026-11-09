@@ -75,6 +75,13 @@ Keychain, with no device token. Future launches reuse that connection. Opening
 an existing Task observes its running Session; it never starts or resumes a
 provider implicitly. No CLI is installed on the phone.
 
+If a Task has no Session here and its checkout is on another Machine, the phone
+explains where to look. It does not infer that the remote provider stopped or
+start a replacement locally. A recorded conversation remains accessible even
+when its Task's checkout is elsewhere; the Sessions sheet can also select a
+conversation on the connected Machine. Automatic routing between Machines is
+not yet available.
+
 If its terminal has stopped, choose **Open Session** to continue the recorded
 conversation on the Machine. It reuses a running owner or resumes saved history,
 then opens as an observer. **Use keyboard** remains a separate action. If opening

@@ -426,3 +426,33 @@ the Take back action and its DTO fixture; `git diff --check` passed. Earlier
 Current observations: `/tmp/loo813-current/`; production captures:
 `/tmp/loo813-696-after-refresh.txt`. Automatic interactive account/provider
 fallback remains unimplemented; this is not an all-Sessions recovery claim.
+
+Engine-performance's production pane also captured `x` and acknowledged
+Backspace. Capture after Refresh timed out twice. Samples from production PID
+14527 show the main thread in Task-index rebuilding and SwiftUI attribute
+comparison, not waiting on a provider. Both the app and service were debug
+builds; replacing them with normal release builds is the next check.
+Samples: `/tmp/loo813-desktop-stall.sample`,
+`/tmp/loo813-desktop-stall2.sample`. No extra keystroke was sent after the
+timeout.
+
+### Release installation, 2026-11-09 morning
+
+The build processes survived the overnight sleep. `swift build --package-path
+swift -c release` and `cargo build --release -p loopflow --bin lf` passed. Cargo
+recompiled locally after sccache stopped. The signed release bundle and CLI were
+promoted together at `a1cf57374`; no migration. Prior installation artifacts
+remain available through the installer.
+
+Both repository windows then reported current readings. Production captures of
+LOO-696, LOO-434, LOO-718 and engine-performance succeeded. Refresh completed for
+696, 434 and engine-performance, followed by successful captures. LOO-696 again
+captured `x` and then its empty composer after Backspace. LOO-718 still displayed
+`Goal hit usage limits (/goal resume)`. No goal resumed or model turn submitted.
+The debug-build stall did not recur during these release checks; its root cause
+has not been established. Physical keyboard interaction remains unverified.
+
+Release logs: `/tmp/loo813-release-build.log`, `/tmp/loo813-release-cli.log`,
+`/tmp/loo813-promote-release.log`. Session readings:
+`/tmp/loo813-release-sessions.json`. The automatic interactive quota handoff and
+the pending choice about replacing the twenty uncertain clients remain open.

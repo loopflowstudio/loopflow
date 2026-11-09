@@ -33,6 +33,10 @@ use crate::store::{ProviderAccountId, RecordingGap, StoreError};
 
 type Upstream = WebSocketStream<UnixStream>;
 
+#[cfg(test)]
+#[path = "observer_measurement.rs"]
+mod observer_measurement;
+
 const REPLY_LIMIT: Duration = Duration::from_secs(15);
 /// Starting a thread loads MCP servers and plugins.
 const STARTUP_LIMIT: Duration = Duration::from_secs(60);

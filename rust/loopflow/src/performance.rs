@@ -99,6 +99,8 @@ fn record(file: &mut File, event: &str, started: Instant) -> std::io::Result<()>
 }
 
 pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
+    #[cfg(test)]
+    observer_measurement::observe(connection);
     if ENABLED.load(Ordering::Relaxed) {
         CONNECTIONS.fetch_add(1, Ordering::Relaxed);
         connection.trace_v2(
@@ -107,6 +109,9 @@ pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
         );
     }
 }
+
+#[cfg(test)]
+pub(crate) mod observer_measurement;
 
 fn count_sqlite(event: TraceEvent<'_>) {
     match event {

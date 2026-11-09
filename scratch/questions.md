@@ -34,3 +34,10 @@ and a real shell for terminal recovery. The isolated Machine has no configured
 provider account. Native builds ran, but computer use returned `cgWindowNotFound`
 and the final Desktop state had no windows; physical sleep/wake, provider
 continuation and mounted creation recovery remain for the native demo.
+
+Jack Heart, 2026-11-09: "we cleared the codex limit"
+
+Publication repair, 2026-11-09: ordinary concurrent Work loading reached the
+two-producer cap. Desktop now delays request admission with five retries
+(100–1600 ms) only after `busy {limit, max}` confirms nothing ran. This applies
+the existing delay contract; it grants no replay after dispatch or disconnect.

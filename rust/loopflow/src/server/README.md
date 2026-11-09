@@ -142,7 +142,7 @@ on `code`; `outcome_unknown` means the request may have taken effect:
 | `conflict` | The request contradicts current state: a still-unanswered transport ID or a creation ID reused with different content | `{id}` or `{request_id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
 | `outcome_unknown` | The operation may have run; inspect its creation receipt when available, otherwise the resource | creation details when known, otherwise null |
-| `busy` | Admission capacity reached, or a subscription fell behind its checkpoints | `{max_connections}` at connection capacity; `{limit, max}` for the open limit; `{limit: "retained_bytes"}` for byte admission |
+| `busy` | Admission capacity reached, an oversized read answer, or a subscription fell behind its checkpoints | `{max_connections}` at connection capacity; `{limit, max}` for request admission; `{limit: "retained_bytes"}` for an answer that exceeds the message limit |
 
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
@@ -286,7 +286,7 @@ part of what a phone or bot client is offered.
   {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
 - The core loop is `engine::task`, which the CLI handlers call too.
-  `task.run {directory, issue, from, agent, approve}` and `task.ship
+  `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   detached under its own execution owner and answers what that process
@@ -415,6 +415,11 @@ reading before `ended` retain their ordering.
 | `invalid`, `not_found`, `conflict` | Correct the arguments, target or conflicting state; reconnecting alone cannot fix it. |
 | `unavailable` | Retry the affected read when its dependency returns. A failed receipt lookup is not absence. |
 | `outcome_unknown` | Look up the creation receipt, or inspect the resource for other writes. Never replay an arbitrary mutation. |
+
+Desktop retries request-admission refusals (`busy` with `limit` and `max`) up to
+five times with backoff, keeping the connection. It does not retry oversized
+answers, disconnected commands or unknown outcomes. Reads keep their overall
+deadline; cancellation also stops the backoff.
 
 ### Admission and retained work
 

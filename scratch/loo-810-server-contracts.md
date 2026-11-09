@@ -128,11 +128,11 @@ receipt and current resource. A Session whose input published before the result
 was recorded can finish the receipt without republishing. Focused checks are
 below; gate and demo acceptance remain unchanged.
 
-Remaining acceptance belongs to gate and demo:
+Publication acceptance is recorded in [loo-810-publication.md](loo-810-publication.md).
+The complete terminal set, production grace expiry, merged-frontier migration
+and CLI/server parity checks passed on the November 9 merged tree. Remaining
+acceptance belongs to demo:
 
-- Run the complete terminal set listed under Checks, including production grace
-  expiry, plus merged-frontier migrations and the remaining CLI/server parity
-  cases. Focused component results do not establish the composed workflow.
 - Exercise Mac sleep/wake and quit/reopen with a real provider. Inspect the
   recovered Task/Session, confirm one creation and no repeated input or launch,
   and review the transition explanation with current viewer claims.
@@ -248,7 +248,7 @@ Per connection, in `service.rs`:
 
 Exact-owner continuation, the 1 MiB spool, 60 s grace, fresh-screen fallback,
 no input replay and owner-held geometry remain. The coverage is implemented in
-`transport_tests.rs`; the complete set still needs its gate run:
+`transport_tests.rs`; the complete set passed at publication on November 9:
 
 | Case | Test |
 | --- | --- |

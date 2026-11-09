@@ -86,7 +86,7 @@ pub enum Read {
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
-    CreationReceipt { request_id: String },
+    CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -360,9 +360,7 @@ impl Read {
     pub fn argv(&self) -> Vec<String> {
         match self {
             Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
-            Self::CreationReceipt { request_id } => {
-                words(&["server", "receipt", request_id, "--json"])
-            }
+            Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
             Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -617,7 +615,7 @@ impl Read {
                 None,
                 super::session_history::SessionView::Summary,
             )?),
-            Self::CreationReceipt { request_id } => {
+            Self::CreationGet { request_id } => {
                 value(&crate::engine::creation::lookup(request_id)?)
             }
             Self::ProcessList => value(&super::top::load_snapshot()?),

@@ -748,7 +748,7 @@ fn server_operations_match_their_lf_commands() {
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
         Read::ProcessHistory { .. }
-        | Read::CreationReceipt { .. }
+        | Read::CreationGet { .. }
         | Read::ProcessList
         | Read::DesktopViewList { .. }
         | Read::SessionList { .. }
@@ -854,7 +854,7 @@ fn server_operations_match_their_lf_commands() {
                     after: None,
                 },
                 Read::ProcessHistory { id: graph.clone() },
-                Read::CreationReceipt {
+                Read::CreationGet {
                     request_id: "absent-creation".into(),
                 },
                 Read::ProcessGet { id: graph },
@@ -970,8 +970,14 @@ fn server_operations_match_their_lf_commands() {
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
-            // `config repo --path` prints a path, not JSON: its value is that text.
-            assert_eq!(served, Value::String(printed.trim().into()), "{argv:?}");
+            // History is rendered text, including its final newline. A path's
+            // CLI newline is only its output delimiter.
+            let text = if matches!(query, Read::ProcessHistory { .. }) {
+                printed
+            } else {
+                printed.trim().into()
+            };
+            assert_eq!(served, Value::String(text), "{argv:?}");
             continue;
         };
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
@@ -2677,6 +2683,66 @@ fn without_times(mut value: Value) -> Value {
 }
 
 #[test]
+fn served_wave_lifecycle_matches_cli_and_keeps_the_same_wave() {
+    use loopflow::lf::commands::write::Write;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let _server = Server::start(repo.path(), home.path());
+    for served in [false, true] {
+        let name = if served { "served" } else { "cli" };
+        let renamed = format!("{name}-renamed");
+        let apply = |change: Write| -> Value {
+            if served {
+                server_write(change)
+            } else {
+                let args = spelled(&change);
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap()
+            }
+        };
+        let created = apply(Write::WaveCreate {
+            directory: repo.path().into(),
+            wave: name.into(),
+            objective: Some("Keep the creation identity".into()),
+        });
+        let machine = apply(Write::WaveMachine {
+            directory: repo.path().into(),
+            wave: name.into(),
+            machine: "local".into(),
+        });
+        assert_eq!(machine["value"], "local");
+        let moved = apply(Write::WaveRename {
+            directory: repo.path().into(),
+            wave: name.into(),
+            name: renamed.clone(),
+        });
+        assert_eq!(moved["id"], created["id"]);
+        assert_eq!(moved["from"], name);
+        assert_eq!(moved["to"], renamed);
+        assert!(!repo.path().join(format!(".lf/wave/{name}")).exists());
+        let goal = repo.path().join(format!(".lf/wave/{renamed}/GOAL.md"));
+        assert!(goal.exists());
+        let preview = apply(Write::WaveRemove {
+            directory: repo.path().into(),
+            wave: renamed.clone(),
+            preview: true,
+        });
+        assert_eq!(preview["id"], moved["id"]);
+        assert!(goal.exists(), "preview must keep the Wave's files");
+        let removed = apply(Write::WaveRemove {
+            directory: repo.path().into(),
+            wave: renamed,
+            preview: false,
+        });
+        assert_eq!(removed["id"], moved["id"]);
+        assert!(!goal.exists());
+    }
+}
+
+#[test]
 fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     use loopflow::lf::commands::{read::Read, write::Write};
     use loopflow::server::wire::{Operation, REVISION};
@@ -2769,7 +2835,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         }
     });
     let found = connection
-        .request(Operation::Read(Read::CreationReceipt {
+        .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
         }))
         .unwrap()
@@ -2812,7 +2878,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     ));
     conn.execute("UPDATE creation_receipts SET fingerprint=?1,run=1,milestone='filed' WHERE request_id='lost-answer'", [fingerprint]).unwrap();
     let continuation = connection
-        .request(Operation::Read(Read::CreationReceipt {
+        .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
         }))
         .unwrap()
@@ -2824,7 +2890,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     )
     .unwrap();
     let interrupted = connection
-        .request(Operation::Read(Read::CreationReceipt {
+        .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
         }))
         .unwrap()
@@ -2867,7 +2933,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     )
     .unwrap();
     let removed = connection
-        .request(Operation::Read(Read::CreationReceipt {
+        .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
         }))
         .unwrap()

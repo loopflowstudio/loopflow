@@ -6837,7 +6837,7 @@ fn a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live() {
     let mut active = service.viewer(&owner);
     let mut client = service.connect();
     let subscription = client
-        .subscribe(loopflow::lf::commands::read::Read::MonitorPs)
+        .subscribe(loopflow::lf::commands::read::Read::ProcessList)
         .unwrap();
     active.input("next\n");
     let mut bytes = 0;

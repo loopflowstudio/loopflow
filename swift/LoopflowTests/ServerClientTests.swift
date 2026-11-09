@@ -7,6 +7,45 @@ import Testing
 
 @Suite(.serialized)
 struct ServerClientTests {
+    @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
+        let peer = try ServerPeer()
+        let requests = Mutex<Int>(0)
+        let effects = Mutex<Int>(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            if requests.increment() < 3 {
+                respond(["type": "error", "id": message["id"]!, "code": "busy",
+                         "message": "server capacity reached; retry shortly",
+                         "data": ["limit": "retained_bytes", "max": 67108864]])
+            } else {
+                _ = effects.increment()
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "created"])
+            }
+            return true
+        }
+        let value = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
+        #expect(value == "\"created\"")
+        #expect(effects.get() == 1)
+    }
+
+    @Test(arguments: ["busy", "outcome_unknown"])
+    func aDispatchedFailureIsNeverRetried(code: String) async throws {
+        let peer = try ServerPeer()
+        let effects = Mutex<Int>(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            _ = effects.increment()
+            respond(["type": "error", "id": message["id"]!, "code": code,
+                     "message": "reply could not be delivered", "data": ["limit": "retained_bytes"]])
+            return true
+        }
+        do {
+            _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
+            Issue.record("A failed request succeeded")
+        } catch { #expect((error as? ServerError)?.code?.rawValue == code) }
+        #expect(effects.get() == 1)
+    }
+
     @Test func cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() async throws {
         let peer = try ServerPeer()
         let firstId = Mutex<String?>(nil)

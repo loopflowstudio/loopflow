@@ -1203,7 +1203,7 @@ mod tests {
                     } else {
                         ClientMessage::Subscribe {
                             id: n.to_string(),
-                            operation: Read::MonitorPs,
+                            operation: Read::ProcessList,
                             select: None,
                         }
                     };

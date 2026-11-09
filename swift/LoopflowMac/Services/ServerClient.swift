@@ -230,9 +230,27 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    /// One request and its answer. Cancelling the task sends `cancel` and
-    /// releases the wait; a command already dispatched may still complete.
+    /// Admission refusals ran nothing. Give ordinary concurrent Work loading
+    /// time to drain without replaying a dispatched or disconnected command.
     func request(_ operation: ServerOperation) async throws -> JSONValue {
+        var attempt = 0
+        while true {
+            do { return try await requestOnce(operation) }
+            catch let error as ServerError {
+                guard attempt < 5, error.code == .busy,
+                      case .object(let data) = error.data,
+                      case .integer = data["max"],
+                      case .string(let limit) = data["limit"],
+                      ["open", "writes", "retained_bytes"].contains(limit) else { throw error }
+                try await Task.sleep(for: .milliseconds(100 << attempt))
+                attempt += 1
+            }
+        }
+    }
+
+    /// Cancelling sends `cancel` and releases the wait; a command already
+    /// dispatched may still complete.
+    private func requestOnce(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

@@ -70,7 +70,7 @@ actor CreationSubmissions {
 
     init(directory: URL,
          machine: @escaping @Sendable () async throws -> String = CreationSubmissions.machine,
-         lookup: @escaping @Sendable (String) async throws -> String = { try await ServerClient.read(.creationReceipt(requestID: $0)) },
+         lookup: @escaping @Sendable (String) async throws -> String = { try await ServerClient.read(.creationGet(requestID: $0)) },
          send: @escaping @Sendable (Data) async throws -> String = { try await ServerClient.submittedCreation($0) }) {
         self.directory = directory
         self.currentMachine = machine
@@ -117,7 +117,7 @@ actor CreationSubmissions {
 
     static func machine() async throws -> String {
         struct Identity: Decodable { let id: String }
-        return try JSONDecoder().decode(Identity.self, from: Data(try await ServerClient.read(.machineId).utf8)).id
+        return try JSONDecoder().decode(Identity.self, from: Data(try await ServerClient.read(.machineSelf).utf8)).id
     }
 
     func submit(_ change: ServedWrite, requestID: String) async throws -> String {
@@ -301,7 +301,7 @@ private struct RecoveredCreationInspector: View {
                     throw RegistryQueryError("The original Machine is unavailable; this request has not moved.")
                 }
                 if let task = resource.task {
-                    let value = try await ServerClient.read(.desktopTask(directory: resource.directory, issue: task))
+                    let value = try await ServerClient.read(.taskGet(directory: resource.directory, issue: task))
                     let reading = try JSONDecoder().decode(WorkFrame.TaskStatusReading.self, from: Data(value.utf8))
                     guard let row = reading.row else {
                         throw RegistryQueryError("The recovered Task is no longer available on its original Machine.")

@@ -34,3 +34,12 @@ No conflicts; the Work observation backoff and Swift guidance coexist with
 creation presentation. `git merge-base --is-ancestor origin/main HEAD`: passed.
 No runtime checks rerun for the conflict-free merge; final-tree Swift recovery
 checks remain with gate. This sync stayed local.
+
+2026-11-09 publication: `lf sync --manual` and `lf sync --continue` merged
+main `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b` as `fef21fd4d`.
+Conflicts combined revision-3 creation envelopes with canonical operation names,
+retained Git reads, event-driven Swift mailboxes and terminal input draining.
+Kept the QA geometry correction and original documentation audit. The branch
+CLI built; the migration history check passed. Website sync regenerated 33
+routes from `target/debug/lf`. Final merged-tree results are recorded separately
+in `loo-810-publication.md`; physical sleep/wake stays at demo review.

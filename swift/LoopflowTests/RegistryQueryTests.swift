@@ -98,7 +98,7 @@ struct RegistryQueryTests {
             == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
         let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil)
         #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#))
-        #expect(sessions.argv == ["session", "list", "--interactive", "all", "--json"])
+        #expect(sessions.argv == ["session", "list", "--interactive", "all", "--json", "--limit", "0"])
         let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100)
         #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100}"#))
         #expect(page.argv == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100", "--after", "cursor"])

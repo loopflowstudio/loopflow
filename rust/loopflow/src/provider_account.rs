@@ -3457,6 +3457,33 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
+    async fn codex_revoked_refresh_requires_login_or_a_working_copy() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _fixture = install_codex_access_fixture(temp.path());
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        let profile = temp.path().join("first");
+        let account = store
+            .get_provider_account("codex", &parse_account_id("first").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let rejected = set_codex_fixture_access(&native, "revoked-refresh");
+        set_codex_fixture_access(&profile, "revoked-refresh");
+        assert!(matches!(
+            crate::subscription::poll_account(&account).await,
+            Err(crate::subscription::SubscriptionError::NeedsLogin(_))
+        ));
+
+        set_codex_fixture_access(&profile, "fixture");
+        let usage = crate::subscription::poll_account(&account).await.unwrap();
+        assert_eq!(usage.windows[0].used_percent, 12);
+        assert_eq!(fs::read(native.join("auth.json")).unwrap(), rejected);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
     async fn codex_same_login_recovery_requires_definite_rejection() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();

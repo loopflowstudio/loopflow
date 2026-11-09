@@ -678,24 +678,29 @@ pub fn location(
 ) -> Result<()> {
     let store = read_registry()?
         .ok_or_else(|| anyhow!("execution location unavailable: local registry is absent"))?;
-    let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("select a repository before reading execution location"))?;
-    let repository = cli
-        .repository
-        .clone()
-        .or(store.repository_id(&repo.to_string())?)
-        .ok_or_else(|| anyhow!("repository identity unavailable"))?;
+    // Desktop and peers already name the plan. Its execution reading does not
+    // require a local checkout (including an unrecorded Task on this Machine).
+    let (repository, repo) = if let Some(repository) = &cli.repository {
+        (repository.clone(), store.repository_path(repository)?)
+    } else {
+        let repo = crate::repository::CanonicalRepo::current()?
+            .ok_or_else(|| anyhow!("select a repository before reading execution location"))?
+            .to_string();
+        let repository = store
+            .repository_id(&repo)?
+            .ok_or_else(|| anyhow!("repository identity unavailable"))?;
+        (repository, Some(repo))
+    };
     // A full unknown Task ID remains an unavailable observation, not creation input.
     let task = TaskId::parse(selector)
         .ok()
-        .or(resolve_task_id(&store, selector, Some(&repo.to_string()))?)
+        .or(resolve_task_id(&store, selector, repo.as_deref())?)
         .ok_or_else(|| anyhow!("Task {selector} is unavailable"))?;
     if let Some(global) = cli.task.as_deref() {
         anyhow::ensure!(
             global == selector || {
-                let selected = resolve_task_id(&store, selector, Some(&repo.to_string()))?;
-                selected.is_some()
-                    && selected == resolve_task_id(&store, global, Some(&repo.to_string()))?
+                let selected = resolve_task_id(&store, selector, repo.as_deref())?;
+                selected.is_some() && selected == resolve_task_id(&store, global, repo.as_deref())?
             },
             "conflicting Task selections: {global} and {selector}"
         );

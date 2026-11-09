@@ -1,50 +1,37 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-718 · concept review · the key bar</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-718 · One Machine, two clients</title>
 <style>
-:root{color-scheme:light dark;--bg:#faf8f4;--fg:#292724;--muted:#68625b;--line:#d7d0c5;--panel:#f1ede6;--accent:#76513a;--new:#3f6b4a}
-@media(prefers-color-scheme:dark){:root{--bg:#201e1c;--fg:#eee7dd;--muted:#bdb3a6;--line:#514940;--panel:#2c2824;--accent:#e2b797;--new:#9ccaa6}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 system-ui,sans-serif}
-main{max-width:760px;margin:auto;padding:48px 24px 80px}header{font-size:13px;color:var(--muted)}
-h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:normal}h1{font-size:clamp(30px,7vw,44px);margin:28px 0 20px}h2{font-size:28px;margin-top:48px}
-code,pre{font:13px/1.6 ui-monospace,monospace}code{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
-.example{background:var(--panel);border-left:3px solid var(--line);padding:20px;margin:20px 0}.example.proposed{border-left-color:var(--new)}
-.example strong{display:block;margin-bottom:10px}.tag{font-style:italic;color:var(--muted)}.proposed .tag{color:var(--new)}
-li{margin-bottom:14px}.muted{color:var(--muted)}footer{border-top:1px solid var(--line);margin-top:44px;padding-top:12px;font-size:14px;color:var(--muted)}
-@media(max-width:420px){main{padding:28px 18px 60px}.example{padding:16px}}
+:root{color-scheme:light dark;--bg:#faf8f4;--ink:#302c28;--muted:#70695f;--line:#d8d0c5;--wash:#efebe4;--accent:#785334}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:800px;margin:auto;padding:38px 24px 64px}header,footer,small{color:var(--muted);font-size:12px}h1,h2{font-family:Georgia,serif;font-weight:normal;line-height:1.15}h1{font-size:clamp(30px,6vw,43px);margin:24px 0 14px}h2{font-size:25px;margin:30px 0 12px}p{margin:12px 0}code,pre{font:12px/1.5 ui-monospace,monospace}code{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}.example{background:var(--wash);padding:16px 19px;border-left:3px solid var(--accent);margin:16px 0}.example p{margin:6px 0}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;padding:10px 7px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{padding-left:0}li{margin:10px 0}footer{border-top:1px solid var(--line);padding-top:16px;margin-top:28px}details{margin:18px 0}summary{cursor:pointer;color:var(--accent)}@media(prefers-color-scheme:dark){:root{--bg:#211f1c;--ink:#eee7df;--muted:#b8aea2;--line:#51483e;--wash:#2c2823;--accent:#d8ae85}}@media(max-width:500px){main{padding:24px 16px 48px}table{font-size:12px}td,th{padding:8px 4px}}
 </style></head><body><main>
-<header>LOO-718 · concept-review (headless) · November 5, 2026<br>
-Built from <code>scratch/mobile-ios.md</code>, <code>swift/LoopflowiOS/SessionTerminalView.swift</code>, commit <code>7e745926e3</code>, Jack Heart's key-bar steer (comment d72340bb), <code>4070315ab3:scratch/mobile-native-demo.md</code></header>
-
-<h1>Which keys sit under the terminal until contextual controls exist?</h1>
-<p><strong>Outcome: an open product choice; this step returns Blocked.</strong> The previous review's four items (portfolio scope, <code>portfolio.get</code>, <code>task.start</code>, the operation table) are in code. Nothing else in the implemented change contradicts an accepted decision.</p>
-
-<h2>The mismatch</h2>
-<div class="example"><strong>Accepted <span class="tag">Jack Heart's steer</span></strong>
-<pre>Default row      Paste · New line · keyboard
-With a prompt    + choices · Cancel / Confirm
-While working    + Stop
-Superseded       Ctrl/Opt/Shift/Tab and the four-arrow strip</pre></div>
-<div class="example"><strong>Shipped <span class="tag">existing behavior, November 4</span></strong>
-<pre>Default row      Paste · New line · Keys · keyboard
-Keys             ← ↑ ↓ → · Tab · Esc · back to typing
-Contextual       none: provider state isn't trustworthy yet</pre></div>
-<p>Keys came in as the stand-in for the deferred contextual controls. Today it is the only software way to send Escape (interrupt an agent) or to arrow through a provider menu. Typing a digit and Return already answers numbered prompts. No recorded review approved it, and the working design had listed it as part of Jack's reduced row. That record is now corrected.</p>
-
-<h2>Actions → concepts → APIs</h2>
-<p><b>Answer a prompt.</b> Typed input to the Session owner, through the existing input claim. It works without Keys for numbered choices.</p>
-<p><b>Interrupt the agent.</b> Escape byte through the same claim. Without Keys or a Stop control, there is no way to send it from the software keyboard.</p>
-<p><b>Contextual choices and Stop.</b> These need program-state semantics from the backend that don't exist yet (remaining work item 5). No API change follows from any answer below.</p>
-
-<h2>Challenge</h2>
-<p>Normal path: Claude asks to trust a repository. You type <code>1</code> and Return, or open Keys and press Return. Failure: the agent runs away mid-task. With (b) below you can't stop it from the phone, only watch. Counterexample to (a): Jack's steer said a generic shell needs the bigger bar and an agent Session doesn't. Keys brings that bar back one tap away.</p>
-
-<h2>Questions</h2>
-<ol>
-<li>Until contextual controls exist:
- (a) keep Keys in the default row as the interim ·
- (b) remove Keys and answer prompts by typing only, with no software interrupt ·
- (c) remove Keys and add only an Escape/Stop control to the row.</li>
-</ol>
-<footer>Design record updated in <code>scratch/mobile-ios.md</code> (Unresolved product choice). Code unchanged; no tests run. Page not visually inspected.</footer>
+<header>LOO-718 · concept-review · November 9, 2026<br>Sources: <code>scratch/mobile-ios.md</code>; <code>server/README.md</code>; <code>RemoteMobileClient.swift</code>; <code>MachineConnection.swift</code>; <code>MobileTaskCreation.swift</code>; <code>SessionTerminalView.swift</code>. Incoming main: <code>237a10726</code>.</header>
+<h1>One Machine selection, shared by both apps</h1>
+<p>Mobile should open an existing Task and let you work in its Session. The repository selection belongs to the Machine: the phone gets its Tasks and creation destinations through <code>desktop.portfolio</code>. Incoming main described that namespace as <strong>Desktop-only</strong>; the sync keeps Mobile’s shared selection and documents the exception.</p>
+<div class="example"><strong>Existing</strong><pre>Desktop repository selection
+  → desktop.portfolio → Mobile’s New Task destinations
+  → view.select       → Mobile’s Task list</pre><p>Changing Desktop’s selected repositories changes what Mobile can find. The stored selection lives on the Machine, so Desktop need not be running. Keep this shared set. Removing a repository from the selection does not delete its files or Tasks.</p></div>
+<div class="example"><strong>Design — shared Machine selection</strong><pre>Machine repository selection
+  ├─ Desktop: Tasks, windows and panes
+  └─ Mobile:  Tasks → Session → type</pre><p>One selection, one store, one engine. A headless Machine can configure the same set. Desktop’s pane layouts stay Desktop-only. <em>Proposed API cleanup:</em> move shared selection and Work reads out of the Desktop API namespace; replace their old names together, without aliases or a second inventory.</p></div>
+<h2>The interaction and the API</h2>
+<table><thead><tr><th>Action</th><th>Concept</th><th>Current API / effect</th></tr></thead><tbody>
+<tr><td>Scan QR, connect</td><td>Machine</td><td>HTTPS address → Tailscale identity → <code>hello / welcome</code>. QR is an address shortcut.</td></tr>
+<tr><td>Open Tasks</td><td>Repository selection + Work</td><td><code>view.select</code> subscription. Proposed: a shared Work read; same engine and complete readings.</td></tr>
+<tr><td>Open a Task</td><td>Session</td><td><code>session.attach</code> → ticket → separate <code>attach</code> connection. View the existing provider.</td></tr>
+<tr><td>Use keyboard</td><td>Input and geometry claims</td><td>Owner protocol grants control and fits the screen. The server does not own a second terminal.</td></tr>
+<tr><td>Create &amp; start</td><td>Task + saved creation request</td><td><code>task.start</code> invokes <code>lf</code> with a persistent request ID. A lost reply recovers that same request.</td></tr>
+</tbody></table>
+<details open><summary>Walk through failure and recovery</summary><p>Scan the QR → open a Task → read → Use keyboard → type. Backgrounding closes the attachment. Returning attaches by <em>Session</em> and observes again; it neither starts a provider nor resends input. If the provider has ended, Open Session is a separate action.</p><p>During Create &amp; start, lose the network after the Machine accepts the work. Check status uses the saved creation request, even after an app restart. A normal protocol request ID only correlates a response; it is not this creation receipt. An uncertain start must leave the existing Task available for inspection.</p></details>
+<details><summary>What the protocol sync must keep straight</summary><ul>
+<li>The sync aligns Mobile’s call sites with main’s renamed Swift/Rust operations. Keep wire fixtures and callers together; aliases would hide drift.</li>
+<li>Incoming main used 32 MiB messages. The combined branch keeps 1 MiB control plus shared bulk tickets. Both advertise revision 2, so revision alone cannot establish that an older server implements Mobile’s extra operations. Installation/version behavior still needs the live compatibility check.</li>
+<li><code>session.resume</code> prepares an opening command; Mobile’s <code>session.start</code> actually starts the retained owner. Do not equate them just because both return a Session record.</li>
+<li>Keep current cancellation, subscription completion and request diagnostics. A disconnected client does not imply an admitted mutation was undone.</li>
+<li>The phone attaches through its one connected Machine. Tasks whose providers run elsewhere need a routing design or a clear explanation; do not label a remote Session as stopped merely because the local owner is absent.</li>
+<li>Show the real path next: QR → Task → editable Session → background/foreground → server interruption. Older Simulator checks do not establish the synced build’s phone behavior.</li>
+</ul></details>
+<h2>Usage draft — proposed</h2><div class="example"><p>“Select the repositories available on this Machine. Desktop and Mobile show open Tasks from that same selection. On your phone, scan the Machine’s QR code, open a Task, then choose Use keyboard to work in its Session. Closing Desktop leaves the Machine service and running Sessions available.”</p><small>Proposed wording, not a claim that the API names have been changed. No skill-instruction changes are needed for this interaction.</small></div>
+<p><small>Jack Heart, after the explanation of shared versus separate lists: “yes sure”.</small></p>
+<h2>Remaining question</h2><ol start="2">
+<li><strong>Keys under the terminal:</strong> <b>2a</b> Keep Keys tucked behind its button for arrows, Tab and Escape until contextual actions exist (recommended interim). <b>2b</b> Remove Keys and keep only Paste, New line and keyboard visibility. The latter leaves no software Escape or arrow control.</li>
+</ol><footer>The shared selection remains the design. API cleanup and the Keys recommendation are proposals. This review does not change application code. Live host-Tailscale and physical-iPhone acceptance remain separate from automated checks.</footer>
 </main></body></html>

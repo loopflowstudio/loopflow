@@ -175,6 +175,47 @@ pairing/creation tests after fixture alignment. The schema snapshot agrees with
 `lf server describe --json`; `cargo fmt` and all-target clippy pass. Physical-device and live host-Tailscale acceptance
 remain below; fixture identity is not that proof.
 
+## Concept review — November 9
+
+Jack Heart: “593 had a LOT of protocol changes”
+
+Desktop and Mobile share one Machine-level repository selection, including on
+headless hosts. Changing the set changes both apps' Task lists and New Task
+destinations; it does not delete files or Tasks. Desktop need not be running.
+
+Jack Heart, replying to the explanation of shared versus separate repository
+lists: “yes sure”
+
+The existing behavior stays. Proposed API cleanup: expose selection and Work
+reads as shared concepts and replace the Desktop names together; keep pane
+arrangement Desktop-only. Names and implementation have not changed. Do not
+introduce a second inventory or implementation.
+
+Proposed usage wording: “Select the repositories available on this Machine.
+Desktop and Mobile show open Tasks from that same selection. On your phone,
+scan the Machine's QR code, open a Task, then choose Use keyboard to work in its
+Session. Closing Desktop leaves the Machine service and running Sessions
+available.” No skill-instruction change is needed for this interaction.
+
+The next live demonstration must distinguish attachment from launch and normal
+request correlation from the saved creation request. Background/foreground
+reattaches by Session without starting a provider or replaying input. A lost
+Create & start reply recovers the same creation request. `session.resume`
+prepares a command; it cannot replace `session.start` merely because both return
+a Session record. Both branch protocols advertised revision 2 despite different
+operation sets and limits; matching that integer alone does not establish an
+older installation's support for Mobile. Settle the shared revision before
+distribution, rather than adding a second capability allowlist.
+
+Counterexample to exercise: a visible Task whose provider runs on another
+Machine. Mobile attaches through its connected server; a missing local owner
+must not misrepresent a remote Session as stopped. Multi-Machine routing stays
+outside the current single-Machine slice, but its explanation needs to be clear.
+
+The existing Keys question remains open. Recommended interim: retain the
+collapsed Keys button until contextual controls can replace it. This is a
+proposal, not a recorded answer. Review page: `scratch/concept-review.html`.
+
 ## Unresolved product choice — November 5 concept review
 
 The default key bar diverges from Jack Heart's accepted row. Evidence: the

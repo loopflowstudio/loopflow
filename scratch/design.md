@@ -1,19 +1,11 @@
 # LOO-809: remote attach tickets
 
-Reuse the local attach flow and wire shapes documented in
-`rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
-`docs/server.md`. This checkout contains that planned contract only; tickets
-still bind to Unix UID and expire with `Instant`.
-
-Shipping doc paths: `docs/server.md` and `rust/loopflow/src/server/README.md`.
-The remote example requires independent bridge authentication and sends `attach`
-first, without `hello`.
+Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
+linked from `docs/server.md`. This checkout contains the planned contract only.
 
 The listener, mobile settings and bulk protocol are outside this Task.
-The remote contract reuses the local owner-selection, binary protocol and control description;
-only the exchange example and remote ticket rules need their own section.
-Keep consume-on-attempt and rejection rules in the shared attach description,
-with the remote contract referring to them.
+Keep the shared attach rules in one place; the remote section adds only its
+exchange example, authentication and expiry requirements.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -41,9 +33,7 @@ above remain historical findings. `git fetch origin main`
 returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
 transport file. The separate mobile checkout findings above are not a landed
 implementation. `lf task status LOO-718 --json` still reports `feature` at `demo`,
-with PR #1812 open. Reading `service.rs` confirmed UID-only tickets, `Instant`
-expiry and removal before identity validation; no code repair is needed before
-the transport integration.
+with PR #1812 open.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
@@ -76,8 +66,7 @@ or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
 and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
-Retain local attachment and its consume-on-attempt behavior through the shared
-store, including the unchanged ticket response and bridge wire fixtures.
+Retain local attachment and its consume-on-attempt behavior through the shared store.
 
 Desktop review and opening results are in `questions.md`.
 

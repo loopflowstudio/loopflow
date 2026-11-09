@@ -100,6 +100,14 @@ fn record(file: &mut File, event: &str, started: Instant) -> std::io::Result<()>
 
 pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
     #[cfg(test)]
+    if subscription_measurement::observe(connection) {
+        assert!(
+            !ENABLED.load(Ordering::Relaxed),
+            "measurement tracers must not overlap"
+        );
+        return;
+    }
+    #[cfg(test)]
     observer_measurement::observe(connection);
     if ENABLED.load(Ordering::Relaxed) {
         CONNECTIONS.fetch_add(1, Ordering::Relaxed);
@@ -112,6 +120,8 @@ pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
 
 #[cfg(test)]
 pub(crate) mod observer_measurement;
+#[cfg(test)]
+pub(crate) mod subscription_measurement;
 
 fn count_sqlite(event: TraceEvent<'_>) {
     match event {

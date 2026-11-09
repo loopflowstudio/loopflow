@@ -368,3 +368,31 @@ arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+## Subscription cost experiment
+
+`scripts/benchmarks/subscription_baseline.py` drives an isolated test server
+through the production connection handler. Copy the optimized library test
+executable out of `target/` before comparing builds:
+
+```sh
+cargo test --release -p loopflow --lib subscription_ --no-run
+uv run python scripts/benchmarks/subscription_baseline.py /tmp/frozen-subscription-server --output /tmp/subscription-samples
+```
+
+The runner uses 1/16/64 unpaged Session subscriptions, multiplexed and physical
+connections, real checkpoints, ten-second quiet/active windows, 32/128 single
+cycles and five cohort cycles. A separate writer records capture facts and
+attachment-valid activity. Server CPU excludes that writer and the driver;
+writer CPU and reaped-child CPU are separate. `--profile` produces a separate
+macOS stack sample; exclude that run from timing comparisons. The fixture pins
+two Tokio async workers per runtime and four server blocking workers to bound
+resource creation. This does not measure installed defaults, Task resolution,
+Process projections or kernel wakeups.
+
+Counters are test-only and opt-in. SQL tracing resets VM status after each
+execution so cached statements are counted once. Caller-thread CPU for runtime
+construction/destruction excludes work on the runtime's worker threads; whole
+phase CPU includes all server threads. Completed projections remain independent
+per subscriber. Cancellation tests use deterministic pauses, including queued
+setup, and keep known baseline failures separate from measured successes.

@@ -845,8 +845,14 @@ async fn subscribe(
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
+    #[cfg(test)]
+    let mut pause = subscription_measurement::take_pause(id, "setup");
     let subscription = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(pause) = &mut pause {
+                pause.wait();
+            }
             crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
         })
         .await??,
@@ -868,7 +874,13 @@ async fn subscribe(
             }
             () = notify.notified() => {
                 let pull = Arc::clone(&subscription);
-                let frame = tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| pull.pull())).await?;
+                #[cfg(test)]
+                let mut pause = subscription_measurement::take_pause(id, "pull");
+                let frame = tokio::task::spawn_blocking(move || {
+                    #[cfg(test)]
+                    if let Some(pause) = &mut pause { pause.wait(); }
+                    crate::journal::request::isolate(|| pull.pull())
+                }).await?;
                 let mut reason = None;
                 if let Some(frame) = frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
@@ -1499,6 +1511,168 @@ mod tests {
         client.ended().await;
     }
 
+    #[test]
+    fn cancellation_during_setup_and_pull_preserves_sibling_and_reused_id() {
+        for stage in ["setup", "pull"] {
+            with_empty_home(async {
+                let mut client = Client::connect();
+                client.hello(REVISION, REVISION).await;
+                let pause = super::subscription_measurement::pause("slow", stage);
+                client
+                    .send(&ClientMessage::Subscribe {
+                        id: "slow".into(),
+                        operation: Read::ProcessList,
+                        select: None,
+                    })
+                    .await;
+                pause.queued.await.unwrap();
+                pause.entered.await.unwrap();
+                if stage == "pull" {
+                    assert!(
+                        matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "slow")
+                    );
+                }
+                client
+                    .send(&ClientMessage::Subscribe {
+                        id: "peer".into(),
+                        operation: Read::ProcessList,
+                        select: None,
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "peer")
+                );
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Reading { id, .. } if id == "peer")
+                );
+                client
+                    .send(&ClientMessage::Cancel { id: "slow".into() })
+                    .await;
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 7,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
+                    panic!("sibling did not answer")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 7);
+                client
+                    .send(&ClientMessage::Request {
+                        id: "slow".into(),
+                        operation: catalog(),
+                        select: None,
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "slow")
+                );
+                pause.release.send(()).unwrap();
+                pause.finished.await.unwrap();
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 8,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
+                    panic!("old work escaped cancellation")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 8);
+                drop(client.writer);
+                drop(client.reader);
+                client.server.await.unwrap().unwrap();
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "known baseline failure: canceled queued setup still runs; tracked in subscription experiment"]
+    fn queued_subscription_cancellation_skips_construction() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        use crate::performance::subscription_measurement as meter;
+        meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let before = meter::snapshot();
+        runtime.block_on(async {
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let mut workers = Vec::new();
+            let mut releases = Vec::new();
+            for _ in 0..2 {
+                let (entered, began) = tokio::sync::oneshot::channel();
+                let (release, wait) = std::sync::mpsc::channel();
+                releases.push(release);
+                workers.push(tokio::task::spawn_blocking(move || {
+                    entered.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(30)).unwrap();
+                }));
+                began.await.unwrap();
+            }
+            let pause = super::subscription_measurement::pause("queued", "setup");
+            client
+                .send(&ClientMessage::Subscribe {
+                    id: "queued".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            pause.queued.await.unwrap();
+            client
+                .send(&ClientMessage::Cancel {
+                    id: "queued".into(),
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "queued".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            ));
+            // Wake the canceled job if it runs, then drain everything before the assertion.
+            pause.release.send(()).unwrap();
+            for release in releases {
+                release.send(()).unwrap();
+            }
+            for worker in workers {
+                worker.await.unwrap();
+            }
+            let _entered = pause.entered.await;
+            pause.finished.await.unwrap();
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
+        drop(runtime);
+        let work = meter::snapshot().since(before);
+        meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            work.stages
+                .get("runtime_build")
+                .map_or(0, |count| count.count),
+            0,
+            "canceled queued subscription constructed a runtime"
+        );
+    }
+
     #[tokio::test]
     async fn an_overlong_line_ends_the_connection() {
         let mut client = Client::connect();
@@ -1522,3 +1696,7 @@ mod tests {
         assert!(client.server.await.unwrap().is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "subscription_measurement.rs"]
+mod subscription_measurement;

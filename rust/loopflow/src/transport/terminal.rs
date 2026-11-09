@@ -27,6 +27,12 @@ pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
         // Nothing to redraw: the owner's first output flows from the viewer's cursor.
         return Ok(bytes);
     }
+    // The formatter emits enabled modes, not every disabled mode. Leave the old
+    // screen without 1049's saved-cursor restore, which also moves a viewer
+    // already on its primary screen above its existing output.
+    bytes.extend(b"\x1b[?1047l\x1b[?47l");
+    bytes.extend(RESET_MODES);
+    bytes.extend(RESET_DRAWING);
     let retained_primary = if terminal.alternate_screen() {
         // Switching only a disposable copy preserves the owner's parser,
         // continuation and replies. Paint primary first so a bare screen switch
@@ -189,6 +195,31 @@ mod tests {
         assert!(screen.entered);
         screen.observe(b"\x1b[?1049lbye\x1b[?1049h\x1b[?1049l");
         assert!(!screen.entered);
+    }
+
+    #[test]
+    fn reattachment_restores_default_modes_over_a_dirty_viewer() {
+        for saved in [false, true] {
+            let mut owner = viewer_showing(b"ready\r\n> ");
+            if saved {
+                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+            }
+            let mut viewer = viewer_showing(
+                b"\x1b[?1049h\x1b[?25l\x1b[?2004h\x1b[?1h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[>5uold screen",
+            );
+            viewer.write(&repaint(&owner).unwrap());
+            let queries =
+                b"\x1b[?25$p\x1b[?2004$p\x1b[?1$p\x1b[?1004$p\x1b[?1003$p\x1b[?1006$p\x1b[?u";
+            owner.write(queries);
+            viewer.write(queries);
+            assert_eq!(viewer.take_replies(), owner.take_replies());
+            assert!(!viewer.alternate_screen());
+            assert_eq!(viewer.cursor(), owner.cursor());
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            owner.write(b"typed after return");
+            viewer.write(b"typed after return");
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        }
     }
 
     #[test]

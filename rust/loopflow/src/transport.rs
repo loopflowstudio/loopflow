@@ -2340,6 +2340,7 @@ fn view(
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
     let mut heartbeat = SystemTime::now() + HEARTBEAT_INTERVAL;
+    let mut last_response = SystemTime::now();
     'relay: loop {
         if status.as_ref().is_some_and(connection::Status::closed) {
             return Ok(());
@@ -2360,6 +2361,7 @@ fn view(
                 return Ok(());
             };
             socket = stream::Stream::socket(next)?;
+            last_response = SystemTime::now();
             decoder = Decoder::default();
             controlled = false;
             owned = false;
@@ -2428,6 +2430,7 @@ fn view(
                 Ok(_) => bail!("Execution owner disconnected; outcome is unknown"),
                 Err(error) => return Err(error.into()),
             };
+            last_response = SystemTime::now();
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 if tag != Tag::Reply {
@@ -2622,6 +2625,17 @@ fn view(
                     }
                 }
             }
+        }
+        // Drain available replies before checking elapsed wall time: after sleep,
+        // a healthy connection may already have its heartbeat answer queued.
+        if acknowledgement_deadline.is_none()
+            && last_response.elapsed().unwrap_or_default() >= HEARTBEAT_TIMEOUT
+        {
+            if server {
+                interrupted = Some("The bridge stopped answering".to_owned());
+                continue;
+            }
+            bail!("Execution owner stopped answering; outcome is unknown, no provider was restarted and no input was replayed");
         }
         if let Some(status) = &mut status {
             if status.closed() {

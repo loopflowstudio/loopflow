@@ -142,10 +142,15 @@ resubmit its input.
 An owner that answers but then fails to attach leaves delivery unknown; that
 reconnection launches no other provider and replays no Graph. Finished Runs retain
 results in Session history.
+A restored screen first clears the previous viewer’s input modes and leaves its
+old alternate screen, then applies the owner’s screen and modes. A snapshot with
+default settings must not inherit mouse reporting or bracketed paste from the
+previous program.
+
 A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session resolution. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
-acknowledged, the attachment stays while its heartbeats reach the owner.
+acknowledged, the attachment stays while the owner answers its heartbeats.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
@@ -337,6 +342,11 @@ independent of input and output; after thirty seconds without
 one the owner releases that connection's retention and input claim. Silent network
 loss needs no EOF. Other connected viewers still hold. Attach/Resume restarts the
 heartbeat deadline, and the same stream carries input, resize, ownership and Leave.
+The viewer also detects thirty seconds without an answer or output, even when
+its writes still succeed. A server-backed viewer reconnects to the same owner;
+other viewers report an unknown outcome and close. Neither starts a provider or
+replays input. Wall time includes sleep; queued replies are read before checking
+the deadline so a responsive, quiet provider stays attached after waking.
 An ordinary external SSH connection uses its host's connection-loss detection; LF's bounded heartbeat applies to its own remote path.
 
 Leaving Desktop’s warm set, window close and orderly Quit send Ctrl+] to release their

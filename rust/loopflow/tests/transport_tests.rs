@@ -6312,6 +6312,101 @@ fn status_channel_failure_keeps_relay_alive_and_never_replays_outage_input() {
 }
 
 #[test]
+fn server_reconnects_a_writable_bridge_that_stops_answering() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &[
+        "/bin/sh", "-c",
+        "while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"$HOME/input\"; printf '%s\\n' \"$line\"; done",
+    ]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let owner_pid = pid_of_process(&fixture, &owner);
+    let service = ServerProof::start(&fixture, false);
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    std::fs::rename(&endpoint, &retained).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    let stalled = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let proxy = scope.spawn(|| {
+            let (mut downstream, _) = listener.accept().unwrap();
+            let mut upstream = UnixStream::connect(&retained).unwrap();
+            for socket in [&downstream, &upstream] {
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(45)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+            }
+            let mut requests = downstream.try_clone().unwrap();
+            let mut destination = upstream.try_clone().unwrap();
+            let forward = scope.spawn(move || {
+                let _ = std::io::copy(&mut requests, &mut destination);
+                let _ = destination.shutdown(std::net::Shutdown::Both);
+            });
+            while let Some((tag, payload)) = read_frame(&mut upstream) {
+                // Requests still reach the real owner, including heartbeats.
+                // Only the return path is lost: no EOF or failed write can help.
+                if !stalled.load(std::sync::atomic::Ordering::SeqCst) {
+                    downstream.write_all(&frame(tag, &payload)).unwrap();
+                }
+            }
+            forward.join().unwrap();
+        });
+        let (command, status) = service.relay_command(&owner);
+        let mut relay = Terminal::stream(command);
+        wait_server_status(&status, "connected", true, 1);
+        relay.input(b"before stall\n");
+        relay.wait_text("before stall");
+        stalled.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Fresh connections can reach the same owner while this bridge stays open.
+        std::fs::remove_file(&endpoint).unwrap();
+        std::fs::rename(&retained, &endpoint).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(40);
+        loop {
+            let reading = status.reading();
+            if reading.as_ref().is_some_and(|reading| {
+                reading["state"] == "connected" && reading["generation"] == 2
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Silent bridge never recovered: {reading:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        relay.input(b"after recovery\n");
+        relay.wait_text("after recovery");
+        assert_eq!(fixture.wait_file("input"), "before stall\nafter recovery\n");
+        assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+        drop(relay.child.stdin.take());
+        assert!(relay.wait_exit().success());
+        proxy.join().unwrap();
+    });
+}
+
+#[test]
+fn server_heartbeats_keep_a_quiet_provider_attached() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let service = ServerProof::start(&fixture, false);
+    let (command, status) = service.relay_command(&owner);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connected", true, 1);
+    std::thread::sleep(Duration::from_secs(32));
+    relay.assert_viewing("Quiet provider still answers heartbeats");
+    let reading = status.reading().unwrap();
+    assert_eq!(reading["state"], "connected");
+    assert_eq!(reading["generation"], 1, "No unnecessary reconnect");
+    relay.input(b"still attached\n");
+    relay.wait_text("still attached");
+    drop(relay.child.stdin.take());
+    assert!(relay.wait_exit().success());
+}
+
+#[test]
 fn server_preserves_owner_and_graph_across_restart() {
     server_continuity(false, false);
 }

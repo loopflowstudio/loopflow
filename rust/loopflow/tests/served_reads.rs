@@ -569,6 +569,64 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 }
 
 #[test]
+fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::server::wire::Operation;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file("edit.txt", "before\n");
+    repo.stage_all();
+    repo.commit("Comparison base");
+    register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let _server = Server::start(repo.path(), home.path());
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let pane = || Read::TaskGet {
+        directory: repo.path().to_owned(),
+        issue: "INF-123".into(),
+    };
+    let id = connection.subscribe(pane()).unwrap();
+    let frame = connection.reading(&id).unwrap().unwrap();
+    assert!(frame["unavailable"].is_null(), "{frame}");
+    assert_eq!(
+        frame["body"]["row"]["condition"]["local_progress"]["dirty"], false,
+        "{frame}"
+    );
+    let changes = || {
+        Operation::Read(Read::TaskChanges {
+            issue: "INF-123".into(),
+            base: "parent".into(),
+            head: None,
+        })
+    };
+    let before = connection.request(changes()).unwrap().result;
+    assert!(before["files"].as_array().unwrap().is_empty(), "{before}");
+    repo.create_file("edit.txt", "after\n");
+    repo.create_file("new.txt", "new\n");
+    let detail = connection.request(Operation::Read(pane())).unwrap().result;
+    assert_eq!(
+        detail["row"]["condition"]["local_progress"]["dirty"], true,
+        "{detail}"
+    );
+    let after = connection.request(changes()).unwrap().result;
+    let files = after["files"].as_array().unwrap();
+    assert!(
+        files
+            .iter()
+            .any(|file| file["path"] == "edit.txt" && file["unstaged"] == true),
+        "{after}"
+    );
+    assert!(
+        files
+            .iter()
+            .any(|file| file["path"] == "new.txt" && file["untracked"] == true),
+        "{after}"
+    );
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
@@ -660,7 +718,7 @@ fn server_operations_match_their_lf_commands() {
     let work_folder = home.path().join("folder");
     fs::create_dir_all(&work_folder).unwrap();
     let history = || {
-        Read::History(HistoryWindow {
+        Read::SessionHistory(HistoryWindow {
             since: "7d".into(),
             limit: 50,
             wave: None,
@@ -668,7 +726,7 @@ fn server_operations_match_their_lf_commands() {
             task: Some("INF-123".into()),
         })
     };
-    let all_plans = || Read::Roadmap {
+    let all_plans = || Read::PlanList {
         directory: "/".into(),
         wave: None,
         task: None,
@@ -680,52 +738,52 @@ fn server_operations_match_their_lf_commands() {
         after: None,
         limit: None,
     };
-    let task_pane = || Read::DesktopTask {
+    let task_pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
     };
-    let plans = || Read::DesktopPlans {
+    let plans = || Read::DesktopViewList {
         directory: repo.path().to_owned(),
     };
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
         Read::ProcessHistory { .. }
         | Read::CreationReceipt { .. }
-        | Read::MonitorPs
-        | Read::DesktopPlans { .. }
+        | Read::ProcessList
+        | Read::DesktopViewList { .. }
         | Read::SessionList { .. }
-        | Read::DesktopTask { .. }
+        | Read::TaskGet { .. }
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
-        | Read::Waves
-        | Read::MachineId
-        | Read::Portfolio
-        | Read::Settings { .. }
+        | Read::WaveList
+        | Read::MachineSelf
+        | Read::DesktopPortfolio
+        | Read::ConfigSettings { .. }
         | Read::ConfigCatalog
         | Read::ConfigGet { .. }
         | Read::ConfigExplain { .. }
-        | Read::PaneLayout { .. }
-        | Read::People { .. }
-        | Read::Graphs { .. }
-        | Read::ViewPlan { .. }
-        | Read::GraphProcesses { .. }
-        | Read::GraphProcess { .. }
-        | Read::Usage { .. }
+        | Read::DesktopLayout { .. }
+        | Read::RepoPeople { .. }
+        | Read::GraphList { .. }
+        | Read::DesktopViewGet { .. }
+        | Read::TaskRuns { .. }
+        | Read::ProcessGet { .. }
+        | Read::SessionUsage { .. }
         | Read::TaskContext { .. }
-        | Read::WaveDetail { .. }
-        | Read::ClosedTasks { .. }
-        | Read::Machines
-        | Read::History(_)
-        | Read::Roadmap { .. }
-        | Read::PlanStatus { .. }
-        | Read::WorkLink { .. }
-        | Read::RepositoryPath { .. }
+        | Read::WavePlan { .. }
+        | Read::TaskList { .. }
+        | Read::MachineList
+        | Read::SessionHistory(_)
+        | Read::PlanList { .. }
+        | Read::RepoPlan { .. }
+        | Read::WorkResolve { .. }
+        | Read::RepoPath { .. }
         | Read::WaveGraph { .. }
-        | Read::Tokens { .. }
-        | Read::Retention
-        | Read::Doctor
-        | Read::Ci { .. }
+        | Read::RepoTokens { .. }
+        | Read::SessionRetention
+        | Read::MachineDoctor
+        | Read::RepoCi { .. }
         | Read::AccountList { .. }
         | Read::AccountNext { .. }
         | Read::SkillList { .. }
@@ -733,7 +791,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::PrReviews { .. }
         | Read::TaskWait { .. } => (
             [
-                Read::MonitorPs,
+                Read::ProcessList,
                 plans(),
                 sessions(true),
                 task_pane(),
@@ -749,10 +807,10 @@ fn server_operations_match_their_lf_commands() {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
                 },
-                Read::Waves,
-                Read::MachineId,
-                Read::Portfolio,
-                Read::Settings {
+                Read::WaveList,
+                Read::MachineSelf,
+                Read::DesktopPortfolio,
+                Read::ConfigSettings {
                     directory: repo.path().to_owned(),
                     wave: None,
                     skill: Some("implement".into()),
@@ -772,25 +830,25 @@ fn server_operations_match_their_lf_commands() {
                     },
                     key: "agent".into(),
                 },
-                Read::PaneLayout {
+                Read::DesktopLayout {
                     directory: repo.path().to_owned(),
                     work: "repository".into(),
                 },
-                Read::People {
+                Read::RepoPeople {
                     directory: repo.path().to_owned(),
                 },
-                Read::Graphs {
+                Read::GraphList {
                     directory: repo.path().to_owned(),
                 },
-                Read::ViewPlan {
+                Read::DesktopViewGet {
                     directory: repo.path().to_owned(),
                     expression: None,
                 },
-                Read::ViewPlan {
+                Read::DesktopViewGet {
                     directory: repo.path().to_owned(),
                     expression: Some("state:backlog".into()),
                 },
-                Read::GraphProcesses {
+                Read::TaskRuns {
                     directory: repo.path().to_owned(),
                     task: "INF-123".into(),
                     after: None,
@@ -799,14 +857,14 @@ fn server_operations_match_their_lf_commands() {
                 Read::CreationReceipt {
                     request_id: "absent-creation".into(),
                 },
-                Read::GraphProcess { id: graph },
-                Read::Usage {
+                Read::ProcessGet { id: graph },
+                Read::SessionUsage {
                     days: 0,
                     wave: None,
                     project: None,
                     task: Some("INF-123".into()),
                 },
-                Read::Usage {
+                Read::SessionUsage {
                     days: 30,
                     wave: Some("task-pr-tests".into()),
                     project: None,
@@ -815,33 +873,33 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskContext {
                     task: "INF-123".into(),
                 },
-                Read::WaveDetail {
+                Read::WavePlan {
                     directory: repo.path().to_owned(),
                     wave: "task-pr-tests".into(),
                 },
-                Read::ClosedTasks {
+                Read::TaskList {
                     directory: repo.path().to_owned(),
                     wave: "task-pr-tests".into(),
                     after: None,
                     closed: true,
                 },
-                Read::Machines,
+                Read::MachineList,
                 history(),
                 all_plans(),
-                Read::Roadmap {
+                Read::PlanList {
                     directory: repo.path().to_owned(),
                     wave: None,
                     task: Some("INF-123".into()),
                     all: false,
                 },
-                Read::PlanStatus {
+                Read::RepoPlan {
                     directory: repo.path().to_owned(),
                 },
-                Read::WorkLink {
+                Read::WorkResolve {
                     directory: "/".into(),
                     url: format!("loopflow://{folder}/task/INF-123"),
                 },
-                Read::RepositoryPath {
+                Read::RepoPath {
                     id: serde_json::from_value(repository["id"].clone()).unwrap(),
                 },
                 Read::WaveGraph {
@@ -858,18 +916,18 @@ fn server_operations_match_their_lf_commands() {
                     after: None,
                     limit: Some(100),
                 },
-                Read::Tokens {
+                Read::RepoTokens {
                     directory: repo.path().to_owned(),
                     days: None,
                 },
-                Read::Tokens {
+                Read::RepoTokens {
                     directory: repo.path().to_owned(),
                     days: Some(1),
                 },
-                Read::Retention,
-                Read::Doctor,
+                Read::SessionRetention,
+                Read::MachineDoctor,
                 // An absolute window: a relative one is measured from each run's now.
-                Read::Ci {
+                Read::RepoCi {
                     since: "2026-01-01T00:00:00Z".into(),
                     wave: None,
                     repo: None,
@@ -885,12 +943,12 @@ fn server_operations_match_their_lf_commands() {
             ],
             [
                 history(),
-                Read::MonitorPs,
+                Read::ProcessList,
                 all_plans(),
                 plans(),
                 sessions(false),
                 sessions(true),
-                Read::PlanStatus {
+                Read::RepoPlan {
                     directory: work_folder,
                 },
                 task_pane(),
@@ -955,7 +1013,7 @@ fn server_operations_match_their_lf_commands() {
     // What a write changed, as the app reads it.
     let effect = |issue: &str| {
         without_clock(
-            Read::Roadmap {
+            Read::PlanList {
                 directory: directory.clone(),
                 wave: None,
                 task: Some(issue.into()),
@@ -968,7 +1026,7 @@ fn server_operations_match_their_lf_commands() {
     let repository_id = repository["id"].as_str().unwrap().to_owned();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
-        Read::PaneLayout {
+        Read::DesktopLayout {
             directory: directory.clone(),
             work: work.into(),
         }
@@ -977,7 +1035,7 @@ fn server_operations_match_their_lf_commands() {
     };
     let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
     let dashboard = || without_revision(layout("query:served"));
-    let pane = |revision: i64| Write::PaneLayout {
+    let pane = |revision: i64| Write::DesktopLayoutSave {
         directory: directory.clone(),
         work: "repository".into(),
         layout: serde_json::json!({
@@ -1006,7 +1064,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
-        | Write::TaskNotes { .. }
+        | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
         | Write::TaskHold { .. }
@@ -1025,20 +1083,20 @@ fn server_operations_match_their_lf_commands() {
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::SessionMove { .. }
-        | Write::WaveAdd { .. }
+        | Write::WaveCreate { .. }
         | Write::WaveRename { .. }
         | Write::WaveRemove { .. }
         | Write::WaveMachine { .. }
-        | Write::PlanningRefresh { .. }
+        | Write::WaveSync { .. }
         // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
         // compares their spelling.
-        | Write::WavePlanningBind { .. }
-        | Write::WavePlanningConnect { .. }
-        | Write::WavePlanningReteam { .. }
+        | Write::WavePlanBind { .. }
+        | Write::WavePlanConnect { .. }
+        | Write::WavePlanReteam { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
-        | Write::RepositoryRelease { .. }
+        | Write::RepoRelease { .. }
         | Write::CheckoutCommit { .. }
         | Write::CheckoutSync { .. }
         | Write::CheckoutCreate { .. }
@@ -1059,22 +1117,22 @@ fn server_operations_match_their_lf_commands() {
         | Write::PrAbandon { .. }
         | Write::PrReconcile { .. }
         | Write::PrRequestReview { .. }
-        | Write::Portfolio { .. }
-        | Write::DashboardQuery { .. }
-        | Write::DashboardPin { .. }
-        | Write::DashboardUnpin { .. }
-        | Write::DashboardRename { .. }
-        | Write::DashboardHide { .. }
-        | Write::DashboardShow { .. }
-        | Write::DashboardSlots { .. }
-        | Write::TileMove { .. }
+        | Write::DesktopPortfolioSet { .. }
+        | Write::DesktopDashboardQuery { .. }
+        | Write::DesktopDashboardPin { .. }
+        | Write::DesktopDashboardUnpin { .. }
+        | Write::DesktopDashboardRename { .. }
+        | Write::DesktopDashboardHide { .. }
+        | Write::DesktopDashboardShow { .. }
+        | Write::DesktopDashboardSlots { .. }
+        | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
         | Write::ConfigUnset { .. }
         | Write::ConfigTheme { .. }
-        | Write::PaneLayout { .. } => (
+        | Write::DesktopLayoutSave { .. } => (
             [
-                Write::TaskNotes {
+                Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
                     notes: "Served from the app".into(),
@@ -1135,12 +1193,12 @@ fn server_operations_match_their_lf_commands() {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
                 },
-                Write::WaveAdd {
+                Write::WaveCreate {
                     directory: directory.clone(),
                     wave: "task-pr-tests".into(),
                     objective: None,
                 },
-                Write::PlanningRefresh {
+                Write::WaveSync {
                     directory: directory.clone(),
                     wave: "task-pr-tests".into(),
                 },
@@ -1154,18 +1212,18 @@ fn server_operations_match_their_lf_commands() {
             [
                 // The fixture's Working Tasks hold no Task; the shared order
                 // moves through the same tile writer as a Dashboard's.
-                Box::new(|| Write::TileMove {
+                Box::new(|| Write::DesktopDashboardMove {
                     directory: directory.clone(),
                     board: "query:served".into(),
                     member: format!("task:{task_id}"),
                     destination: format!("task:{task_id}"),
                 }) as Box<dyn Fn() -> Write>,
-                Box::new(|| Write::DashboardPin {
+                Box::new(|| Write::DesktopDashboardPin {
                     directory: directory.clone(),
                     id: "served".into(),
                     revision: revision("query:served"),
                 }),
-                Box::new(|| Write::DashboardRename {
+                Box::new(|| Write::DesktopDashboardRename {
                     directory: directory.clone(),
                     id: "served".into(),
                     name: "Served board".into(),
@@ -1175,26 +1233,26 @@ fn server_operations_match_their_lf_commands() {
                 Box::new(|| {
                     let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
                         c.request(loopflow::server::wire::Operation::Write(
-                            Write::DashboardShow {
+                            Write::DesktopDashboardShow {
                                 directory: directory.clone(),
                                 id: "served".into(),
                                 member: format!("task:{task_id}"),
                             },
                         ))
                     });
-                    Write::DashboardHide {
+                    Write::DesktopDashboardHide {
                         directory: directory.clone(),
                         id: "served".into(),
                         member: format!("task:{task_id}"),
                     }
                 }),
-                Box::new(|| Write::DashboardSlots {
+                Box::new(|| Write::DesktopDashboardSlots {
                     directory: directory.clone(),
                     id: "served".into(),
                     revision: revision("query:served"),
                     slots: "null".into(),
                 }),
-                Box::new(|| Write::DashboardQuery {
+                Box::new(|| Write::DesktopDashboardQuery {
                     directory: directory.clone(),
                     id: "served".into(),
                     expression: "state:backlog".into(),
@@ -1344,7 +1402,7 @@ fn server_operations_match_their_lf_commands() {
         issue: "INF-123".into(),
     };
     let stopped = || {
-        Read::DesktopTask {
+        Read::TaskGet {
             directory: directory.clone(),
             issue: "INF-123".into(),
         }
@@ -1356,8 +1414,8 @@ fn server_operations_match_their_lf_commands() {
     assert_eq!(stopped()["kind"], "person", "no stop saved");
 
     // Which repositories the app shows, as the app reads them.
-    let portfolio = || without_clock(Read::Portfolio.read().unwrap());
-    let manual = Write::Portfolio {
+    let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());
+    let manual = Write::DesktopPortfolioSet {
         change: loopflow::portfolio::PortfolioCommand::Manual,
     };
     assert!(compare(manual.clone(), &|| manual.clone(), &portfolio) > 0);
@@ -1391,7 +1449,7 @@ fn server_operations_match_their_lf_commands() {
         0
     );
     // Arrangement persists without a Process, in the app as through `lf`.
-    let create = Write::DashboardQuery {
+    let create = Write::DesktopDashboardQuery {
         directory: directory.clone(),
         id: "served".into(),
         expression: format!("task:{task_id}"),
@@ -1801,7 +1859,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         Write::TaskReopen { directory, issue } => {
             (path(directory), words(&["task", "reopen", issue, "--json"]))
         }
-        Write::TaskNotes {
+        Write::TaskUpdate {
             directory,
             issue,
             notes,
@@ -2028,7 +2086,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["--wave", wave, "set", "machine", machine, "--json"]),
         ),
-        Write::WaveAdd {
+        Write::WaveCreate {
             directory,
             wave,
             objective,
@@ -2040,10 +2098,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::PlanningRefresh { directory, wave } => {
+        Write::WaveSync { directory, wave } => {
             (path(directory), words(&["wave", "sync", wave, "--json"]))
         }
-        Write::WavePlanningBind {
+        Write::WavePlanBind {
             directory,
             wave,
             project,
@@ -2051,7 +2109,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["wave", "plan", "bind", wave, project, "--json"]),
         ),
-        Write::WavePlanningConnect {
+        Write::WavePlanConnect {
             directory,
             wave,
             all,
@@ -2072,7 +2130,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::WavePlanningReteam { directory, apply } => {
+        Write::WavePlanReteam { directory, apply } => {
             let mut spelled = words(&["wave", "plan", "reteam"]);
             if *apply {
                 spelled.push("--apply".into());
@@ -2084,7 +2142,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["graph", "customize", name, "--json"]),
         ),
-        Write::RepositoryRelease {
+        Write::RepoRelease {
             directory,
             version,
             target,
@@ -2441,7 +2499,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::Portfolio { change } => {
+        Write::DesktopPortfolioSet { change } => {
             let mut spelled = words(&["desktop", "portfolio"]);
             match change {
                 PortfolioCommand::Folder { path: folder } => {
@@ -2465,7 +2523,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             ("/".into(), spelled)
         }
-        Write::DashboardQuery {
+        Write::DesktopDashboardQuery {
             directory,
             id,
             expression,
@@ -2476,7 +2534,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.extend(words(&["--", id, expression]));
             (path(directory), spelled)
         }
-        Write::DashboardPin {
+        Write::DesktopDashboardPin {
             directory,
             id,
             revision,
@@ -2491,7 +2549,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 id,
             ]),
         ),
-        Write::DashboardUnpin {
+        Write::DesktopDashboardUnpin {
             directory,
             id,
             revision,
@@ -2506,7 +2564,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 id,
             ]),
         ),
-        Write::DashboardRename {
+        Write::DesktopDashboardRename {
             directory,
             id,
             name,
@@ -2523,7 +2581,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 name,
             ]),
         ),
-        Write::DashboardHide {
+        Write::DesktopDashboardHide {
             directory,
             id,
             member,
@@ -2536,7 +2594,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 &format!("query:{id}/{member}"),
             ]),
         ),
-        Write::DashboardShow {
+        Write::DesktopDashboardShow {
             directory,
             id,
             member,
@@ -2549,7 +2607,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 &format!("query:{id}/{member}"),
             ]),
         ),
-        Write::DashboardSlots {
+        Write::DesktopDashboardSlots {
             directory,
             id,
             revision,
@@ -2564,7 +2622,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 &format!("--revision={revision}"),
             ]),
         ),
-        Write::TileMove {
+        Write::DesktopDashboardMove {
             directory,
             board,
             member,
@@ -2580,7 +2638,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 destination,
             ]),
         ),
-        Write::PaneLayout {
+        Write::DesktopLayoutSave {
             directory, work, ..
         } => (
             path(directory),

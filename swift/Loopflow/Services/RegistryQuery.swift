@@ -52,41 +52,40 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case processHistory(id: String)
     case creationReceipt(requestID: String)
-    case monitorPs
-    case desktopPlans(directory: String)
-    case desktopSessions(directory: String, headless: Bool)
-    case desktopTask(directory: String, issue: String)
+    case processList
+    case desktopViewList(directory: String)
+    case sessionList(directory: String, headless: Bool, after: String?, limit: Int?)
+    case taskGet(directory: String, issue: String)
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String)
-    case waves
-    case machineId
-    case portfolio
-    case settings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
-    case paneLayout(directory: String, work: String)
-    case people(directory: String)
-    case graphs(directory: String)
-    case viewPlan(directory: String, expression: String?)
-    case graphProcesses(directory: String, task: String, after: String?)
-    case graphProcess(id: String)
-    case usage(days: Int, wave: String?, project: String?, task: String?)
+    case waveList
+    case machineSelf
+    case desktopPortfolio
+    case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
+    case desktopLayout(directory: String, work: String)
+    case repoPeople(directory: String)
+    case graphList(directory: String)
+    case desktopViewGet(directory: String, expression: String?)
+    case taskRuns(directory: String, task: String, after: String?)
+    case processGet(id: String)
+    case sessionUsage(days: Int, wave: String?, project: String?, task: String?)
     case taskContext(task: String)
-    case waveDetail(directory: String, wave: String)
-    case closedTasks(directory: String, wave: String, after: String?)
-    case machines
-    case history(since: String, limit: Int, wave: String?, project: String?, task: String?)
-    case roadmap(directory: String, wave: String?, task: String?, all: Bool)
-    case planningStatus(directory: String)
-    case workLink(directory: String, url: String)
-    case repositoryPath(id: String)
+    case wavePlan(directory: String, wave: String)
+    case taskList(directory: String, wave: String, after: String?)
+    case machineList
+    case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
+    case planList(directory: String, wave: String?, task: String?, all: Bool)
+    case repoPlan(directory: String)
+    case workResolve(directory: String, url: String)
+    case repoPath(id: String)
     case waveGraph(directory: String, wave: String?)
-    case sessionPage(directory: String, headless: Bool, after: String?)
-    case tokens(directory: String, days: Int?)
-    case retention
-    case doctor
+    case repoTokens(directory: String, days: Int?)
+    case sessionRetention
+    case machineDoctor
     /// How failed CI was detected, repaired and landed on this Machine since
     /// `since` (`7d`, `24h` or an RFC 3339 instant).
-    case ci(since: String, wave: String?, repo: String?)
+    case repoCi(since: String, wave: String?, repo: String?)
     /// Every login's state on this Machine; `cached` skips the providers.
     case accountList(target: String?, cached: Bool)
     /// How the repository selects an account for each provider.
@@ -101,24 +100,25 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
 
-    /// Rows in one `sessionPage`.
-    static let sessionPageLimit = 100
-
     /// `lf plan list --all`: every repository's Waves and Tasks.
-    public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
+    public static let allPlans = ServedRead.planList(directory: "/", wave: nil, task: nil, all: true)
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
         case .processHistory(let id): return ["session", "history", "show", id]
         case .creationReceipt(let requestID): return ["server", "receipt", requestID, "--json"]
-        case .monitorPs:
+        case .processList:
             return ["process", "list", "--json"]
-        case .desktopPlans:
+        case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
-        case .desktopSessions(_, let headless):
-            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
-        case .desktopTask(_, let issue):
+        case .sessionList(_, let headless, let after, let limit):
+            if let limit {
+                return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+                    + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
+            }
+            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
+        case .taskGet(_, let issue):
             return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base, let head):
             return ["task", "changes", issue, "--base", base, "--json"] + (head.map { ["--head", $0] } ?? [])
@@ -127,62 +127,59 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
-        case .waves:
+        case .waveList:
             return ["wave", "list", "--all", "--json"]
-        case .machineId:
+        case .machineSelf:
             return ["machine", "self", "--json"]
-        case .portfolio:
+        case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
-        case .settings(_, let wave, let skill, let graph, let step):
+        case .configSettings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
-        case .paneLayout(_, let work):
+        case .desktopLayout(_, let work):
             return ["desktop", "layout", work]
-        case .people:
+        case .repoPeople:
             return ["repo", "people", "--json"]
-        case .graphs:
+        case .graphList:
             return ["graph", "list", "--json"]
-        case .viewPlan(_, let expression):
+        case .desktopViewGet(_, let expression):
             return ["desktop", "view", "show"] + (expression.map { [$0] } ?? []) + ["--json"]
-        case .graphProcesses(_, let task, let after):
+        case .taskRuns(_, let task, let after):
             return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
-        case .graphProcess(let id):
+        case .processGet(let id):
             return ["process", "show", id, "--json"]
-        case .usage(let days, let wave, let project, let task):
+        case .sessionUsage(let days, let wave, let project, let task):
             return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
             return ["task", "context", task, "--json"]
-        case .waveDetail(_, let wave):
+        case .wavePlan(_, let wave):
             return ["wave", "plan", wave, "--json"]
-        case .closedTasks(_, let wave, let after):
+        case .taskList(_, let wave, let after):
             return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
-        case .machines:
+        case .machineList:
             return ["machine", "list", "--json"]
-        case .history(let since, let limit, let wave, let project, let task):
+        case .sessionHistory(let since, let limit, let wave, let project, let task):
             return ["session", "history", "--since", since, "--limit", String(limit)]
                 + Self.work(wave: wave, project: project, task: task) + ["--json"]
-        case .roadmap(_, let wave, let task, let all):
+        case .planList(_, let wave, let task, let all):
             return ["plan", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
-        case .planningStatus:
+        case .repoPlan:
             return ["repo", "plan", "--json"]
-        case .workLink(_, let url):
+        case .workResolve(_, let url):
             return ["open", url, "--link", "--json"]
-        case .repositoryPath(let id):
+        case .repoPath(let id):
             return ["--repo-id", id, "repo", "path"]
         case .waveGraph(_, let wave):
             return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
-        case .sessionPage(_, let headless, let after):
-            return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
-                + ["--limit", String(Self.sessionPageLimit)] + (after.map { ["--after", $0] } ?? [])
-        case .tokens(_, let days):
+        case .repoTokens(_, let days):
             return ["repo", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
-        case .retention:
+        case .sessionRetention:
             return ["session", "retention", "--json"]
-        case .doctor:
+        case .machineDoctor:
             return ["machine", "doctor", "--json"]
-        case .ci(let since, let wave, let repo):
+        case .repoCi(let since, let wave, let repo):
             return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
         case .accountList(let target, let cached):
             return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
@@ -219,11 +216,11 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         switch self {
         case .processHistory(let id): TaggedFields("process.history", ["id": id])
         case .creationReceipt(let requestID): TaggedFields("creation.get", ["request_id": requestID])
-        case .monitorPs: TaggedFields("process.list")
-        case .desktopPlans(let directory): TaggedFields("desktop.view.list", ["directory": directory])
-        case .desktopSessions(let directory, let headless):
-            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": nil, "limit": nil])
-        case .desktopTask(let directory, let issue):
+        case .processList: TaggedFields("process.list")
+        case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
+        case .sessionList(let directory, let headless, let after, let limit):
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit])
+        case .taskGet(let directory, let issue):
             TaggedFields("task.get", ["directory": directory, "issue": issue])
         case .taskChanges(let issue, let base, let head):
             TaggedFields("task.changes", ["issue": issue, "base": base, "head": head])
@@ -231,46 +228,43 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path):
             TaggedFields("task.file", ["issue": issue, "path": path])
-        case .waves: TaggedFields("wave.list")
-        case .machineId: TaggedFields("machine.self")
-        case .portfolio: TaggedFields("desktop.portfolio")
-        case .settings(let directory, let wave, let skill, let graph, let step):
+        case .waveList: TaggedFields("wave.list")
+        case .machineSelf: TaggedFields("machine.self")
+        case .desktopPortfolio: TaggedFields("desktop.portfolio")
+        case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
-        case .paneLayout(let directory, let work):
+        case .desktopLayout(let directory, let work):
             TaggedFields("desktop.layout", ["directory": directory, "work": work])
-        case .people(let directory): TaggedFields("repo.people", ["directory": directory])
-        case .graphs(let directory): TaggedFields("graph.list", ["directory": directory])
-        case .viewPlan(let directory, let expression):
+        case .repoPeople(let directory): TaggedFields("repo.people", ["directory": directory])
+        case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
+        case .desktopViewGet(let directory, let expression):
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
-        case .graphProcesses(let directory, let task, let after):
+        case .taskRuns(let directory, let task, let after):
             TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
-        case .graphProcess(let id): TaggedFields("process.get", ["id": id])
-        case .usage(let days, let wave, let project, let task):
+        case .processGet(let id): TaggedFields("process.get", ["id": id])
+        case .sessionUsage(let days, let wave, let project, let task):
             TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
-        case .waveDetail(let directory, let wave):
+        case .wavePlan(let directory, let wave):
             TaggedFields("wave.plan", ["directory": directory, "wave": wave])
-        case .closedTasks(let directory, let wave, let after):
+        case .taskList(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
-        case .machines: TaggedFields("machine.list")
-        case .history(let since, let limit, let wave, let project, let task):
+        case .machineList: TaggedFields("machine.list")
+        case .sessionHistory(let since, let limit, let wave, let project, let task):
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
-        case .roadmap(let directory, let wave, let task, let all):
+        case .planList(let directory, let wave, let task, let all):
             TaggedFields("plan.list", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .planningStatus(let directory): TaggedFields("repo.plan", ["directory": directory])
-        case .workLink(let directory, let url):
+        case .repoPlan(let directory): TaggedFields("repo.plan", ["directory": directory])
+        case .workResolve(let directory, let url):
             TaggedFields("work.resolve", ["directory": directory, "url": url])
-        case .repositoryPath(let id): TaggedFields("repo.path", ["id": id])
+        case .repoPath(let id): TaggedFields("repo.path", ["id": id])
         case .waveGraph(let directory, let wave):
             TaggedFields("wave.graph", ["directory": directory, "wave": wave])
-        case .sessionPage(let directory, let headless, let after):
-            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after,
-                                          "limit": Self.sessionPageLimit])
-        case .tokens(let directory, let days):
+        case .repoTokens(let directory, let days):
             TaggedFields("repo.tokens", ["directory": directory, "days": days])
-        case .retention: TaggedFields("session.retention")
-        case .doctor: TaggedFields("machine.doctor")
-        case .ci(let since, let wave, let repo):
+        case .sessionRetention: TaggedFields("session.retention")
+        case .machineDoctor: TaggedFields("machine.doctor")
+        case .repoCi(let since, let wave, let repo):
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
         case .accountList(let target, let cached):
             TaggedFields("account.list", ["target": target, "cached": cached])
@@ -297,8 +291,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
-    case taskNotes(directory: String, issue: String, notes: String)
-    case taskOwnership(directory: String, issue: String, claimed: Bool)
+    case taskUpdate(directory: String, issue: String, notes: String)
+    case taskClaim(directory: String, issue: String)
+    case taskUnassign(directory: String, issue: String)
     /// Start the Task's run detached; `approve` runs every step headless to
     /// `end` and approves Auto-Ship, as `-b` does.
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
@@ -323,15 +318,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case waveMachine(directory: String, wave: String, machine: String)
     /// Move the open Sessions the selector names to an agent.
     case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
-    case waveAdd(directory: String, wave: String, objective: String?)
-    case planningRefresh(directory: String, wave: String)
-    case wavePlanningBind(directory: String, wave: String, project: String)
-    case wavePlanningConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
+    case waveCreate(directory: String, wave: String, objective: String?)
+    case waveSync(directory: String, wave: String)
+    case wavePlanBind(directory: String, wave: String, project: String)
+    case wavePlanConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
     /// Without `apply`, the plan: nothing moves.
-    case wavePlanningReteam(directory: String, apply: Bool)
+    case wavePlanReteam(directory: String, apply: Bool)
     case graphCustomize(directory: String, name: String)
     /// Started detached: the Process carrying the release.
-    case repositoryRelease(directory: String, version: String?, target: String?)
+    case repoRelease(directory: String, version: String?, target: String?)
     case checkoutCommit(directory: String, message: String?, push: Bool, noAdd: Bool, paths: [String], agent: String?)
     /// The plan with `preview`, a finished `continueSync` or `abort`, or the
     /// Process carrying a sync started detached.
@@ -368,14 +363,16 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case prReconcile(directory: String)
     case prRequestReview(directory: String, pr: String?, reviewers: [String])
     /// Run from `/`, as the app's `lf` ran it.
-    case portfolio(change: [String])
-    case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
-    case dashboardPin(directory: String, id: String, pinned: Bool, revision: Int64)
-    case dashboardRename(directory: String, id: String, name: String, revision: Int64)
-    case dashboardTile(directory: String, id: String, member: String, hidden: Bool)
-    case dashboardSlots(directory: String, id: String, revision: Int64, slots: String)
-    case tileMove(directory: String, board: String, member: String, destination: String)
-    case paneLayout(directory: String, work: String, layout: String)
+    case desktopPortfolioSet(change: [String])
+    case desktopDashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
+    case desktopDashboardPin(directory: String, id: String, revision: Int64)
+    case desktopDashboardUnpin(directory: String, id: String, revision: Int64)
+    case desktopDashboardRename(directory: String, id: String, name: String, revision: Int64)
+    case desktopDashboardHide(directory: String, id: String, member: String)
+    case desktopDashboardShow(directory: String, id: String, member: String)
+    case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
+    case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
+    case desktopLayoutSave(directory: String, work: String, layout: String)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -384,15 +381,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .accountDisconnect, .accountConnect, .accountSet, .accountRedeemReset, .accountUse, .accountPause, .accountUnpause:
             return accountArgv
         case .graphRun(_, let name, let message, let agent):
-            return ["--batch"] + Self.option("--agent", agent) + ["graph", name] + argument(nil, message)
+            return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
         case .skillRun(_, let name, let message, let agent):
-            return ["--batch"] + Self.option("--agent", agent) + ["skill", name] + argument(nil, message)
+            return ["--batch"] + argument("--agent", agent) + ["skill", name] + argument(nil, message)
         case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
             var argv = ["task", "create", "--request-id", requestID]
-            argv += Self.option("--title", title)
-            argv += Self.option("--wave", wave)
-            argv += Self.option("--graph", graph)
-            argv += Self.option("--session", session)
+            argv += argument("--title", title)
+            argv += argument("--wave", wave)
+            argv += argument("--graph", graph)
+            argv += argument("--session", session)
             if run { argv.append("--run") }
             argv.append("--json")
             if let request { argv += ["--", request] }
@@ -400,11 +397,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
-        case .taskNotes(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
-        case .taskOwnership(_, let issue, let claimed): return ["task", claimed ? "claim" : "unassign", issue, "--json"]
+        case .taskUpdate(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
+        case .taskClaim(_, let issue): return ["task", "claim", issue, "--json"]
+        case .taskUnassign(_, let issue): return ["task", "unassign", issue, "--json"]
         case .taskRun(_, let issue, let graph, let from, let agent, let approve):
-            return (approve ? ["--batch"] : []) + Self.option("--agent", agent) + ["task", "run", issue]
-                + [graph].compactMap { $0 } + Self.option("--from", from) + ["--json"]
+            return (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
+                + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
         case .taskSteer(_, let issue, let message): return ["task", "steer", issue, message, "--json"]
@@ -416,13 +414,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskSave(_, let issue, let path, let revision, _):
             return ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionSteer(_, let session, let wave, let message):
-            return Self.option("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
+            return argument("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
         case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task, let preview):
             return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
             return Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
-                + Self.option("--task", task) + Self.option("--wave", wave),
+                + argument("--task", task) + argument("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let requestID, let id, let agent):
             return Self.prepared(agent, ["session", "new", id, "--request-id", requestID], repo: nil)
@@ -431,19 +429,19 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .waveMachine(_, let wave, let machine): return ["--wave", wave, "set", "machine", machine, "--json"]
         case .sessionMove(_, let blocked, let on, let agent):
             return ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
-                + Self.option("--on", on) + ["--json"]
-        case .waveAdd(_, let wave, let objective): return ["wave", "create", wave] + Self.option("--objective", objective) + ["--json"]
-        case .planningRefresh(_, let wave): return ["wave", "sync", wave, "--json"]
-        case .wavePlanningBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
-        case .wavePlanningConnect(_, let wave, let all, let teamKey, let teamName):
+                + argument("--on", on) + ["--json"]
+        case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
+        case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
+        case .wavePlanBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
+        case .wavePlanConnect(_, let wave, let all, let teamKey, let teamName):
             return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
-                + Self.option("--team-key", teamKey) + Self.option("--team-name", teamName) + ["--json"]
-        case .wavePlanningReteam(_, let apply): return ["wave", "plan", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
+                + argument("--team-key", teamKey) + argument("--team-name", teamName) + ["--json"]
+        case .wavePlanReteam(_, let apply): return ["wave", "plan", "reteam"] + (apply ? ["--apply"] : []) + ["--json"]
         case .graphCustomize(_, let name): return ["graph", "customize", name, "--json"]
-        case .repositoryRelease(_, let version, let target):
-            return ["repo", "release", "run"] + [version].compactMap { $0 } + Self.option("--target", target) + ["--json"]
+        case .repoRelease(_, let version, let target):
+            return ["repo", "release", "run"] + [version].compactMap { $0 } + argument("--target", target) + ["--json"]
         case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
-            var argv = Self.option("--agent", agent) + ["commit"] + Self.option("--message", message)
+            var argv = argument("--agent", agent) + ["commit"] + argument("--message", message)
             argv += Self.flags([("--push", push), ("--no-add", noAdd)])
             return argv + paths + ["--json"]
         case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
@@ -453,20 +451,24 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return argv + ["--json"]
         case .checkoutCreate(_, let name, let preview, let persistent):
             return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
-        case .portfolio(let change): return ["desktop", "portfolio"] + change + ["--json"]
-        case .dashboardQuery(_, let id, let expression, let revision):
+        case .desktopPortfolioSet(let change): return ["desktop", "portfolio"] + change + ["--json"]
+        case .desktopDashboardQuery(_, let id, let expression, let revision):
             return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
-        case .dashboardPin(_, let id, let pinned, let revision):
-            return ["desktop", "dashboard", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
-        case .dashboardRename(_, let id, let name, let revision):
+        case .desktopDashboardPin(_, let id, let revision):
+            return ["desktop", "dashboard", "pin", "--revision=\(revision)", "--", id]
+        case .desktopDashboardUnpin(_, let id, let revision):
+            return ["desktop", "dashboard", "unpin", "--revision=\(revision)", "--", id]
+        case .desktopDashboardRename(_, let id, let name, let revision):
             return ["desktop", "dashboard", "rename", "--revision=\(revision)", "--", "query:" + id, name]
-        case .dashboardTile(_, let id, let member, let hidden):
-            return ["desktop", "dashboard", hidden ? "hide" : "show", "query:\(id)/\(member)"]
-        case .dashboardSlots(_, let id, let revision, _):
+        case .desktopDashboardHide(_, let id, let member):
+            return ["desktop", "dashboard", "hide", "query:\(id)/\(member)"]
+        case .desktopDashboardShow(_, let id, let member):
+            return ["desktop", "dashboard", "show", "query:\(id)/\(member)"]
+        case .desktopDashboardSlots(_, let id, let revision, _):
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
-        case .tileMove(_, let board, let member, let destination):
+        case .desktopDashboardMove(_, let board, let member, let destination):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
-        case .paneLayout(_, let work, _): return ["desktop", "layout", work, "--save"]
+        case .desktopLayoutSave(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -487,7 +489,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     /// `lf [--repo <repo>] [--agent <agent>] <command> --prepare --json`.
     private static func prepared(_ agent: String?, _ command: [String], repo: String?) -> [String] {
-        option("--repo", repo) + option("--agent", agent) + command + ["--prepare", "--json"]
+        argument("--repo", repo) + argument("--agent", agent) + command + ["--prepare", "--json"]
     }
 
     /// The `pr` namespace's spellings.
@@ -529,7 +531,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .accountDisconnect(let provider, let email):
             return ["account", "disconnect", Self.accountTarget(provider, email)]
         case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
-            var argv = ["account", "connect", Self.accountTarget(provider, email)] + argument("--chrome-profile", chromeProfile)
+            let argv = ["account", "connect", Self.accountTarget(provider, email)] + argument("--chrome-profile", chromeProfile)
             return argv + Self.flags([("--import", `import`), ("--api-key", apiKey)])
         case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
                          let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
@@ -550,10 +552,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         }
     }
 
-    private static func option(_ flag: String, _ value: String?) -> [String] {
-        argument(flag, value)
-    }
-
     /// The flags that are on, in order.
     private static func flags(_ flags: [(String, Bool)]) -> [String] {
         flags.filter(\.1).map(\.0)
@@ -562,9 +560,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// `lf [--agent] pr <verb> <flags> [--worktree] [--message] [--title] [--body] --json`.
     private static func prArgv(_ verb: String, agent: String?, flags: [(String, Bool)], worktree: String?,
                                message: String?, title: String?, body: String?) -> [String] {
-        var argv = option("--agent", agent) + ["pr", verb] + Self.flags(flags)
-        argv += option("--worktree", worktree) + option("--message", message)
-        argv += option("--title", title) + option("--body", body)
+        var argv = argument("--agent", agent) + ["pr", verb] + Self.flags(flags)
+        argv += argument("--worktree", worktree) + argument("--message", message)
+        argv += argument("--title", title) + argument("--body", body)
         return argv + ["--json"]
     }
 
@@ -576,8 +574,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
-        case .dashboardSlots(_, _, _, let slots): slots
-        case .paneLayout(_, _, let layout): layout
+        case .desktopDashboardSlots(_, _, _, let slots): slots
+        case .desktopLayoutSave(_, _, let layout): layout
         default: nil
         }
     }
@@ -593,10 +591,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
             TaggedFields("task.abandon", ["directory": directory, "issue": issue])
-        case .taskNotes(let directory, let issue, let notes):
+        case .taskUpdate(let directory, let issue, let notes):
             TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
-        case .taskOwnership(let directory, let issue, let claimed):
-            TaggedFields(claimed ? "task.claim" : "task.unassign", ["directory": directory, "issue": issue])
+        case .taskClaim(let directory, let issue):
+            TaggedFields("task.claim", ["directory": directory, "issue": issue])
+        case .taskUnassign(let directory, let issue):
+            TaggedFields("task.unassign", ["directory": directory, "issue": issue])
         case .taskRun(let directory, let issue, let graph, let from, let agent, let approve):
             TaggedFields("task.run", ["directory": directory, "issue": issue, "graph": graph, "from": from, "agent": agent,
                                       "approve": approve])
@@ -634,20 +634,20 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.machine", ["directory": directory, "wave": wave, "machine": machine])
         case .sessionMove(let directory, let blocked, let on, let agent):
             TaggedFields("session.move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
-        case .waveAdd(let directory, let wave, let objective):
+        case .waveCreate(let directory, let wave, let objective):
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
-        case .planningRefresh(let directory, let wave):
+        case .waveSync(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
-        case .wavePlanningBind(let directory, let wave, let project):
+        case .wavePlanBind(let directory, let wave, let project):
             TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project])
-        case .wavePlanningConnect(let directory, let wave, let all, let teamKey, let teamName):
+        case .wavePlanConnect(let directory, let wave, let all, let teamKey, let teamName):
             TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
                                                    "team_key": teamKey, "team_name": teamName])
-        case .wavePlanningReteam(let directory, let apply):
+        case .wavePlanReteam(let directory, let apply):
             TaggedFields("wave.plan.reteam", ["directory": directory, "apply": apply])
         case .graphCustomize(let directory, let name):
             TaggedFields("graph.customize", ["directory": directory, "name": name])
-        case .repositoryRelease(let directory, let version, let target):
+        case .repoRelease(let directory, let version, let target):
             TaggedFields("repo.release", ["directory": directory, "version": version, "target": target])
         case .checkoutCommit(let directory, let message, let push, let noAdd, let paths, let agent):
             TaggedFields("checkout.commit", ["directory": directory, "message": message, "push": push, "no_add": noAdd,
@@ -700,25 +700,27 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .prReconcile(let directory): TaggedFields("pr.reconcile", ["directory": directory])
         case .prRequestReview(let directory, let pr, let reviewers):
             TaggedFields("pr.request_review", ["directory": directory, "pr": pr, "reviewers": reviewers])
-        case .portfolio(let change):
+        case .desktopPortfolioSet(let change):
             TaggedFields("desktop.portfolio.set", ["change": Self.portfolioChange(change)])
-        case .dashboardQuery(let directory, let id, let expression, let revision):
+        case .desktopDashboardQuery(let directory, let id, let expression, let revision):
             TaggedFields("desktop.dashboard.query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])
-        case .dashboardPin(let directory, let id, let pinned, let revision):
-            TaggedFields(pinned ? "desktop.dashboard.pin" : "desktop.dashboard.unpin",
-                         ["directory": directory, "id": id, "revision": revision])
-        case .dashboardRename(let directory, let id, let name, let revision):
+        case .desktopDashboardPin(let directory, let id, let revision):
+            TaggedFields("desktop.dashboard.pin", ["directory": directory, "id": id, "revision": revision])
+        case .desktopDashboardUnpin(let directory, let id, let revision):
+            TaggedFields("desktop.dashboard.unpin", ["directory": directory, "id": id, "revision": revision])
+        case .desktopDashboardRename(let directory, let id, let name, let revision):
             TaggedFields("desktop.dashboard.rename", ["directory": directory, "id": id, "name": name, "revision": revision])
-        case .dashboardTile(let directory, let id, let member, let hidden):
-            TaggedFields(hidden ? "desktop.dashboard.hide" : "desktop.dashboard.show",
-                         ["directory": directory, "id": id, "member": member])
-        case .dashboardSlots(let directory, let id, let revision, let slots):
+        case .desktopDashboardHide(let directory, let id, let member):
+            TaggedFields("desktop.dashboard.hide", ["directory": directory, "id": id, "member": member])
+        case .desktopDashboardShow(let directory, let id, let member):
+            TaggedFields("desktop.dashboard.show", ["directory": directory, "id": id, "member": member])
+        case .desktopDashboardSlots(let directory, let id, let revision, let slots):
             TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
-        case .tileMove(let directory, let board, let member, let destination):
+        case .desktopDashboardMove(let directory, let board, let member, let destination):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
-        case .paneLayout(let directory, let work, let layout):
+        case .desktopLayoutSave(let directory, let work, let layout):
             TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
@@ -806,63 +808,65 @@ public struct RegistryQuery: Sendable {
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
-        try Self.decode(WorkViewPlan.self, from: await serve(.viewPlan(directory: repoPath, expression: expression)))
+        try Self.decode(WorkViewPlan.self, from: await serve(.desktopViewGet(directory: repoPath, expression: expression)))
     }
 
     public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .dashboardQuery(directory: repoPath, id: id, expression: expression, revision: revision)))
+            .desktopDashboardQuery(directory: repoPath, id: id, expression: expression, revision: revision)))
     }
 
     public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .dashboardPin(directory: repoPath, id: id, pinned: pinned, revision: revision)))
+            pinned ? .desktopDashboardPin(directory: repoPath, id: id, revision: revision)
+                : .desktopDashboardUnpin(directory: repoPath, id: id, revision: revision)))
     }
 
     public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .dashboardRename(directory: repoPath, id: id, name: name, revision: revision)))
+            .desktopDashboardRename(directory: repoPath, id: id, name: name, revision: revision)))
     }
 
     /// Hide or show a Dashboard tile in its shared record; hiding keeps its place and mode.
     public func setDashboardTile(id: String, member: WorkWorkspaceKey, hidden: Bool, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .dashboardTile(directory: repoPath, id: id, member: member.selector, hidden: hidden)))
+            hidden ? .desktopDashboardHide(directory: repoPath, id: id, member: member.selector)
+                : .desktopDashboardShow(directory: repoPath, id: id, member: member.selector)))
     }
 
     /// Nil restores the default slot layout.
     public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
         let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
         return try Self.decode(Dashboard.self, from: await write(
-            .dashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
+            .desktopDashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
     }
 
     /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
     /// repository order's drop does; Rust applies the move and decides the mode.
     public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .tileMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
+            .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
     }
 
     /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await write(
-            .tileMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
+            .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
     }
 
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
-        try Self.decode(WorkPaneLayout?.self, from: await serve(.paneLayout(directory: repoPath, work: work)))
+        try Self.decode(WorkPaneLayout?.self, from: await serve(.desktopLayout(directory: repoPath, work: work)))
     }
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
         let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
         return try Self.decode(WorkPaneLayout.self, from: await write(
-            .paneLayout(directory: repoPath, work: layout.work.selector, layout: input)))
+            .desktopLayoutSave(directory: repoPath, work: layout.work.selector, layout: input)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
-        if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.portfolio)) }
-        return try Self.decode(Portfolio.self, from: await write(.portfolio(change: arguments)))
+        if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.desktopPortfolio)) }
+        return try Self.decode(Portfolio.self, from: await write(.desktopPortfolioSet(change: arguments)))
     }
 
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
@@ -953,8 +957,9 @@ public struct RegistryQuery: Sendable {
     public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
         // The request token is opaque and returns byte-exact; identities compare canonically.
         let request = UUID().uuidString
+        let scope = remoteMachine == nil ? ["--repo-id", repository] : []
         let readings = try Self.decode([TaskLocationObservation].self, from: await run(
-            ["task", "location", task, "--request", request, "--json"], nil))
+            scope + ["task", "location", task, "--request", request, "--json"], nil))
         guard readings.count == 1, let reading = readings.first,
               reading.request == request,
               reading.repositoryID == StructuredIdentity.prefixed(repository, "repo_"),
@@ -994,13 +999,13 @@ public struct RegistryQuery: Sendable {
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await serve(.repositoryPath(id: id)).trimmingCharacters(in: .whitespacesAndNewlines)
+        try await serve(.repoPath(id: id)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await serve(.waves)
+        let stdout = try await serve(.waveList)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -1008,21 +1013,21 @@ public struct RegistryQuery: Sendable {
     /// One page of a Wave's closed Tasks, most recently closed first. The
     /// Wave's status carries only its open Tasks.
     public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
-        try Self.decode(ClosedTaskPage.self, from: await serve(.closedTasks(directory: cwd, wave: wave, after: after)))
+        try Self.decode(ClosedTaskPage.self, from: await serve(.taskList(directory: cwd, wave: wave, after: after)))
     }
 
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
         // Without a repository the Wave resolves from `/`, where the app runs.
-        let stdout = try await serve(.waveDetail(directory: cwd ?? "/", wave: wave))
+        let stdout = try await serve(.wavePlan(directory: cwd ?? "/", wave: wave))
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
     /// Refresh one Wave's planning from its provider (Linear, or the
     /// repository's Git planning ref), retrying pending deliveries.
     public func syncPlanning(wave: String, cwd: String) async throws {
-        _ = try await write(.planningRefresh(directory: cwd, wave: wave))
+        _ = try await write(.waveSync(directory: cwd, wave: wave))
     }
 
     /// `lf wave create`: registers the Wave, commits its files on the main checkout and
@@ -1032,7 +1037,7 @@ public struct RegistryQuery: Sendable {
     @discardableResult
     public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> WaveAdded {
         let objective = objective.flatMap { $0.isEmpty ? nil : $0 }
-        return try Self.decode(WaveAdded.self, from: await write(.waveAdd(directory: cwd, wave: name, objective: objective)))
+        return try Self.decode(WaveAdded.self, from: await write(.waveCreate(directory: cwd, wave: name, objective: objective)))
     }
 
     /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
@@ -1048,13 +1053,13 @@ public struct RegistryQuery: Sendable {
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .roadmap(directory: "/", wave: wave, task: nil, all: wave == nil)))
+            .planList(directory: "/", wave: wave, task: nil, all: wave == nil)))
     }
 
     /// Resolve a public Work address through Rust's repository and Work owners.
     /// Reads only: no checkout, Session or window is prepared.
     public func workLink(_ url: URL) async throws -> WorkLink {
-        let links = try Self.decode([WorkLink].self, from: await serve(.workLink(directory: "/", url: url.absoluteString)))
+        let links = try Self.decode([WorkLink].self, from: await serve(.workResolve(directory: "/", url: url.absoluteString)))
         guard let link = links.first, links.count == 1 else {
             throw RegistryQueryError("The Work link did not resolve to one destination.")
         }
@@ -1064,17 +1069,17 @@ public struct RegistryQuery: Sendable {
     /// Without a repository the Task resolves across every repository.
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
         try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .roadmap(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
+            .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
     }
 
     public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
         struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await serve(.planningStatus(directory: cwd))).destinations
+        return try Self.decode(Status.self, from: await serve(.repoPlan(directory: cwd))).destinations
     }
 
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
-        return try Self.decode(MachineIdentity.self, from: await serve(.machineId)).id
+        return try Self.decode(MachineIdentity.self, from: await serve(.machineSelf)).id
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,
@@ -1098,7 +1103,7 @@ public struct RegistryQuery: Sendable {
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
         try Self.decode(WorkActivitySnapshot.self, from: await serve(
-            .history(since: since, limit: limit, wave: wave, project: project, task: task)))
+            .sessionHistory(since: since, limit: limit, wave: wave, project: project, task: task)))
     }
 
     // Task content reads and saves address the Task by issue and run outside its
@@ -1118,20 +1123,20 @@ public struct RegistryQuery: Sendable {
     /// One store-driven reading keeps position, readiness and run history together.
     public func subscribeTask(task: String) async throws -> LineSubscription {
         guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
-        let read = ServedRead.desktopTask(directory: "/", issue: task)
+        let read = ServedRead.taskGet(directory: "/", issue: task)
         return try await observeRead(read.argv + ["--subscribe"], read.cwd)
     }
 
     /// Every selectable Graph with the topology it would capture, via the shared loader.
     public func graphCatalog(cwd: String?) async throws -> [GraphCatalogEntry] {
         // Without a repository the catalog resolves from `/`, where the app runs.
-        let stdout = try await serve(.graphs(directory: cwd ?? "/"))
+        let stdout = try await serve(.graphList(directory: cwd ?? "/"))
         return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
     /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
     public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
-        let stdout = try await serve(.people(directory: cwd ?? "/"))
+        let stdout = try await serve(.repoPeople(directory: cwd ?? "/"))
         return try Self.decode([RepoPerson].self, from: stdout)
     }
 
@@ -1179,7 +1184,7 @@ public struct RegistryQuery: Sendable {
 
     /// Your registered Machines. This Machine appears only when a default names it.
     public func machines() async throws -> [Machine] {
-        try Self.decode([Machine].self, from: await serve(.machines))
+        try Self.decode([Machine].self, from: await serve(.machineList))
     }
 
     /// Move a Task to `machine` through `lf task move --machine`, or set your
@@ -1193,7 +1198,8 @@ public struct RegistryQuery: Sendable {
 
     /// `lf task claim` or `lf task unassign`.
     public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
-        _ = try await write(.taskOwnership(directory: cwd ?? "/", issue: issue, claimed: claimed))
+        _ = try await write(claimed ? .taskClaim(directory: cwd ?? "/", issue: issue)
+                               : .taskUnassign(directory: cwd ?? "/", issue: issue))
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
@@ -1222,7 +1228,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
-        _ = try await write(.taskNotes(directory: cwd, issue: id, notes: text))
+        _ = try await write(.taskUpdate(directory: cwd, issue: id, notes: text))
     }
 
     /// One Task's complete patch, or the patch for a selected changed file.
@@ -1257,7 +1263,7 @@ public struct RegistryQuery: Sendable {
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
         try Self.decode(SessionPage.self, from: await serve(
-            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after)))
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -1348,32 +1354,32 @@ public struct RegistryQuery: Sendable {
         task: String? = nil
     ) async throws -> [SessionHistory] {
         try Self.decode([SessionHistory].self, from: await serve(
-            .usage(days: days, wave: wave, project: project, task: task)))
+            .sessionUsage(days: days, wave: wave, project: project, task: task)))
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
     /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        try Self.decode(CodeNode.self, from: await serve(.tokens(directory: repoPath, days: nil)))
+        try Self.decode(CodeNode.self, from: await serve(.repoTokens(directory: repoPath, days: nil)))
     }
 
     /// How big the codebase was on each day it changed. Mirrors Rust
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        try Self.decode([CodeSnapshot].self, from: await serve(.tokens(directory: repoPath, days: days)))
+        try Self.decode([CodeSnapshot].self, from: await serve(.repoTokens(directory: repoPath, days: days)))
     }
 
     /// How much Session history providers still keep, and what they remove next.
     /// Mirrors Rust `RetentionSummary`.
     public func retention() async throws -> RetentionSummary {
-        try Self.decode(RetentionSummary.self, from: await serve(.retention))
+        try Self.decode(RetentionSummary.self, from: await serve(.sessionRetention))
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
     public func doctor() async throws -> DoctorReport {
-        try Self.decode(DoctorReport.self, from: await serve(.doctor))
+        try Self.decode(DoctorReport.self, from: await serve(.machineDoctor))
     }
 
     /// Decode retained wire text through the decoder live reads use.

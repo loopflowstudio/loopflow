@@ -80,6 +80,36 @@ fn json(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn task_location_uses_the_named_plan_outside_a_checkout() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let repository = json(&lf(home.path(), repo.path(), None, &["repo", "--json"]));
+    let repository = repository["id"].as_str().unwrap();
+    let reading = json(&lf(
+        home.path(),
+        elsewhere.path(),
+        None,
+        &[
+            "--repo-id",
+            repository,
+            "task",
+            "location",
+            registered.task.id.as_str(),
+            "--request",
+            "desktop-reconnect",
+            "--json",
+        ],
+    ));
+    assert_eq!(reading[0]["repository_id"], repository);
+    assert_eq!(reading[0]["task_id"], registered.task.id.as_str());
+    assert_eq!(reading[0]["request"], "desktop-reconnect");
+    assert_eq!(reading[0]["location"]["state"], "recorded");
+}
+
 fn folder(path: &Path) -> String {
     path.file_name().unwrap().to_string_lossy().into_owned()
 }
@@ -853,8 +883,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         "a live conversation never gets a second terminal"
     );
 
-    // Desktop receives the batch in one request. Here the final item, an
-    // exact secondary Session, cannot open there, so nothing activates Desktop.
+    // Desktop receives both Work and exact taskless Session addresses.
     if cfg!(target_os = "macos") {
         // A caller inside a Desktop addresses that Desktop by id; nothing here
         // is installed, so the Machine's own Loopflow.app never answers.
@@ -873,11 +902,14 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
             .iter()
             .map(|receipt| receipt["status"].as_str().unwrap())
             .collect();
-        assert_eq!(statuses, ["opening", "failed"], "{report}");
+        assert_eq!(statuses, ["opening", "opening"], "{report}");
         assert_eq!(
             std::fs::read_to_string(opened).unwrap(),
-            format!("-b com.loopflow.mac.test -g {task_url}\n"),
-            "one background request"
+            format!(
+                "-b com.loopflow.mac.test {task_url} {}\n",
+                side["url"].as_str().unwrap()
+            ),
+            "one request focuses the final conversation"
         );
     }
 }
@@ -1961,6 +1993,65 @@ esac
         .unwrap();
     assert_eq!(retained, (origin, token));
     assert_eq!(sessions(home.path()), 1);
+}
+
+#[test]
+fn rex_agent_without_a_current_viewer_opens_on_the_local_server() {
+    use std::os::unix::process::CommandExt;
+
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let provider = NativeServer(
+        Command::new("/bin/sleep")
+            .arg("3600")
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Detached caller",
+        1,
+        0,
+    );
+    let caller = agent_caller_env(home.path(), &session);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute("UPDATE processes SET terminal_id=NULL", [])
+        .unwrap();
+    rex_peer(bin.path());
+    let report = json(&lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[
+            ("LF_AGENT_CALLER", &caller),
+            ("REX_SERVER", "unix:///stale"),
+            ("REX_SESSION", "session:stale"),
+            ("REX_BLOCK", "block:stale"),
+        ],
+        &[
+            "open",
+            "--task",
+            "INF-123",
+            "--host",
+            "rex",
+            "--no-focus",
+            "--json",
+        ],
+    ));
+    assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+    assert_eq!(report["receipts"][0]["destination"], "window:fixture");
+    assert!(bin.path().join("session.create.requests").exists());
+    assert!(
+        !bin.path().join("session.view.requests").exists(),
+        "no stale block is inspected"
+    );
 }
 
 /// Make `session` the primary conversation of `wave`.

@@ -110,7 +110,8 @@ the Dashboard leaves. A board's other pages wait: past the bound, a tile opens w
 page turns up or it is selected, and a tile that leaves returns to the bound.
 Repository and Wave conversations stay warm beside that bound.
 Return lands at the bottom. Older conversations reconnect or resume the same
-provider history automatically. After relaunch, the saved selected Work opens
+provider history automatically. `lf open --session <ID> --host desktop`
+opens the exact conversation, including repository and Wave conversations without a Task. After relaunch, the saved selected Work opens
 first, then the bounded warm set reconnects with at most two preparations at once.
 Fresh completion and recorded Machine/checkout evidence must arrive before
 background retention. Close removes warm intent; refresh does not reopen it, and a
@@ -132,6 +133,10 @@ in control until clicked. Close and eviction discard late opening results.
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
+
+Session panes watch their relay's connection-status mailbox for changes.
+Quiet mailboxes schedule no reads, including in retained hidden panes. Closing
+a pane stops observation and removes its mailbox.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
@@ -255,10 +260,16 @@ local uncommitted edits stay in Files.
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
-**Reset session** starts a fresh primary conversation/process from current Work
-instructions, without replaying the previous conversation; its history remains
-available. Reset preserves the previous terminal and client. Provider switching
-first reads its saved history, then replaces the current provider process. If the
+**Refresh session** reconnects the pane to that conversation, including after a
+failed launch or stale connection. It keeps the provider's history and running
+process; a conversation open elsewhere still offers **Take back**. The control
+stays visible when the Session is the only pane. The same action is available
+through `lf desktop do refresh-session -p session`. **Take back** transfers input
+from another terminal; `lf desktop do take-back-session -p session` uses the same
+action.
+**Reset session** starts a fresh provider thread in the same Session, seeded with
+its saved conversation. Reset and provider switching first read that history,
+then replace the current provider process. If the
 provider has not saved a transcript yet, the current terminal stays open; finish
 its first turn and retry the switch. A failed status observer reconnects on the
 next status event without replacing the conversation.
@@ -1089,6 +1100,21 @@ On a pull request the Swift tests get 5 minutes after the build (161 s on
 2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
 the suite slower fails on its own PR: make the slow test fast or share its setup,
 and raise the budget only with a measured reason.
+
+After the tests, `swift-test` launches the debug app it built and waits for it
+to quit, the same check the release package runs:
+
+```bash
+uv run python scripts/check_desktop_launch.py   # launch, snapshot, quit within 30 s
+```
+
+It runs `LoopflowMac -ui-test-mode empty-workspaces` with the snapshot
+environment, unattended like the rest of the job. Passing means the app wrote a
+non-empty snapshot and exited 0. If the app is still running after 30 s, the check
+samples it, kills its process group and fails with the app's output and the
+sampled stacks, so a hang at launch or quit fails on its own PR
+instead of in `Packages (main)` after merge. Read the stack first: it names the
+frame the app is waiting in (for #1811's hang, `uiTestSnapshot`).
 
 Failed Swift CI runs write the unfinished and slowest tests to the job summary
 (`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`

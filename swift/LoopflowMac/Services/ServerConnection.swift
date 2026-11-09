@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Loopflow
 
@@ -28,44 +29,56 @@ struct ServerConnectionReading: Decodable, Equatable {
 
 @MainActor
 final class ServerConnection {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lf-view-" + UUID().uuidString)
-    private var statusURL: URL { directory.appendingPathComponent("status.json") }
-    var path: String { statusURL.path }
+    private let mailbox = Mailbox()
+    var directory: URL { mailbox.directory }
+    var path: String { directory.appendingPathComponent("status.json").path }
     private(set) var reading = ServerConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil, transition: nil)
-    private var observation: Task<Void, Never>?
     private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var pendingMove: UInt64?
 
     func start(changed: @escaping @MainActor (ServerConnectionReading) -> Void) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
-        self.changed = changed
-        changed(reading)
-        observation = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                if let data = FileManager.default.contents(atPath: path),
-                   let next = try? JSONDecoder().decode(ServerConnectionReading.self, from: data),
-                   pendingMove.map({ next.generation > $0 }) ?? true,
-                   next != reading {
-                    pendingMove = nil
-                    reading = next
-                    changed(next)
-                }
-                try? await Task.sleep(for: .milliseconds(100))
-            }
+        let fd = open(directory.path, O_EVTONLY | O_CLOEXEC)
+        guard fd >= 0 else {
+            let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            mailbox.stop()
+            throw error
         }
+        // The relay replaces status.json atomically, so watch its parent inode.
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: .write, queue: .main)
+        mailbox.source = source
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.readStatus() }
+        }
+        source.setCancelHandler { close(fd) }
+        self.changed = changed
+        source.resume()
+        changed(reading)
+        readStatus()
+    }
+
+    private func readStatus() {
+        guard mailbox.source != nil,
+              let data = FileManager.default.contents(atPath: path),
+              let next = try? JSONDecoder().decode(ServerConnectionReading.self, from: data),
+              pendingMove.map({ next.generation > $0 }) ?? true,
+              next != reading else { return }
+        pendingMove = nil
+        reading = next
+        changed?(next)
     }
 
     func retry() {
-        guard observation != nil, reading.state == .unavailable else { return }
-        try? Data().write(to: statusURL.deletingPathExtension().appendingPathExtension("retry"), options: .atomic)
+        guard mailbox.source != nil, reading.state == .unavailable else { return }
+        try? Data().write(to: directory.appendingPathComponent("status.retry"), options: .atomic)
     }
 
     func moveHere() {
-        guard observation != nil, reading.canMoveHere else { return }
+        guard mailbox.source != nil, reading.canMoveHere else { return }
         do {
-            let action = statusURL.deletingPathExtension().appendingPathExtension("move")
+            let action = directory.appendingPathComponent("status.move")
             try JSONEncoder().encode(reading.generation).write(to: action, options: .atomic)
             pendingMove = reading.generation
             reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, message: nil, transition: nil)
@@ -76,18 +89,31 @@ final class ServerConnection {
     }
 
     func stop() {
-        observation?.cancel()
-        observation = nil
+        mailbox.stop()
         pendingMove = nil
         changed = nil
-        // Remove the mailbox address atomically before deleting its contents;
-        // the relay may still be publishing a status file as the pane closes.
-        let closed = directory.appendingPathExtension("closed")
-        do {
-            try FileManager.default.moveItem(at: directory, to: closed)
-            try FileManager.default.removeItem(at: closed)
-        } catch {
-            // Repeated stop has no mailbox left to remove.
+    }
+
+    // Mutated on the main actor; cancellation and cleanup can also run on the
+    // thread that releases the last owner, without an actor-isolated deinit.
+    private final class Mailbox {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("lf-view-" + UUID().uuidString)
+        var source: DispatchSourceFileSystemObject?
+
+        func stop() {
+            source?.cancel()
+            source = nil
+            // Remove the address before its contents: the relay can still be
+            // publishing as the pane closes.
+            let closed = directory.appendingPathExtension("closed")
+            do {
+                try FileManager.default.moveItem(at: directory, to: closed)
+                try FileManager.default.removeItem(at: closed)
+            } catch {
+                // Repeated stop has no mailbox left to remove.
+            }
         }
+
+        deinit { stop() }
     }
 }

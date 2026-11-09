@@ -482,6 +482,14 @@ final class SessionsWorkspaceRegistry {
         if let sessions { openWarmConversations(store: sessions) }
     }
 
+    func refreshSession(_ id: String) async {
+        await sessions?.refresh(id)
+    }
+
+    func takeBackSession(_ id: String) async {
+        await sessions?.moveHere(id)
+    }
+
     func evict(_ key: WorkWorkspaceKey) {
         recentTasks.removeAll { $0 == key }
         releasedTasks.insert(key)
@@ -1280,6 +1288,13 @@ final class SessionsStore {
 
     func moveHere(_ id: String) async {
         await prepare(id, intent: .resume)
+    }
+
+    /// Replace this pane's viewer and read the same conversation again. A
+    /// provider running in another terminal remains there until Take back.
+    func refresh(_ id: String) async {
+        release(id)
+        await select(id)
     }
 
     @discardableResult

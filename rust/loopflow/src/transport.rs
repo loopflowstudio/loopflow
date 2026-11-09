@@ -476,20 +476,34 @@ impl Spool {
 #[derive(Debug)]
 enum Connection {
     Open(UnixStream),
+    /// The peer stopped reading; its frames still queued are read out until
+    /// end of stream, and nothing more is written.
+    Draining(UnixStream),
     /// Lost at this instant; the stream waits for a resume until `GRACE` passes.
     Dropped(Instant),
 }
 
 impl Connection {
-    fn open(&mut self) -> Option<&mut UnixStream> {
+    fn writable(&mut self) -> Option<&mut UnixStream> {
         match self {
             Self::Open(socket) => Some(socket),
+            Self::Draining(_) | Self::Dropped(_) => None,
+        }
+    }
+
+    fn readable(&mut self) -> Option<&mut UnixStream> {
+        match self {
+            Self::Open(socket) | Self::Draining(socket) => Some(socket),
             Self::Dropped(_) => None,
         }
     }
 
     fn is_open(&self) -> bool {
         matches!(self, Self::Open(_))
+    }
+
+    fn is_dropped(&self) -> bool {
+        matches!(self, Self::Dropped(_))
     }
 
     fn expired(&self) -> bool {
@@ -555,7 +569,7 @@ impl Viewer {
     }
 
     fn live(&self) -> bool {
-        self.attached && self.connection.is_open() && !self.leaving
+        self.attached && !self.connection.is_dropped() && !self.leaving
     }
 
     fn expire_heartbeat(&mut self, now: SystemTime) {
@@ -615,8 +629,29 @@ impl Viewer {
         }
     }
 
+    /// Write queued frames. A peer that stopped reading may still have sent
+    /// input, so its connection drains instead of failing.
     fn flush(&mut self) -> io::Result<()> {
-        let Some(socket) = self.connection.open() else {
+        match self.write_output() {
+            Err(error) if lost(&error) => {
+                tracing::debug!(%error, viewer = %self.id, "viewer stopped reading; draining its input");
+                self.output.clear();
+                self.connection = match std::mem::replace(
+                    &mut self.connection,
+                    Connection::Dropped(Instant::now()),
+                ) {
+                    Connection::Open(socket) => Connection::Draining(socket),
+                    other => other,
+                };
+                Ok(())
+            }
+            written => written,
+        }
+    }
+
+    fn write_output(&mut self) -> io::Result<()> {
+        let Some(socket) = self.connection.writable() else {
+            self.output.clear();
             return Ok(());
         };
         while !self.output.is_empty() {
@@ -634,7 +669,7 @@ impl Viewer {
 
     /// Read into the frame decoder; a closed connection is `UnexpectedEof`.
     fn read(&mut self) -> io::Result<()> {
-        let Some(socket) = self.connection.open() else {
+        let Some(socket) = self.connection.readable() else {
             return Ok(());
         };
         let mut bytes = [0; 8192];
@@ -678,18 +713,21 @@ impl Viewer {
 /// Whether a viewer whose connection failed stays for a resume: only a lost
 /// connection qualifies, never a protocol error or a viewer that fell behind.
 fn survive(viewer: &mut Viewer, error: &io::Error) -> bool {
-    let lost = matches!(
+    if lost(error) && viewer.live() {
+        viewer.drop_connection();
+        return true;
+    }
+    false
+}
+
+fn lost(error: &io::Error) -> bool {
+    matches!(
         error.kind(),
         io::ErrorKind::UnexpectedEof
             | io::ErrorKind::BrokenPipe
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::ConnectionAborted
-    );
-    if lost && viewer.live() {
-        viewer.drop_connection();
-        return true;
-    }
-    false
+    )
 }
 
 /// Whether a viewer stays after a stream write.
@@ -950,6 +988,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut execution_directory_reported = false;
     let mut planning = None;
+    let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
     loop {
         #[cfg(test)]
         input_retry_tests::poll();
@@ -1188,13 +1227,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let _ = viewers[index].flush();
                 continue;
             };
+            viewers[index].leaving = true;
+            // A resuming peer that already closed has nothing to continue on.
             let Connection::Open(socket) = std::mem::replace(
                 &mut viewers[index].connection,
                 Connection::Dropped(Instant::now()),
             ) else {
-                unreachable!("a resuming connection is open")
+                continue;
             };
-            viewers[index].leaving = true;
             let viewer = &mut viewers[target];
             viewer.size = dimensions(resume.rows, resume.cols);
             size_change |= ownership.held_by(viewer);
@@ -1309,6 +1349,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             .any(|v| v.token.is_some() && v.token == control);
         if detached {
             control = None;
+        }
+        if let Some(name) = title.as_mut().and_then(|title| title.tick()) {
+            output.title(&name);
         }
         if let Some(input) = input.as_mut() {
             // Typing at an idle shell prompt is not an agent draft: retain only
@@ -1554,16 +1597,17 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             .iter()
             .filter_map(|viewer| match viewer.connection {
                 Connection::Dropped(at) => Some(at + GRACE),
-                Connection::Open(_) if viewer.live() => Some(
+                Connection::Open(_) | Connection::Draining(_) if viewer.live() => Some(
                     Instant::now()
                         + HEARTBEAT_TIMEOUT
                             .saturating_sub(viewer.heartbeat_at.elapsed().unwrap_or_default()),
                 ),
-                Connection::Open(_) => None,
+                Connection::Open(_) | Connection::Draining(_) => None,
             })
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(pending_input.retry_at())
+            .chain(title.as_ref().map(|title| title.deadline()))
             .chain(settling.as_ref().and_then(Settling::deadline))
             .min();
         wait_for_activity(
@@ -1625,13 +1669,13 @@ fn wait_for_activity(
         pollfd(wake.as_raw_fd(), libc::POLLIN),
     ];
     for viewer in viewers {
-        let Connection::Open(socket) = &viewer.connection else {
-            continue;
+        let (socket, events) = match &viewer.connection {
+            Connection::Open(socket) if !viewer.output.is_empty() => {
+                (socket, libc::POLLIN | libc::POLLOUT)
+            }
+            Connection::Open(socket) | Connection::Draining(socket) => (socket, libc::POLLIN),
+            Connection::Dropped(_) => continue,
         };
-        let mut events = libc::POLLIN;
-        if !viewer.output.is_empty() {
-            events |= libc::POLLOUT;
-        }
         fds.push(pollfd(socket.as_raw_fd(), events));
     }
     for (_, reader) in readers {
@@ -1740,10 +1784,15 @@ fn deliver(
     }
     let replies = output.process(stream, bytes, detached);
     pending_input.push(&replies);
+    let reports = output.take_reports();
     viewers.retain_mut(|viewer| {
         !viewer.attached || {
             let written = viewer
                 .stream(Tag::stream(stream), bytes)
+                .and_then(|()| match &reports {
+                    Some(reports) => viewer.stream(Tag::Out, reports),
+                    None => Ok(()),
+                })
                 .and_then(|()| viewer.flush());
             keep(viewer, written)
         }

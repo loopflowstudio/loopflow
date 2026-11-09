@@ -411,7 +411,7 @@ struct SessionPaneView: View {
         return sessions.sessions.first { $0.id == id }
     }
 
-    private var showsStrip: Bool { (store.visibleLayout?.allPanes.count ?? 0) > 1 }
+    private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) > 1 }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -494,8 +494,19 @@ struct SessionPaneView: View {
             .disabled(changingSession)
             .help("Choose this Session's agent or open a companion pane\n\(programHeading.detail)")
             .accessibilityIdentifier("pane-program-\(pane.id)")
+            if let item {
+                stripButton("arrow.clockwise", label: "Refresh session", id: "pane-refresh-session",
+                    help: "Reconnect this pane to the existing conversation.",
+                    disabled: changingSession) {
+                    changingSession = true
+                    Task { @MainActor in
+                        defer { changingSession = false }
+                        await sessions.refresh(item.id)
+                    }
+                }
+            }
             if let session = primarySession {
-                stripButton("arrow.clockwise", label: "Reset session", id: "pane-reset-session",
+                stripButton("plus.bubble", label: "Reset session", id: "pane-reset-session",
                     help: "Start fresh with current Work context. Keeps history; discards unsent input.",
                     disabled: changingSession) { changeSession(session, agent: nil) }
             }

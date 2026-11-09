@@ -130,7 +130,7 @@ public enum ServerOperation: Encodable, Sendable {
     case submittedCreation(JSONValue)
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
-    case attach(session: String, owner: String?)
+    case sessionAttach(session: String, owner: String?)
 
     private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id" }
     public func encode(to encoder: Encoder) throws {
@@ -139,7 +139,7 @@ public enum ServerOperation: Encodable, Sendable {
         case .command(let change): try change.encode(to: encoder)
         case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
-        case .attach(let session, let owner):
+        case .sessionAttach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
@@ -152,38 +152,32 @@ public enum ServerOperation: Encodable, Sendable {
 /// A destination is the Rust `config::files::Destination` as JSON: an owner,
 /// never a file plus a scope. Mirrors `Read::Config*` and `Write::Config*`.
 public enum ConfigOperation: Encodable, Sendable {
-    case catalog
-    case get(destination: JSONValue, key: String)
-    case explain(destination: JSONValue, key: String)
+    case configCatalog
+    case configGet(destination: JSONValue, key: String)
+    case configExplain(destination: JSONValue, key: String)
     /// `value` is YAML.
-    case set(destination: JSONValue, key: String, value: String)
-    case unset(destination: JSONValue, key: String)
+    case configSet(destination: JSONValue, key: String, value: String)
+    case configUnset(destination: JSONValue, key: String)
     /// Appearance's theme file: set to `value`, or read when nil.
-    case theme(path: String, value: String?)
+    case configTheme(path: String, value: String?)
 
-    private enum Keys: String, CodingKey { case kind, destination, key, value, path }
     public func encode(to encoder: Encoder) throws {
-        var box = encoder.container(keyedBy: Keys.self)
+        try tagged.encode(to: encoder, tag: "kind")
+    }
+
+    private var tagged: TaggedFields {
         switch self {
-        case .catalog: try box.encode("config.catalog", forKey: .kind)
-        case .get(let destination, let key), .explain(let destination, let key), .unset(let destination, let key):
-            let kind = switch self {
-            case .get: "config.get"
-            case .explain: "config.explain"
-            default: "config.unset"
-            }
-            try box.encode(kind, forKey: .kind)
-            try box.encode(destination, forKey: .destination)
-            try box.encode(key, forKey: .key)
-        case .set(let destination, let key, let value):
-            try box.encode("config.set", forKey: .kind)
-            try box.encode(destination, forKey: .destination)
-            try box.encode(key, forKey: .key)
-            try box.encode(value, forKey: .value)
-        case .theme(let path, let value):
-            try box.encode("config.theme", forKey: .kind)
-            try box.encode(path, forKey: .path)
-            try box.encode(value, forKey: .value)
+        case .configCatalog: TaggedFields("config.catalog")
+        case .configGet(let destination, let key):
+            TaggedFields("config.get", ["destination": destination, "key": key])
+        case .configExplain(let destination, let key):
+            TaggedFields("config.explain", ["destination": destination, "key": key])
+        case .configSet(let destination, let key, let value):
+            TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
+        case .configUnset(let destination, let key):
+            TaggedFields("config.unset", ["destination": destination, "key": key])
+        case .configTheme(let path, let value):
+            TaggedFields("config.theme", ["path": path, "value": value])
         }
     }
 }

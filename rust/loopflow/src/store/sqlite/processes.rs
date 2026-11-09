@@ -1435,7 +1435,8 @@ impl SqliteStore {
                 now, payload.to_string()],
             |row| row.get(0),
         )?;
-        // Ordinary disposable conversations retire on an observed exit. Primary
+        // A departure continues the Session elsewhere; only an exit without a
+        // destination retires an ordinary disposable conversation. Primary
         // conversations, Wave conversations, Task work and Graph reviews stay open.
         tx.execute(
             &format!(
@@ -1443,11 +1444,11 @@ impl SqliteStore {
              AND s.completed_at IS NULL AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL
              AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
-             AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
+             AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted') AND ?4",
                 super::sessions::SESSION_GRAPH,
                 super::task_work::session_tasks("s")
             ),
-            params![session, now, outcome],
+            params![session, now, outcome, departure.is_none()],
         )?;
         tx.execute(
             "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,

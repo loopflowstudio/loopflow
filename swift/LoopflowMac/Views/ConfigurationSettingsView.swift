@@ -63,7 +63,7 @@ struct ConfigurationSettingsView: View {
         .onChange(of: wave) { _, _ in resetSelection() }
         .onChange(of: key) { _, _ in resetSelection() }
         .task {
-            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: await ServerClient.configuration(.catalog)); await load() }
+            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: await ServerClient.configuration(.configCatalog)); await load() }
             catch { notice = error.localizedDescription }
         }
     }
@@ -90,7 +90,7 @@ struct ConfigurationSettingsView: View {
     private func load() async {
         let selection = selectionID
         do {
-            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(.get(destination: address, key: key)))
+            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(.configGet(destination: address, key: key)))
             guard selection == selectionID else { return }
             locator = result.path
             if result.value != .null {
@@ -107,7 +107,7 @@ struct ConfigurationSettingsView: View {
         defer { saving = false }
         do {
             let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(
-                unset ? .unset(destination: address, key: key) : .set(destination: address, key: key, value: value)))
+                unset ? .configUnset(destination: address, key: key) : .configSet(destination: address, key: key, value: value)))
             locator = result.path
             if unset { value = "" }
             notice = "\(unset ? "Removed declaration from" : "Saved to") \(result.path) · \(result.lifecycle.replacingOccurrences(of: "_", with: " "))"
@@ -119,7 +119,7 @@ struct ConfigurationSettingsView: View {
         let selection = selectionID
         explanation = ""
         do {
-            let data = try await ServerClient.configuration(.explain(destination: address, key: key))
+            let data = try await ServerClient.configuration(.configExplain(destination: address, key: key))
             let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
             guard selection == selectionID else { return }
             locator = result.path

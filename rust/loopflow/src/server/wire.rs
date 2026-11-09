@@ -48,6 +48,8 @@ pub enum ClientMessage {
         id: String,
         operation: Read,
         select: Option<Vec<String>>,
+        /// The last applied reading's opaque checkpoint; null starts fresh.
+        resume: Option<String>,
     },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
@@ -138,6 +140,8 @@ pub enum ServerMessage {
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
         id: String,
+        /// Resume this reading on another connection to the same server.
+        checkpoint: String,
         #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
@@ -326,7 +330,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":2,"min_revision":2}"#
+            r#"{"type":"hello","revision":3,"min_revision":3}"#
         )
         .is_err());
         assert!(

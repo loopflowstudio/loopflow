@@ -509,7 +509,7 @@ async fn session(
                 };
                 let (id, admission) = match message {
                     ClientMessage::Request { id, operation, select } => (id, Admission::Request(operation, select)),
-                    ClientMessage::Subscribe { id, operation, select } => (id, Admission::Subscribe(operation, select)),
+                    ClientMessage::Subscribe { id, operation, select, resume } => (id, Admission::Subscribe(operation, select, resume)),
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
@@ -583,9 +583,9 @@ async fn session(
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
                         continue;
                     }
-                    Admission::Subscribe(query, select) => {
+                    Admission::Subscribe(query, select, resume) => {
                         let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscribing(id.clone(), query, select, outgoing.clone(), inbox, slot));
+                        let task = tasks.spawn(subscribing(id.clone(), query, select, resume, instance.clone(), outgoing.clone(), inbox, slot));
                         Inflight { task, checkpoints: Some(checkpoints) }
                     }
                     Admission::Request(operation, select) => {
@@ -629,7 +629,7 @@ async fn session(
 /// What a request or subscription asks the session to start.
 enum Admission {
     Request(Operation, Option<Vec<String>>),
-    Subscribe(Read, Option<Vec<String>>),
+    Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
 /// The owner `session.attach` reaches: the Session's current owner Process,
@@ -869,16 +869,29 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn subscribing(
     id: String,
     query: Read,
     select: Option<Vec<String>>,
+    resume: Option<String>,
+    instance: Arc<str>,
     outgoing: Outbox,
     checkpoints: mpsc::Receiver<u64>,
     slot: tokio::sync::OwnedSemaphorePermit,
 ) {
     let slot = Arc::new(slot);
-    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints, slot.clone()).await
+    if let Err(failure) = subscribe(
+        &id,
+        query,
+        select,
+        resume,
+        &instance,
+        &outgoing,
+        checkpoints,
+        slot.clone(),
+    )
+    .await
     {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
@@ -890,10 +903,13 @@ async fn subscribing(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn subscribe(
     id: &str,
     query: Read,
     select: Option<Vec<String>>,
+    mut resume: Option<String>,
+    instance: &str,
     outgoing: &Outbox,
     mut checkpoints: mpsc::Receiver<u64>,
     slot: Arc<tokio::sync::OwnedSemaphorePermit>,
@@ -901,6 +917,7 @@ async fn subscribe(
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
+    let scope = serde_json::to_vec(&(instance, &query, &select))?;
     let reservation = outgoing.wait().await?;
     let held = (reservation.clone(), slot.clone());
     let subscription = tokio::task::spawn_blocking(move || {
@@ -938,7 +955,12 @@ async fn subscribe(
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
                     let last = ends.ends_after(&frame["body"]);
-                    outgoing.deliver(ServerMessage::Reading { id: id.into(), frame }, reservation).await?;
+                    let checkpoint = reading_checkpoint(&scope, &frame)?;
+                    let unchanged = resume.take().as_ref() == Some(&checkpoint)
+                        && frame["answers"].is_null() && reason.is_none();
+                    if !unchanged {
+                        outgoing.deliver(ServerMessage::Reading { id: id.into(), checkpoint, frame }, reservation).await?;
+                    }
                     if last {
                         return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
                     }
@@ -957,6 +979,18 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
         Error::new(ErrorCode::Busy, "server capacity reached; retry shortly")
             .with(serde_json::json!({ "limit": limit, "max": max })),
     )
+}
+
+/// A checkpoint identifies the selected reading in this server incarnation.
+/// Recomputing it needs no retained payloads or disconnected subscriptions.
+fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let reading =
+        crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let mut hash = Sha256::new();
+    hash.update(scope);
+    hash.update(reading);
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
@@ -1205,6 +1239,7 @@ mod tests {
                             id: n.to_string(),
                             operation: Read::ProcessList,
                             select: None,
+                            resume: None,
                         }
                     };
                     let mut line = serde_json::to_vec(&message).unwrap();
@@ -1267,8 +1302,9 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
-                if let ServerMessage::Reading { id: actual, frame } =
-                    serde_json::from_str(&line).unwrap()
+                if let ServerMessage::Reading {
+                    id: actual, frame, ..
+                } = serde_json::from_str(&line).unwrap()
                 {
                     if actual == id && frame["answers"] == 42 {
                         break;
@@ -1389,6 +1425,148 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_resumes_an_unchanged_watch_without_a_complete_reading() {
+        with_empty_home(async {
+            let mut first = Client::connect();
+            first.hello(REVISION, REVISION).await;
+            first
+                .send(&ClientMessage::Subscribe {
+                    id: "first".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                    resume: None,
+                })
+                .await;
+            assert!(matches!(
+                first.receive().await.unwrap(),
+                ServerMessage::Response { .. }
+            ));
+            let ServerMessage::Reading {
+                checkpoint, frame, ..
+            } = first.receive().await.unwrap()
+            else {
+                panic!("expected the baseline");
+            };
+            assert!(frame["unavailable"].is_null());
+            // Lose the actual socket while its watch is live.
+            drop(first.writer);
+            drop(first.reader);
+            first.server.await.unwrap().unwrap();
+
+            let mut next = Client::connect();
+            next.hello(REVISION, REVISION).await;
+            next.send(&ClientMessage::Subscribe {
+                id: "new-id".into(),
+                operation: Read::ProcessList,
+                select: None,
+                resume: Some(checkpoint.clone()),
+            })
+            .await;
+            assert!(matches!(
+                next.receive().await.unwrap(),
+                ServerMessage::Response { .. }
+            ));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), next.receive())
+                    .await
+                    .is_err(),
+                "an unchanged watch must not resend its baseline"
+            );
+            // It is still live and answers an explicit confirmation, unchanged or not.
+            next.send(&ClientMessage::Checkpoint {
+                id: "new-id".into(),
+                checkpoint: 7,
+            })
+            .await;
+            let ServerMessage::Reading {
+                checkpoint: confirmed,
+                frame,
+                ..
+            } = next.receive().await.unwrap()
+            else {
+                panic!("expected the confirmation");
+            };
+            assert_eq!(frame["answers"], 7);
+            assert_eq!(confirmed, checkpoint);
+
+            for (id, resume, select) in [
+                ("unknown", Some("unknown".to_owned()), None),
+                ("fresh", None, None),
+                (
+                    "changed-selection",
+                    Some(checkpoint),
+                    Some(vec!["absent".into()]),
+                ),
+            ] {
+                next.send(&ClientMessage::Subscribe {
+                    id: id.into(),
+                    operation: Read::ProcessList,
+                    select,
+                    resume,
+                })
+                .await;
+                assert!(matches!(
+                    next.receive().await.unwrap(),
+                    ServerMessage::Response { .. }
+                ));
+                assert!(
+                    matches!(next.receive().await.unwrap(), ServerMessage::Reading { id: of, .. } if of == id)
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn resume_checkpoint_tracks_the_read_selection_and_server_incarnation() {
+        let query = Read::SessionList {
+            directory: "/repo".into(),
+            headless: false,
+            after: None,
+            limit: None,
+        };
+        let scope = |instance, query: &Read, select: Option<Vec<&str>>| {
+            serde_json::to_vec(&(instance, query, select)).unwrap()
+        };
+        let original = scope("first-server", &query, None);
+        let frame = |title, at, answers| {
+            serde_json::json!({
+                "body": [{"title": title, "condition": {"observed_at": at}}],
+                "unavailable": null, "answers": answers,
+            })
+        };
+        let baseline =
+            super::reading_checkpoint(&original, &frame("first", 1, None::<u64>)).unwrap();
+        assert_eq!(
+            baseline,
+            super::reading_checkpoint(&original, &frame("first", 2, Some(7))).unwrap()
+        );
+        assert_ne!(
+            baseline,
+            super::reading_checkpoint(&original, &frame("changed", 1, None)).unwrap()
+        );
+        for changed in [
+            scope("restarted-server", &query, None),
+            scope("first-server", &Read::ProcessList, None),
+            scope(
+                "first-server",
+                &Read::SessionList {
+                    directory: "/another".into(),
+                    headless: false,
+                    after: None,
+                    limit: None,
+                },
+                None,
+            ),
+            scope("first-server", &query, Some(vec!["title"])),
+        ] {
+            assert_ne!(
+                baseline,
+                super::reading_checkpoint(&changed, &frame("first", 1, None)).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn cancel_ends_a_subscription_while_a_sibling_request_answers() {
         with_empty_home(async {
             let mut client = Client::connect();
@@ -1401,6 +1579,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::ProcessList,
+                    resume: None,
                     select: None,
                 })
                 .await;
@@ -1408,7 +1587,7 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, result: serde_json::Value::Null, .. } if id == "ps"
             ));
-            let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
+            let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap() else {
                 panic!("expected the first reading")
             };
             assert_eq!(id, "ps");
@@ -1555,6 +1734,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::ProcessList,
+                    resume: None,
                     select: Some(vec!["absent".into()]),
                 })
                 .await;

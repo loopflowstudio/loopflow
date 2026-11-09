@@ -131,11 +131,7 @@ impl Rex {
                         .resolve()?,
                 ),
                 Some(_) => None,
-                None if super::in_rex() => {
-                    anyhow::ensure!(
-                        crate::journal::agent_caller().is_none(),
-                        "Current conversation viewer is unavailable; refusing stale Rex startup placement"
-                    );
+                None if super::in_rex() && crate::journal::agent_caller().is_none() => {
                     Some(RexLocation::current()?)
                 }
                 None => None,

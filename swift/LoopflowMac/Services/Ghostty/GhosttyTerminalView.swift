@@ -1117,7 +1117,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard connectionAcceptsInput else { return }
+        // Ghostty uses a key to dismiss an exited child. An ended relay no
+        // longer accepts input, but must still let that local close happen.
+        let exited = surface.map { ghostty_surface_process_exited($0) } ?? false
+        guard connectionAcceptsInput || exited else { return }
         guard let surface else {
             super.keyDown(with: event)
             return

@@ -113,7 +113,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
             }
-            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
+            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
         case .taskGet(_, let issue):
             return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base, let head):
@@ -923,8 +923,9 @@ public struct RegistryQuery: Sendable {
     public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
         // The request token is opaque and returns byte-exact; identities compare canonically.
         let request = UUID().uuidString
+        let scope = remoteMachine == nil ? ["--repo-id", repository] : []
         let readings = try Self.decode([TaskLocationObservation].self, from: await run(
-            ["task", "location", task, "--request", request, "--json"], nil))
+            scope + ["task", "location", task, "--request", request, "--json"], nil))
         guard readings.count == 1, let reading = readings.first,
               reading.request == request,
               reading.repositoryID == StructuredIdentity.prefixed(repository, "repo_"),

@@ -1,1 +1,0 @@
-Resume Desktop watches without resending unchanged readings

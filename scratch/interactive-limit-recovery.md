@@ -11,38 +11,26 @@ started a local candidate build; no installation, account switch or Session
 restart was performed.
 
 The first handoff went to LOO-813. Jack Heart then corrected the placement:
-"813 was marked complete so move that" and "to 811", enclosing the three targets
-below. LOO-811 now owns this recovery outcome. Leave LOO-813 complete; its merged
+"813 was marked complete so move that" and "to 811". LOO-811 now owns this recovery outcome. Leave LOO-813 complete; its merged
 PR #1863 is prior work, not completion of automatic quota recovery. PR #1862's
 two-item Keychain repair is only part of LOO-811's outcome.
-
-- Automatically continue affected Sessions when another login has capacity.
-- Show Recover affected sessions in Desktop, with progress and anything still waiting.
-- Keep history, drafts and approvals intact.
-
-Desired experience: recover the affected open conversations together when an
-eligible login has room; otherwise expose a visible Desktop recovery action and
-explain what is waiting. Retain each conversation's history, model selection,
-drafts and pending requests. A shared credential switch alone does not establish
-that a stopped message continued. Automatic retry must distinguish a rejected
-turn from uncertain delivery or completed tool effects.
 
 Jack Heart's November 9 continuation direction:
 
 > Automatically continue affected open Sessions on another eligible login for the selected model; expose Recover affected sessions in Desktop with progress and waiting states. Preserve native history, drafts and pending approvals. Distinguish rejected turns from uncertain delivery/completed effects and never replay finished Graph steps. Account switching alone is not acceptance. Inspect Claude and Codex; the report's provider is unspecified.
 
 The original provider remains unidentified; both providers are in scope. The
-initial brief/title sync timed out. November 9 `lf task status LOO-811 --json`
-now returns the expanded title and direction, open PR #1862 and the current code
-Graph at realign; it does not report title/brief delivery status. The earlier
+initial brief/title sync timed out; a later November 9 status read returned the
+expanded title/direction and open PR #1862, without delivery status. The earlier
 local candidate build (`cargo build -p loopflow --bin lf`, inherited LF_* unset)
 passed in 1m 45s. No disposable demo was launched.
 
-## Replacement design — November 9, draft
+## Recovery design — November 9, incomplete
 
-Implementation is incomplete. The November 9 documentation remains the intended
-experience; it is not implemented by the account switch in #1862. The recovery
-owner must change before automatic retry or Desktop can truthfully report success.
+Automatic continuation and Desktop recovery remain unimplemented. The native
+drain counterexample below must be resolved before integrating replacement;
+Claude retry still needs turn correlation. The shipping docs describe the intended
+experience, not what the Keychain repair currently provides.
 
 Main was reconciled at `4276fb28b` (merge of `4848816f7`), including #1863
 `4344618dd` and #1839. `2e0018453` checkpoints the three documentation edits and
@@ -185,22 +173,13 @@ an uncertain write; a later successful native turn may establish continuation.
 A turn with earlier tool effects stays intact for review instead of resending its
 original input. Pending requests remain with Claude.
 
-Codex keeps the native client, transport owner, selected thread and editor while
-its private provider changes generation. The existing attachment/lifeline/exit
-owners must perform this as one handoff, retaining the old provider's exit and
-pointing quit at the successor before acknowledging recovery. Reuse the native
-endpoint and saved thread configuration; do not rebuild settings from an old
-launch or replace native history. Pending approvals/tools, unknown delivery and
-unproven quiescence wait with their original provider. An idle observation alone
-never authorizes shutdown. The native replacement probe makes this design worth
-pursuing; it does not yet establish that handoff contract.
-
-Native graceful drain supplies admission but the racing-input probe above
-invalidates using it with the installed terminal client. Pending approval
-survival alone does not close that gap. Claude also needs a correlation rule
-linking its retry dispatch to the native successful turn; the existing inbox
-write supplies no such acknowledgement. These are technical design gaps, not
-a choice to narrow the recovery outcome.
+If provider replacement becomes viable, Codex must keep its native client,
+transport owner, selected thread and editor. The existing attachment/lifeline/exit
+owners must retain the old provider's exit and point quit at the successor before
+acknowledging recovery. Reuse the native endpoint and saved thread configuration;
+do not rebuild settings from an old launch or replace native history. Pending
+requests/tools and unknown delivery stay with their provider. The passing draft
+probe cannot authorize this handoff after the racing-input failure.
 
 ### Desktop and receipts
 
@@ -233,11 +212,11 @@ No account preferences, model fallback, Graph completion or Auto-Ship changes.
   Graph limit recovery, Keychain reconciliation, or #1863/#1839 reconnect/input
   behavior. They remain required behavior, not fallback implementations.
 
-These runtime cuts await their surviving recovery path; neither replacement is
-implemented. Compression removed the command fixture's arbitrary `history` file:
-keeping unrelated bytes unchanged cannot test native conversation continuity.
-Credential retry, rotation, marker and third-item assertions remain. The recovery
-guide lives in `docs/sessions.md`; subscriptions and Desktop docs link there.
+Both runtime cuts await their surviving recovery path. Do not extend or refactor
+the predecessors while that path is unresolved. The surviving Keychain writer,
+activation and command tests need no further reduction: each remaining case covers
+a distinct installation failure. Keep the native probe as the failing acceptance
+case; it is not a second recovery implementation.
 
 ### Preservation cases and remaining implementation
 
@@ -264,7 +243,17 @@ guide lives in `docs/sessions.md`; subscriptions and Desktop docs link there.
    Native managed-token and installed two-item observations in live-recovery.md
    remain demo/review work. Publication waits for the whole recovery outcome.
 
-This replaces the assumption that existing `resume --account` plus a Desktop
-button can meet the expanded scope. The recovery implementation and the provider
-handoff need review together; neither the current PR nor the native probe is
-acceptance of the expanded outcome.
+### Context reconciliation
+
+The Wave memory's Limit recovery paragraph describes only the earlier draft
+probe. Its next maintenance pass should include the drain/input failure and the
+separate passing approval case above. Leave that read-only context unchanged here.
+
+Compression, November 9: consolidated repeated status/implementation history in
+this plan and live-recovery.md, retaining exact direction, native observations,
+restrictions and open acceptance cases. Full pre-curation notes and the native
+probe are checkpointed at `f5b3539644f30b22842273bdba995077eb2bd905`. No runtime,
+fixture or shipping-doc behavior changed; no runtime test rerun is needed.
+
+Check: `git diff --check` and `lf context` — passed; memory and scratch fit both
+token/byte budgets. Gate retains runtime checks after the next implementation.

@@ -2,54 +2,24 @@
 
 November 8, 2026. Direction in the recovery conversation: "can we get that installed so that loopflow is routing properly again" and "you can do 811".
 
-## Outcome and remaining work
+## Remaining work
 
-Shipping docs for the expanded recovery scope are in `docs/sessions.md`
-(Recover after a usage limit), `docs/subscriptions.md` (When an account runs
-out), and `swift/README.md` (Session panes). November 9 write-docs describes
-intended behavior; implementation and validation remain. Main, #1863 and #1839
-were reconciled at `4276fb28b`, retaining the Keychain repair and both recovery
-notes. `interactive-limit-recovery.md` now holds the draft replacement design,
-the native Codex continuation probe and preservation cases. Existing account
-resume ends the native client; automatic recovery needs a provider-generation
-handoff that retains its editor, pending requests and exit ownership. That
-lifecycle change remains unimplemented; no automatic restart or Desktop
-recovery action is published.
+[interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
+scope, replacement design, native Codex findings and preservation cases. Automatic
+continuation and Desktop recovery remain unimplemented. November 9's drain probe
+invalidates generation replacement with Codex 0.167.0 when input races shutdown;
+publication waits for a path that retains the native client and input.
 
-November 9: `lf open --host desktop --file docs/sessions.md --file docs/subscriptions.md --file swift/README.md`
-reported all three opened in Desktop. `git diff --check` passed; prose-only
-changes need no build. No new product question arose; the reported provider
-remains unspecified, and the docs cover both Claude and Codex.
+The intended experience is in `docs/sessions.md`, linked from subscriptions and
+Desktop docs. November 9's `lf open --host desktop --file docs/sessions.md --file
+docs/subscriptions.md --file swift/README.md` reported all three opened. No demo
+or approval of the expanded outcome occurred. November 8's Keychain concept
+review, QA and gate cover only that repair.
 
-The expanded scope, original report and preservation cases are in
-[interactive-limit-recovery.md](interactive-limit-recovery.md). The November 9
-implementation probe found native SIGHUP drain admission, but
-Codex 0.167.0's terminal exits 1 when typed input receives a drain rejection.
-Pending approvals stayed answerable, and the approval case completed another
-turn after replacement. The design and reproducible probe now record both cases.
-The handoff depends on native rejection handling that keeps the client/input, or
-proven managed-account reload without replacement. Turn-correlated retry and
-Desktop progress remain unimplemented; this pass cannot publish the expanded
-outcome. All probe processes were reaped; no production logins, Sessions,
-installation or updater state changed.
-
-The November 8 publication checks below completed the earlier Keychain gate.
-Earlier references to pending gate checks are historical. They do not cover the
-expanded recovery outcome, which still needs implementation, affected-suite
-validation and several open Sessions continuing successfully. The November 8
-Keychain concept review and qa.html are likewise limited to that repair.
-
-Realign, November 9: `git diff --check` and `lf context` passed; both budgets fit.
-Documentation-only reconciliation reused the recorded tests; no runtime check reran.
-
-Compression checks, November 9 (inherited LF_* unset for tests):
-- `cargo test -p loopflow --lib keychain_ < /dev/null` — built; 5 passed, existing large `__eh_frame` linker warning.
-- `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null` — 3 passed; gate retains affected suites and clippy.
-- `cargo fmt --check`, `git diff --check`, `lf context` — passed; both context budgets remain satisfied.
-
-Validate LOO-747's recovery against installed lf and native clients with fake or
-idle logins, without paid inference, manufactured exhaustion, credential output
-or disruption to open conversations. Fixture success does not complete the Task.
+Use disposable environments. No production account switches or Session restarts,
+installed-app or updater changes, paid inference, manufactured exhaustion, merge
+or Auto-Ship. No isolated real-login environment was available; shared production
+logins had open conversations. Demo/review retains the live observations below.
 
 Still unobserved:
 
@@ -70,121 +40,35 @@ Still unobserved:
   input alongside account selection. The native fixture starts fresh Claude clients.
 - Whether refreshing Claude invalidates earlier access tokens used by a rental.
 
-The current iteration retains the Task's two-item requirement. Its direction is:
+## Keychain repair scope and check history
+
+The two-item direction remains:
 "implement a focused repair for the existing two-item expectation, with regression
 coverage where lookup order changes and both items must follow every switch."
-The earlier concept-review alternatives do not select a narrower or broader promise.
+The retry direction was: "Reconcile USER plus the selected legacy item under
+existing locks using the newest native credential, retaining lexical selection
+and third-item scope from scratch/questions.md."
 
-No isolated real-login environment was available. Shared production logins had open
-conversations. Demo/review owns the remaining live checks above, using disposable
-or idle logins or a naturally occurring failure. Delivery remains review-only.
+Both repairs are implemented. Keep USER plus one eligible legacy item, lexical
+selection, newest-native save-back, credential/refresh locks and reload-marker
+errors. No service-wide synchronization or rollback is promised. Stand-in tests
+cover failed writes/retries, access-only and both-token rotation, complete repeats,
+normal switches, marker recovery and unsuffixed fallback. Native checks below
+cover seeded stale state and a real marker failure, not rejected Keychain writes.
 
-## Candidate repair and remaining verification — November 8
+Pre-curation details and exact earlier commands/results:
+`f5b3539644f30b22842273bdba995077eb2bd905:scratch/live-recovery.md`, headings
+“Candidate repair and remaining verification — November 8” and “Finish a partial
+switch — implemented; live checks remain”. Those include the two candidate
+hashes, native receipts under `.lf/tmp/loo-811-two-item-{repair,compress}/`, and
+superseded pending-gate notes. Earlier concept alternatives remain in
+`d4941f045600750beffbbfc73934bd4bbf9abfbb:scratch/live-recovery.md`.
 
-The repair selects USER and one distinct existing account from service-scoped
-metadata and verifies both writes. Existing account-name filtering remains; among
-eligible non-USER accounts, lexical order is the headless choice recorded in
-questions.md. Activation/save-back, refresh locks, service selection and stdin
-credential writes remain. No service-wide synchronization is promised.
+Latest focused checks, November 9 (inherited LF_* unset):
 
-Regression coverage changes lookup order, checks both items after every switch
-and detects a legacy write that did not stick. The native fixture checks A → B → A
-and account-selected launches; its third-item observation remains separate.
-
-Checks on November 8 (inherited LF_* unset):
-- `cargo test -p loopflow --lib provider_auth::tests::keychain_switch_ < /dev/null` — 3 passed; linker warned about large `__eh_frame`.
-- `cargo build -p loopflow --bin lf < /dev/null` — passed.
-- `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf target/debug/lf --output .lf/tmp/loo-811-two-item-repair < /dev/null` — passed with Claude 2.1.319; both items followed every switch, plain Claude followed, hold/order and shared launches passed; third item unchanged. Cleanup completed.
-- `uv run ruff check tests/e2e/claude_shared_home.py` / `uv run ruff format --check tests/e2e/claude_shared_home.py` / `git diff --check` — passed after formatting one long line; native result reused for that whitespace-only change.
-
-Candidate SHA256: `93053e164ac5e2fd4bd4d78df95243f84801a6b93ceb185ecb7e4dcdd79e20c3`.
-Native receipt: `.lf/tmp/loo-811-two-item-repair/results.json`. This proves the
-candidate with synthetic logins, not installed repair or live token rotation.
-Gate owns affected provider_auth, provider_account::activation and account command
-suites plus clippy. Demo/review retains the running-client and refresh checks above.
-
-Compression checks on November 8 (inherited LF_* unset):
-- `cargo test -p loopflow --lib provider_auth::tests::keychain_switch_ < /dev/null` — 3 passed; same large `__eh_frame` linker warning.
-- `cargo build -p loopflow --bin lf < /dev/null` — passed.
-- `uv run python scripts/test_network.py uv run --script tests/e2e/claude_shared_home.py --claude /Users/jack/.local/bin/claude --lf target/debug/lf --output .lf/tmp/loo-811-two-item-compress < /dev/null` — passed; all eight result fields match the repair run, including both items following every switch and the third unchanged. Cleanup completed.
-- `cargo fmt --check`, Ruff check/format, `git diff --check` — passed; gate retains affected suites and clippy.
-- `lf context` — memory and scratch remain below both token and byte limits.
-
-Compressed candidate SHA256: `8f5c270b27973262028fa1050ab80385fae9799fdc118aebc8e6d9b48376d4fa`.
-
-Earlier concept-review alternatives remain in
-`d4941f045600750beffbbfc73934bd4bbf9abfbb:scratch/live-recovery.md` and its
-`scratch/concept-review.html`. The current page reflects the review below.
-
-## Finish a partial switch — implemented; live checks remain
-
-**November 8 implementation: stand-in tests and the publication gate passed.**
-A successful repeat of `lf account use claude=work@` finishes a partial
-installation even when the native item already names work@. The two-item scope
-and existing command remain; no new persisted state or public API was added.
-
-The pre-repair counterexample was USER=A, legacy=A → select B → USER=B,
-legacy write fails → retry B. The writer reports the first failure correctly,
-but `activation::activate` returned early on `same_login`, which reads USER only.
-`install_login` then said "already signed in" and `use_login` installed the hold;
-legacy stayed A. The failed write also skipped the credential marker touch.
-The original writer rejection test stopped at the first error. This path was
-traced in source, not exercised against native Keychain.
-
-The subscriptions guide now says: “If a Claude login installation fails, fix the reported
-storage problem and repeat `lf account use claude=work@`. It finishes installing
-that login before reporting success.” Existing hold, routing, resume and
-shared-home guidance otherwise stays unchanged.
-
-The implementation follows the iteration direction: "Reconcile USER plus the
-selected legacy item under existing locks using the newest native credential,
-retaining lexical selection and third-item scope from scratch/questions.md."
-
-Claude's same-login returns no longer bypass installation. The same-owner path
-after save-back writes and verifies the two selected items from the current
-native credential under the credential and refresh locks. Marker open/touch
-failures propagate; an absent marker remains valid because Claude reloads when
-it is absent. Codex's fast path, outgoing save-back and service fallback remain.
-No rollback or synchronization of every service item is promised.
-
-The three consolidated tests call the command's `install_login` through
-activation. They cover rejected writes and failed retries, access-only and
-both-token rotation, marker failure/recovery, complete repeats and normal
-switches. The retry/switch scenario runs against scoped and unsuffixed services;
-the third item remains unchanged. These are stand-in results,
-not an executable CLI/hold test or Session identity/input continuity observation.
-
-Demo/review still shows native retry alongside normal
-switches and retains every installed/running-client check above, including Session
-identity, history and continued input. No further product choice is needed for
-this repair; delivery remains review-only.
-
-Concept-review, November 8: no further design change or open product choice.
-Normal switching, partial-write retry and rotation fit one interaction: repeat
-the account command to finish installation. Keychain item names remain storage
-addresses, not managed accounts; completeness needs no persisted retry state.
-That review covered the Keychain interaction only. November 9's expanded scope
-adds automatic continuation and Desktop recovery; the earlier review does not
-establish their design or acceptance.
-
-`cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null`
-(inherited LF_* unset) — 4 passed November 8: rejected-write retries, access-only
-and both-token rotation, marker failure/recovery, complete repeats, normal switches
-and unsuffixed fallback using a Keychain stand-in; linker repeated the existing
-large `__eh_frame` warning. This does not establish native or installed acceptance.
-`cargo build -p loopflow --bin lf < /dev/null` (inherited LF_* unset), `cargo fmt`
-and `git diff --check` — passed November 8 for the retry repair.
-Gate retains provider_auth, provider_account activation/callers, account command
-suites, docs checks and clippy.
-
-Compression recheck November 8: `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null`
-(inherited LF_* unset) — built and passed all 3 consolidated tests, including the
-retry scenario in both scoped and unsuffixed homes; same `__eh_frame` warning.
-`cargo fmt --check`, `git diff --check`, `lf context` — passed; memory and scratch
-remain below both limits. Production code was unchanged in this compression pass.
-
-Realign November 8: reused those results; only the plan and Wave memory changed.
-`git diff --check` and `lf context` — passed; both context budgets remain satisfied.
+- `cargo test -p loopflow --lib keychain_ < /dev/null` — built; 5 passed, existing large `__eh_frame` linker warning.
+- `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null` — 3 passed; gate owns affected suites/clippy after runtime changes.
+- `cargo fmt --check`, `git diff --check`, `lf context` — passed; both budgets fit.
 
 ## QA — November 8
 
@@ -208,8 +92,8 @@ Probe: `.lf/tmp/loo-811-qa/native_recovery.py`, a copy of the existing native
 fixture with these extra scenarios and command transcripts. Cleanup independently
 confirmed all three scoped items absent, the temporary home removed and zero
 processes referencing it. These fixture results do not complete live QA. No
-production defect surfaced; no runtime code changed. Gate checks and the live
-login/installed/running-client observations listed above remain outstanding.
+production defect surfaced; no runtime code changed. The later publication gate
+passed; the live login/installed/running-client observations remain outstanding.
 
 ## Publication checks — November 8
 

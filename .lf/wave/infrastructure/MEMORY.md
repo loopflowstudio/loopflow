@@ -20,41 +20,42 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (LOO-747/811, reconciled 2026-11-08)
+## Limit recovery (LOO-747/811, reconciled 2026-11-09)
 
 LOO-747 (#1828, `90a82635fc`) recovers inside the Graph step without replay.
 Explicit models change accounts only; bare harnesses may change models/providers,
 then wait by wall clock. Holds override scoped order until full or `use auto`.
 One shared provider home means switches affect every open Session on the Machine.
 
-Claude 2.1.318 reloads on `.credentials.json` mtime. Source restarts Codex for
-`resume --account`, switches Claude before attaching, and defers busy moves to
-Stop; these running-client paths remain unobserved. Rentals receive refreshed
-Claude access tokens (~8h) every 2h; earlier-token invalidation is unknown.
+LOO-811 now owns automatic interactive continuation and Desktop recovery;
+LOO-813/#1863 is complete opening/reconnect work. Account switching alone cannot
+establish continuation. Keep native history, selected model, drafts and approvals;
+rejected-before-work, uncertain delivery and completed effects need distinct handling.
 
-Threads without transcripts need seeding. Only failed-exit provider words cool accounts.
-Claude StopFailure labels every 429 `rate_limit`; displayed text distinguishes
-spent quota/model, polling supplies reset. A no-model spent line with all
-account-wide windows below 100% could clear its own cooldown; live retry remains
-unobserved. November 7 direction kept overage cooling and unbounded waits.
-Prompt-cache switch cost and LOO-435 remain open. Earlier detail:
-`d4941f045600750beffbbfc73934bd4bbf9abfbb:.lf/wave/infrastructure/MEMORY.md`.
+Codex's `resume --account` ends its native client. A disposable Codex 0.167.0
+probe retained the client/editor across private app-server replacement, then
+submitted the edited draft and completed a synthetic turn. It proves no
+managed-login handoff, approval survival or input/shutdown race. Automatic recovery
+and Desktop progress remain unimplemented. Native input bypasses the observer:
+an idle snapshot cannot authorize shutdown. Provider replacement must transfer
+exit ownership as well as the attachment. Claude's native inbox has no consumption
+acknowledgement; a successful write stays uncertain and must not be replayed.
 
-November 8: installed lf 0.15.2+dad2621c1 / Claude 2.1.319 respected holds but
-three A → B → A checks left legacy stale: service-only lookup could select USER
-twice. Two synthetic-login native runs passed every switch on a temporary service;
-the third item stayed unchanged. USER plus one distinct eligible account remains
-the scope; lexical selection is a headless assumption.
+November 8 native checks exposed service-only lookup selecting USER twice;
+writer tests also missed same-login activation's early return. Scoped synthetic
+checks now cover both items following switches, seeded stale-item repair and an
+marker permission failure/retry. Native Keychain rejection, installed
+repair and unsuffixed-service acceptance remain unobserved. USER plus one distinct
+eligible item is the scope; lexical choice is an assumption, third items untouched.
 
-Same-login success also hid partial writes and skipped reload. Reconciliation now
-uses the current native credential under existing locks before success, including
-after save-back identifies a rotated login. Three command-installation tests passed
-with stand-ins: retry, rotation, marker recovery, repeats and service fallback.
-Native runs predate this repair. Writer tests missed activation's early returns.
-
-Native retry, installed repair, unsuffixed service, running-client continuity,
-Codex refresh overwrite and rental-token invalidation remain unobserved.
-Production conversations preclude disruptive probes; demo/review retains acceptance.
+Also unobserved: running-client account changes, Codex refresh overwriting another
+login, Claude's no-model spent line clearing its cooldown when all windows read
+below 100%, and refresh invalidating rentals' earlier access tokens. Keep these
+limits separate from fixture results. Release's entry-point lesson applies here:
+exercise continued input through the native Session, not only its account writer.
+Task plans and receipts: `scratch/interactive-limit-recovery.md` and
+`scratch/live-recovery.md` in `14ce07e30`; earlier detail and prompt-cache/LOO-435
+questions: `d4941f045600750beffbbfc73934bd4bbf9abfbb` under this heading.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

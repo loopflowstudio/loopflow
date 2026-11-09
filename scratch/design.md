@@ -16,8 +16,8 @@ binding in the remote contract, so planned support cannot read as implemented.
 
 ## Transport dependency — November 9, 2026 UTC
 
-The 20:14 UTC realign check inspected PR #1812 head
-`f0c77e31fa569f13748ad29506af56670bcde3b1`. It supplies
+The 21:30 UTC realign check inspected PR #1812 head
+`baf3989a02a5fa6be666ae94d11448c664be2380`. It supplies
 `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
 `UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
@@ -33,14 +33,13 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-The 21:26 UTC implementation check found PR #1812 still OPEN without auto-merge and with
+The 22:04 UTC implementation check found the same PR #1812 head still OPEN without auto-merge and with
 `mergedAt: null` (`gh pr view`).
-`git fetch origin main` returned `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b`;
+`git fetch origin main` returned `86bc0692e4f593e747bbacc8ed0bf710f5e06af0`;
 `git ls-tree` found neither `mobile.rs` nor `ticket.rs` there.
-These inspected changes are not a landed implementation.
-The PR head is now `baf3989a02a5fa6be666ae94d11448c664be2380`; its code has
-not been inspected in this pass, so the earlier code findings apply only to
-`f0c77e31fa569f13748ad29506af56670bcde3b1`.
+These inspected changes are not a landed implementation. This checkout still
+uses the UID-only `service.rs` store and `Instant` expiry; its foreign attempts
+already consume the ticket.
 `lf task status LOO-718 --json` still places `feature` at `demo`, with PR #1812
 open and settlement not armed.
 
@@ -48,9 +47,11 @@ Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
 Implementation and publication remain incomplete. The existing checkout and
 documentation edits remain available for continuation when the transport lands.
+The next authored Graph decision must stop for this external dependency;
+another implementation pass cannot advance against the unchanged transport.
 
 Earlier dependency observations are in
-`cda7cf5c96f5896800c12d34f8c71126308fbb87:scratch/design.md`.
+`7fb30bb8c6810107352558868c33bbf177f83a5c:scratch/design.md`.
 
 ## Delete — do not maintain
 

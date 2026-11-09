@@ -122,6 +122,22 @@ does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.
 
+## Keep several conversations open
+
+Leave Task conversations open while their Graphs run. LF watches for new
+comments and progress; once work settles, idle update checks read revision
+counters instead of rebuilding unchanged Task history on every clock tick.
+This is automatic and needs no setting.
+Transcript, usage and ordinary tool activity in other conversations do not
+trigger those history rebuilds. A comment or workflow change on another Task
+can still do so because observers share the workflow revision counter.
+
+Locally saved comments can reach a conversation even when planning connection
+settings are unavailable. Sync badges remain in the Task thread. A busy provider
+leaves an update pending for retry. A failed store read is retried even if nothing else changes;
+lf records the gap in `logs/lf.log` while the provider conversation continues.
+Live Graphs still get periodic checks so an unrecorded process exit can be noticed.
+
 ## One more headless turn
 
 ```bash

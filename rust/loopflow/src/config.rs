@@ -806,8 +806,6 @@ fn personal_file_layers(
     if let Some(repo) = repo_root {
         let path = files::private_path(repo)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
-        files::diagnose_private_file(&path)
-            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {
             let waves = private_wave_layers(repo, wave, &path, &value)?;
             if let Some(map) = value.as_mapping_mut() {

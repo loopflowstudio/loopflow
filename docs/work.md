@@ -98,7 +98,7 @@ claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
 lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
 lf task changes LOO-12        # what it changed so far
-lf task wait LOO-13                # block until its run ends, with no agent polling
+lf task wait LOO-13                # wait until the Task is done or abandoned
 ```
 
 ```bash

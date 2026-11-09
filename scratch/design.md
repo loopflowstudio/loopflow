@@ -32,7 +32,8 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9, 00:45 UTC implementation recheck reconfirmed the dependency:
+The November 9 rechecks at 00:47 UTC (realign) and 01:21 UTC (implement)
+reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -44,10 +45,9 @@ above are from the earlier inspection, not a landed implementation.
 The authenticated transport is still absent from this checkout and origin/main.
 Remote attach implementation and authenticated acceptance checks remain
 unfinished; the existing local UID tests cannot exercise that transport.
-The Graph decision remains stop for the external dependency: LOO-718's
-authenticated transport must land before this Task can implement and validate
-remote tickets. No product decision is missing; the separate mobile PR is
-outside this Task's landing authorization.
+LOO-718's authenticated transport is the external dependency for implementation
+and remote acceptance. No product decision is missing. Landing the separate
+mobile PR is outside this Task's scope.
 
 ## Delete — do not maintain
 
@@ -85,3 +85,7 @@ Visual review remains for demo or QA; Desktop opening results are in
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Dependency
 recheck only; no code changed and no build or tests needed.
+
+Compress clarified the bridge's single JSON handshake and removed the Rex
+analogy; the protocol stands on its own. The deletion targets still await the
+shared remote authority. `git diff --check` — clean; docs only, no build or tests.

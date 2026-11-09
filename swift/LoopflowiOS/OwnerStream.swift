@@ -144,7 +144,7 @@ struct OwnerStream {
             inputControl = false
             geometryControl = false
             events.append(.disconnected("This Session attachment was closed"))
-        case .theme, .hint, .returnToSession:
+        case .theme, .hint, .returnToSession, .directory:
             // These carry presentation hints, never commands for the phone to run.
             break
         }
@@ -209,6 +209,7 @@ private struct OwnerEvent: Decodable {
     enum Value {
         case resize(columns: UInt16, rows: UInt16)
         case theme(JSONValue)
+        case directory(String)
         case programStatus(ProgramStatusRecords)
         case owner(viewer: String?, name: String?, held: Bool)
         case control(held: Bool)
@@ -216,7 +217,7 @@ private struct OwnerEvent: Decodable {
     }
     let sequence: UInt64
     let value: Value
-    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, code, text, detach, status }
+    enum Keys: String, CodingKey { case seq, type, rows, cols, theme, viewer, name, held, code, text, detach, status, cwd }
 
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -224,6 +225,7 @@ private struct OwnerEvent: Decodable {
         switch try box.decode(String.self, forKey: .type) {
         case "resize": value = .resize(columns: try box.decode(UInt16.self, forKey: .cols), rows: try box.decode(UInt16.self, forKey: .rows))
         case "theme": value = .theme(try box.decode(JSONValue.self, forKey: .theme))
+        case "directory": value = .directory(try box.decode(String.self, forKey: .cwd))
         case "program_status": value = .programStatus(try box.decode(ProgramStatusRecords.self, forKey: .status))
         case "owner": value = .owner(viewer: try box.decodeIfPresent(String.self, forKey: .viewer), name: try box.decodeIfPresent(String.self, forKey: .name), held: try box.decode(Bool.self, forKey: .held))
         case "control": value = .control(held: try box.decode(Bool.self, forKey: .held))

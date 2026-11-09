@@ -284,3 +284,22 @@ desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
 - `swift test --package-path swift --filter 'ServerProtocolTests|RegistryQueryTests|ServerClientTests'`: 47 passed after aligning the mobile operation names with main. Device and host-Tailscale acceptance remain for demo.
 - November 9 live-connection preparation: iOS `MachinePairingTests`, `OwnerStreamTests`, and `MobileTerminalTests` on Simulator `1FE57D5C-9173-49D7-B295-704E442231E9`: 55 passed after fixing the stale `roadmap` test call and waiting for foreground recovery's state. The first run had an integer/number expectation mismatch in the new heartbeat test and a foreground assertion before recovery finished.
 - Live owner heartbeat remains to verify over the transport. The opt-in native acceptance now observes for 35 seconds before taking control, exceeding the owner's 30-second expiry; this added check has not run. The real Machine installation prerequisites and open sample app are recorded in `scratch/mobile-demo.md`.
+
+## November 9 gate continuation
+
+The current branch reaches the new iOS target, shared DTOs, Desktop's server
+adapter, recoverable creation and remote transport. The changed-aware runner
+does not include iOS yet; native iOS checks run directly. Remaining backend
+gate work includes creation/served-read integration after the main sync,
+protocol revision compatibility before distribution, and the live acceptance
+already listed above. This is not a completed release gate.
+
+- iOS `LoopflowiOSTests` excluding the three suites already run on this tree: 30 executed, 28 passed, 2 skipped (host-Tailscale setup and physical-device file protection). `LoopflowiOSUITests`: 8 passed, including native editing, foreground recovery, Session switching, landscape and onboarding. Command: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,id=04874CED-476E-4BB0-9B20-55C01F8F17B2' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -skip-testing:LoopflowiOSTests/MachinePairingTests -skip-testing:LoopflowiOSTests/OwnerStreamTests -skip-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`.
+- `swift test --package-path swift --filter ServerClientTests`: 9 passed. Coalescing ticket admission and payload reproduced invalid JSON before the reader fix; the same test passes afterward. The control response limit is also checked when the newline arrives in the final read.
+- `swift test --package-path swift --filter 'DTOFixtureTests|MobilePairingTests'`: 55 passed.
+- `cargo test -p loopflow --lib transport::wire::`: 11 passed, including the new directory-event fixture. Focused iOS `OwnerStreamTests` against that fixture: 7 passed. Directory reports advance sequence without becoming terminal text or phone filesystem actions.
+- `uv run python scripts/check_architecture.py`: passed after documenting the creation-request table. `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed after identifying the new iOS app/test targets as platform-specific. `uv run ruff check scripts/check_swift_multiplatform_boundaries.py`: passed.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed. The dedicated test Simulator was removed after both iOS runs completed; the open demo was not changed.
+
+All test commands above ran with inherited `LF_*` unset and stdin closed. The
+test Simulator is separate from the open demo and contains no personal input.

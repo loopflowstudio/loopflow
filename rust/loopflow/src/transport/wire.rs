@@ -453,6 +453,35 @@ mod tests {
     }
 
     #[test]
+    fn mobile_directory_fixture_keeps_owner_event_sequence() {
+        let mut bytes = frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                3,
+                Event::Directory {
+                    cwd: "/src/project".into(),
+                },
+            ),
+        );
+        bytes.extend(frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                4,
+                Event::Control {
+                    held: false,
+                    notice: None,
+                },
+            ),
+        ));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/directory.bin")
+        );
+    }
+
+    #[test]
     fn mobile_status_fixture_uses_shared_validated_records() {
         let records = crate::program_status::Records {
             seen: true,

@@ -151,7 +151,7 @@ struct ServerClientTests {
             switch operation["kind"] as? String {
             case "repo.path":
                 respond(["type": "bulk", "id": id, "ticket": "download", "bytes": big.utf8.count])
-                try? peer.admit("download") { try $0.write(["type": "response", "id": id, "trace_id": "trace", "result": big]) }
+                try? peer.admit("download", initial: ["type": "response", "id": id, "trace_id": "trace", "result": big]) { _ in }
             case "request.upload":
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": ["ticket": "upload"]])
                 try? peer.admit("upload") { connection in
@@ -166,6 +166,20 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == big)
         let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
+    }
+
+    @Test func oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() async throws {
+        let peer = try ServerPeer()
+        let big = String(repeating: "x", count: ServerProtocol.maxMessage + 1)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": big])
+            return true
+        }
+        do {
+            _ = try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location)
+            Issue.record("An oversized response bypassed the control connection's limit")
+        } catch { #expect(error is RegistryQueryError) }
     }
 
     @Test func serverEndingASubscriptionFailsItsWatchAlone() async throws {
@@ -376,7 +390,7 @@ private final class ServerPeer: @unchecked Sendable {
 
     /// Accept one ticketed connection presenting `ticket`, admit it, then let
     /// `handle` exchange on it.
-    func admit(_ ticket: String, _ handle: (PeerConnection) throws -> Void) throws {
+    func admit(_ ticket: String, initial: [String: Any]? = nil, _ handle: (PeerConnection) throws -> Void) throws {
         let fd = accept(listener, nil, nil)
         guard fd >= 0 else { throw RegistryQueryError("No ticketed connection arrived") }
         let connection = PeerConnection(fd: fd)
@@ -385,7 +399,9 @@ private final class ServerPeer: @unchecked Sendable {
         guard presented?["type"] as? String == "attach", presented?["ticket"] as? String == ticket else {
             throw RegistryQueryError("The ticketed connection presented \(presented ?? [:])")
         }
-        try connection.write(["type": "admitted"])
+        // Coalesce admission and payload so the client's greeting read may
+        // already contain the beginning of the bulk response.
+        try connection.write([["type": "admitted"]] + (initial.map { [$0] } ?? []))
         try handle(connection)
     }
 
@@ -433,7 +449,14 @@ private final class PeerConnection: @unchecked Sendable {
     }
 
     func write(_ message: [String: Any]) throws {
-        let bytes = try JSONSerialization.data(withJSONObject: message) + [10]
+        try write([message])
+    }
+
+    func write(_ messages: [[String: Any]]) throws {
+        let bytes = try messages.reduce(into: Data()) { bytes, message in
+            bytes.append(try JSONSerialization.data(withJSONObject: message))
+            bytes.append(10)
+        }
         try bytes.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {

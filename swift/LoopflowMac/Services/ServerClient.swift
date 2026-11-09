@@ -241,7 +241,7 @@ final class ServerLink: @unchecked Sendable {
         }
         return try await answer(id) {
             Thread.detachNewThread { [self] in
-                do { try Self.ticketed(path, ticket) { try Self.write($0, line) } } catch { settle(id, throwing: error) }
+                do { try Self.ticketed(path, ticket) { fd, _ in try Self.write(fd, line) } } catch { settle(id, throwing: error) }
             }
         }
     }
@@ -329,8 +329,7 @@ final class ServerLink: @unchecked Sendable {
             // Fetched off the reader thread, so other readings never wait behind it.
             Thread.detachNewThread { [self] in
                 do {
-                    try dispatch(try Self.ticketed(path, ticket) { fd in
-                        var reader = LineReader(fd: fd, limit: ServerProtocol.maxBulk)
+                    try dispatch(try Self.ticketed(path, ticket) { _, reader in
                         guard let line = try reader.next() else { throw RegistryQueryError("Server closed the bulk connection without its message") }
                         return line
                     })
@@ -352,19 +351,20 @@ final class ServerLink: @unchecked Sendable {
 
     /// A ticketed connection: present `ticket`, read `admitted`, then `body` has
     /// the socket to itself. Every read waits at most the handshake bound.
-    private static func ticketed<T>(_ path: String, _ ticket: String, _ body: (Int32) throws -> T) throws -> T {
+    private static func ticketed<T>(_ path: String, _ ticket: String, _ body: (Int32, inout LineReader) throws -> T) throws -> T {
         let fd = try connect(path)
         defer { Darwin.close(fd) }
         setReceiveTimeout(fd, seconds: handshakeSeconds)
         try write(fd, try line(.attach(ticket: ticket)))
-        var reader = LineReader(fd: fd)
+        var reader = LineReader(fd: fd, limit: ServerProtocol.maxBulk)
         guard let first = try reader.next() else { throw RegistryQueryError("Server closed the ticketed connection without admitting it") }
         switch try JSONDecoder().decode(ServerMessage.self, from: first) {
         case .admitted: break
         case .error(_, let code, let message, _): throw RegistryQueryError("\(code): \(message)")
         default: throw RegistryQueryError("Server did not admit the ticket; update the client")
         }
-        return try body(fd)
+        // Admission and the first payload bytes may arrive in one read.
+        return try body(fd, &reader)
     }
 
     private func fail(_ error: any Error) {
@@ -450,6 +450,9 @@ private struct LineReader {
     mutating func next() throws -> Data? {
         while true {
             if let newline = buffer[(buffer.startIndex + scanned)...].firstIndex(of: 10) {
+                guard newline - buffer.startIndex <= limit else {
+                    throw RegistryQueryError("Server message exceeds \(limit >> 20) MiB")
+                }
                 let line = buffer.subdata(in: buffer.startIndex..<newline)
                 buffer.removeSubrange(buffer.startIndex...newline)
                 scanned = 0

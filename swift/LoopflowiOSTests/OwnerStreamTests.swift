@@ -28,6 +28,25 @@ final class OwnerStreamTests: XCTestCase {
         XCTAssertThrowsError(try stream.receive(OwnerStream.frame(tag: 1, body: unexpected)))
     }
 
+    func testRemoteDirectoryAdvancesTheStreamWithoutChangingLocalState() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "directory", withExtension: "bin", subdirectory: "owner"))
+        let wire = try Data(contentsOf: url)
+        for size in [1, 7, wire.count] {
+            var stream = try observed()
+            var events: [MobileTerminalEvent] = []
+            for start in stride(from: 0, to: wire.count, by: size) {
+                events += try stream.receive(wire.subdata(in: start..<min(start + size, wire.count)))
+            }
+            XCTAssertEqual(events.count, 1, "The remote path is metadata, not terminal output")
+            guard case .control(let input, let geometry) = events.first else {
+                return XCTFail("The event following a directory report must still arrive")
+            }
+            XCTAssertFalse(input)
+            XCTAssertFalse(geometry)
+            XCTAssertTrue(stream.ready)
+        }
+    }
+
     func testRustOwnerSnapshotRendersOnceAfterGeometryAcrossEveryReadBoundary() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "observer", withExtension: "bin", subdirectory: "owner"))
         let wire = try Data(contentsOf: url)

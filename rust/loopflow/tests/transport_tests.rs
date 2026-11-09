@@ -420,10 +420,10 @@ read -r answer < /dev/tty
         while self
             .sql()
             .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
-                r.get::<_, bool>(0)
+                r.get::<_, Option<bool>>(0)
             })
             .unwrap()
-            != viewed
+            != Some(viewed)
         {
             assert!(
                 Instant::now() < deadline,
@@ -6015,7 +6015,7 @@ fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
         result
     };
     let created = create();
-    let owner = created["owner"].as_str().unwrap().to_string();
+    let owner = created["owner_lf_process_id"].as_str().unwrap().to_string();
     let _cleanup = StopOwner(&fixture, owner.clone());
     let session = created["receipt"]["session_id"].as_str().unwrap();
     assert_eq!(fixture.session_of_owner(&owner), session);
@@ -6304,15 +6304,17 @@ fn simultaneous_session_openers_share_one_retained_owner() {
         }
     }
     assert_eq!(fixture.launches(1), launches);
-    let owners: i64 = fixture
+    let owners: Vec<String> = fixture
         .sql()
-        .query_row(
-            "SELECT count(*) FROM processes WHERE command LIKE '%serve%' AND completed_at IS NULL",
-            [],
-            |row| row.get(0),
+        .prepare(
+            "SELECT command FROM processes WHERE command LIKE '%serve%' AND completed_at IS NULL",
         )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
         .unwrap();
-    assert_eq!(owners, 1);
+    assert_eq!(owners.len(), 1, "live owners: {owners:?}");
     let mut viewer = fixture.viewer(&owner, true);
     viewer.input("done\n");
     viewer.finish();

@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "13f169271657f6921c1ba76457de3c6273a06e4cda7c17d663cfb8c52c91ff65",
+    "Cargo.lock": "b18c3119fc0b43b9bef63358807b17bf66d167cf491df8e2242e94b256918b3e",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -64,7 +64,7 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "e94c5d32d844b9cabdf242d8cca2bb854cf0e6320975b6f6954c45e14b9d3544",
     "swift/Package.swift": "913803ac0ef1a0c1ebcf732a4db6e22c5ad4a896219c536d32d99dc9683c49bf",
-    "third_party/README.md": "ab704e7eef1524c178bc75259b58c5a96406dc2160d59d0bce20e300458a4bcb",
+    "third_party/README.md": "5a5aaf5e6eb6e8cc988cbbb93259ad12d1f78b33533c802b5851a7edb5d54228",
     "third_party/REBUILD.md": "7f16e0e02ff9eeba71f70a2fd7812f2b9f21121775ca258125cd0ca4f34eb374",
     "third_party/manifest.json": "6eb513a714ada6d0bdb0326e44e014990c3a1df85e4e5ecf7d2f98bcfb0c87ba",
     "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
@@ -90,6 +90,7 @@
     "third_party/notices/oniguruma-oniguruma.txt": "a4d780032f7db15e33f8d8dd1500454178ab93aa57fe4963383443f2f6133099",
     "third_party/notices/sentry-sentry.txt": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221",
     "third_party/notices/spirv-cross-spirv_cross.txt": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96",
+    "third_party/notices/swiftterm.txt": "0dc6bdd99b652c675586854efcacd59de21e2679d64fcaa20424aeb951df6856",
     "third_party/notices/uucode.txt": "5c5f26c8d2e93f0ab15b658ccd95a22d02be65622401d8c92ef54e92fa4b087d",
     "third_party/notices/vaxis.txt": "1306dd94538c211fcfd9f9dda2ea715d243c042fa6e14934047e6a4e74001196",
     "third_party/notices/wuffs-pixels.txt": "7980eaa7ddc61c03ccd329426a25c4745409125ff13414515346bf902efbe94b",

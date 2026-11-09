@@ -116,6 +116,8 @@ mod tests {
         "steer_batches",
         "steer_deliveries",
         "store_revisions",
+        // Creation receipts are recovered by request ID, not Work subscriptions.
+        "task_create_requests",
         "task_linear_ingested_comments",
         "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.

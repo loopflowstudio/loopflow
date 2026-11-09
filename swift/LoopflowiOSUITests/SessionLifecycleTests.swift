@@ -60,7 +60,7 @@ final class SessionLifecycleTests: XCTestCase {
         let keyboard = app.buttons["Use keyboard"]
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(keyboard.isHittable)
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height)
         keyboard.tap()
         app.typeText("landscape draft")
         XCTAssertTrue(app.buttons["New line"].waitForExistence(timeout: 5))
@@ -94,6 +94,39 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Close Find"].isHittable)
         capture(app, "session-portrait-find-after-rotation")
+    }
+
+    func testPortraitAndLandscapeKeepTheUnsentDraft() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        defer { XCUIDevice.shared.orientation = .portrait; app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        app.typeText("portrait draft")
+
+        XCUIDevice.shared.orientation = .landscapeRight
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height)
+        XCTAssertTrue(app.buttons["New line"].isHittable)
+        app.typeText(" + landscape")
+        capture(app, "draft-landscape")
+        XCTAssertGreaterThanOrEqual(app.buttons["New line"].frame.height, 44)
+        XCTAssertLessThanOrEqual(app.buttons["New line"].frame.maxY, app.keyboards.firstMatch.frame.minY,
+                                 "Typing controls must remain fully above the keyboard")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height)
+        app.buttons["Find in Session"].tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("portrait draft + landscape")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Close Find"].isHittable)
+        capture(app, "draft-portrait")
     }
 
     func testChooseAnotherSessionAndReturnToTheOriginalDraft() throws {

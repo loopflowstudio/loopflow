@@ -256,7 +256,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             message.bottomAnchor.constraint(equalTo: bar.topAnchor),
             bar.leadingAnchor.constraint(equalTo: viewport.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: viewport.trailingAnchor),
-            bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            view.keyboardLayoutGuide.topAnchor.constraint(equalToSystemSpacingBelow: bar.bottomAnchor, multiplier: 2),
             latestButton.centerXAnchor.constraint(equalTo: viewport.centerXAnchor),
             latestButton.bottomAnchor.constraint(equalTo: viewport.bottomAnchor, constant: -8),
             latestButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),

@@ -264,25 +264,37 @@ fn delegate(
             ViewerTerminal::preview(preview_session)?
         };
         let cwd = std::env::current_dir()?;
-        let owner = match preview_session {
-            Some(session) => start_session(session, &argv, terminal, &cwd, &|_| {})?,
+        // Attach immediately so a refusal before registration retains its output
+        // and exit. A non-replacing Start must let the child recheck that intent.
+        let owner = match preview_session.filter(|_| replace) {
+            Some(session) => start_session_owner(session, &argv, terminal, &cwd, &|_| {}, false)?,
             None => start(&argv, terminal, &cwd, &|_| {})?,
         };
         let session = preview_session.map(LfSessionId::from);
-        relay_with_preview(
-            &owner,
-            session.as_ref(),
-            None,
-            json_session,
-            preview,
-            replace,
-        )?;
+        if session.is_some() && replace {
+            // Exec would destroy the registration waiter and release its lock.
+            // Use the same relay here while that waiter protects concurrent starts.
+            if std::env::var_os(STREAM_ENV).is_some() {
+                stream::bridge(&owner)?;
+            } else {
+                attach_with_terminal(&owner, session.as_ref(), None, preview, replace)?;
+            }
+        } else {
+            relay_with_preview(
+                &owner,
+                session.as_ref(),
+                None,
+                json_session,
+                preview,
+                replace,
+            )?;
+        }
         Ok(true)
     }
 }
 
 /// Start or obtain the Session's existing terminal owner without becoming a
-/// viewer. Task background startup, Desktop delegation and mobile creation
+/// viewer. Task background startup, ordinary resume and mobile creation
 /// share this lock, which differs from the provider launch lock the child
 /// must acquire itself.
 pub(crate) fn start_session(
@@ -292,7 +304,18 @@ pub(crate) fn start_session(
     cwd: &Path,
     inherit: &dyn Fn(&mut Command),
 ) -> Result<LfProcessId> {
-    let _startup = crate::ops::human_session::lock_session_process(&format!("owner:{session}"))?;
+    start_session_owner(session, argv, terminal, cwd, inherit, true)
+}
+
+fn start_session_owner(
+    session: &str,
+    argv: &[String],
+    terminal: bool,
+    cwd: &Path,
+    inherit: &dyn Fn(&mut Command),
+    wait_for_registration: bool,
+) -> Result<LfProcessId> {
+    let startup = crate::ops::human_session::lock_session_process(&format!("owner:{session}"))?;
     let registry =
         crate::store::read_existing_registry()?.context("Session registry is unavailable")?;
     let record = registry
@@ -305,19 +328,36 @@ pub(crate) fn start_session(
         }
     }
     let owner = start(argv, terminal, cwd, inherit)?;
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if registry.sqlite.session_transport(session)?.as_ref() == Some(&owner) {
-            return Ok(owner);
+    let session = session.to_owned();
+    let started = owner.clone();
+    let registered = move || -> Result<()> {
+        let _startup = startup;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if registry.sqlite.session_transport(&session)?.as_ref() == Some(&started) {
+                return Ok(());
+            }
+            anyhow::ensure!(crate::ops::human_session::owner_running(&registry.sqlite, &started)?,
+                "Session owner exited before opening the provider; inspect the Session before another start");
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "Session startup has not been confirmed; delivery is unknown, do not repeat the launch"
+            );
+            std::thread::sleep(Duration::from_millis(20));
         }
-        anyhow::ensure!(crate::ops::human_session::owner_running(&registry.sqlite, &owner)?,
-            "Session owner exited before opening the provider; inspect the Session before another start");
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "Session startup has not been confirmed; delivery is unknown, do not repeat the launch"
-        );
-        std::thread::sleep(Duration::from_millis(20));
+    };
+    if wait_for_registration {
+        registered()?;
+    } else {
+        // Keep concurrent openers behind registration without delaying this
+        // viewer's byte stream, including an early launcher error.
+        std::thread::spawn(move || {
+            if let Err(error) = registered() {
+                tracing::debug!(%error, "Session startup ended before registration");
+            }
+        });
     }
+    Ok(owner)
 }
 
 pub(crate) fn start(

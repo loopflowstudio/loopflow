@@ -7,7 +7,7 @@ use crate::agent::check_cli_available;
 use crate::agent::run_agent;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
-use crate::session_record::{AgentExecution, AttributionSource, SessionCaptureSpec};
+use crate::session_record::{AttributionSource, SessionCaptureSpec};
 
 pub fn run(selector: &str) -> Result<()> {
     let home = crate::store::lf_home_dir();
@@ -94,8 +94,14 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
-    let capture = AgentExecution::begin_replay_at(home, spec, request, source.artifact_key)
-        .map_err(|error| anyhow!("failed to publish replay capture before execution: {error}"))?;
+    let capture = crate::session_record::SessionRecorder::begin_replay_at(
+        home,
+        spec,
+        request,
+        source.artifact_key,
+    )
+    .map(crate::process::LfProcessRuntime::new)
+    .map_err(|error| anyhow!("failed to publish replay capture before execution: {error}"))?;
     let artifact_key = capture.artifact_key();
     let context_file = if config.system_prompt.trim().is_empty() {
         None
@@ -109,7 +115,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        capture: Some(capture.clone()),
+        runtime: Some(capture.clone()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
@@ -136,7 +142,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::replay_at;
-    use crate::session_record::{AgentExecution, AgentProcessRequest, SessionCaptureSpec};
+    use crate::session_record::{AgentProcessRequest, SessionCaptureSpec};
 
     #[test]
     fn replay_uses_recorded_request_without_the_planning_store() {
@@ -249,7 +255,7 @@ for line in sys.stdin:
             skip_permissions: true,
             chrome: None,
         };
-        let source = AgentExecution::begin_with_request(
+        let source = crate::session_record::SessionRecorder::begin_with_request(
             SessionCaptureSpec {
                 harness: harness.to_string(),
                 model: (harness == "opencode").then(|| "opencode/glm-5.2".to_string()),
@@ -264,6 +270,7 @@ for line in sys.stdin:
             },
             request.clone(),
         )
+        .map(crate::process::LfProcessRuntime::new)
         .unwrap();
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();

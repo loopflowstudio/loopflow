@@ -1,14 +1,12 @@
 //! Captured Session inputs and append-only provider evidence.
 
 pub(crate) mod activity;
-mod runtime;
+mod capture;
+#[cfg(test)]
+mod capture_tests;
 
 use crate::id::AgentSessionId;
-pub use runtime::AgentExecution;
-pub(crate) use runtime::{
-    finish_session_attachment, register_session_attachment_interrupt, resume_session_agent_process,
-    CaptureHandoff,
-};
+pub(crate) use capture::CaptureHandoff;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -1401,9 +1399,9 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 
 /// Append-only capture data. This value has no attachment or process authority.
 #[derive(Debug)]
-struct SessionRecorder {
-    manifest: SessionCaptureManifest,
-    dir: PathBuf,
+pub(crate) struct SessionRecorder {
+    pub(crate) manifest: SessionCaptureManifest,
+    pub(crate) dir: PathBuf,
     /// The live identity is known, but its last observation could not be kept.
     provider_observation_pending: bool,
     attempt: u32,
@@ -1415,7 +1413,7 @@ struct SessionRecorder {
     previous_event: Option<OffsetDateTime>,
     telemetry_warned: bool,
     terminal_recorded: bool,
-    activity: activity::Observer,
+    pub(crate) activity: activity::Observer,
 }
 
 impl SessionRecorder {
@@ -1468,7 +1466,7 @@ impl SessionRecorder {
         }
     }
 
-    fn observe_provider(
+    pub(crate) fn observe_provider(
         &mut self,
         session: Option<&AgentSessionId>,
         account: Option<&crate::store::ProviderAccountId>,
@@ -1496,7 +1494,7 @@ impl SessionRecorder {
         Ok(())
     }
 
-    fn start_attempt(
+    pub(crate) fn start_attempt(
         &mut self,
         provider: &str,
         model: Option<&str>,
@@ -1524,7 +1522,7 @@ impl SessionRecorder {
         })
     }
 
-    fn next_attempt(
+    pub(crate) fn next_attempt(
         &mut self,
         provider: &str,
         model: Option<&str>,
@@ -1549,7 +1547,7 @@ impl SessionRecorder {
     }
 
     /// Keep how a turn ended; any other event only ticks the silence clock.
-    fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
+    pub(crate) fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
         let end = match event {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 TurnEnd::TurnCompleted { turn_id, status }
@@ -1602,7 +1600,7 @@ impl SessionRecorder {
             .map_err(std::io::Error::other)
     }
 
-    fn warn_telemetry(&mut self, error: std::io::Error) {
+    pub(crate) fn warn_telemetry(&mut self, error: std::io::Error) {
         if self.telemetry_warned {
             tracing::debug!(%error, artifact_key = %self.manifest.artifact_key, "Session telemetry write failed");
             return;
@@ -1615,7 +1613,7 @@ impl SessionRecorder {
         );
     }
 
-    fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
+    pub(crate) fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
         if self.terminal_recorded {
             return Ok(());
         }
@@ -1667,7 +1665,7 @@ impl SessionRecorder {
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
-fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
+pub(crate) fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
     crate::store::sqlite::SqliteStore::new(&row_database(dir)?)
 }
 
@@ -1989,6 +1987,6 @@ fn sync_dir(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn record_error(error: std::io::Error) -> StoreError {
+pub(crate) fn record_error(error: std::io::Error) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }

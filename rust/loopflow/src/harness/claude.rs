@@ -48,7 +48,7 @@ impl Launch {
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     launch: Option<Launch>,
-    capture: Option<crate::agent::AgentExecution>,
+    runtime: Option<crate::process::LfProcessRuntime>,
     should_seed_task_prompt: bool,
     skill_input: Option<String>,
     /// Vendor session id captured from the first turn's `system` event; a
@@ -96,7 +96,7 @@ impl ClaudeHarness {
         Self {
             events,
             launch: None,
-            capture: None,
+            runtime: None,
             should_seed_task_prompt: true,
             skill_input: None,
             agent_session: Arc::new(Mutex::new(None)),
@@ -144,9 +144,9 @@ impl ClaudeHarness {
             .as_mut()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
         let config = &mut launch.config;
-        if let Some(capture) = &self.capture {
+        if let Some(runtime) = &self.runtime {
             let (_, session, attachment) = &mut launch.owner;
-            *attachment = capture.prepare_agent_process(session, attachment)?;
+            *attachment = runtime.prepare_agent_process(session, attachment)?;
             config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attachment.caller(session.clone().into()))?,
@@ -416,8 +416,8 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
-    fn set_capture(&mut self, capture: Option<crate::agent::AgentExecution>) {
-        self.capture = capture;
+    fn set_runtime(&mut self, runtime: Option<crate::process::LfProcessRuntime>) {
+        self.runtime = runtime;
     }
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots() {
-        use crate::session_record::{AgentExecution, SessionCaptureSpec, SessionGraphMembership};
+        use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
 
         async fn observed_input(home: &std::path::Path, text: &str) -> String {
             tokio::time::timeout(Duration::from_secs(5), async {
@@ -788,7 +788,7 @@ mod tests {
             .build()
             .unwrap();
         crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-            let capture = AgentExecution::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "claude".into(),
@@ -802,7 +802,8 @@ mod tests {
                     graph: SessionGraphMembership::Independent,
                     work: None,
                 },
-            )?;
+            )
+            .map(crate::process::LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
             let (session, first) = capture.session_attachment().unwrap();
             let store = crate::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))?;
@@ -820,7 +821,7 @@ mod tests {
                     })
                     .unwrap(),
                 );
-                harness.set_capture(Some(capture.clone()));
+                harness.set_runtime(Some(capture.clone()));
                 harness.send_input("first request").await.unwrap();
                 // Pipe acceptance precedes provider execution. Interrupt only
                 // after this throwaway provider consumed its first request.

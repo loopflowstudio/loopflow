@@ -26,7 +26,7 @@ pub(crate) struct CpuProcess {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct Observer {
+pub(crate) struct Observer {
     body: Option<(u32, String)>,
     previous: Option<(OffsetDateTime, Vec<CpuProcess>)>,
     quiet_since: Option<OffsetDateTime>,
@@ -39,7 +39,7 @@ impl Observer {
 
     /// Since when the body and its tools used no CPU; `None` when this sample
     /// could not read them or the PID now names another process.
-    pub(super) fn observe(
+    pub(crate) fn observe(
         &mut self,
         now: OffsetDateTime,
         body_pid: Option<u32>,

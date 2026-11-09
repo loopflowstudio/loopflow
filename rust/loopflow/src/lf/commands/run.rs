@@ -9,14 +9,13 @@ use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
+use crate::process::LfProcessRuntime;
 use crate::prompt::process::prepare_process_prompt;
 use crate::prompt::process::ContextSourceOverrides;
 use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::PromptComponents;
 use crate::prompt::Surface;
-use crate::session_record::{
-    AgentExecution, AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
-};
+use crate::session_record::{AgentProcessRequest, SessionCaptureSpec, SubjectAttribution};
 use anyhow::{anyhow, bail, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -674,9 +673,9 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
-        let capture = begin_capture(built, "tui", &built.agent_config, None)?;
+        let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
         let agent_session: Option<crate::id::AgentSessionId> = if built.harness == "claude" {
-            let artifact_key = capture.artifact_key();
+            let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key
                 .as_str()
                 .strip_prefix("run_")
@@ -691,29 +690,29 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             None
         };
         let mut environment = built.agent_config.env.clone();
-        environment.extend(capture.environment());
+        environment.extend(runtime.environment());
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
             let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
-            config.session_attachment = capture.session_attachment();
+            config.session_attachment = runtime.session_attachment();
             launch_session(
                 &config,
                 agent_session.as_ref(),
                 context_file.as_deref(),
-                Some(&capture),
+                Some(&runtime),
             )
         })();
         if let Some(provider_session) =
-            crate::session_record::read_provider_session(&capture.artifact_dir())
+            crate::session_record::read_provider_session(&runtime.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            capture.observe_provider(
+            runtime.observe_provider(
                 Some(provider_session.agent_session),
                 provider_session.account_id,
             );
         }
-        capture.finish(if result.is_ok() {
+        runtime.finish(if result.is_ok() {
             "completed"
         } else {
             "failed"
@@ -734,13 +733,13 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     );
 
     let agent_config = built.agent_config.clone();
-    let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
+    let runtime = begin_process_runtime(built, "headless", &agent_config, cli.resume.as_deref())?;
 
-    let result = run_headless_prompt(built, &capture, &agent_config);
+    let result = run_headless_prompt(built, &runtime, &agent_config);
     // Explicit native resume can retire this provider while its executor waits.
     // Settle our capture as interrupted; a failed Graph step would replay it.
-    if capture.attachment_replaced()? {
-        capture.finish("interrupted")?;
+    if runtime.attachment_replaced()? {
+        runtime.finish("interrupted")?;
         return Err(crate::process::CommandExit(130).into());
     }
     let outcome = if result.is_ok() {
@@ -748,20 +747,20 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     } else {
         "failed"
     };
-    let settlement = capture.finish(outcome);
+    let settlement = runtime.finish(outcome);
     match (result, settlement) {
         (Err(error), Err(settlement)) => Err(error.context(format!(
             "Session execution also failed to settle: {settlement}"
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(capture.final_answer()?),
+        (Ok(()), Ok(())) => Ok(runtime.final_answer()?),
     }
 }
 
 fn run_headless_prompt(
     built: &PromptBuild,
-    capture: &AgentExecution,
+    runtime: &LfProcessRuntime,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
     let context_file_start = Instant::now();
@@ -773,7 +772,7 @@ fn run_headless_prompt(
 
     let mut process = built.process.clone();
     process.context_file = context_file;
-    process.capture = Some(capture.clone());
+    process.runtime = Some(runtime.clone());
 
     // Set up directive relay so agent skills can issue shell directives
     // (e.g. `cd` after `lf wt switch`).
@@ -811,24 +810,24 @@ fn run_headless_prompt(
     } else if let Some(failure) = &result.failure {
         Err(anyhow!(
             "agent stopped after {failure}. Check {} for details.",
-            capture.artifact_dir().display()
+            runtime.artifact_dir().display()
         ))
     } else {
         let reason = crate::os_process::exit_reason(&result.stderr);
         Err(anyhow!(
             "agent exited with code {}{reason}. Check {} for details.",
             result.exit_code,
-            capture.artifact_dir().display()
+            runtime.artifact_dir().display()
         ))
     }
 }
 
-fn begin_capture(
+fn begin_process_runtime(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
     resume: Option<&str>,
-) -> Result<AgentExecution> {
+) -> Result<LfProcessRuntime> {
     let started = Instant::now();
     let cwd = built
         .agent_config
@@ -853,34 +852,36 @@ fn begin_capture(
         graph: crate::session_record::SessionGraphMembership::Independent,
         work: built.work.clone(),
     };
-    let capture = if let Some(session) = resume {
-        AgentExecution::continue_with_context(
+    let runtime = if let Some(session) = resume {
+        LfProcessRuntime::continue_with_context(
             session,
             spec,
             &built.context,
             AgentProcessRequest::from_prepared(prepared_config)?,
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
-        AgentExecution::start_prepared(
+        crate::session_record::SessionRecorder::start_prepared(
             &crate::store::lf_home_dir(),
             &id,
             spec,
             &built.context,
             Some(AgentProcessRequest::from_prepared(prepared_config)?),
         )
+        .map(crate::process::LfProcessRuntime::new)
     } else {
         let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
-        AgentExecution::begin_with_context(spec, &built.context, launch)
+        crate::session_record::SessionRecorder::begin_with_context(spec, &built.context, launch)
+            .map(crate::process::LfProcessRuntime::new)
     }
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
-    capture.claim_session_attachment()?;
+    runtime.claim_session_attachment()?;
     debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "published Session capture"
     );
-    Ok(capture)
+    Ok(runtime)
 }
 
 pub(crate) fn attributed_context(
@@ -1252,9 +1253,9 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_capture, build_bound_prompt_at, build_prompt, build_prompt_at,
-        is_interactive_run, is_interactive_run_with_tty, run_headless_prompt, run_prompt,
-        PromptBuild,
+        attributed_context, begin_process_runtime, build_bound_prompt_at, build_prompt,
+        build_prompt_at, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
+        run_prompt, PromptBuild,
     };
 
     use crate::agent::{run_agent, AgentConfig, ProcessConfig};
@@ -1510,16 +1511,16 @@ for line in sys.stdin:
         let command = vec!["lf".to_string(), "implement".to_string()];
         let admitted = || {
             crate::journal::with_runtime(home.path(), &command, || {
-                let capture = begin_capture(&built, "headless", &built.agent_config, None)?;
-                let artifact_key = capture.artifact_key();
-                let run_dir = capture.artifact_dir();
+                let runtime = begin_process_runtime(&built, "headless", &built.agent_config, None)?;
+                let artifact_key = runtime.artifact_key();
+                let run_dir = runtime.artifact_dir();
 
                 assert!(run_dir.join("manifest.json").is_file());
                 let manifest = std::fs::read_to_string(run_dir.join("manifest.json"))?;
                 assert!(manifest.contains("task:LOO-265"));
                 assert!(!run_dir.join("terminal.json").exists());
-                let result = run_headless_prompt(&built, &capture, &built.agent_config);
-                capture.finish(if result.is_ok() {
+                let result = run_headless_prompt(&built, &runtime, &built.agent_config);
+                runtime.finish(if result.is_ok() {
                     "completed"
                 } else {
                     "failed"

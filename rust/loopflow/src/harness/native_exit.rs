@@ -84,8 +84,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     };
     let outcome = command.capture_outcome();
     if let Some((store, session, attachment)) = &owner {
-        match crate::session_record::finish_session_attachment(store, session, attachment, outcome)
-        {
+        match crate::process::finish_session_attachment(store, session, attachment, outcome) {
             Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
             Err(error) => {
                 tracing::warn!(%error, %session, "cannot record the Session attachment's end")
@@ -93,9 +92,13 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         }
     }
     if let Some(capture) = &exit.capture {
-        if let Err(error) = crate::session_record::AgentExecution::adopt(capture.clone())
-            .and_then(|capture| capture.finish(outcome))
-        {
+        if let Err(error) = crate::session_record::SessionRecorder::adopt(capture.clone()).and_then(
+            |mut capture| {
+                capture
+                    .finish(outcome)
+                    .map_err(crate::session_record::record_error)
+            },
+        ) {
             tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
         }
     }
@@ -213,7 +216,7 @@ mod tests {
 
     use crate::journal::{self, TestLedgerGuard};
     use crate::process::Departure;
-    use crate::session_record::{AgentExecution, SessionCaptureSpec, SessionGraphMembership};
+    use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
     use crate::store::sqlite::SqliteStore;
 
     use super::{settle, NativeExit};
@@ -223,7 +226,7 @@ mod tests {
         let ledger = TestLedgerGuard::new();
         let home = ledger.home();
         {
-            let capture = AgentExecution::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "codex".into(),
@@ -255,7 +258,7 @@ mod tests {
                 client: false,
                 resuming: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off()),
+                capture: Some(capture.hand_off(None, false, None)),
                 capture_key: Some(capture.artifact_key()),
                 account: None,
                 diagnostics: (home.join("absent.log"), 0),
@@ -283,7 +286,7 @@ mod tests {
         let ledger = TestLedgerGuard::new();
         let home = ledger.home();
         journal::with_runtime(home, &["lf".into(), "-i".into()], || {
-            let capture = AgentExecution::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 home,
                 SessionCaptureSpec {
                     harness: "claude".into(),
@@ -315,7 +318,7 @@ mod tests {
                 client: false,
                 resuming: true,
                 cwd: home.into(),
-                capture: Some(capture.hand_off()),
+                capture: Some(capture.hand_off(None, false, None)),
                 capture_key: Some(capture.artifact_key()),
                 account: None,
                 diagnostics: (home.join("absent.log"), 0),

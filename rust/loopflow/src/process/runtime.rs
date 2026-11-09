@@ -1,31 +1,28 @@
-//! Shared execution state for launch, retry and settlement. Only its current
-//! attachment may close an AgentProcess; a replaced invocation cannot stop
-//! the new owner's provider.
+//! Live resources used by an lf invocation to run its provider.
+//!
+//! LfProcess supplies the identity. Retries replace AgentProcess under that same
+//! invocation; recording has no authority to launch, replace or stop a process.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use uuid::Uuid;
-
-use super::{
-    boot_id, inherited_capture_key, new_artifact_key, prepare_manifest, publish_manifest,
-    read_manifest, reconcile_private_file, reconcile_reserved_manifest, record_dir, record_error,
-    resolve_manifest, row_store, runtime_identity, sync_dir, validate_manifest_path,
-    write_private_exclusive, AgentProcessRequest, SessionCaptureManifest, SessionCaptureSpec,
-    SessionContextArtifact, SessionContextRef, SessionGraphMembership, SessionRecorder,
-    CAPTURE_KEY_ENV, SCHEMA_VERSION,
-};
 use crate::chat::types::ConversationEvent;
 use crate::harness::agent_process::{close_session_agent_process, AttachmentOwner};
 use crate::id::AgentSessionId;
-use crate::naming::generated_session_title;
 use crate::process::SessionAttachment;
+use crate::session_record::{
+    new_artifact_key, record_error, row_store, AgentProcessRequest, CaptureHandoff,
+    SessionCaptureSpec, SessionRecorder, CAPTURE_KEY_ENV,
+};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
+
+/// Shared live resources for an lf invocation's provider work, with no separate
+/// execution identity. A skill keeps one runtime across provider retries.
+/// Harnesses retain immutable attachment snapshots for dispatch.
+#[derive(Debug, Clone)]
+pub struct LfProcessRuntime(Arc<Mutex<RuntimeState>>);
 
 pub(crate) fn finish_session_attachment(
     store: &SqliteStore,
@@ -36,24 +33,6 @@ pub(crate) fn finish_session_attachment(
     store.finish_session_attachment(session, attachment, outcome, None, || {
         close_session_agent_process(store, session)
     })
-}
-
-/// One invocation's provider lifecycle and recording. Clones share attachment
-/// changes and settlement; harnesses retain immutable snapshots for dispatch.
-#[derive(Debug, Clone)]
-pub struct AgentExecution(Arc<Mutex<ExecutionState>>);
-
-/// A capture's state as it crosses from an exec'd launcher to the execution
-/// owner that records its outcome.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CaptureHandoff {
-    pub key: String,
-    attempt: u32,
-    attempt_started: bool,
-    event_seq: u64,
-    account_id: Option<crate::store::ProviderAccountId>,
-    account_observed: bool,
-    agent_session: Option<AgentSessionId>,
 }
 
 pub(crate) fn register_session_attachment_interrupt(
@@ -81,101 +60,9 @@ fn retry_keeps_its_thread(
     saved == resume || (resume.is_none() && moved)
 }
 
-impl AgentExecution {
-    /// Publish identity before a human boundary becomes visible. No provider or
-    /// terminal receipt exists until this prepared Session executes.
-    pub(crate) fn prepare(
-        spec: SessionCaptureSpec,
-        caller: Option<String>,
-        id: String,
-    ) -> StoreResult<String> {
-        #[cfg(test)]
-        let home = std::env::var_os("LF_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
-            });
-        #[cfg(not(test))]
-        let home = crate::store::lf_home_dir();
-        Self::prepare_at_with_key(&home, spec, caller, id)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn prepare_at(
-        home: &Path,
-        spec: SessionCaptureSpec,
-        caller: Option<String>,
-    ) -> StoreResult<String> {
-        Self::prepare_at_with_key(home, spec, caller, new_artifact_key())
-    }
-
-    fn prepare_at_with_key(
-        home: &Path,
-        spec: SessionCaptureSpec,
-        caller: Option<String>,
-        id: String,
-    ) -> StoreResult<String> {
-        let (manifest, _) =
-            prepare_manifest(spec, id.clone(), caller, None, None).map_err(record_error)?;
-        let (_, dir) = reconcile_reserved_manifest(home, manifest, None).map_err(record_error)?;
-        if dir.join("launching").try_exists().map_err(record_error)? {
-            return Err(record_error(std::io::Error::other(
-                "prepared input was already claimed",
-            )));
-        }
-        reconcile_private_file(&dir.join("prepared"), b"").map_err(record_error)?;
-        sync_dir(&dir).map_err(record_error)?;
-        // Preparation creates no execution owner: dropping it must not settle a
-        // Session whose provider has never been launched.
-        Ok(id)
-    }
-
-    pub(crate) fn start_prepared(
-        home: &Path,
-        id: &str,
-        spec: SessionCaptureSpec,
-        context: &crate::trace::PreparedTurnContext,
-        request: Option<AgentProcessRequest>,
-    ) -> StoreResult<Self> {
-        let (dir, mut manifest) = resolve_manifest(home, id).map_err(record_error)?;
-        // Atomically claim this preparation. A second launcher cannot record
-        // another provider attempt into the same capture.
-        fs::rename(dir.join("prepared"), dir.join("launching")).map_err(record_error)?;
-        let bytes = serde_json::to_vec_pretty(&SessionContextArtifact {
-            schema_version: SCHEMA_VERSION,
-            context,
-        })?;
-        write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
-        manifest.process = request;
-        manifest.context = Some(SessionContextRef {
-            path: "context.json".to_string(),
-            content_sha256: hex::encode(Sha256::digest(&bytes)),
-            bytes: bytes.len() as u64,
-        });
-        // Finalize process provenance on the existing identity. Preparation did
-        // not freeze a prompt, runtime, or model selection before process.
-        manifest.harness = spec.harness;
-        manifest.model = spec.model;
-        manifest.surface = spec.surface;
-        manifest.cwd = spec.cwd;
-        manifest.repo = spec.repo;
-        manifest.worktree = spec.worktree;
-        manifest.skill = spec.skill;
-        // Preparation owns Work attribution and a human Graph step's membership;
-        // the child's Task prompt context cannot reassign that captured input.
-        manifest.graph = manifest.graph.or(Some(spec.graph));
-        (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
-        manifest.host = gethostname::gethostname().to_string_lossy().into_owned();
-        manifest.boot_id = boot_id();
-        let staged = dir.join(".manifest-launching.json");
-        write_private_exclusive(&staged, &serde_json::to_vec_pretty(&manifest)?)
-            .map_err(record_error)?;
-        fs::rename(staged, dir.join("manifest.json")).map_err(record_error)?;
-        fs::remove_file(dir.join("launching")).map_err(record_error)?;
-        sync_dir(&dir).map_err(record_error)?;
-        Ok(Self(Arc::new(Mutex::new(ExecutionState::from_manifest(
-            manifest, dir,
-        )))))
+impl LfProcessRuntime {
+    pub(crate) fn new(recorder: SessionRecorder) -> Self {
+        Self(Arc::new(Mutex::new(RuntimeState::new(recorder))))
     }
 
     /// Append an input only after the same transaction admits its attachment.
@@ -206,7 +93,7 @@ impl AgentExecution {
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
         spec.subjects = crate::ops::human_session::capture_subjects(&next);
-        let result = Self::begin_reserved_at(
+        let result = SessionRecorder::begin_reserved_at(
             &home,
             spec,
             next.input_key()
@@ -221,15 +108,15 @@ impl AgentExecution {
                 })
             },
         );
-        match result {
-            Ok(capture) => {
-                capture
+        match result.map(Self::new) {
+            Ok(runtime) => {
+                runtime
                     .0
                     .lock()
-                    .expect("Agent execution mutex poisoned")
+                    .expect("Process runtime mutex poisoned")
                     .owner = Some((store.clone(), session.to_string(), attachment));
-                capture.register_interrupt();
-                Ok(capture)
+                runtime.register_interrupt();
+                Ok(runtime)
             }
             Err(error) => {
                 // Publication did not start a provider or complete a turn. Keep
@@ -242,155 +129,20 @@ impl AgentExecution {
         }
     }
 
-    pub(crate) fn begin_with_request(
-        spec: SessionCaptureSpec,
-        process: AgentProcessRequest,
-    ) -> StoreResult<Self> {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &process.system_prompt,
-            &process.task_prompt,
-        );
-        Self::begin_with_context(spec, &context, Some(process))
-    }
-
-    pub(crate) fn begin_with_context(
-        spec: SessionCaptureSpec,
-        context: &crate::trace::PreparedTurnContext,
-        process: Option<AgentProcessRequest>,
-    ) -> StoreResult<Self> {
-        #[cfg(test)]
-        let home = std::env::var_os("LF_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
-            });
-        #[cfg(not(test))]
-        let home = crate::store::lf_home_dir();
-        Self::begin_at_with_id(
-            &home,
-            spec,
-            new_artifact_key(),
-            inherited_capture_key()?,
-            process,
-            Some(context),
-        )
-    }
-
-    fn begin_reserved_at(
-        home: &Path,
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        caller: Option<String>,
-        process: Option<AgentProcessRequest>,
-        context: &crate::trace::PreparedTurnContext,
-        publish: impl FnOnce(&String) -> StoreResult<()>,
-    ) -> StoreResult<Self> {
-        let (manifest, context) =
-            prepare_manifest(spec, artifact_key, caller, process, Some(context))
-                .map_err(record_error)?;
-        let (manifest, dir) = reconcile_reserved_manifest(home, manifest, context.as_deref())
-            .map_err(record_error)?;
-        // Only the reservation transaction grants process authority. A rejected
-        // publication must not start a recorder or settle somebody else's capture.
-        publish(&manifest.artifact_key)?;
-        Ok(Self(Arc::new(Mutex::new(ExecutionState::from_manifest(
-            manifest, dir,
-        )))))
-    }
-
-    /// Retain the source key already resolved by the replay reader.
-    pub(crate) fn begin_replay_at(
-        lf_home: &Path,
-        spec: SessionCaptureSpec,
-        process: AgentProcessRequest,
-        caller_artifact_key: String,
-    ) -> StoreResult<Self> {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &process.system_prompt,
-            &process.task_prompt,
-        );
-        Self::begin_at_with_id(
-            lf_home,
-            spec,
-            new_artifact_key(),
-            Some(caller_artifact_key),
-            Some(process),
-            Some(&context),
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn begin_at(lf_home: &Path, spec: SessionCaptureSpec) -> StoreResult<Self> {
-        Self::begin_at_with_id(
-            lf_home,
-            spec,
-            new_artifact_key(),
-            inherited_capture_key()?,
-            None,
-            None,
-        )
-    }
-
-    #[cfg(test)]
-    fn begin_at_with_request(
-        lf_home: &Path,
-        spec: SessionCaptureSpec,
-        process: AgentProcessRequest,
-    ) -> StoreResult<Self> {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &process.system_prompt,
-            &process.task_prompt,
-        );
-        Self::begin_at_with_id(
-            lf_home,
-            spec,
-            new_artifact_key(),
-            inherited_capture_key()?,
-            Some(process),
-            Some(&context),
-        )
-    }
-
-    fn begin_at_with_id(
-        lf_home: &Path,
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        caller_artifact_key: Option<String>,
-        process: Option<AgentProcessRequest>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Self> {
-        let work = spec.work.clone();
-        let (manifest, context_bytes) =
-            prepare_manifest(spec, artifact_key, caller_artifact_key, process, context)
-                .map_err(record_error)?;
-        let dir = record_dir(lf_home, &manifest.artifact_key).expect("artifact key is a UUID");
-        let reserved = ExecutionState::record_row(&manifest, &dir, work, context)?;
-        publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
-        if let Some(session) = reserved {
-            row_store(&dir)?.publish_capture(&session.id, session.captured)?;
-        }
-        Ok(Self(Arc::new(Mutex::new(ExecutionState::from_manifest(
-            manifest, dir,
-        )))))
-    }
-
     pub(crate) fn artifact_key(&self) -> String {
         self.0
             .lock()
-            .expect("Agent execution mutex poisoned")
+            .expect("Process runtime mutex poisoned")
             .recorder
-            .manifest
-            .artifact_key
-            .clone()
+            .artifact_key()
     }
 
     pub(crate) fn artifact_dir(&self) -> PathBuf {
         self.0
             .lock()
-            .expect("Agent execution mutex poisoned")
+            .expect("Process runtime mutex poisoned")
             .recorder
-            .dir
-            .clone()
+            .artifact_dir()
     }
 
     /// Claim an admitted conversation and retain the exact provider provenance
@@ -399,13 +151,13 @@ impl AgentExecution {
         let lf_process_id = crate::journal::current_lf_process_id().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess requires an admitted invocation".into())
         })?;
-        let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if capture.owner.is_some() {
+        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        if runtime.owner.is_some() {
             return Ok(());
         }
-        let store = row_store(&capture.recorder.dir)?;
+        let store = row_store(&runtime.recorder.dir)?;
         let session = store
-            .session_for_artifact(&capture.recorder.manifest.artifact_key)?
+            .session_for_artifact(&runtime.recorder.manifest.artifact_key)?
             .ok_or_else(|| {
                 StoreError::InvalidAuthority(
                     "AgentProcess requires an admitted conversation".into(),
@@ -415,19 +167,19 @@ impl AgentExecution {
         if let Some(owner) = crate::transport::current() {
             store.bind_session_transport(&session.id, &attachment, owner)?;
         }
-        capture.owner = Some((store, session.id.to_string(), attachment));
-        drop(capture);
+        runtime.owner = Some((store, session.id.to_string(), attachment));
+        drop(runtime);
         self.register_interrupt();
         Ok(())
     }
 
     fn register_interrupt(&self) {
-        let capture = Arc::downgrade(&self.0);
+        let runtime = Arc::downgrade(&self.0);
         crate::agent::register_interrupt_cleanup(move || {
-            if let Some(capture) = capture.upgrade() {
-                let mut capture = capture.lock().expect("Agent execution mutex poisoned");
-                if capture.settled_outcome.is_none() {
-                    if let Err(error) = capture.finish("interrupted") {
+            if let Some(runtime) = runtime.upgrade() {
+                let mut runtime = runtime.lock().expect("Process runtime mutex poisoned");
+                if runtime.settled_outcome.is_none() {
+                    if let Err(error) = runtime.finish("interrupted") {
                         tracing::warn!(%error, "record interrupted Session exit");
                     }
                 }
@@ -436,12 +188,12 @@ impl AgentExecution {
     }
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<AgentSessionId>> {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if let Some((store, session, _)) = &capture.owner {
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        if let Some((store, session, _)) = &runtime.owner {
             return store.session_thread(session);
         }
-        let store = row_store(&capture.recorder.dir)?;
-        let Some(session) = store.session_for_artifact(&capture.recorder.manifest.artifact_key)?
+        let store = row_store(&runtime.recorder.dir)?;
+        let Some(session) = store.session_for_artifact(&runtime.recorder.manifest.artifact_key)?
         else {
             return Ok(None);
         };
@@ -452,11 +204,13 @@ impl AgentExecution {
         &self,
         mut command: std::process::Command,
     ) -> anyhow::Result<(std::process::Child, crate::process::SessionAttachment)> {
-        let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if capture.settled_outcome.is_some() {
-            return Err(StoreError::InvalidAuthority("Capture already settled".into()).into());
+        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        if runtime.settled_outcome.is_some() {
+            return Err(
+                StoreError::InvalidAuthority("Process runtime already settled".into()).into(),
+            );
         }
-        let owner = capture.owner.as_mut().ok_or_else(|| {
+        let owner = runtime.owner.as_mut().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess launch has no attachment".into())
         })?;
         let (store, session, attachment) = owner;
@@ -466,7 +220,7 @@ impl AgentExecution {
             serde_json::to_string(&attachment.caller(session.clone().into()))?,
         );
         let snapshot = attachment.clone();
-        // Keep the execution's settlement snapshot fixed through admission.
+        // Keep the invocation's settlement snapshot fixed through admission.
         let child = crate::harness::agent_process::spawn_native(command, owner)?;
         Ok((child, snapshot))
     }
@@ -475,15 +229,15 @@ impl AgentExecution {
         &self,
         expected: &crate::process::SessionAttachment,
     ) -> StoreResult<()> {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        let Some((store, session, attachment)) = &capture.owner else {
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        let Some((store, session, attachment)) = &runtime.owner else {
             return Err(StoreError::InvalidAuthority(
-                "Capture has no attachment".into(),
+                "Process has no attachment".into(),
             ));
         };
         if attachment != expected {
             return Err(StoreError::InvalidAuthority(
-                "Capture attachment changed".into(),
+                "Process attachment changed".into(),
             ));
         }
         store.record_agent_process_exit(session, expected, true)
@@ -492,49 +246,49 @@ impl AgentExecution {
     pub(crate) fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
         self.0
             .lock()
-            .expect("Agent execution mutex poisoned")
+            .expect("Process runtime mutex poisoned")
             .owner
             .as_ref()
             .map(|(_, session, attachment)| (session.clone(), attachment.clone()))
     }
 
     pub(crate) fn attachment_replaced(&self) -> StoreResult<bool> {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        let Some((store, session, expected)) = &capture.owner else {
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        let Some((store, session, expected)) = &runtime.owner else {
             return Ok(false);
         };
         Ok(store.session_attachment(session)?.as_ref() != Some(expected))
     }
 
-    /// Only the invocation's capture owner advances its settlement snapshot.
+    /// Only the invocation's runtime advances its settlement snapshot.
     /// Dispatch and history retain the immutable snapshot they already took.
     pub(crate) fn prepare_agent_process(
         &self,
         session: &str,
         expected: &crate::process::SessionAttachment,
     ) -> StoreResult<crate::process::SessionAttachment> {
-        let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        let settled = capture.settled_outcome.is_some();
-        let (store, id, attachment) = capture
+        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        let settled = runtime.settled_outcome.is_some();
+        let (store, id, attachment) = runtime
             .owner
             .as_mut()
             .filter(|(_, id, attachment)| !settled && id == session && attachment == expected)
-            .ok_or_else(|| StoreError::InvalidAuthority("Capture attachment changed".into()))?;
+            .ok_or_else(|| StoreError::InvalidAuthority("Process attachment changed".into()))?;
         let next = store.prepare_session_agent_process(id, attachment)?;
         *attachment = next.clone();
         Ok(next)
     }
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
         let mut environment = BTreeMap::from([(
             CAPTURE_KEY_ENV.to_string(),
-            capture.recorder.manifest.artifact_key.to_string(),
+            runtime.recorder.manifest.artifact_key.to_string(),
         )]);
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
             environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
-        if let Some((_, session, attachment)) = &capture.owner {
+        if let Some((_, session, attachment)) = &runtime.owner {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attachment.caller(session.clone().into()))
@@ -545,11 +299,11 @@ impl AgentExecution {
     }
 
     pub(crate) fn mark_spawn_requested(&self) {
-        self.record_best_effort(ExecutionState::start_attempt);
+        self.record_best_effort(RuntimeState::start_attempt);
     }
 
     pub(crate) fn record_conversation(&self, event: ConversationEvent) {
-        self.record_best_effort(|capture| capture.recorder.record_conversation(event));
+        self.record_best_effort(|runtime| runtime.recorder.record_conversation(event));
     }
 
     pub(crate) fn retry_agent_process(
@@ -559,30 +313,30 @@ impl AgentExecution {
         account_id: Option<crate::store::ProviderAccountId>,
         resume_thread: Option<&AgentSessionId>,
     ) -> anyhow::Result<()> {
-        let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if capture.settled_outcome.is_some() {
-            anyhow::bail!("Capture already settled");
+        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        if runtime.settled_outcome.is_some() {
+            anyhow::bail!("Process runtime already settled");
         }
-        let (store, session, expected) = capture.owner.as_ref().ok_or_else(|| {
+        let (store, session, expected) = runtime.owner.as_ref().ok_or_else(|| {
             StoreError::InvalidAuthority("AgentProcess retry has no attachment".into())
         })?;
         // The provider may have switched threads while history was unavailable.
         // Its latest observation outranks an older persisted projection.
-        let saved_thread = capture
-            .agent_session
-            .clone()
-            .or(store.session_thread(session)?);
-        let moved = (capture.account_observed && capture.account_id != account_id)
-            || capture.provider != provider;
+        let saved_thread = match &runtime.agent_session {
+            Some(thread) => Some(thread.clone()),
+            None => store.session_thread(session)?,
+        };
+        let moved = (runtime.account_observed && runtime.account_id != account_id)
+            || runtime.provider != provider;
         if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
             anyhow::bail!("AgentProcess retry must retain its thread");
         }
         let next = store.replace_session_agent_process(session, expected, resume_thread, || {
             close_session_agent_process(store, session)
         })?;
-        capture.owner = Some((store.clone(), session.clone(), next));
-        if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
-            capture.recorder.warn_telemetry(error);
+        runtime.owner = Some((store.clone(), session.clone(), next));
+        if let Err(error) = runtime.fail_and_begin_attempt(provider, model, account_id) {
+            runtime.recorder.warn_telemetry(error);
         }
         Ok(())
     }
@@ -596,70 +350,37 @@ impl AgentExecution {
     }
 
     pub(crate) fn final_answer(&self) -> StoreResult<Option<String>> {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        row_store(&capture.recorder.dir)?
-            .input_final_answer(&capture.recorder.manifest.artifact_key)
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        row_store(&runtime.recorder.dir)?
+            .input_final_answer(&runtime.recorder.manifest.artifact_key)
     }
 
     pub(crate) fn finish(&self, outcome: &str) -> StoreResult<()> {
         self.0
             .lock()
-            .expect("Agent execution mutex poisoned")
+            .expect("Process runtime mutex poisoned")
             .finish(outcome)
             .map_err(record_error)
     }
 
-    /// This capture's live state, for the execution owner that settles it
-    /// after the launcher has exec'd its provider.
     pub(crate) fn hand_off(&self) -> CaptureHandoff {
-        let capture = self.0.lock().expect("Agent execution mutex poisoned");
-        CaptureHandoff {
-            key: capture.recorder.manifest.artifact_key.clone(),
-            attempt: capture.recorder.attempt,
-            attempt_started: capture.recorder.attempt_started,
-            event_seq: capture.recorder.event_seq,
-            account_id: capture.account_id.clone(),
-            account_observed: capture.account_observed,
-            agent_session: capture.agent_session.clone(),
-        }
+        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        runtime.recorder.hand_off(
+            runtime.account_id.clone(),
+            runtime.account_observed,
+            runtime.agent_session.clone(),
+        )
     }
 
-    /// Continue a handed-off capture in this process, at the stream position
-    /// its launcher left. Settling it writes the same terminal receipt and
-    /// attempt facts the launcher would have.
-    pub(crate) fn adopt(handoff: CaptureHandoff) -> StoreResult<Self> {
-        // The handoff names the exact capture, so its directory needs no store:
-        // the terminal receipt is written even when the store is unavailable.
-        let dir = record_dir(&crate::store::lf_home_dir(), &handoff.key).ok_or_else(|| {
-            record_error(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Invalid capture key",
-            ))
-        })?;
-        let manifest = read_manifest(&dir).map_err(record_error)?;
-        validate_manifest_path(&dir, &manifest).map_err(record_error)?;
-        let mut capture = ExecutionState::from_manifest(manifest, dir);
-        capture.recorder.attempt = handoff.attempt;
-        capture.recorder.attempt_started = handoff.attempt_started;
-        capture.recorder.event_seq = handoff.event_seq;
-        capture.account_id = handoff.account_id;
-        capture.account_observed = handoff.account_observed;
-        capture.agent_session = handoff.agent_session;
-        Ok(Self(Arc::new(Mutex::new(capture))))
-    }
-
-    fn record_best_effort(
-        &self,
-        operation: impl FnOnce(&mut ExecutionState) -> std::io::Result<()>,
-    ) {
-        let mut capture = self.0.lock().expect("Agent execution mutex poisoned");
-        if let Err(error) = operation(&mut capture) {
-            capture.recorder.warn_telemetry(error);
+    fn record_best_effort(&self, operation: impl FnOnce(&mut RuntimeState) -> std::io::Result<()>) {
+        let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
+        if let Err(error) = operation(&mut runtime) {
+            runtime.recorder.warn_telemetry(error);
         }
     }
 }
 
-impl Drop for ExecutionState {
+impl Drop for RuntimeState {
     fn drop(&mut self) {
         if self.settled_outcome.is_some() {
             return;
@@ -675,7 +396,7 @@ impl Drop for ExecutionState {
 }
 
 #[derive(Debug)]
-struct ExecutionState {
+struct RuntimeState {
     owner: Option<AttachmentOwner>,
     provider: String,
     model: Option<String>,
@@ -686,82 +407,21 @@ struct ExecutionState {
     recorder: SessionRecorder,
 }
 
-impl ExecutionState {
-    /// Independent agent launches, including helpers, admit their conversation
-    /// before provider work. Graph reservations have their own fenced publisher.
-    fn record_row(
-        manifest: &SessionCaptureManifest,
-        dir: &Path,
-        work: Option<crate::session::SessionWork>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Option<crate::session::LfSession>> {
-        let step = match &manifest.graph {
-            Some(SessionGraphMembership::Step(step)) => Some(step),
-            Some(SessionGraphMembership::Independent) | None => None,
-        };
-        // Mechanical commands have a process and, in a Graph, operation history.
-        // Capturing their diagnostics does not create an agent conversation.
-        if manifest.harness == "loopflow" {
-            return Ok(None);
-        }
-        let store = row_store(dir)?;
-        let task = work
-            .as_ref()
-            .and_then(|work| work.task_id.as_ref())
-            .map(|id| store.task(id))
-            .transpose()?
-            .flatten();
-        let title = generated_session_title(
-            context,
-            manifest.skill.as_deref(),
-            task.as_ref().map(|task| task.title.as_str()),
-            &manifest.cwd,
-        );
-        let session = store.create_session(
-            crate::session::LfSession {
-                captured: None,
-                caller_artifact_key: manifest.caller_artifact_key.clone(),
-                id: format!("session_{}", Uuid::new_v4().simple()).into(),
-                artifact_key: Some(manifest.artifact_key.clone()),
-                input_published: false,
-                cwd: manifest.cwd.clone(),
-                skill: manifest.skill.clone(),
-                provider: Some(manifest.harness.clone()),
-                model: manifest.model.clone(),
-                node: step.and_then(|step| step.key),
-                iterations: step.and_then(|step| step.iterations.clone()),
-                task_id: work.as_ref().and_then(|work| work.task_id.clone()),
-                wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
-                work_source: work.as_ref().map(|work| work.source),
-                graph_lf_process_id: None,
-                bound_at: None,
-                interactive: manifest.surface != "headless",
-                repo: None,
-                title,
-                title_source: crate::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: manifest.created_at.unix_timestamp(),
-            },
-            crate::journal::current_lf_process_id().as_ref(),
-        )?;
-        Ok(Some(session))
-    }
-
-    fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
+impl RuntimeState {
+    fn new(recorder: SessionRecorder) -> Self {
         Self {
             owner: None,
-            provider: manifest.harness.clone(),
-            model: manifest.model.clone(),
-            account_id: manifest
+            provider: recorder.manifest.harness.clone(),
+            model: recorder.manifest.model.clone(),
+            account_id: recorder
+                .manifest
                 .process
                 .as_ref()
                 .and_then(|process| process.account_id.clone()),
             account_observed: false,
             agent_session: None,
             settled_outcome: None,
-            recorder: SessionRecorder::from_manifest(manifest, dir),
+            recorder,
         }
     }
 
@@ -820,20 +480,20 @@ impl ExecutionState {
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
         if !matches!(outcome, "completed" | "failed" | "interrupted") {
             return Err(std::io::Error::other(format!(
-                "invalid recorder outcome: {outcome}"
+                "invalid process outcome: {outcome}"
             )));
         }
         if let Some(settled) = &self.settled_outcome {
             if settled != outcome {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
-                    format!("Recorder already settled as {settled}; refusing {outcome}"),
+                    format!("Process runtime already settled as {settled}; refusing {outcome}"),
                 ));
             }
         } else {
             self.settled_outcome = Some(outcome.to_string());
         }
-        // Ending the execution cannot depend on writing its receipt. A retry
+        // Ending the invocation cannot depend on writing its receipt. A retry
         // may record the same outcome, but cannot reopen or relabel this owner.
         if let Some((store, session, attachment)) = self.owner.take() {
             match finish_session_attachment(&store, &session, &attachment, outcome) {
@@ -859,13 +519,13 @@ pub(crate) fn resume_session_agent_process(
     })
 }
 
-impl AgentExecution {
+impl LfProcessRuntime {
     pub(crate) async fn observe_activity(&self, body_pid: Option<u32>) {
-        let processes = super::activity::sample(body_pid).await;
-        self.record_best_effort(|capture| {
+        let processes = crate::session_record::activity::sample(body_pid).await;
+        self.record_best_effort(|runtime| {
             let now = time::OffsetDateTime::now_utc();
-            let quiet_since = capture.recorder.activity.observe(now, body_pid, processes);
-            let Some((store, session, attachment)) = &capture.owner else {
+            let quiet_since = runtime.recorder.activity.observe(now, body_pid, processes);
+            let Some((store, session, attachment)) = &runtime.owner else {
                 return Ok(());
             };
             store
@@ -940,7 +600,7 @@ mod tests {
             let home = std::path::PathBuf::from(home);
             let store = SqliteStore::new(&home.join("store.db")).unwrap();
             std::fs::write(home.join("recovering"), "ready").unwrap();
-            let result = crate::session_record::resume_session_agent_process(
+            let result = crate::process::resume_session_agent_process(
                 &store,
                 "resume",
                 &store.test_lf_process(),
@@ -963,8 +623,8 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        let capture = store.session("resume").unwrap().unwrap().captured;
-        store.bind_session("resume", capture, &task.id).unwrap();
+        let runtime = store.session("resume").unwrap().unwrap().captured;
+        store.bind_session("resume", runtime, &task.id).unwrap();
         let attached = store
             .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
             .unwrap();
@@ -1031,10 +691,7 @@ mod tests {
         };
         let mut recovery = Child(
             Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    &format!("session_record::runtime::tests::{test}"),
-                ])
+                .args(["--exact", &format!("process::runtime::tests::{test}")])
                 .env(RECOVERY_HOME, home.path())
                 .stdin(Stdio::null())
                 .spawn()
@@ -1133,7 +790,7 @@ mod tests {
             .unwrap();
 
         // A live foreground provider must not be stopped or launched twice.
-        assert!(crate::session_record::resume_session_agent_process(
+        assert!(crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1157,7 +814,7 @@ mod tests {
             [&attached.agent_process_id],
         )
         .unwrap();
-        assert!(crate::session_record::resume_session_agent_process(
+        assert!(crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1169,7 +826,7 @@ mod tests {
         )
         .unwrap();
 
-        let next = crate::session_record::resume_session_agent_process(
+        let next = crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1223,7 +880,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        let next = crate::session_record::resume_session_agent_process(
+        let next = crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1276,7 +933,7 @@ mod tests {
                 super::close_session_agent_process(&store, "resume")
             })
             .is_err());
-        assert!(crate::session_record::resume_session_agent_process(
+        assert!(crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process()
@@ -1323,7 +980,7 @@ mod tests {
         store
             .record_agent_process_identity("duplicate", &duplicate, pid, birth)
             .unwrap();
-        let error = crate::session_record::resume_session_agent_process(
+        let error = crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1369,7 +1026,7 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let next = crate::session_record::resume_session_agent_process(
+        let next = crate::process::resume_session_agent_process(
             &store,
             "resume",
             &store.test_lf_process(),
@@ -1678,5 +1335,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "execution_tests.rs"]
-mod capture_tests;
+#[path = "runtime_tests.rs"]
+mod state_tests;

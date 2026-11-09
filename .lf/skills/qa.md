@@ -45,14 +45,15 @@ scenario, prepare a Session with the installed binary before opening the same
 state with the branch binary.
 
 Run `lf server run` as a child with closed stdin; get its socket from
-`lf server status`. Use the revision-2 newline JSON protocol in
+`lf server status`. Use the current revision's newline JSON protocol in
 `rust/loopflow/src/server/README.md` over that Unix socket. Exercise Swift
 encoding with the built `Loopflow` library's `ServerClientMessage` and
 `ServerOperation`; this checks live interoperability, not Desktop UI behavior.
 Check the resulting state through the CLI as well as the socket. Dashboard
 queries accept `task:<id>`; hide/show members use that same selector.
 `lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.
-Session pages return `entries` and `next`. Stop and reap every server child,
+Paged Session reads return `entries` and `next`; the unpaged `session.list`
+subscription returns an array. Stop and reap every server child,
 including on failure; no service installation is needed for this isolated run.
 
 ## Launching Loopflow Desktop
@@ -105,7 +106,7 @@ and separate `HOME` and `LF_HOME`; clear inherited `LF_*`, then set `LF_BIN` to
 the absolute branch-built binary. Start that binary's `server run` there and
 read the socket from `server status`. Never fault the installed Machine's store.
 
-Connect over the Unix socket with newline-delimited JSON: send the revision-2
+Connect over the Unix socket with newline-delimited JSON: send the current
 hello from `tests/fixtures/dto/server/hello.json`, then requests shaped like
 the adjacent `graph_run.json` or `task_run.json`. A local Graph containing
 `- cmd: help` exercises real execution without a provider. For disposable
@@ -122,6 +123,21 @@ and inspect its actual result without launching it again. Find completed direct
 Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
 process list cannot find a finished run. Stop the private server and every
 remaining child after the scenarios.
+
+For watch recovery, save the baseline's opaque `checkpoint`, close the socket,
+then reconnect with the same operation and `select` plus `resume: <checkpoint>`.
+An unchanged watch sends its acknowledgement only; send a numeric `checkpoint`
+to confirm it is live. Change Work with the CLI while disconnected and check the
+complete replacement. Restart the private server to check incarnation changes.
+For a terminal `task.wait`, drop after its final reading but before consuming
+`ended`; resuming that token must still end. Read field paths from the live
+body or schema: `task.get` exposes `task.title`.
+
+`scripts/test_desktop.sh --filter
+WorkCLISubscriptionTests/serverReplacementKeepsWorkCurrent` exercises the
+production Work model against a real private server: last reading during an
+outage, offline edits, continued updates after replacement, and cancellation
+during another outage. It is a headless automated check, not a window walkthrough.
 
 ## Keep what you learned
 

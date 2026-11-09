@@ -24,6 +24,12 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 `detached` once Desktop restarts and its pane reattaches. An owner that is running
 but never answers reads `detached` too.
 
+`lf session rename SESSION 'Resume repair'` updates the attached terminal title,
+including Rex and other terminals that support OSC titles. Reattaching shows the
+current name. Updates wait for complete provider control sequences; slow name
+lookups leave input and output running. cmux tabs and tmux windows also follow the
+Session name, while cmux workspaces keep their Task name or a hand-edited name.
+
 Desktop's server relay stays alive when its service connection drops. Its native
 status row shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Recovery refreshes the same owner's screen;
@@ -132,6 +138,8 @@ acknowledged, the attachment stays while its heartbeats reach the owner.
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
 attachments keep their PTY open; the running program interprets terminal EOF keys.
+Keystrokes a viewer sent before it closed reach the program in order, even when
+the viewer quits in the same instant, as long as it still held control.
 
 The owner keeps a libghostty-vt terminal (the Ghostty revision pinned in
 `rust/loopflow/ghostty-vt.json`, 8 MiB of scrollback) and answers the program's

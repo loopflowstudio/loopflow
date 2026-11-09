@@ -145,9 +145,25 @@ on `code`; only `outcome_unknown` means the request may have taken effect:
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
 
+After editing a Task's checkout, request its changed files on the same connection:
+
+```json
+{"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null}
+```
+
+The response reflects Git state read for this request, even while subscriptions
+are active. One-shot reads and served writes consult Git afresh. Only subscription
+readings reuse retained Git answers, shared across subscriptions so listing
+checkouts side by side stays fast. Git observations are not an atomic snapshot
+of a checkout being edited.
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
-the shared kinds; `wire::ServerOperation` owns the server's own:
+the shared kinds; `wire::ServerOperation` owns the server's own.
+
+Rust variants use the kind's PascalCase spelling (`ProcessList`); Swift cases
+use lowerCamelCase (`processList`). Dots and underscores separate words. Each
+case names one operation, including distinct claim/unassign and pin/unpin writes.
 
 | API kind | CLI | Engine |
 | --- | --- | --- |

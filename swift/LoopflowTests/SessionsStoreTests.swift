@@ -101,6 +101,26 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.presentationProvider == "codex")
     }
 
+    @Test("Refresh replaces the viewer and reveals the same conversation without resetting it")
+    func refreshSameConversation() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args == ["session", "resume", "--reveal-existing", "main", "--prepare", "--json"] else {
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+            return session(id: "main", state: "closed", primary: true)
+        })
+        let original = try #require(records([session(id: "main", state: "active", primary: true)]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        let previous = try #require(item(store, "main"))
+        await store.refresh("main")
+        #expect(item(store, "main")?.state == .prepared)
+        #expect(item(store, "main")?.launchId != previous.launchId)
+        #expect(item(store, "main")?.record.id == original.id)
+        #expect(item(store, "main")?.agentOverride == nil)
+    }
+
     @Test("Reset restarts the same Session with a fresh launch")
     func resetRestartsSameSession() async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in

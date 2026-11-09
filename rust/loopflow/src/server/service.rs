@@ -372,7 +372,7 @@ impl Connection<'_> {
         // A Machine registry that is unavailable or uninitialized leaves `machine`
         // null; file settings stay reachable through the same connection.
         let machine = tokio::task::spawn_blocking(|| {
-            crate::journal::request::isolate(|| Read::MachineId.read())
+            crate::journal::request::isolate(|| Read::MachineSelf.read())
         })
         .await?
         .ok();
@@ -1262,7 +1262,7 @@ mod tests {
             first
                 .send(&ClientMessage::Subscribe {
                     id: "first".into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     select: None,
                     resume: None,
                 })
@@ -1287,7 +1287,7 @@ mod tests {
             next.hello(REVISION, REVISION).await;
             next.send(&ClientMessage::Subscribe {
                 id: "new-id".into(),
-                operation: Read::MonitorPs,
+                operation: Read::ProcessList,
                 select: None,
                 resume: Some(checkpoint.clone()),
             })
@@ -1330,7 +1330,7 @@ mod tests {
             ] {
                 next.send(&ClientMessage::Subscribe {
                     id: id.into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     select,
                     resume,
                 })
@@ -1376,7 +1376,7 @@ mod tests {
         );
         for changed in [
             scope("restarted-server", &query, None),
-            scope("first-server", &Read::MonitorPs, None),
+            scope("first-server", &Read::ProcessList, None),
             scope(
                 "first-server",
                 &Read::SessionList {
@@ -1408,7 +1408,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     resume: None,
                     select: None,
                 })
@@ -1563,7 +1563,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     resume: None,
                     select: Some(vec!["absent".into()]),
                 })

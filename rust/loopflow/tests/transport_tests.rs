@@ -410,12 +410,31 @@ read -r answer < /dev/tty
             )
             .unwrap();
     }
-    fn ends(&self, owner: &str) {
+    /// Wait until `owner` has recorded whether a viewer is attached.
+    fn wait_viewed(&self, owner: &str, viewed: bool) {
         let deadline = Instant::now() + Duration::from_secs(20);
-        while self.running(owner) {
+        while self
+            .sql()
+            .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap()
+            != viewed
+        {
             assert!(
                 Instant::now() < deadline,
-                "{owner} kept running; logs: {:?}",
+                "{owner} never recorded viewed={viewed}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    fn ends(&self, owner: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        // The completion receipt can precede the owner's socket cleanup.
+        while self.running(owner) || self.endpoint(owner).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{owner} did not finish cleanup; logs: {:?}",
                 std::fs::read_to_string(self.home.path().join("logs/transport.log"))
             );
             std::thread::sleep(Duration::from_millis(50));
@@ -1771,6 +1790,70 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         fixture.stop(&owner);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
+}
+
+#[test]
+fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s\n' "$*" > "$HOME/launches"
+while read -r answer < /dev/tty; do
+    [ "$answer" = stale ] || exit 0
+    printf '\033]2;default\007\033]7501;state=idle:app=claude-code\033\\'
+done
+"#,
+    );
+    let mut command = fixture.serve(true, &[env!("CARGO_BIN_EXE_lf"), "-i", "-a", "claude"]);
+    command
+        .env("PATH", path)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE");
+    let owner = fixture.owner(command);
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let initial: String = fixture
+        .sql()
+        .query_row(
+            "SELECT title FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut viewer = fixture.viewer(&owner, true);
+    until_out(&mut viewer, &format!("\x1b]0;{initial}\x07"));
+    let renamed = fixture
+        .command(&["session", "rename", &session, "Resume repair"])
+        .output()
+        .unwrap();
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    until_out(&mut viewer, "\x1b]0;Resume repair\x07");
+    viewer.input("stale\n");
+    let overwritten = out(&until_out(&mut viewer, "\x1b]0;Resume repair\x07"));
+    assert!(overwritten
+        .windows(b"\x1b]2;default\x07".len())
+        .any(|bytes| bytes == b"\x1b]2;default\x07"));
+    assert!(overwritten
+        .windows(b"7501;state=idle".len())
+        .any(|bytes| bytes == b"7501;state=idle"));
+    drop(viewer);
+    let mut viewer = fixture.viewer(&owner, true);
+    let snapshot = match viewer.next().unwrap() {
+        Item::Snapshot(bytes) => bytes,
+        other => panic!("expected snapshot, got {other:?}"),
+    };
+    viewer.input("bye\n");
+    viewer.finish();
+    fixture.ends(&owner);
+    assert_ne!(initial, "default");
+    let title = b"\x1b]0;Resume repair\x07";
+    assert!(snapshot.windows(title.len()).any(|bytes| bytes == title));
 }
 
 #[test]
@@ -3311,8 +3394,11 @@ while True:
         first.input("retained draft");
         until_out(&mut first, "EDITOR:retained draft");
     }
+    fixture.wait_viewed(&owner, true);
     first.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(first);
+    // Pausing during that record's write would leave the store locked.
+    fixture.wait_viewed(&owner, false);
 
     let next = bin.join("lf-after");
     other_build(&next);
@@ -4871,6 +4957,89 @@ fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
         "{} bytes on the wire",
         viewer.wire
     );
+}
+
+/// Wait until `path` holds `len` bytes, the program having written them all.
+fn wait_for_answer(fixture: &Fixture, len: usize) -> Vec<u8> {
+    let answer = fixture.home.path().join("answer");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !answer.exists() {
+        if Instant::now() > deadline {
+            let partial = std::fs::read(fixture.home.path().join("answer.tmp")).unwrap_or_default();
+            panic!(
+                "input lost; received {} of {len} bytes: {:?}",
+                partial.len(),
+                String::from_utf8_lossy(&partial[partial.len().saturating_sub(200)..])
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::fs::read(answer).unwrap()
+}
+
+/// A program that keeps the owner writing to its viewers while it collects
+/// exactly `len` bytes of input into `$HOME/answer`.
+fn collecting(len: usize) -> String {
+    format!(
+        "(while :; do echo tick; sleep 0.01; done) & \
+         head -c {len} > \"$HOME/answer.tmp\"; mv \"$HOME/answer.tmp\" \"$HOME/answer\"; kill $!"
+    )
+}
+
+/// Keystrokes sent just before a viewer closes reach the program, even when
+/// the owner writes to the closed viewer before reading them.
+#[test]
+fn viewer_input_survives_its_disconnect() {
+    let fixture = Fixture::new();
+    const N: usize = 20000;
+    let program = collecting(N);
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", &program]));
+    let paused = fixture.pause(&owner);
+    let mut socket = UnixStream::connect(fixture.endpoint(&owner)).unwrap();
+    // The paused owner accepts nothing; room for every byte before it runs.
+    let room: libc::c_int = 1 << 20;
+    // SAFETY: the option value is a live c_int of the size given.
+    assert_eq!(
+        unsafe {
+            libc::setsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                (&room as *const libc::c_int).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        },
+        0
+    );
+    let attach = json!({"id":1,"kind":"attach","control":true,"replace":true,
+        "own":"take","rows":24,"cols":80});
+    let mut bytes = frame(REQUEST, attach.to_string().as_bytes());
+    let input: Vec<u8> = (0..N).map(|i| b'a' + (i % 26) as u8).collect();
+    for chunk in input.chunks(1000) {
+        bytes.extend(frame(INPUT, chunk));
+    }
+    socket.write_all(&bytes).unwrap();
+    drop(socket);
+    drop(paused);
+    assert_eq!(wait_for_answer(&fixture, N), input);
+
+    // Attaching, typing and closing at once, against a program that keeps the
+    // owner writing, loses nothing.
+    let fixture = Fixture::new();
+    let rounds: Vec<String> = (0..50).map(|round| format!("round {round:02}\n")).collect();
+    let program = collecting(rounds.iter().map(String::len).sum());
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", &program]));
+    for round in &rounds {
+        let mut socket = UnixStream::connect(fixture.endpoint(&owner)).unwrap();
+        // Separate writes, so the owner can read the attach alone and reply
+        // after the close, while the keystrokes still wait unread.
+        socket
+            .write_all(&frame(REQUEST, attach.to_string().as_bytes()))
+            .unwrap();
+        socket.write_all(&frame(INPUT, round.as_bytes())).unwrap();
+    }
+    let answer = wait_for_answer(&fixture, rounds.iter().map(String::len).sum());
+    assert_eq!(String::from_utf8(answer).unwrap(), rounds.concat());
 }
 
 struct ShellOwnerGuard<'a>(&'a Fixture, String);

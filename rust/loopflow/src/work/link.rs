@@ -94,8 +94,8 @@ impl WorkUrl {
             }
         }
         ensure!(
-            matches!(url.target, WorkTarget::Task(_)) || (url.session.is_none() && !url.diff),
-            "Session and Changes selectors need a Task link"
+            matches!(url.target, WorkTarget::Task(_)) || !url.diff,
+            "Changes selectors need a Task link"
         );
         Ok(url)
     }
@@ -210,6 +210,8 @@ mod tests {
             "loopflow://loopflow",
             "loopflow://loopflow/wave/product",
             "loopflow://loopflow/task/LOO-426",
+            "loopflow://loopflow?session=s",
+            "loopflow://loopflow/wave/product?session=s",
             &qualified,
             "loopflow://loopflow/task/LOO-1?session=a%2Bb%26c&diff=true",
         ] {
@@ -246,7 +248,6 @@ mod tests {
             "loopflow://loopflow/task/A?session=",
             "loopflow://loopflow/task/A?diff=1",
             "loopflow://loopflow/wave/product?diff=true",
-            "loopflow://loopflow?session=s",
             "loopflow://loop graph",
         ] {
             assert!(WorkUrl::parse(text).is_err(), "{text} parsed");

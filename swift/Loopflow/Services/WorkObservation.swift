@@ -76,16 +76,16 @@ public enum WorkPart: String, CaseIterable, Sendable {
     public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
         case .planning: return .allPlans
-        case .activity: return .monitorPs
-        case .selections: return scope.repo.map { .desktopPlans(directory: $0) }
-        case .peerPlanning: return scope.repo.map { .planningStatus(directory: $0) }
-        case .sessions: return scope.repo.map { .desktopSessions(directory: $0, headless: scope.headless) }
+        case .activity: return .processList
+        case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
+        case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
+        case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil) }
         case .task:
             // Without a repository the Task resolves Machine-wide, from no checkout.
-            return scope.task.map { .desktopTask(directory: scope.repo ?? "/", issue: $0) }
+            return scope.task.map { .taskGet(directory: scope.repo ?? "/", issue: $0) }
         case .workActivity:
             return scope.activity.map {
-                .history(since: "7d", limit: 50, wave: $0.wave, project: $0.project, task: $0.task)
+                .sessionHistory(since: "7d", limit: 50, wave: $0.wave, project: $0.project, task: $0.task)
             }
         }
     }

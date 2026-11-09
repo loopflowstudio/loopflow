@@ -85,9 +85,8 @@ struct ConversationPlaceholder: View {
 
     var body: some View {
         if model.conversationIsOpening(workspace) {
-            ProgressView("Opening conversation…")
+            SessionOpeningView(screen: nil)
                 .foregroundStyle(theme.palette.text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
             TaskStartOffer(model: model, task: task)
         } else {
@@ -106,6 +105,27 @@ struct ConversationPlaceholder: View {
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
         if model.showsSavedWork { return WorkCache.savedReason }
         return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
+    }
+}
+
+/// Opening keeps available history readable until the terminal takes its place.
+struct SessionOpeningView: View {
+    let screen: String?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            if let screen {
+                ScrollView {
+                    Text(screen).font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            ProgressView(ServerConnectionReading.openingTitle)
+                .controlSize(.small).padding(8).background(.background)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -850,9 +870,8 @@ struct SessionPaneView: View {
         case .elsewhere:
             _elsewherePlaceholder(item)
         case .opening, .prepared:
-            ProgressView("Opening conversation…")
+            SessionOpeningView(screen: item.lastScreen)
                 .foregroundStyle(theme.palette.text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("No longer open here").foregroundStyle(theme.palette.text)
@@ -874,9 +893,8 @@ struct SessionPaneView: View {
                 openButton(item)
             }
         case .pending where model.conversationIsOpening(workspace):
-            ProgressView("Opening conversation…")
+            SessionOpeningView(screen: item.lastScreen)
                 .foregroundStyle(theme.palette.text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
             PaneEmptyState(title: "Not running here", systemImage: "terminal",
                            description: "This Session has no live terminal in this pane yet.") {
@@ -961,13 +979,6 @@ struct SessionPaneView: View {
                 onFocus: focusPane
             )
             .id(item.launchId)
-            .overlay(alignment: .topTrailing) {
-                if item.state == .prepared {
-                    ProgressView("Connecting…").controlSize(.small).padding(8)
-                        .background(theme.terminal.background.color)
-                        .allowsHitTesting(false)
-                }
-            }
         } else {
             Text("Session location unavailable")
         }

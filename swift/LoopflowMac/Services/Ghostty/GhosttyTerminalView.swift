@@ -570,7 +570,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var connectionReadonly = false
     var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
     private let connectionLabel = NSTextField(labelWithString: "")
-    private lazy var retryConnection = NSButton(title: "Retry", target: self, action: #selector(retryServerConnection))
+    private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
     private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
     lazy var connectionBar: NSStackView = {
         let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
@@ -600,7 +600,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         connectionLabel.stringValue = reading.title ?? ""
         connectionLabel.toolTip = reading.title
         connectionBar.isHidden = reading.title == nil
-        retryConnection.isHidden = reading.state != .unavailable
+        retryConnection.isHidden = !(serverConnection?.canRetry ?? false)
         moveConnection.isHidden = !reading.canMoveHere
         superview?.needsLayout = true
     }

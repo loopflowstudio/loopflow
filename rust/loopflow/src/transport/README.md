@@ -30,7 +30,10 @@ current name. Updates wait for complete provider control sequences; slow name
 lookups leave input and output running. cmux tabs and tmux windows also follow the
 Session name, while cmux workspaces keep their Task name or a hand-edited name.
 
-Desktop shows **Opening session…** until the first attachment is acknowledged.
+Desktop shows **Opening… Input paused** until attachment and native input readiness
+are acknowledged. Initial retries keep that label; **Reconnecting…** follows a
+previously acknowledged connection. Workspace preparation uses the same display
+and retains its last available screen.
 Connection feedback overlays the screen without changing the terminal's size;
 the first retained screen uses the new pane's dimensions and cursor position.
 The server relay stays alive when its service connection drops. Its native
@@ -42,18 +45,20 @@ took control, recovery observes it without replacing input or geometry. Choose
 **Move here** in the read-only pane's connection row to edit the same running
 Session. Input stays paused until its owner acknowledges; a lost reply never
 repeats that takeover. Eight attempts with capped backoff lead to **Session
-unavailable** and a native **Retry** action. Only an owner exit event means ended.
+unavailable** and a native **Retry connection** action. Only an owner exit event means ended.
 Closing the surface cancels recovery. Ordinary explicit Open remains separate.
 
-The native surface creates a private temporary mailbox directory and passes
-`LF_SERVER_STATUS` to its relay only. Atomic JSON readings carry connection
-generation, state, input capability and optional explanation; `status.retry`
-requests another bounded cycle. `status.move` carries the current generation;
-the relay consumes it once before requesting an explicit replacing attachment,
-and advances the generation. Stale actions cannot cross a connection loss.
-Surface closure removes the directory and cancels pending actions. This is
-presentation state, not a durable viewer registry or execution authority. Plain
-CLI server relays retain their Ctrl+R/Ctrl+] interaction.
+The native surface listens on a private Unix socket and passes its path through
+`LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry generation,
+state, input capability, native readiness and optional explanation. The same
+stream carries `{"kind":"retry"}` or `{"kind":"move","generation":N}`.
+A move is consumed once before its replacing attachment; stale generations and
+lost actions are never replayed. Closing the surface removes its private directory
+and cancels recovery. A broken status stream pauses Desktop input immediately;
+the relay records the gap, keeps the terminal running, and reconnects the status
+stream with its current reading. Status I/O, including connect, is nonblocking.
+This is temporary presentation, not a viewer registry or execution authority.
+Plain CLI server relays retain their Ctrl+R/Ctrl+] interaction.
 
 Leaving a terminal relay restores keyboard and drawing modes at the current
 cursor position. Returning to the shell must not home the cursor or overwrite

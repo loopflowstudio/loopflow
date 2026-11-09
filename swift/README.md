@@ -101,8 +101,9 @@ failure with **Retry**; never a **No session** or **Open** gate. Load opens the
 selected Work first, then visible tiles, then the repository and Waves, then
 recent working Tasks, two preparations at a time; initial rendering does not wait.
 A prepared conversation starts its provider at once, before any pane shows it;
-selecting the Work shows the running terminal. A small **Connecting…** indicator
-remains until the live relay accepts input.
+selecting the Work shows the running terminal. One **Opening… Input paused**
+reading remains through preparation, attachment and native input readiness. The
+terminal owns that display once mounted; there is no second workspace overlay.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
 any additional panes on screen; a Task admitted from a Dashboard tile stays warm after
@@ -133,9 +134,12 @@ Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes watch their relay's connection-status mailbox for changes.
-Quiet mailboxes schedule no reads, including in retained hidden panes. Closing
-a pane stops observation and removes its mailbox.
+Session panes receive their relay's status and send Retry/Move actions over one
+private Unix connection. Quiet streams schedule no reads, including in retained
+hidden panes. Status loss pauses input while the relay continues; a fresh status
+connection supplies the current reading without replaying actions. Closing a pane
+stops observation and removes its private socket directory. Native readiness and
+attachment permission share that reading; a saved screen cannot enable input.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
@@ -1025,7 +1029,8 @@ context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
-Initial attachment shows **Opening session…**; **Reconnecting…** is recovery.
+Opening shows **Opening… Input paused** through attachment and native readiness;
+**Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same
 viewport while status changes.

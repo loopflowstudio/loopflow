@@ -73,11 +73,15 @@ lf server status   # readiness, socket, server instance and connection diagnosis
 lf doctor          # selected installation and store health
 ```
 
-**Opening session…** means Desktop is waiting for its first attachment.
+**Opening… Input paused** means Desktop is waiting for attachment and native
+input readiness. Its last available screen stays readable; without a saved
+screen the same pane stays empty until output arrives.
 **Reconnecting…** means a connection was lost and Desktop is trying the same
 Session owner. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
-end, **Retry** reconnects without replaying input or restarting the provider.
+end, **Retry connection** reconnects without replaying input or restarting the provider.
+A lost connection-status channel also pauses input; the terminal relay keeps
+running and restores its status automatically when that channel returns.
 A read-only pane's **Move here** requests control explicitly; a lost connection
 alone never takes it from another viewer.
 

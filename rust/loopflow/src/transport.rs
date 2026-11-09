@@ -2446,7 +2446,7 @@ fn view(
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
                                 }
                                 if let Some(status) = &mut status {
-                                    status.connected(controlled)?;
+                                    status.connected(controlled);
                                 }
                             }
                             Reply::Busy if recovery.is_some() => {
@@ -2547,8 +2547,8 @@ fn view(
                             return Ok(());
                         }
                         Event::ChildExited { code } => {
-                            if let Some(status) = &status {
-                                status.ended()?;
+                            if let Some(status) = &mut status {
+                                status.ended();
                             }
                             return if code == 0 {
                                 Ok(())
@@ -2563,6 +2563,9 @@ fn view(
                         }
                         Event::Return { detach } => {
                             returning = Some(detach);
+                            if let Some(status) = &mut status {
+                                status.native_ready();
+                            }
                             // This marker comes from the acknowledged live relay, never
                             // the owner's saved screen. Desktop consumes it as readiness.
                             if controlled && crate::session_record::current_terminal_id().is_some()
@@ -2585,7 +2588,7 @@ fn view(
             if status.closed() {
                 return Ok(());
             }
-            if status.take_move(acknowledgement_deadline.is_none() && !controlled)? {
+            if status.take_move(acknowledgement_deadline.is_none() && !controlled) {
                 controlled = false;
                 owned = false;
                 recovery = Some(Recovery::Takeover);

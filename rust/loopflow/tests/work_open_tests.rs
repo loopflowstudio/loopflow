@@ -80,6 +80,36 @@ fn json(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn task_location_uses_the_named_plan_outside_a_checkout() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let repository = json(&lf(home.path(), repo.path(), None, &["repo", "--json"]));
+    let repository = repository["id"].as_str().unwrap();
+    let reading = json(&lf(
+        home.path(),
+        elsewhere.path(),
+        None,
+        &[
+            "--repo-id",
+            repository,
+            "task",
+            "location",
+            registered.task.id.as_str(),
+            "--request",
+            "desktop-reconnect",
+            "--json",
+        ],
+    ));
+    assert_eq!(reading[0]["repository_id"], repository);
+    assert_eq!(reading[0]["task_id"], registered.task.id.as_str());
+    assert_eq!(reading[0]["request"], "desktop-reconnect");
+    assert_eq!(reading[0]["location"]["state"], "recorded");
+}
+
 fn folder(path: &Path) -> String {
     path.file_name().unwrap().to_string_lossy().into_owned()
 }

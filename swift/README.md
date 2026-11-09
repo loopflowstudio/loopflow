@@ -259,10 +259,13 @@ local uncommitted edits stay in Files.
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
-**Reset session** starts a fresh primary conversation/process from current Work
-instructions, without replaying the previous conversation; its history remains
-available. Reset preserves the previous terminal and client. Provider switching
-first reads its saved history, then replaces the current provider process. If the
+**Refresh session** reconnects the pane to that conversation, including after a
+failed launch or stale connection. It keeps the provider's history and running
+process; a conversation open elsewhere still offers **Take back**. The control
+stays visible when the Session is the only pane.
+**Reset session** starts a fresh provider thread in the same Session, seeded with
+its saved conversation. Reset and provider switching first read that history,
+then replace the current provider process. If the
 provider has not saved a transcript yet, the current terminal stays open; finish
 its first turn and retry the switch. A failed status observer reconnects on the
 next status event without replacing the conversation.

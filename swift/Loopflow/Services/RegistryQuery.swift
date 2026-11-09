@@ -923,8 +923,9 @@ public struct RegistryQuery: Sendable {
     public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
         // The request token is opaque and returns byte-exact; identities compare canonically.
         let request = UUID().uuidString
+        let scope = remoteMachine == nil ? ["--repo-id", repository] : []
         let readings = try Self.decode([TaskLocationObservation].self, from: await run(
-            ["task", "location", task, "--request", request, "--json"], nil))
+            scope + ["task", "location", task, "--request", request, "--json"], nil))
         guard readings.count == 1, let reading = readings.first,
               reading.request == request,
               reading.repositoryID == StructuredIdentity.prefixed(repository, "repo_"),

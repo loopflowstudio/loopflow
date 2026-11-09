@@ -1282,6 +1282,13 @@ final class SessionsStore {
         await prepare(id, intent: .resume)
     }
 
+    /// Replace this pane's viewer and read the same conversation again. A
+    /// provider running in another terminal remains there until Take back.
+    func refresh(_ id: String) async {
+        release(id)
+        await select(id)
+    }
+
     @discardableResult
     func switchProvider(_ id: String, to agent: String) async throws -> SessionRecord {
         guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }

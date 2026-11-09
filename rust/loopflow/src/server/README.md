@@ -380,6 +380,11 @@ After `welcome`, request `session.attach` on the authenticated client connection
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
+The Session must already have a running terminal owner; attaching never starts
+one. `owner_lf_process_id: null` selects its current owner. To reconnect only to
+the owner you had, send that owner's ID instead; a changed owner returns
+`not_found` rather than attaching to its replacement.
+
 Open a separate authenticated bridge connection and send the ticket first:
 
 ```text

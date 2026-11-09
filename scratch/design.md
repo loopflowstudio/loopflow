@@ -1,13 +1,13 @@
 # LOO-809: remote attach tickets
 
-Reuse the local attach flow and wire shapes. The planned contract lives in
+Reuse the local attach flow and wire shapes documented in
 `rust/loopflow/src/server/README.md#remote-attach-contract`, linked from
-`docs/server.md`.
+`docs/server.md`. This checkout contains that planned contract only; tickets
+still bind to Unix UID and expire with `Instant`.
 
-This checkout contains the planned contract only. The listener, mobile settings
-and bulk protocol are outside this Task; no product decision is missing.
+The listener, mobile settings and bulk protocol are outside this Task.
 
-## Transport dependency — November 8, 2026
+## Transport dependency — November 9, 2026 UTC
 
 LOO-718's PR #1812 supplies `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
@@ -26,7 +26,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 rechecks from 00:47 through 02:36 UTC agreed:
+The November 9 rechecks from 00:47 through 03:13 UTC agreed:
 `lf task status LOO-718 --json` showed the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -35,12 +35,10 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-Implementation and remote acceptance await LOO-718's authenticated transport.
-Landing the separate mobile PR is outside this Task's scope.
-
-Graph decision: stop for the external transport dependency; implementation and
-publication cannot advance on the local-only predecessor. Continue when LOO-718
-lands, reconciling against its merged revision. No product decision is missing.
+Graph decision: stop for LOO-718's authenticated transport, then reconcile
+against its merged revision. Implementation and publication cannot advance on
+the local-only predecessor. Landing the separate mobile PR is outside this
+Task's scope; no product decision is missing.
 
 ## Delete — do not maintain
 
@@ -73,10 +71,7 @@ satisfy these checks.
 Retain local attachment and its consume-on-attempt behavior through the shared
 store, including the unchanged ticket response and bridge wire fixtures.
 
-Visual review remains for demo or QA; Desktop opening results are in
-`questions.md`.
+Desktop review and opening results are in `questions.md`.
 
-Compress keeps the latest Desktop opening result here and references earlier
-attempts in git. No code reduction applies before the transport lands.
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

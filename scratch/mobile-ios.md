@@ -392,3 +392,21 @@ with the suite, then only `testRemoteCheckoutDoesNotHideARecordedOrSelectedLocal
 Logs: `/tmp/mobile-session-location-tests.log`,
 `/tmp/mobile-session-location-focused.log`. This does not establish routing or
 attachment to a second Machine.
+
+### Review publication — November 9
+
+`lf sync --manual` found current main (`4848816f7`) already integrated; no new
+merge or conflict repair was needed. GitHub still showed the older published
+head `f0c77e31f` as conflicting. Task status by its full ID confirms the existing
+feature Graph remains at demo, with no settlement armed.
+
+- `uv run python scripts/check_migrations.py`: passed; `mobile_device_admission.sql` remains unmerged and cannot be installed on the real Machine yet.
+- `cargo test -p loopflow --lib lf::tests:: --jobs 4`: 39 passed (`/tmp/mobile-parser-check.log`).
+- `cargo test -p loopflow --test integration cli_discovery:: --jobs 4`: 36 passed (`/tmp/mobile-cli-discovery-check.log`).
+- `cd website && uv run python dev.py test`, with candidate CLI first on PATH: 73 passed (`/tmp/mobile-docs-gate.log`).
+- The earlier November 4 output-timeout logs named above no longer exist in `/tmp`; the committed observations remain. Their cause is not established by the November 9 passing run.
+
+The PR copy now describes revision 3, the native integration repair and remaining
+physical-device/installed-server acceptance. Retained scratch artifacts defer
+hosted full-matrix CI under `.github/CI.md`; publication is a review checkpoint,
+not release acceptance or permission to land/install.

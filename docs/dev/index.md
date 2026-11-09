@@ -340,6 +340,6 @@ A successful check covers that inventory, not configured runtime behavior.
 
 ## Research
 
-[Session experience comparison](research/session-experience.html) reviews T3 Code,
+[Session experience comparison](https://github.com/loopflowstudio/loopflow/blob/7232e533e14be764951b8eb35bfef8262086e5a5/docs/dev/research/session-experience.html) reviews T3 Code,
 Paradev and Paseo commit history and tests, with Loopflow findings and Task handoffs.
 It records source observations from November 2026, not a live product benchmark.

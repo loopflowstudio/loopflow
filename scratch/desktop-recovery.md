@@ -1,5 +1,50 @@
 # Desktop session recovery
 
+## Landing gate, 2026-11-09
+
+Gate passed for the bounded fixes in PR #1863. Reviewed the committed diff from
+`237a107261572d08e4ffa3c8baf72b1c164c110e` to
+`a6f254931348c08481525466e040246d81bc42f3` plus the working tree. No further
+production-code repair was identified. Physical invisible typing and automatic
+interactive quota handoff remain unfixed; neither the incident nor LOO-813 is
+complete. No installation, Session restart, Desktop operation, publication or
+landing occurred in this gate.
+
+Affected plan: `open.rs`, `open/rex.rs`, `work_route.rs` and `work/link.rs` reach
+opening/routing, CLI, Work-link and `work_open_tests` suites; `read.rs` and
+`RegistryQuery.swift` reach Session inventory, served reads and Swift query
+tests; `provider_account.rs`, `subscription.rs` and `codex_access.py` reach
+account/auth polling tests. The changed Swift model, pane, action, destination,
+input and test files plus `desktop_action.json` reach the headless Desktop
+app/model/view suite and shared DTO tests. No project.yml, build-script or
+Ghostty dependency change requires another local Xcode build.
+
+Command (inherited `LF_*` unset, canonical `TMPDIR`, stdin `/dev/null`):
+
+```sh
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(lf::commands::open::) | test(lf::commands::read::) | test(lf::commands::work_route::) | test(lf::tests::) | test(work::link::) | test(subscription::) | test(provider_account::account_first_tests::) | test(work_open_tests::) | test(auth_tests::) | test(dto_fixtures::) | test(session_cli_tests::) | binary(served_reads) | binary(lf)'
+```
+
+- Affected-suite command above: PASS, three suites in 722 s; no reused result or timeout; log `/tmp/loo813-debug/gate-final.log`, phase logs `.lf/tmp/gate/run-75735/`.
+- `scripts/check_architecture.py` and `scripts/check_rust_test_inventory.py`: PASS.
+- `cargo fmt --all -- --check`: PASS; `cargo build -p loopflow --bin lf --jobs 4`: PASS.
+- Filtered `cargo nextest run -p loopflow`: PASS, 289 tests, 3306 unselected/ignored; 177.172 s execution.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`: PASS.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone`: PASS, app/test build and reported 780 tests in 94 suites; 45 optional display diagnostics skipped; 181.201 s test execution.
+- `scripts/check_swift_multiplatform_boundaries.py` and `git diff --check`: PASS.
+- Full Linux matrix and candidate Xcode build: CI-owned, not run here. Physical input/repaint: unverified, requires an available native screen.
+
+Replacement PR copy is in `scratch/pr-title.txt`, `scratch/pr-body.md` and
+`scratch/.pr-copy-ref`; the remote description was not changed. It retains the
+09:15 Nov 9 updater rollback, repaired local installation, temporarily disabled
+`com.loopflow.refresh`, and LOO-593 same-thread/API-edit observations with the
+screen limitation. No raw captures are in the copy. The byte-matching backup
+remains `/tmp/loo813-debug/desktop-recovery-captures-preserved.json`; the untracked
+checkout copy was relocated to `/tmp/loo813-debug/desktop-recovery-captures-gate.json`
+to keep private captures out of delivery commits. Only scratch notes/copy changed
+after the tested source tree. Parent owns `lf land --wait-and-fix` and retaining
+the open incident/Task disposition.
+
 ## Recurrence, 2026-11-09 10:04–10:17 local
 
 Jack Heart:

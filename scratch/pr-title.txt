@@ -1,0 +1,1 @@
+Open exact Desktop Sessions and reconnect stale panes

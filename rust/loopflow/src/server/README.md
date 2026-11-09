@@ -430,8 +430,9 @@ it, and send `attach` as its first message, without a `hello` exchange:
 Both connections must authenticate with the same Tailscale node stable ID and
 user ID; the same account on another device does not match. A ticket, `hello`
 name, `client_id`, login text or proxy's Unix UID cannot replace that authentication.
-Local and remote tickets are not interchangeable. The 60-second deadline includes
-host sleep; expiry does not close an open bridge.
+Local and remote tickets are not interchangeable. Each ticket opens one bridge
+within 60 seconds of issue, including time the host spends asleep. Expiry does
+not close an open bridge.
 
 An unknown, spent, expired or identity-mismatched ticket returns `not_found`
 with a null `id` and closes the bridge connection. Presenting a terminal ticket

@@ -1,5 +1,9 @@
 # LOO-809
 
+The November 9 write-docs attempt at 18:52 UTC reported both shipping docs
+opened in Loopflow Desktop. No visual inspection was performed. The existing
+docs cover the chosen contract; no edits or product questions were needed.
+
 The November 9 write-docs attempt at 18:15 UTC to open the same files returned:
 `Error: The pane content was replaced; inspect Desktop again.`
 The shipping docs remain at the paths below. No product question is open.

@@ -24,7 +24,7 @@ through `host.permits`.
 
 Two inspected revisions differ:
 
-- Published head `b222504a8ededd0f26dbe01e404b1bcb9f446d14`: 30-second UUID-text
+- Earlier published head `b222504a8ededd0f26dbe01e404b1bcb9f446d14`: 30-second UUID-text
   tickets and the older `ticket` / `admitted` wire flow.
 - Clean mobile checkout `682e2492bb791dbc7b3c786a68cdfcce00943138`: shared
   60-second lifetime and 22-character base64url tokens.
@@ -34,12 +34,16 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 implementation check at 18:16 UTC found PR #1812 OPEN at the
-published head above, without auto-merge (`gh pr view`). `git fetch origin main`
+The November 9 implementation check at 18:54 UTC found PR #1812 OPEN at
+`2f89c2558347e63e40a679a0d59adefa1cf2d84b`, without auto-merge (`gh pr view`).
+That revision's ticket implementation has not been inspected; the two revisions
+above remain historical findings. `git fetch origin main`
 returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
-transport file. `lf task status LOO-718 --json` still reports its interactive
-`feature` demo step. The separate mobile checkout
-findings above are not a landed implementation.
+transport file. The separate mobile checkout findings above are not a landed
+implementation. `lf task status LOO-718 --json` still reports `feature` at `demo`,
+with PR #1812 open. Reading `service.rs` confirmed UID-only tickets, `Instant`
+expiry and removal before identity validation; no code repair is needed before
+the transport integration.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.

@@ -855,8 +855,10 @@ Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
 automatically repeated.
 
-Local subscriptions use server sockets off the main actor. Cancellation closes
-the connection; reconnect opens a fresh subscription without replaying revisions.
+Local subscriptions share a server connection off the main actor. Cancellation
+ends only that watch; connection loss resumes its retained reading and queued
+frames. See [Reconnect a watch](../rust/loopflow/src/server/README.md#reconnect-a-watch)
+for checkpoint and recovery behavior.
 Remote Task file subscriptions retain their CLI pipes, drained off the main actor;
 cancellation closes stdin, then terminates and reaps only the owned reader if
 necessary. A subscription that speaks only on change is not stalled merely by silence.

@@ -21,13 +21,9 @@
   worktrees lf created (git admin-dir marker; exact-path `hasTrustDialogAccepted`
   in the config the launched child reads). No hooks or other global Claude
   settings. Found in LOO-554's fresh-Linux QA; real-Claude verification is review's.
-- LOO-497 owns saved pane records and their Console integration; LOO-489 owns
-  ordinary navigation, LOO-416 reattachment. LOO-426 owns Task/Session
-  opening; LOO-402 owns Waiting navigation, including blocked shell panes through
-  shared Swift while Session Waiting stays in Rust. LOO-403 owns shortcuts and
-  palette, LOO-387 native draft preparation. Programmatic Desktop control must
-  reuse these owners. LOO-415 owns the transparent relay and all lf status
-  emission; LOO-398 is reading only. LOO-422 owns host status/title fidelity.
+- Programmatic Desktop control reuses the surface's existing owners. October's
+  Task allocation list remains at `328593dcb:.lf/wave/product/MEMORY.md`, this heading;
+  current navigation, retention and host decisions appear below.
 - LOO-418: a Task has zero or one PR; optional later work uses ordinary Tasks. Serial PR
   chains below describe the retired implementation. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
@@ -165,39 +161,27 @@ Project membership derives the Wave. No synthetic inbox or query-owned workspace
 AGENTS.md owns current graph selection. Jack Heart's superseded Workflow defaults
 and commands remain at `781e5dc5b4:.lf/wave/product/MEMORY.md`, this heading.
 
-Jack renamed membership to `task move --wave/--no-wave`. Same-repository moves
-may include active work and preserve
-execution, PR, checkout and conversation identity. Current Session membership
-follows the Task; capture/dispatch ownership, including null, remains historical.
-Next capture uses the new home; membership never transfers execution.
+Jack renamed membership to `task move --wave/--no-wave`. Moving active work
+keeps execution and conversation identity; capture/dispatch ownership remains
+historical. Current membership never rewrites attribution or transfers execution.
 
-Branch tests cover nullable transport, Linear recovery, Workflow defaults, live
-Flow detach/reattach and CLI-stream workspace/file-draft retention. A file draft
-does not prove unsent provider input. Broader gate, between-Wave and configured
-native proof remain; no external-progress credit follows. LOO-489 owns query UI;
-LOO-416 retains lifecycle scope.
-
-Decisions and evidence:
+Branch tests covered nullable transport, Linear recovery, Workflow defaults, live
+Flow detach/reattach and CLI-stream workspace/file-draft retention:
 `996f16fabb5344d6545bf75d94393117694cd489:.lf/wave/product/MEMORY.md`, this heading.
 Those tests prove neither unsent provider input nor mounted between-Wave continuity.
 Broader native acceptance remains with LOO-489/416; no external-progress credit follows.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
-Jack Heart clarified in LOO-427: follow-up is only an optional window after PR
-landing, with no required disposition or dedicated APIs. Ordinary Task creation
-handles new work. Bare landing keeps the Task open; explicit completion or an
-authored Workflow end completes it. Historical follow-through events remain history,
-not completion gates. Earlier implementation and decisions:
+Jack Heart clarified in LOO-427: follow-up after landing is optional and uses
+ordinary Tasks, with no required disposition. Landing and completion remain
+separate. Superseded follow-through mechanics and earlier decisions:
 `f1e8cd19ff:wave/product/MEMORY.md`, this heading.
 
-Zero or one PR per Task; dependencies use stacked Tasks. Task status, Workflow
-position and Process liveness are independent. Failed end requests retry without
-replaying the Flow; reopening supersedes old intent. Linear completion preserves
-execution. Completion rechecks a verified merge for a Task with a PR. Failed cleanup
-never reverses completion. Common planning owns creation and optional export;
-412 retains private recovery of historical filing intents and uncertain exports
-under their originally reserved identities; this adds no new filing API or gate.
+AGENTS.md owns the current delivery model. Earlier lifecycle and historical
+filing recovery details remain at
+`328593dcb2c45d243a971bbda87c4bbf80f0f96f:.lf/wave/product/MEMORY.md`, this heading.
+Reopening supersedes old completion intent; failed cleanup never reverses completion.
 
 Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes
@@ -844,40 +828,21 @@ September 24 hierarchy decisions govern. Historical KR counts and review mechani
   forward boundary; retain later wording as dated evidence. Append-only provider
   revisions remain an option when a real review needs unavailable lineage.
 
-## Work and continuity (reconciled 2026-09-23)
+## Work and continuity (reconciled 2026-11-09)
 
-- Work identity and domain ownership follow AGENTS.md. The September 23
-  prepared-Run and internal-Project account is archived at
-  `0e9b9b705:wave/product/MEMORY.md`; launch attribution grants no control.
-- Steers remain durable authored inputs; retired Chat/mailbox details share that archive.
-- **Another Work perspective is an ordinary Run; interactive work is a
-  Session.** Launch `lf --task ISSUE : <question>` when another agent perspective
-  is useful. Ask was removed by Jack Heart’s 2026-10-01 decision. Failed work
-  retains its normal logs and outcome; necessary judgment belongs in the existing
-  Wave chat. Authored review Sessions return feedback to their recorded Flow
-  boundary, with navigation owned by the following decider. There is no agent
-  exchange row, answer lane,
-  or dedicated answer controller.
-- **#1521 replaces stored Wave documents; #1536 moves them.** Checkout
-  `.lf/wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
-  stay stored. Reads never provision. Recent Wave Chat is not ambient Task context.
-- **Environment configures a process; it never decides what the process is.**
-  Work identity comes from durable state; execution and signal authority must
-  be established at their owning boundary, never inferred from a Run id,
-  inherited endpoint variables, or a surviving terminal.
-- **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
-  not the Wave's roadmap.
+AGENTS.md owns Work identity and domain ownership. Retired Run, Ask, chat and
+review recipes remain at
+`328593dcb2c45d243a971bbda87c4bbf80f0f96f:.lf/wave/product/MEMORY.md`, this heading.
+Environment configures a process; it never decides what the process is. Neither
+an inherited endpoint nor a surviving terminal establishes execution or signal
+authority. Reads never provision; open execution is not the Wave's roadmap.
 
 ## Model (design invariants)
 
 - `lf` and store projections define the product API; Mac and iOS consume it,
   never a parallel lifecycle.
-- **Terminal-only and agent-embedded Loopflow are normal primary modes.** Chat
-  is an optional shared steering and observation surface, never a prerequisite
-  for operating Loopflow or an onboarding funnel every user must enter.
-- **Wave Chat is asynchronous steering, not a low-latency support chat.**
-  Inputs keep order and may wait behind Wave work; surfaces show delivered,
-  queued and working state, never an implied immediate reply.
+- Terminal-only and agent-embedded operation need no chat surface. Retired Wave
+  Chat presentation guidance: `328593dcb:.lf/wave/product/MEMORY.md`, this heading.
 - App surfaces navigate, present and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or review-playhead truth.
 - AgentSessionId names opaque provider history, not Work or process authority.
@@ -943,16 +908,22 @@ non-launching adoption through the shared `task_from_session` write; parity cove
 prepared Session identity, repository-person claims and no fabricated Process/Graph,
 not provider continuity. Earlier passes do not establish merged-build acceptance.
 
-Protocol revision 2 (Task 4877de, November 5, after Jack asked to learn from Rex):
-one connection per client, `hello`/`welcome` negotiating
-the newest common revision, requests multiplexed by id; `attach` keeps its own
-connection so terminal bytes never share the control path's queue or fate; the
-one-byte revision-1 sniff is the whole compatibility layer and leaves with revision 1.
+The November 5 revision-2 design followed Jack's request to learn from Rex;
+`server/README.md` owns the current wire contract. Terminal bridges keep their
+own connections so bytes never share the control path's queue or fate.
 Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
 leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
 a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
 resolves a harness it never starts, so fixtures name one. No local latency change was
 measured; the Desktop run awaits demo.
+
+LOO-775 (November 9) found that recovery must retain queued frames with the
+resume token: receiving a baseline does not mean its consumer has applied it.
+The headless Swift socket-loss check passed with recovery before baseline
+consumption, then confirmation and cancellation. The Rust socket-loss check
+passed after upstream sync. These establish local protocol/stream behavior,
+not mounted Desktop or phone recovery. Resume compares current state, not missed
+events; numeric confirmations remain separate from opaque reading tokens.
 
 Registration migrates OS labels while retaining socket/lock identity and disabled
 choices. Readiness is consumed once even on failure; recovery only observes status;

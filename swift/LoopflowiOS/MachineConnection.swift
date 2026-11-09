@@ -152,6 +152,7 @@ final class MachineConnection {
     private let socket: MachineSocket
     private var pending: [String: PendingRequest] = [:]
     private var subscriptions: [String: MachineSubscription] = [:]
+    private var order = ServerMessageOrder()
     private var failure: (any Error)?
     private var reader: Task<Void, Never>?
 
@@ -240,6 +241,7 @@ final class MachineConnection {
     }
 
     fileprivate func unsubscribe(_ id: String) {
+        order.discard(id)
         guard subscriptions.removeValue(forKey: id) != nil, failure == nil else { return }
         Task { try? await socket.send(try Self.line(.cancel(id: id))) }
     }
@@ -291,13 +293,20 @@ final class MachineConnection {
                 let timeout = bulk.deadline(seconds: 60)
                 defer { timeout.cancel() }
                 let message = try await bulk.receiveText()
-                try self?.dispatch(message)
+                guard let self, let (answer, queued) = try order.complete(id, payload: message) else { return }
+                try deliver(answer)
+                for line in queued { try dispatch(line) }
             } catch { self?.forget(id, throwing: error) }
         }
     }
 
     private func dispatch(_ line: Data) throws {
-        switch try JSONDecoder().decode(ServerMessage.self, from: line) {
+        guard failure == nil, let message = try order.receive(line) else { return }
+        try deliver(message)
+    }
+
+    private func deliver(_ message: ServerMessage) throws {
+        switch message {
         case .response(let id, _, let result):
             if let waiting = pending.removeValue(forKey: id) {
                 waiting.timeout.cancel()
@@ -321,6 +330,7 @@ final class MachineConnection {
 
     /// Fail the request or subscription `id` without touching the connection.
     private func forget(_ id: String, throwing error: any Error) {
+        order.discard(id)
         if let waiting = pending.removeValue(forKey: id) {
             waiting.timeout.cancel()
             if failure == nil { Task { try? await socket.send(try Self.line(.cancel(id: id))) } }
@@ -333,6 +343,7 @@ final class MachineConnection {
     private func fail(_ error: any Error) {
         guard failure == nil else { return }
         failure = error
+        order = ServerMessageOrder()
         reader?.cancel()
         let waiting = pending.values
         let watching = subscriptions.values

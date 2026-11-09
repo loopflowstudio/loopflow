@@ -234,6 +234,43 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
+    @Test func delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() async throws {
+        let peer = try ServerPeer()
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        peer.serve { message, respond in
+            let id = message["id"] as? String ?? ""
+            switch message["type"] as? String {
+            case "subscribe":
+                respond(["type": "bulk", "id": id, "ticket": "baseline", "bytes": 100])
+                Thread.detachNewThread {
+                    try? peer.admit("baseline") { connection in
+                        guard release.wait(timeout: .now() + 10) == .success else { return }
+                        try connection.write(["type": "reading", "id": id, "checkpoint": "first",
+                                              "frame": "first"])
+                    }
+                }
+                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": "second"])
+                respond(["type": "ended", "id": id])
+            case "request":
+                respond(["type": "response", "id": id, "trace_id": "trace", "result": "independent"])
+            default: break
+            }
+            return true
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        defer { Task { await subscription.cancel() } }
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "independent")
+        release.signal()
+        var frames = subscription.lines.makeAsyncIterator()
+        let first = try await frames.next()
+        let second = try await frames.next()
+        #expect(first.map { String(decoding: $0, as: UTF8.self) } == "\"first\"")
+        #expect(second.map { String(decoding: $0, as: UTF8.self) } == "\"second\"")
+        #expect(try await frames.next() == nil)
+    }
+
     @Test func bulkAnswersAndOversizeRequestsTravelByTicket() async throws {
         let peer = try ServerPeer()
         let big = String(repeating: "x", count: ServerProtocol.maxMessage)

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Revision 3 of the server protocol: one connection per client, a negotiated
+/// Revision 4 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {

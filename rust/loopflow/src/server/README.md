@@ -352,7 +352,11 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the answer arrives on the control connection under the request's id. Ticketed
   connections carry up to 64 MiB and a transfer has two minutes; larger messages
   are refused with `unavailable`. Clients fetch spills off their reader so other
-  readings never wait. A control line over the limit is answered
+  request IDs never wait. Within one ID, the ticket keeps its place: deliver its
+  payload before later readings, errors or `ended`, and advance the resume
+  checkpoint only with the delivered reading. Swift clients bound deferred
+  messages to 64 frames and 64 MiB; falling behind requires reconnecting.
+  A control line over the limit is answered
   `error {id: null, invalid}` whose data names `max_message`, and the connection
   closes. Nothing is paged.
 

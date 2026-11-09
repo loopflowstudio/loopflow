@@ -147,6 +147,8 @@ final class ServerLink: @unchecked Sendable {
     private let fd: Int32
     private let state = NSLock()
     private let writes = NSLock()
+    private let delivery = NSRecursiveLock()
+    private var order = ServerMessageOrder()
     private var pending: [String: CheckedContinuation<JSONValue, any Error>] = [:]
     private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
@@ -257,6 +259,9 @@ final class ServerLink: @unchecked Sendable {
                 do { try deliver() } catch { settle(id, throwing: error) }
             }
         } onCancel: {
+            delivery.lock()
+            defer { delivery.unlock() }
+            order.discard(id)
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) {
                 try? send(.cancel(id: id))
                 waiting.resume(throwing: CancellationError())
@@ -266,6 +271,9 @@ final class ServerLink: @unchecked Sendable {
 
     /// Fail the request or subscription `id` without touching the connection.
     private func settle(_ id: String, throwing error: any Error) {
+        delivery.lock()
+        defer { delivery.unlock() }
+        order.discard(id)
         if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(throwing: error); return }
         state.withLock { subscriptions.removeValue(forKey: id) }?.finish(throwing: error)
     }
@@ -284,6 +292,9 @@ final class ServerLink: @unchecked Sendable {
     }
 
     fileprivate func unsubscribe(_ id: String) {
+        delivery.lock()
+        defer { delivery.unlock() }
+        order.discard(id)
         let alive = state.withLock {
             subscriptions.removeValue(forKey: id)
             return failure == nil
@@ -316,7 +327,14 @@ final class ServerLink: @unchecked Sendable {
     }
 
     private func dispatch(_ line: Data) throws {
-        switch try JSONDecoder().decode(ServerMessage.self, from: line) {
+        try delivery.withLock {
+            guard !isClosed, let message = try order.receive(line) else { return }
+            try deliver(message)
+        }
+    }
+
+    private func deliver(_ message: ServerMessage) throws {
+        switch message {
         case .response(let id, _, let result):
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
             // A null result confirms a registered subscription; anything else is
@@ -327,10 +345,15 @@ final class ServerLink: @unchecked Sendable {
             // Fetched off the reader thread, so other readings never wait behind it.
             Thread.detachNewThread { [self] in
                 do {
-                    try dispatch(try Self.ticketed(path, ticket) { _, reader in
+                    let payload = try Self.ticketed(path, ticket) { _, reader in
                         guard let line = try reader.next() else { throw RegistryQueryError("Server closed the bulk connection without its message") }
                         return line
-                    })
+                    }
+                    try delivery.withLock {
+                        guard let (message, queued) = try order.complete(id, payload: payload) else { return }
+                        try deliver(message)
+                        for line in queued { try dispatch(line) }
+                    }
                 } catch { settle(id, throwing: error) }
             }
         case .ended(let id):
@@ -366,6 +389,9 @@ final class ServerLink: @unchecked Sendable {
     }
 
     private func fail(_ error: any Error) {
+        delivery.lock()
+        defer { delivery.unlock() }
+        order = ServerMessageOrder()
         let (waiting, subscribing) = state.withLock {
             failure = error
             defer { pending = [:]; subscriptions = [:] }
@@ -373,7 +399,7 @@ final class ServerLink: @unchecked Sendable {
         }
         for continuation in waiting { continuation.resume(throwing: RegistryQueryError(Self.disconnected)) }
         for subscription in subscribing { subscription.disconnected(from: self, error: error) }
-        writes.withLock { Darwin.close(fd) }
+        _ = writes.withLock { Darwin.close(fd) }
     }
 
     private static func line(_ message: ServerClientMessage) throws -> Data {

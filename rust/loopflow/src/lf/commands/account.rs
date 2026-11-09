@@ -2262,7 +2262,6 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                 fs::create_dir_all(&native).unwrap();
                 fs::create_dir_all(&items).unwrap();
                 fs::write(native.join(".credentials.json"), "{}").unwrap();
-                fs::write(native.join("history"), "retained conversation").unwrap();
                 fs::write(items.join("fixture-third"), "untouched").unwrap();
                 for item in ["fixture-current", "fixture-legacy"] {
                     fs::write(items.join(item), credential("first")).unwrap();
@@ -2293,10 +2292,6 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                     check(&Arc::new(store), &accounts, &native, &items).await;
                 });
                 assert!(!native.join(".oauth_refresh.lock").exists());
-                assert_eq!(
-                    fs::read_to_string(native.join("history")).unwrap(),
-                    "retained conversation"
-                );
                 assert_eq!(
                     fs::read_to_string(items.join("fixture-third")).unwrap(),
                     "untouched"

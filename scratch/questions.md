@@ -17,3 +17,10 @@ filtering in the stdin writer remains unchanged in this focused repair.
 and a read-only reload marker. Use synthetic accounts for supplemental native
 checks; seeded partial state does not establish a rejected native write or live
 login acceptance. Keep the installed pair and production conversations untouched.
+
+2026-11-09 implementation assumption: keep Codex's native terminal alive while
+replacing only its private app-server; the disposable probe retains and submits
+a draft across that replacement. Do not reuse `resume --account` for automatic
+recovery: it ends the native client. Pending requests and uncertain dispatch wait.
+The provider-generation/exit-record handoff and turn-arrival race remain a design
+conflict to resolve before automatic recovery can be implemented or published.

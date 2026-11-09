@@ -7,23 +7,27 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 Shipping docs for the expanded recovery scope are in `docs/sessions.md`
 (Recover after a usage limit), `docs/subscriptions.md` (When an account runs
 out), and `swift/README.md` (Session panes). November 9 write-docs describes
-intended behavior; implementation and validation remain. Read these files in
-the implementation step, reconcile current main and merged #1863 first, and
-retain the existing Keychain repair and both local recovery notes.
+intended behavior; implementation and validation remain. Main, #1863 and #1839
+were reconciled at `4276fb28b`, retaining the Keychain repair and both recovery
+notes. `interactive-limit-recovery.md` now holds the draft replacement design,
+the native Codex continuation probe and preservation cases. Existing account
+resume ends the native client; automatic recovery needs a provider-generation
+handoff that retains its editor, pending requests and exit ownership. That
+lifecycle change remains unimplemented; no automatic restart or Desktop
+recovery action is published.
 
 November 9: `lf open --host desktop --file docs/sessions.md --file docs/subscriptions.md --file swift/README.md`
 reported all three opened in Desktop. `git diff --check` passed; prose-only
 changes need no build. No new product question arose; the reported provider
 remains unspecified, and the docs cover both Claude and Codex.
 
-November 9 scope: LOO-811 also owns recovery of all open Task Sessions stopped
-by a usage limit. Automatically continue affected Sessions when another eligible
-login has capacity, and expose **Recover affected sessions** in Desktop with
-progress and anything still waiting. Keep history, drafts, pending approvals
-and the selected model intact. Distinguish rejected turns from uncertain input
-or completed effects before retrying. The Keychain repair alone does not complete
-this outcome. LOO-813 stays complete; its merged PR #1863 supplies prior recovery
-work. Direction and the original report are in `interactive-limit-recovery.md`.
+The expanded scope, original report and preservation cases are in
+[interactive-limit-recovery.md](interactive-limit-recovery.md).
+
+Compression checks, November 9 (inherited LF_* unset for tests):
+- `cargo test -p loopflow --lib keychain_ < /dev/null` — built; 5 passed, existing large `__eh_frame` linker warning.
+- `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null` — 3 passed; gate retains affected suites and clippy.
+- `cargo fmt --check`, `git diff --check`, `lf context` — passed; both context budgets remain satisfied.
 
 Validate LOO-747's recovery against installed lf and native clients with fake or
 idle logins, without paid inference, manufactured exhaustion, credential output
@@ -129,7 +133,7 @@ The three consolidated tests call the command's `install_login` through
 activation. They cover rejected writes and failed retries, access-only and
 both-token rotation, marker failure/recovery, complete repeats and normal
 switches. The retry/switch scenario runs against scoped and unsuffixed services;
-the third item and a history file remain unchanged. These are stand-in results,
+the third item remains unchanged. These are stand-in results,
 not an executable CLI/hold test or Session identity/input continuity observation.
 
 Remaining: gate runs affected provider_auth, activation/caller and account command

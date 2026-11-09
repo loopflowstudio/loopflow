@@ -4513,8 +4513,6 @@ echo
 
     #[cfg(target_os = "macos")]
     pub(crate) fn with_keychain_fixture(check: impl FnOnce(&Path, &Path, &str)) {
-        use std::os::unix::fs::PermissionsExt;
-
         let _lock = crate::journal::test_env_lock();
         let _env = EnvGuard::snapshot(&["PATH", "USER"]);
         let root = tempdir().unwrap();

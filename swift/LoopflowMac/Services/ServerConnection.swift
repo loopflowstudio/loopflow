@@ -3,7 +3,7 @@ import Foundation
 
 /// A surface owns this temporary mailbox; it conveys no Session authority.
 struct ServerConnectionReading: Decodable, Equatable {
-    enum State: String, Decodable { case connected, moving, reconnecting, unavailable, ended }
+    enum State: String, Decodable { case connecting, connected, moving, reconnecting, unavailable, ended }
     let generation: UInt64
     let state: State
     let input: Bool
@@ -13,6 +13,7 @@ struct ServerConnectionReading: Decodable, Equatable {
     var canMoveHere: Bool { state == .connected && !input }
     var title: String? {
         switch state {
+        case .connecting: "Opening session…"
         case .connected: input ? nil : "Read-only. Move here to type."
         case .moving: "Moving input here… Input paused."
         case .reconnecting: "Reconnecting… Input paused; last screen may be stale."
@@ -27,7 +28,7 @@ final class ServerConnection {
     private let mailbox = Mailbox()
     var directory: URL { mailbox.directory }
     var path: String { directory.appendingPathComponent("status.json").path }
-    private(set) var reading = ServerConnectionReading(generation: 0, state: .reconnecting, input: false, message: nil)
+    private(set) var reading = ServerConnectionReading(generation: 0, state: .connecting, input: false, message: nil)
     private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var pendingMove: UInt64?
 

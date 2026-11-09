@@ -94,7 +94,15 @@ impl Status {
         initial: bool,
     ) -> Result<Option<(UnixStream, bool)>> {
         self.generation += 1;
-        self.publish("reconnecting", false, None)?;
+        self.publish(
+            if initial {
+                "connecting"
+            } else {
+                "reconnecting"
+            },
+            false,
+            None,
+        )?;
         super::discard_reconnect_input()?;
         let mut recovered = !initial;
         // Readiness belongs to this first call, never to a Retry cycle. A failed
@@ -114,13 +122,26 @@ impl Status {
         };
         // Each cycle is bounded; a native Retry action starts another cycle.
         loop {
-            self.publish("reconnecting", false, setup_error.as_deref())?;
+            self.publish(
+                if initial && !recovered {
+                    "connecting"
+                } else {
+                    "reconnecting"
+                },
+                false,
+                setup_error.as_deref(),
+            )?;
             super::discard_reconnect_input()?;
             let mut reason = "The exact owner did not acknowledge its connection".to_owned();
             while self.attempts < MAX_ATTEMPTS {
                 let attempt = self.attempts;
                 self.attempts += 1;
-                let until = Instant::now() + Duration::from_millis(100 << attempt.min(5));
+                let delay = if initial && attempt == 0 {
+                    Duration::ZERO
+                } else {
+                    Duration::from_millis(100 << attempt.min(5))
+                };
+                let until = Instant::now() + delay;
                 while Instant::now() < until {
                     if !self.wait(Duration::from_millis(50))? {
                         return Ok(None);

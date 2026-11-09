@@ -131,8 +131,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
             let searchHeight = nsView.searchBar.isHidden ? 0 : TerminalSearchBar.height
-            let connectionHeight: CGFloat = nsView.connectionBar.isHidden ? 0 : 36
-            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight - connectionHeight)))
+            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight)))
 
             if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
                size.width > 0, size.height > 0 {
@@ -183,9 +182,11 @@ final class GhosttyTerminalMount: NSView {
         super.layout()
         guard terminal.superview === self else { return }
         let searchHeight = terminal.searchBar.isHidden ? 0 : min(TerminalSearchBar.height, bounds.height)
-        let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : 36
-        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight - connectionHeight))
-        terminal.connectionBar.frame = NSRect(x: 8, y: bounds.height - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
+        // Connection feedback overlays the retained screen. Showing or clearing
+        // it must not resize the provider or move its cursor.
+        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
+        let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : min(36, terminal.frame.height)
+        terminal.connectionBar.frame = NSRect(x: 8, y: terminal.frame.maxY - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
@@ -576,6 +577,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.isHidden = true
+        bar.wantsLayer = true
         connectionLabel.lineBreakMode = .byTruncatingTail
         connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return bar
@@ -644,6 +646,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
         searchBar.applyTheme(theme)
         layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
+        connectionBar.layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         dropHighlight?.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
         dropHighlight?.layer?.backgroundColor = NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
         renderCommandBlocks()

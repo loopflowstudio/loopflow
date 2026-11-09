@@ -1025,6 +1025,10 @@ context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
 Terminal recovery must preserve the exact owner, draft and newer control claims.
+Initial attachment shows **Opening session…**; **Reconnecting…** is recovery.
+Connection feedback overlays the terminal, so clearing it does not resize the
+provider or move its cursor. Both mount layout and pre-mount sizing keep the same
+viewport while status changes.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
 one-shot **Move here**, and cancellation on pane closure. Only an owner exit means
 ended. Installed-helper replacement must preserve the Session and Graph owners

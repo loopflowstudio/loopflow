@@ -88,8 +88,12 @@ struct ServerConnectionTests {
         var visible: ServerConnectionReading?
         try connection.start { visible = $0 }
         #expect(visible?.acceptsInput == false)
-        #expect(visible?.title?.contains("Reconnecting") == true)
+        #expect(visible?.state == .connecting)
+        #expect(visible?.title == "Opening session…")
         let readings: [(String, Bool, String?)] = [
+            ("connecting", false, nil),
+            ("connected", true, nil),
+            ("reconnecting", false, nil),
             ("connected", false, nil),
             ("unavailable", false, "Enable Loopflow in Background Items, then Retry."),
             ("connected", true, nil),
@@ -98,6 +102,9 @@ struct ServerConnectionTests {
         for (state, input, message) in readings {
             try await publish(connection, generation: 2, state: state, input: input, message: message)
             #expect(visible?.acceptsInput == (state == "connected" && input))
+            if state == "reconnecting" {
+                #expect(visible?.title?.contains("Reconnecting") == true)
+            }
             if state == "unavailable" {
                 #expect(visible?.title == message)
                 connection.retry()

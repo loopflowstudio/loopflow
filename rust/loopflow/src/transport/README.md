@@ -30,8 +30,11 @@ current name. Updates wait for complete provider control sequences; slow name
 lookups leave input and output running. cmux tabs and tmux windows also follow the
 Session name, while cmux workspaces keep their Task name or a hand-edited name.
 
-Desktop's server relay stays alive when its service connection drops. Its native
-status row shows **Reconnecting…** and pauses input while local selection, copy,
+Desktop shows **Opening session…** until the first attachment is acknowledged.
+Connection feedback overlays the screen without changing the terminal's size;
+the first retained screen uses the new pane's dimensions and cursor position.
+The server relay stays alive when its service connection drops. Its native
+status row then shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Recovery refreshes the same owner's screen;
 byte streams resume from their received position or refresh when output expires.
 Disconnected typing and uncertain writes are never replayed. If another viewer
@@ -51,6 +54,10 @@ and advances the generation. Stale actions cannot cross a connection loss.
 Surface closure removes the directory and cancels pending actions. This is
 presentation state, not a durable viewer registry or execution authority. Plain
 CLI server relays retain their Ctrl+R/Ctrl+] interaction.
+
+Leaving a terminal relay restores keyboard and drawing modes at the current
+cursor position. Returning to the shell must not home the cursor or overwrite
+the command's output.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,

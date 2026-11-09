@@ -73,7 +73,9 @@ lf server status   # readiness, socket, server instance and connection diagnosis
 lf doctor          # selected installation and store health
 ```
 
-**Reconnecting…** means Desktop is trying the same Session owner. Keep the pane
+**Opening session…** means Desktop is waiting for its first attachment.
+**Reconnecting…** means a connection was lost and Desktop is trying the same
+Session owner. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
 end, **Retry** reconnects without replaying input or restarting the provider.
 A read-only pane's **Move here** requests control explicitly; a lost connection

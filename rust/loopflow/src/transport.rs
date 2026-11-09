@@ -1122,12 +1122,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                     cwd: cwd.to_path_buf(),
                                 });
                             }
-                            if let Some(snapshot) = output.snapshot()? {
-                                viewer.stream(Tag::Snapshot, &snapshot)?;
-                            }
-                            for (stream, bytes) in output.tail() {
-                                viewer.stream(Tag::stream(stream), bytes)?;
-                            }
                         }
                         Request::Resume(resume) => {
                             viewer.resuming = Some((answers, resume));
@@ -1240,6 +1234,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
             // Fresh streams and ownership changes share the same appearance.
             let fresh = attaching.contains(&viewer.id);
+            if fresh {
+                // Select the new owner's dimensions before painting its first
+                // screen, without waiting for a provider redraw.
+                if let Some(snapshot) = output.snapshot()? {
+                    viewer.stream(Tag::Snapshot, &snapshot)?;
+                }
+                for (stream, bytes) in output.tail() {
+                    viewer.stream(Tag::stream(stream), bytes)?;
+                }
+            }
             if new_size.is_some() || fresh {
                 viewer.event(Event::Resize {
                     rows: size.0,
@@ -1796,10 +1800,7 @@ impl ViewerState {
             self.alternate.entered = false;
             self.output.stdout.write_all(terminal::RESET_MODES)?;
         }
-        // Restore the drawing state too; soft reset support varies by terminal.
-        self.output
-            .stdout
-            .write_all(b"\x1b[?6l\x1b[?7h\x1b[r\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\")
+        self.output.stdout.write_all(terminal::RESET_DRAWING)
     }
 
     fn restore(&mut self) {

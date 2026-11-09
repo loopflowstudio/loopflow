@@ -4678,6 +4678,39 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
 }
 
 #[test]
+fn first_snapshot_uses_the_new_viewers_dimensions() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh", "-c",
+        "i=1; while [ $i -le 20 ]; do printf 'line %s: abcdefghijklmnopqrstuvwxyz0123456789\\r\\n' \"$i\"; i=$((i+1)); done; printf 'ready> '; read -r answer",
+    ]);
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let mut first = fixture.viewer(&owner, true);
+    let mut expected = ghostty_vt::Terminal::new(80, 24).unwrap();
+    for item in until_out(&mut first, "ready> ") {
+        if let Item::Snapshot(bytes) | Item::Out(bytes) = item {
+            expected.write(&bytes);
+        }
+    }
+    expected.resize(40, 12).unwrap();
+    let mut second = fixture.attach(
+        &owner,
+        json!({
+            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":12, "cols":40,
+        }),
+    );
+    let Some(Item::Snapshot(snapshot)) = second.next() else {
+        panic!("fresh viewer must start with its screen");
+    };
+    let mut display = ghostty_vt::Terminal::new(40, 12).unwrap();
+    display.write(&snapshot);
+    assert_eq!(display.text().unwrap(), expected.text().unwrap());
+    assert_eq!(display.cursor(), expected.cursor());
+    second.input("done\n");
+    second.finish();
+}
+
+#[test]
 fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
@@ -6042,6 +6075,33 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
         }
     }
     drop(subscription);
+}
+
+#[test]
+fn server_initial_connection_reports_opening_until_input_is_acknowledged() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    let service = ServerProof::start(&fixture, false);
+    let installer = fixture.home.path().join("installer");
+    std::fs::write(
+        &installer,
+        "#!/bin/sh\nwhile [ ! -f \"$HOME/setup-allowed\" ]; do sleep 0.02; done\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (mut command, status) = service.relay_command(&owner);
+    command.env("LF_BIN", installer);
+    let mut relay = Terminal::stream(command);
+    wait_server_status(&status, "connecting", false, 1);
+    relay.input(b"not yet\n");
+    std::fs::write(fixture.home.path().join("setup-allowed"), "").unwrap();
+    wait_server_status(&status, "connected", true, 1);
+    relay.input(b"after acknowledgement\n");
+    relay.wait_text("after acknowledgement");
+    assert!(!String::from_utf8_lossy(&relay.screen.lock().unwrap()).contains("not yet"));
+    drop(relay.child.stdin.take());
+    assert!(relay.wait_exit().success());
 }
 
 #[test]

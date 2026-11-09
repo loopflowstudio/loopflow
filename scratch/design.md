@@ -7,12 +7,6 @@ Reuse the local attach flow and wire shapes. The planned contract lives in
 This checkout contains the planned contract only. The listener, mobile settings
 and bulk protocol are outside this Task; no product decision is missing.
 
-The existing local service issues 22-character base64url tickets for one Unix
-UID, consumes them on every redemption attempt and sweeps expired tickets on
-issue. Its 60-second lifetime uses `Instant`; expiry across host sleep remains
-unfinished alongside remote identity binding. The existing local test covers
-foreign consumption, single use, the exact expiry boundary and sweeping.
-
 ## Transport dependency — November 8, 2026
 
 LOO-718's PR #1812 supplies `Admission::Remote { node: String, user: u64 }` through
@@ -32,9 +26,8 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 rechecks at 00:47 UTC (realign) and 01:21 UTC (implement)
-reconfirmed the dependency:
-`lf task status LOO-718 --json` reported the interactive
+The November 9 rechecks at 00:47, 01:21, 01:24 and 01:58 UTC agreed:
+`lf task status LOO-718 --json` showed the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
 `git fetch origin main` found origin/main at
@@ -42,12 +35,8 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-The authenticated transport is still absent from this checkout and origin/main.
-Remote attach implementation and authenticated acceptance checks remain
-unfinished; the existing local UID tests cannot exercise that transport.
-LOO-718's authenticated transport is the external dependency for implementation
-and remote acceptance. No product decision is missing. Landing the separate
-mobile PR is outside this Task's scope.
+Implementation and remote acceptance await LOO-718's authenticated transport.
+Landing the separate mobile PR is outside this Task's scope.
 
 ## Delete — do not maintain
 
@@ -83,9 +72,7 @@ store, including the unchanged ticket response and bridge wire fixtures.
 Visual review remains for demo or QA; Desktop opening results are in
 `questions.md`.
 
-`git diff --check` — clean; `lf context` — within both scratch limits. Dependency
-recheck only; no code changed and no build or tests needed.
-
-Compress clarified the bridge's single JSON handshake and removed the Rex
-analogy; the protocol stands on its own. The deletion targets still await the
-shared remote authority. `git diff --check` — clean; docs only, no build or tests.
+Compress consolidated repeated dependency findings and dropped the recoverable
+local implementation summary; the deletion targets still await the transport.
+`git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
+no build or tests needed.

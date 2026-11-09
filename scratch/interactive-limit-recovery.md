@@ -27,14 +27,16 @@ drafts and pending requests. A shared credential switch alone does not establish
 that a stopped message continued. Automatic retry must distinguish a rejected
 turn from uncertain delivery or completed tool effects.
 
-Provider-specific reproduction remains to be identified; asked whether the
-report concerns Claude, Codex or both. No answer recorded yet.
+Jack Heart's November 9 continuation direction:
 
-Scope update saved to LOO-811's canonical brief and title. Linear delivery of
-the title and brief timed out and remains pending; the correction on LOO-813's
-thread synced. Fresh status kept LOO-813 done and LOO-811 at demo, with no live
-Graph. The local candidate build (`cargo build -p loopflow --bin lf`, inherited
-LF_* unset) passed in 1m 45s. No disposable demo was launched.
+> Automatically continue affected open Sessions on another eligible login for the selected model; expose Recover affected sessions in Desktop with progress and waiting states. Preserve native history, drafts and pending approvals. Distinguish rejected turns from uncertain delivery/completed effects and never replay finished Graph steps. Account switching alone is not acceptance. Inspect Claude and Codex; the report's provider is unspecified.
+
+The original provider remains unidentified; both providers are in scope. The
+initial brief/title sync timed out. November 9 `lf task status LOO-811 --json`
+now returns the expanded title and direction, open PR #1862 and the current code
+Graph at realign; it does not report title/brief delivery status. The earlier
+local candidate build (`cargo build -p loopflow --bin lf`, inherited LF_* unset)
+passed in 1m 45s. No disposable demo was launched.
 
 ## Replacement design — November 9, draft
 
@@ -45,6 +47,8 @@ owner must change before automatic retry or Desktop can truthfully report succes
 Main was reconciled at `4276fb28b` (merge of `4848816f7`), including #1863
 `4344618dd` and #1839. `2e0018453` checkpoints the three documentation edits and
 both recovery notes before that merge. The two-item Keychain repair remains.
+November 9 realign fetched origin/main: still `4848816f7`, with zero commits
+outside this branch. No further upstream reconciliation was needed.
 
 ### Counterexample to composing the existing operations
 
@@ -109,6 +113,50 @@ November 9 (`codex-rs/login/src/auth/manager.rs`, `auth` and
 `refresh_token_with_reason`) guards managed refresh against a different account;
 this is a lead, not a native observation of the installed version.
 
+### Native drain counterexample — November 9 implementation pass
+
+The installed Codex 0.167.0 has provider-side admission: one SIGHUP begins a
+graceful drain, rejects new work with `-32600` / `serverShuttingDown`, and waits
+for admitted turns. This agrees with the [app-server errors reference](https://learn.chatgpt.com/docs/app-server#errors),
+read November 9. An observer idle check is unnecessary for admission, but drain
+alone does **not** satisfy native-client preservation.
+
+The credential-free, externally network-denied probe in
+`scratch/codex_drain_probe.py` runs a native PTY against a private app-server and
+loopback Responses endpoint:
+
+- **Racing input fails.** With one admitted model response held locally, SIGHUP
+  kept the server alive and a side connection's new turn received the documented
+  rejection. Typing `TYPED_DURING_DRAIN` and Enter in the original client submitted
+  `turn/steer`; that client exited **1** with:
+  `Error: turn/steer failed: Server is draining; retry after reconnecting (code -32600), data: {"reason":"serverShuttingDown"}`.
+  The server later exited after releasing the fixture response, but no completed
+  original turn was observed. The typed text never reached the model. Starting a
+  successor at the same endpoint did not restore the terminated client.
+- **Pending approval passes.** The original `item/commandExecution/requestApproval`
+  stayed answerable during drain. Answering in the original PTY ran the fixture's
+  `/bin/echo APPROVAL_EXECUTED`, completed the admitted turn, and allowed the
+  server to exit. The same client survived replacement and completed another
+  typed turn. Three local Responses requests occurred; this is no account-switch,
+  Loopflow lifecycle, or multiple-Session proof.
+
+Check: `uv run python scripts/test_network.py uv run --offline --script scratch/codex_drain_probe.py --codex /Users/jack/.local/bin/codex --output .lf/tmp/loo-811-protocol/final-drain [--approval] < /dev/null` — racing input FAIL (native client exit); approval PASS. Both runs reaped every owned child and closed their local HTTP server. Results and terminal/server logs: `.lf/tmp/loo-811-protocol/final-drain/`.
+
+A repeat approval probe reached cleanup and hung in `waitpid` while the PTY
+remained open. Terminating only that disposable probe closed its PTY; its Python
+and remaining Codex PID were then absent. The saved probe closes the PTY before
+waiting on children and bounds the post-kill wait. No production process was
+signalled.
+
+**Design revision:** provider-generation replacement is not ready for integration.
+It requires a native client that retains rejected input and stays connected/rejoins
+when its server drains, or a demonstrated managed-account reload that needs no
+replacement. Neither exists as a proven path here. Changing installed Codex,
+putting lf in the input path, or reopening a dead client from history would not
+meet this run's constraints. Loopflow receipt/lifeline changes cannot repair that
+native loss. The automatic recovery and Desktop implementation remain dependent
+on resolving this counterexample; publication cannot claim them complete.
+
 ### One recovery owner
 
 The Session's existing native observer owns recovery, alongside the provider.
@@ -146,6 +194,13 @@ launch or replace native history. Pending approvals/tools, unknown delivery and
 unproven quiescence wait with their original provider. An idle observation alone
 never authorizes shutdown. The native replacement probe makes this design worth
 pursuing; it does not yet establish that handoff contract.
+
+Native graceful drain supplies admission but the racing-input probe above
+invalidates using it with the installed terminal client. Pending approval
+survival alone does not close that gap. Claude also needs a correlation rule
+linking its retry dispatch to the native successful turn; the existing inbox
+write supplies no such acknowledgement. These are technical design gaps, not
+a choice to narrow the recovery outcome.
 
 ### Desktop and receipts
 
@@ -186,11 +241,13 @@ guide lives in `docs/sessions.md`; subscriptions and Desktop docs link there.
 
 ### Preservation cases and remaining implementation
 
-1. First implement and prove the Codex generation handoff through the existing
-   lifecycle owners. Submit input during replacement; race a new native turn and
-   approval against admission. Every accepted input must have a retained outcome,
-   and the original approval must remain answerable when replacement waits.
-   Closing the original client must settle exactly the current provider.
+1. Resolve the demonstrated Codex drain/client incompatibility before the
+   generation handoff. The prerequisite is native rejection handling that keeps
+   input and the client alive, or proven managed-account reload without restart.
+   Then implement the handoff through existing lifecycle owners and retain
+   coverage of racing input and answerable approvals. Closing the original
+   client must settle exactly the current provider. The probe is a failing
+   acceptance case, not an implementation of recovery.
 2. Add turn-correlated Session recovery observations and once-only dispatch.
    Cover rejected-before-work, earlier tool effects, missing events, lost reply,
    reconnection, stale attachment, `/new`, and a repeated limit. Never treat an

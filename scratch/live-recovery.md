@@ -22,7 +22,25 @@ changes need no build. No new product question arose; the reported provider
 remains unspecified, and the docs cover both Claude and Codex.
 
 The expanded scope, original report and preservation cases are in
-[interactive-limit-recovery.md](interactive-limit-recovery.md).
+[interactive-limit-recovery.md](interactive-limit-recovery.md). The November 9
+implementation probe found native SIGHUP drain admission, but
+Codex 0.167.0's terminal exits 1 when typed input receives a drain rejection.
+Pending approvals stayed answerable, and the approval case completed another
+turn after replacement. The design and reproducible probe now record both cases.
+The handoff depends on native rejection handling that keeps the client/input, or
+proven managed-account reload without replacement. Turn-correlated retry and
+Desktop progress remain unimplemented; this pass cannot publish the expanded
+outcome. All probe processes were reaped; no production logins, Sessions,
+installation or updater state changed.
+
+The November 8 publication checks below completed the earlier Keychain gate.
+Earlier references to pending gate checks are historical. They do not cover the
+expanded recovery outcome, which still needs implementation, affected-suite
+validation and several open Sessions continuing successfully. The November 8
+Keychain concept review and qa.html are likewise limited to that repair.
+
+Realign, November 9: `git diff --check` and `lf context` passed; both budgets fit.
+Documentation-only reconciliation reused the recorded tests; no runtime check reran.
 
 Compression checks, November 9 (inherited LF_* unset for tests):
 - `cargo test -p loopflow --lib keychain_ < /dev/null` — built; 5 passed, existing large `__eh_frame` linker warning.
@@ -98,9 +116,9 @@ Earlier concept-review alternatives remain in
 `d4941f045600750beffbbfc73934bd4bbf9abfbb:scratch/live-recovery.md` and its
 `scratch/concept-review.html`. The current page reflects the review below.
 
-## Finish a partial switch — implemented, verification remains
+## Finish a partial switch — implemented; live checks remain
 
-**November 8 implementation: focused tests pass; gate and review remain.**
+**November 8 implementation: stand-in tests and the publication gate passed.**
 A successful repeat of `lf account use claude=work@` finishes a partial
 installation even when the native item already names work@. The two-item scope
 and existing command remain; no new persisted state or public API was added.
@@ -136,8 +154,7 @@ switches. The retry/switch scenario runs against scoped and unsuffixed services;
 the third item remains unchanged. These are stand-in results,
 not an executable CLI/hold test or Session identity/input continuity observation.
 
-Remaining: gate runs affected provider_auth, activation/caller and account command
-suites, docs checks and clippy. Demo/review shows native retry alongside normal
+Demo/review still shows native retry alongside normal
 switches and retains every installed/running-client check above, including Session
 identity, history and continued input. No further product choice is needed for
 this repair; delivery remains review-only.
@@ -146,8 +163,9 @@ Concept-review, November 8: no further design change or open product choice.
 Normal switching, partial-write retry and rotation fit one interaction: repeat
 the account command to finish installation. Keychain item names remain storage
 addresses, not managed accounts; completeness needs no persisted retry state.
-Advance to gate and demo with the remaining observations above. Existing usage
-guidance needs no further change, and no skill instruction changes are needed.
+That review covered the Keychain interaction only. November 9's expanded scope
+adds automatic continuation and Desktop recovery; the earlier review does not
+establish their design or acceptance.
 
 `cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain:: < /dev/null`
 (inherited LF_* unset) — 4 passed November 8: rejected-write retries, access-only

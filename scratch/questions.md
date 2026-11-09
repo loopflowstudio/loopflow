@@ -24,3 +24,18 @@ a draft across that replacement. Do not reuse `resume --account` for automatic
 recovery: it ends the native client. Pending requests and uncertain dispatch wait.
 The provider-generation/exit-record handoff and turn-arrival race remain a design
 conflict to resolve before automatic recovery can be implemented or published.
+An observer lock cannot prevent the native client from submitting directly to
+Codex. Provider-side replacement admission and Claude retry/turn correlation
+remain technical questions; no narrower recovery outcome has been selected.
+
+2026-11-09 native drain finding: the replacement assumption above is invalid for
+Codex 0.167.0 when input races shutdown. Provider-side SIGHUP admission exists,
+but the native TUI exits 1 on `turn/steer`'s `serverShuttingDown` rejection.
+Pending approvals remain answerable and a non-racing client survives replacement.
+The design now requires native rejection handling or demonstrated managed-auth
+reload before Loopflow can integrate automatic recovery. No narrower outcome,
+credential-ownership change or installed-provider modification is assumed.
+
+Security follow-up: the preceding assessment reported Session capture keys exposed
+in process-list output. They need rotation; their values were not repeated or
+inspected in this run. Production capture state was not changed.

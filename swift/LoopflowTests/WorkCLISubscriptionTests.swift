@@ -10,6 +10,57 @@ import ViewInspector
 @Suite("CLI to retained Work sidebar", .serialized)
 @MainActor
 struct WorkCLISubscriptionTests {
+    @Test("An open Work model keeps its last reading and recovers after server replacement")
+    func serverReplacementKeepsWorkCurrent() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])
+        let id = try #require(created["id"] as? String)
+        let server = LocalServerFixture(fixture.lf)
+        let location = server.location()
+        let query = RegistryQuery(serve: {
+            try await ServerClient.read($0, location: location)
+        }, subscribeWork: {
+            try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
+        }) { args, cwd in
+            try await fixture.lf.run(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
+        }
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        let keeping = Task { await model.keepWorkCurrent() }
+        do {
+            try await eventually { model.task(id: id)?.task.task.name == "Before outage" }
+            await server.stop()
+            try await eventually { model.roadmap.errorMessage != nil }
+            #expect(model.task(id: id)?.task.task.name == "Before outage")
+
+            _ = try await fixture.run(["task", "update", id, "--title", "Changed while offline"])
+            _ = try await server.status()
+            try await eventually {
+                model.roadmap.errorMessage == nil
+                    && model.task(id: id)?.task.task.name == "Changed while offline"
+            }
+            // Recovery must leave a live observation, not just refresh once.
+            _ = try await fixture.run(["task", "update", id, "--title", "Changed after recovery"])
+            try await eventually { model.task(id: id)?.task.task.name == "Changed after recovery" }
+
+            await server.stop()
+            try await eventually { model.roadmap.errorMessage != nil }
+            keeping.cancel()
+            await keeping.value
+            // Cancelling the window's reader must not reopen the replacement.
+            _ = try await server.status()
+            let status = try await fixture.json(["server", "status"])
+            #expect((status["clients"] as? [Any])?.isEmpty == true)
+            await server.stop()
+        } catch {
+            keeping.cancel()
+            await keeping.value
+            await server.stop()
+            throw error
+        }
+    }
+
     @Test("Load initializes working Task and repository conversations without a Start click", arguments: [false, true])
     func workingTaskConversationOpensAutomatically(prepared: Bool) async throws {
         let fixture = try WorkCLIFixture()

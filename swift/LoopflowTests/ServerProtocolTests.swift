@@ -50,14 +50,14 @@ struct ServerProtocolTests {
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
-        let hello = ServerClientMessage.hello(ServerHello(revision: 3, minRevision: 3, client: ServerClientIdentity(
+        let hello = ServerClientMessage.hello(ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
-        #expect(welcome.revision == 3)
-        #expect(welcome.serverRevision == 3)
-        #expect(welcome.minRevision == 3)
+        #expect(welcome.revision == ServerProtocol.revision)
+        #expect(welcome.serverRevision == ServerProtocol.revision)
+        #expect(welcome.minRevision == ServerProtocol.minRevision)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 33554432)
@@ -69,8 +69,8 @@ struct ServerProtocolTests {
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
-        #expect(status.revision == 3)
-        #expect(status.minRevision == 3)
+        #expect(status.revision == ServerProtocol.revision)
+        #expect(status.minRevision == ServerProtocol.minRevision)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
         #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])
@@ -377,7 +377,7 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":3}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

@@ -31,8 +31,9 @@ Keep a Task list open while Desktop reconnects: live Work updates resume
 automatically from the last retained reading. An unchanged list does not need
 to be downloaded again. If Work changed or the server restarted, Desktop receives
 a complete current reading. If recovery fails, the window reports unavailability
-and retries. Changes submitted before the connection dropped are never repeated
-automatically; check the current Work before submitting them again.
+and retries. Task and Session creations recover through their saved request and
+server receipt. Other changes submitted before the connection dropped are never
+repeated automatically; check the current Work before submitting them again.
 
 Desktop reconnects automatically to the same Session owner when the server is
 replaced or its connection drops. Its native status row shows **Reconnecting…**;

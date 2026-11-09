@@ -43,3 +43,9 @@ Kept the QA geometry correction and original documentation audit. The branch
 CLI built; the migration history check passed. Website sync regenerated 33
 routes from `target/debug/lf`. Final merged-tree results are recorded separately
 in `loo-810-publication.md`; physical sleep/wake stays at demo review.
+
+2026-11-09 gate: `lf sync --manual` / `lf sync --continue` merged main
+`86bc0692e4f593e747bbacc8ed0bf710f5e06af0` (#1865) as `7528c8b0f`.
+Combined opaque watch checkpoints with reserved producer capacity. The combined
+contract uses revision 4; current docs and shared fixtures agree. Gate results
+and the admission-window repair are in `loo-810-publication.md`.

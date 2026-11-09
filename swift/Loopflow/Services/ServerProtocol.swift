@@ -4,8 +4,8 @@ import Foundation
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 3
-    public static let minRevision = 3
+    public static let revision = 4
+    public static let minRevision = 4
     public static let maxMessage = 32 * 1024 * 1024
 }
 

@@ -903,15 +903,6 @@ answers, not RSS. Request IDs retire with final delivery, while late frames keep
 worker identity so cancellation/reuse cannot deliver an old answer to a new
 request. A subscription's acknowledgment does not release its identity.
 
-The November 5 revision-2 design followed Jack's request to learn from Rex;
-`server/README.md` owns the current wire contract. Terminal bridges keep their
-own connections so bytes never share the control path's queue or fate.
-Lessons: the shared watch `Reader` owns a blocking runtime, so a served subscription
-leaves through `spawn_blocking` however its task ends (its drop panic is swallowed);
-a client EOF means "older protocol" only before `welcome`; `session resume --prepare`
-resolves a harness it never starts, so fixtures name one. No local latency change was
-measured; the Desktop run awaits demo.
-
 Observed provider identity, not process reservation, establishes a transition.
 Attach may report the same process without replacing provider-change history.
 Fork-source liveness is historical and dated. Unknown lineage stays unknown.
@@ -926,14 +917,6 @@ consumption, then confirmation and cancellation. The Rust socket-loss check
 passed after upstream sync. These establish local protocol/stream behavior,
 not mounted Desktop or phone recovery. Resume compares current state, not missed
 events; numeric confirmations remain separate from opaque reading tokens.
-
-Registration migrates OS labels while retaining socket/lock identity and disabled
-choices. Readiness is consumed once even on failure; recovery only observes status;
-exact-owner recovery is in `server/README.md`. Native proof: `0e597c17a1:scratch/{mobile-backend,direct-write-demo}.md`, no final-build
-or speed/memory claim. LOO-718 owns remote
-admission/iOS; preserve wire identity/credentials; local trust cannot authenticate
-proxies; unattended hosting and phone takeover remain open. #1822 and LOO-724's contention repair prove no continuity, incident
-cause or configured recovery. Full text: `67a968bf84:.lf/wave/product/MEMORY.md`.
 
 Registration/readiness and exact-owner recovery live in `server/README.md`.
 The November 5 native trial remains at

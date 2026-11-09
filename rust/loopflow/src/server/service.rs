@@ -960,6 +960,8 @@ async fn subscribe(
                         && frame["answers"].is_null() && reason.is_none();
                     if !unchanged {
                         outgoing.deliver(ServerMessage::Reading { id: id.into(), checkpoint, frame }, reservation).await?;
+                    } else {
+                        drop(reservation);
                     }
                     if last {
                         return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;

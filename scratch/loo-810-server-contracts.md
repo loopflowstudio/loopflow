@@ -1,6 +1,6 @@
 # LOO-810: server recovery, mutation and provider-transition contracts
 
-Built on LOO-593 (#1813, revision 2); this change speaks revision 3 only.
+Built on LOO-593 (#1813, revision 2); this change speaks revision 4 only.
 Five rows of the 2026-11-07 report card grade B. This plan closes each gap
 where the code lives, keeps the three
 recovery contracts separate (Work readings, terminal, provider conversation)

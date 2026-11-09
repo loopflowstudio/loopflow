@@ -15,7 +15,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         let server = LocalServerFixture(fixture.lf)
         let location = server.location()

@@ -41,3 +41,9 @@ Publication repair, 2026-11-09: ordinary concurrent Work loading reached the
 two-producer cap. Desktop now delays request admission with five retries
 (100–1600 ms) only after `busy {limit, max}` confirms nothing ran. This applies
 the existing delay contract; it grants no replay after dispatch or disconnect.
+
+Jack Heart, 2026-11-09: "lg2m ship it"
+
+Gate sync, 2026-11-09: main #1865 now owns protocol revision 3. Use revision 4
+for the combined required budget fields and creation payloads; older submitted
+records stay retained and require their original revision. No silent payload migration.

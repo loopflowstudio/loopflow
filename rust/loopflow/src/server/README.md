@@ -431,12 +431,15 @@ Remote authentication and pairing are separate from this same-user socket.
 
 Negotiate a revision on each new connection and use that revision's schema.
 Keep `welcome.instance` and limits for that connection; an instance change
-means the server restarted. Transport request IDs, subscription IDs and
-checkpoints have no meaning on a replacement connection.
+means the server restarted. Transport request IDs, subscription IDs and numeric
+confirmation checkpoints belong to one connection. Opaque reading checkpoints
+can resume a watch within the same server incarnation.
 
 Last Work readings may remain visible as stale data. Resubscribe to every needed
-read and replace its cached value with the complete first reading. There is no
-Work replay cursor or universal event log. Coalescing replaces only complete
+read with its retained reading and opaque checkpoint, as described in
+[Reconnect a watch](#reconnect-a-watch). An unchanged reading needs no replacement;
+a changed reading or invalid checkpoint yields a complete current reading.
+There is no missed-event replay or universal event log. Coalescing replaces only complete
 readings of the same subscription; checkpoint answers, errors and the final
 reading before `ended` retain their ordering.
 
@@ -451,8 +454,9 @@ reading before `ended` retain their ordering.
 | `unavailable` | Retry the affected read when its dependency returns. A failed receipt lookup is not absence. |
 | `outcome_unknown` | Look up the creation receipt, or inspect the resource for other writes. Never replay an arbitrary mutation. |
 
-Desktop retries request-admission refusals (`busy` with `limit` and `max`) up to
-five times with backoff, keeping the connection. It does not retry oversized
+Desktop retries request-admission refusals (`busy` with `limit` and `max`) for
+up to 60 seconds, keeping the connection. Backoff starts at 100 ms and caps at
+1600 ms so initial subscription readings can drain before another attempt. It does not retry oversized
 answers, disconnected commands or unknown outcomes. Reads keep their overall
 deadline; cancellation also stops the backoff.
 

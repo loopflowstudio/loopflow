@@ -231,17 +231,18 @@ final class ServerLink: @unchecked Sendable {
     /// Admission refusals ran nothing. Give ordinary concurrent Work loading
     /// time to drain without replaying a dispatched or disconnected command.
     func request(_ operation: ServerOperation) async throws -> JSONValue {
-        var attempt = 0
+        let deadline = ContinuousClock.now + ServerClient.readDeadline
+        var delay = Duration.milliseconds(100)
         while true {
             do { return try await requestOnce(operation) }
             catch let error as ServerError {
-                guard attempt < 5, error.code == .busy,
+                guard ContinuousClock.now < deadline, error.code == .busy,
                       case .object(let data) = error.data,
                       case .integer = data["max"],
                       case .string(let limit) = data["limit"],
                       ["open", "writes", "retained_bytes"].contains(limit) else { throw error }
-                try await Task.sleep(for: .milliseconds(100 << attempt))
-                attempt += 1
+                try await Task.sleep(for: min(delay, ContinuousClock.now.duration(to: deadline)))
+                delay = min(delay * 2, .milliseconds(1600))
             }
         }
     }

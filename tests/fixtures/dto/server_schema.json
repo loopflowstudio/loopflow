@@ -18010,6 +18010,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 3,
-  "x-revision": 3
+  "x-min-revision": 4,
+  "x-revision": 4
 }

@@ -5344,6 +5344,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
             "initial",
             "$(literal); spaced argument",
         ])
+        .env_remove("GHOSTTY_RESOURCES_DIR")
         .env("SHELL", "/bin/bash")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

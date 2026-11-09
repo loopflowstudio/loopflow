@@ -3,13 +3,17 @@
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
 
+Shipping docs: `docs/server.md` links to the exchange in
+`rust/loopflow/src/server/README.md`, including identity mismatch, consumption
+and retry behavior. Read both before implementation.
+
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the contract marked planned until implemented.
 
 ## Transport dependency — November 9, 2026 UTC
 
-The 21:30 UTC realign check inspected PR #1812 head
-`baf3989a02a5fa6be666ae94d11448c664be2380`. It supplies
+The 22:46 UTC realign check inspected PR #1812 head
+`73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. It supplies
 `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
 `UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
@@ -29,11 +33,12 @@ The 22:04 UTC `lf task status LOO-718 --json` placed `feature` at `demo`, with
 PR #1812 open and settlement not armed. Subsequent status reads did not respond
 and were terminated; this is the last successful Graph reading.
 
-At 22:43 UTC, `gh pr view 1812` still returned `OPEN` and `mergedAt: null`,
-now at head `73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. That new head's code
-has not been reviewed here; the implementation observations above describe the
-21:30 revision only. `git fetch origin main` still resolved to
-`86bc0692e4f593e747bbacc8ed0bf710f5e06af0`, with neither `mobile.rs` nor
+At 23:19 UTC, `gh pr view 1812` returned `OPEN`, `mergedAt: null` and
+`autoMergeRequest: null` at that same head. Compared with the previously inspected
+`baf3989a02a5fa6be666ae94d11448c664be2380`, `mobile.rs` and `ticket.rs`
+are unchanged; `service.rs` incorporates watch resumption. Retain that work
+when integrating. `git fetch origin main` resolved to
+`28b0af568d120b56113c0dfb0eff9439d0c014d5`, with neither `mobile.rs` nor
 `ticket.rs` in its tree.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.

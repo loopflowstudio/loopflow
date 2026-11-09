@@ -5,8 +5,12 @@ Reuse the local attach flow and wire shapes documented in
 `docs/server.md`. This checkout contains that planned contract only; tickets
 still bind to Unix UID and expire with `Instant`.
 
+Shipping doc paths: `docs/server.md` and `rust/loopflow/src/server/README.md`.
+The remote example requires independent bridge authentication and sends `attach`
+first, without `hello`.
+
 The listener, mobile settings and bulk protocol are outside this Task.
-The remote contract reuses the local owner-selection and control description;
+The remote contract reuses the local owner-selection, binary protocol and control description;
 only the exchange example and remote ticket rules need their own section.
 
 ## Transport dependency — November 9, 2026 UTC
@@ -28,7 +32,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-November 9 checks at 00:47–03:13 UTC, 16:28 UTC and 17:02 UTC found PR #1812 OPEN at the
+The November 9 implementation check at 17:39 UTC found PR #1812 OPEN at the
 published head above, without auto-merge (`gh pr view`). `git fetch origin main`
 returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
 transport file. `lf task status LOO-718 --json` still reports its interactive

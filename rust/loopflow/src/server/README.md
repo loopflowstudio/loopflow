@@ -315,7 +315,7 @@ part of what a phone or bot client is offered.
   connection, which stays a client. A separate bridge connection sends
   `{"type":"attach","ticket":"<ticket>"}` as its only JSON message; the server answers
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
-  binary owner protocol in `transport/README.md` and `transport/wire.rs`. A
+  [binary owner protocol](../transport/README.md) in `transport/wire.rs`. A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
   60 seconds and works only for the Unix peer UID that requested it. An unknown,
   spent, expired or foreign ticket is `not_found` with a null `id` and closes
@@ -381,21 +381,20 @@ After `welcome`, request `session.attach` on the authenticated client connection
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-Open a separate authenticated bridge connection and send the ticket first:
+Open a separate bridge connection, authenticate it through the remote endpoint,
+and send `attach` as its first message, without a `hello` exchange:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
-After `bridged`, use the [binary owner protocol](../transport/README.md) for
-terminal data and input/geometry control.
-
 Both connections must authenticate with the same Tailscale node stable ID and
-user ID; the same account on another device does not match. A `hello` name,
-`client_id`, login text or proxy's Unix UID cannot supply that identity. Local
-and remote tickets are not interchangeable. Each ticket opens one bridge within
-60 seconds of issuance, including host sleep; expiry does not close an open bridge.
+user ID; the same account on another device does not match. A ticket, `hello`
+name, `client_id`, login text or proxy's Unix UID cannot replace that authentication.
+Local and remote tickets are not interchangeable. Each ticket opens one bridge
+within 60 seconds of issuance, including host sleep; expiry does not close an
+open bridge.
 
 Presenting a ticket consumes it even when the identity does not match. Unknown,
 spent, expired and foreign tickets return `not_found` with a null `id` and close

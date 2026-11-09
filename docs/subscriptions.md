@@ -372,14 +372,20 @@ Running out of usage credits ("You're out of usage credits", Claude's
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
 and the step goes on with Opus on the same account, in the same conversation.
 
-Open Claude Sessions need nothing either. When one hits a limit, the login
-moves to the eligible account that ranks first, and every open Claude follows
-at its next request. Send your next message where you left off. A running
-Codex keeps its login until you `lf resume` it. Naming another login with
-`lf --account codex=<login> resume <session>` restarts it there, and the old
-terminal says where the conversation went. A running Claude stays put:
-`lf --account claude=<login> resume <session>` switches the Machine's login,
-which every open Claude follows, and attaches.
+Open Claude and Codex Sessions recover together after a usage limit. Loopflow
+continues affected conversations on another eligible login for their selected
+model, keeping their native history, drafts and pending approvals. A turn
+rejected before work began can retry automatically; uncertain delivery or
+completed tool effects must not be replayed. A draft or approval that cannot
+survive provider replacement keeps its current provider until recovery can
+proceed safely.
+
+Desktop shows **Recover affected sessions** beside affected Sessions, with
+progress and the reason for each remaining wait. If no eligible login has room,
+it shows the capacity wait and reset time when known. After connecting a login
+or changing a route, choose the action to check again. Interactive recovery
+keeps the selected model and account restrictions; the Graph model fallback
+above is separate. See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit).
 
 To see what would fail next, and move it in one go:
 
@@ -395,7 +401,10 @@ lf account unpause jack@                        # route to it again
 `--blocked` and `--on` are the one Session selector; `list` previews what
 `move` acts on. A move never writes preferences. Taking the active login out
 of automatic routing switches the Machine to the route's next login, and every
-open Claude follows; `lf account use` switches by hand and holds there. In the Desktop, View → Move Blocked Sessions… runs the same move.
+open Claude follows; `lf account use` switches by hand and holds there. In the
+Desktop, View → Move Blocked Sessions… runs the same model/provider move.
+**Recover affected sessions** continues existing conversations on their
+selected models.
 
 ## Switch the shared account
 

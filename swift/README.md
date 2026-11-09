@@ -551,6 +551,14 @@ Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
+When several open Claude or Codex Sessions reach a usage limit, Loopflow
+automatically continues them on eligible logins for their selected models.
+**Recover affected sessions** appears beside affected Sessions to retry them
+together, showing progress and why any remain waiting. Drafts and approvals
+stay with their conversations; uncertain input and completed effects are not
+replayed. See [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit)
+for capacity waits and recovery that needs attention.
+
 **Take back** transfers input to this pane; the previous terminal reports the move.
 Opening the pane leaves the other client in control.
 

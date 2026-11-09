@@ -172,6 +172,32 @@ then any eligible login with room. A resumed Session runs on the active login.
 A Graph carries its selection to every step; run a fresh Graph to choose
 again. Connecting logins and setting routes: [Ops](ops.md).
 
+## Recover after a usage limit
+
+Several Task conversations hit a usage limit while you have them open. Leave
+them open: Loopflow continues affected Claude and Codex Sessions on another
+eligible login for their selected model. Each keeps its native conversation,
+Task and history; you can keep typing in the same pane after recovery.
+
+In Desktop, **Recover affected sessions** appears beside affected Sessions.
+Choose it to retry recovery for those conversations together. Progress shows
+which Sessions are recovering, which have continued, and which are still
+waiting, with the reason for each wait. Changing the shared login alone does
+not mean a stopped turn has continued.
+
+| What is waiting | What happens next |
+|---|---|
+| No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
+| A draft or pending approval needs its current provider | The draft stays editable and the approval stays answerable. Recovery waits if replacing the provider would lose either. |
+| A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
+
+A turn rejected by the provider before work began can retry automatically.
+Completed tool actions and finished Graph steps are never replayed. Recovery
+keeps the selected model and respects the Session's account restrictions; it
+does not change your preferences or answer approvals for you. See
+[Subscriptions](subscriptions.md#when-an-account-runs-out) for account routing
+and the separate model fallback available to headless Graph steps.
+
 ## Move what a limit blocks
 
 ```bash
@@ -183,11 +209,11 @@ lf account use claude=work@                  # switch the Machine's login and st
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-Logins belong to the Machine, not to a Session: every open Claude runs on the
-active one. A running Codex keeps its login until you restart it on another:
-`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
-login each Session uses. `use` holds launches there until the login fills up
-or `lf account use auto`.
+Use a move when you want to choose another model or provider. Usage-limit
+recovery above continues the existing native conversation on its selected
+model. `--blocked` and `--on` read the login each Session uses. Logins belong
+to the Machine, not to a Session: `use` switches the shared login and holds
+launches there until the login fills up or `lf account use auto`.
 
 Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 

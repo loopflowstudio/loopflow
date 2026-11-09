@@ -4,6 +4,27 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 
 ## Outcome and remaining work
 
+Shipping docs for the expanded recovery scope are in `docs/sessions.md`
+(Recover after a usage limit), `docs/subscriptions.md` (When an account runs
+out), and `swift/README.md` (Session panes). November 9 write-docs describes
+intended behavior; implementation and validation remain. Read these files in
+the implementation step, reconcile current main and merged #1863 first, and
+retain the existing Keychain repair and both local recovery notes.
+
+November 9: `lf open --host desktop --file docs/sessions.md --file docs/subscriptions.md --file swift/README.md`
+reported all three opened in Desktop. `git diff --check` passed; prose-only
+changes need no build. No new product question arose; the reported provider
+remains unspecified, and the docs cover both Claude and Codex.
+
+November 9 scope: LOO-811 also owns recovery of all open Task Sessions stopped
+by a usage limit. Automatically continue affected Sessions when another eligible
+login has capacity, and expose **Recover affected sessions** in Desktop with
+progress and anything still waiting. Keep history, drafts, pending approvals
+and the selected model intact. Distinguish rejected turns from uncertain input
+or completed effects before retrying. The Keychain repair alone does not complete
+this outcome. LOO-813 stays complete; its merged PR #1863 supplies prior recovery
+work. Direction and the original report are in `interactive-limit-recovery.md`.
+
 Validate LOO-747's recovery against installed lf and native clients with fake or
 idle logins, without paid inference, manufactured exhaustion, credential output
 or disruption to open conversations. Fixture success does not complete the Task.

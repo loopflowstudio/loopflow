@@ -146,7 +146,13 @@ jobs:
     outputs:
       archive: ${{ steps.archive.outcome == 'success' }}
     steps:
+      # build.rs orders unmerged migrations after origin/main's; a shallow
+      # clone has no history and orders them by name instead.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - name: Fingerprint workspace build profiles
@@ -220,6 +226,12 @@ jobs:
         with:
           name: rust-${{ matrix.suite }}
           path: ${{ runner.temp }}
+      - name: Install isolated SSH fixture support
+        if: matrix.suite == 'integration'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
       - name: Extract the shared build
         run: /usr/bin/time -v tar --zstd -xf "$RUNNER_TEMP/rust-${{ matrix.suite }}.tar.zst"
       - name: Run Rust partition
@@ -297,6 +309,9 @@ jobs:
       - name: Verify migration namespaces
         env:
           LOOPFLOW_REQUIRE_ORIGIN_MAIN: "1"
+          # The replay needs the SQLite the bundled runtime speaks (RAISE with an
+          # expression is 3.48+); the runner's system Python links an older one.
+          UV_PYTHON_PREFERENCE: only-managed
         run: uv run python scripts/check_migrations.py
 
   python-test:

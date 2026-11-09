@@ -20,6 +20,7 @@ public enum SessionAvailability: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
+    case reveal
     case open
     case moveHere = "move_here"
 }
@@ -184,7 +185,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let availability: SessionAvailability?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
-    public let agentProcessId: String?
+    public let agentProcessId: AgentProcessId?
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -204,6 +205,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let provider: String?
     /// The login its conversation is pinned to; nil for a shared or unrouted one.
     public let account: String?
+    /// The model its current input launched with, when one was named.
+    public let model: String?
+    /// Its next message would fail: the login it would use cannot take its model now.
+    public let blocked: Bool
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
@@ -225,8 +230,27 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         actions.first { $0.kind == kind }
     }
 
+    /// Every Task this Session belongs to: its memberships, its checkout's Task
+    /// and its own Work when that is a Task.
+    public var taskMemberships: Set<String> {
+        Set(taskIds + [workspace?.taskId, work?.kind == .task ? work?.id : nil].compactMap { $0 })
+    }
+
+    public func names(task id: String) -> Bool { taskMemberships.contains(id) }
+
+    /// A first launch ended with no history, so there is nothing to open and no
+    /// holder: MoveHere is the explicit click that repeats it.
+    public var launchRetry: SessionAction? {
+        action(.open) == nil ? action(.moveHere) : nil
+    }
+
+    /// Another client holds input; only Take back transfers it.
+    public var heldElsewhere: Bool {
+        action(.moveHere) != nil && launchRetry == nil
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, account, cwd, state, availability
+        case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
         case preview
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -258,6 +282,33 @@ public struct TaskSessionGroups: Sendable, Equatable {
     }
 }
 
+/// What `lf session move --json` reports: Sessions moved now, Sessions that
+/// move after their turn, and Sessions skipped with why.
+public struct SessionMoveReport: Codable, Sendable, Hashable {
+    public struct Moved: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let how: String
+    }
+
+    public struct Skipped: Codable, Sendable, Hashable {
+        public let id: String
+        public let title: String
+        public let reason: String
+    }
+
+    public let moved: [Moved]
+    public let pending: [Moved]
+    public let skipped: [Skipped]
+
+    /// One line per outcome, as the Desktop shows after a move.
+    public var summary: String {
+        let lines = moved.map { "\($0.title): \($0.how)" } + pending.map { "\($0.title): \($0.how)" }
+            + skipped.map { "\($0.title): skipped, \($0.reason)" }
+        return lines.isEmpty ? "No blocked Sessions." : lines.joined(separator: "\n")
+    }
+}
+
 /// A bounded inventory page; nil next marks a complete enumeration.
 public struct SessionPage: Codable, Sendable, Hashable {
     public let entries: [SessionRecord]
@@ -271,7 +322,7 @@ extension SessionRecord {
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
-        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        agentProcessId = try values.decodeIfPresent(AgentProcessId.self, forKey: .agentProcessId)
         taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
         taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
@@ -287,6 +338,8 @@ extension SessionRecord {
         detail = try values.decode(String.self, forKey: .detail)
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        blocked = try values.decode(Bool.self, forKey: .blocked)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)

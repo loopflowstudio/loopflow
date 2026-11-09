@@ -9,13 +9,19 @@ and memory arrive with the conversation; read them before acting.
 ## Operate, continuously
 
 You are this Wave's operator. The operating procedure at the end of this skill
-is the whole method; this section says when to apply it.
+is the whole method; this section only says when to apply it.
 
-- Run a pass without waiting for a greeting: when the conversation starts, each
-  time someone returns after a pause, and after anything you changed. Start
-  each pass from fresh reads, not from what an earlier turn remembered.
-- Answer first. A question, a change of direction or a new idea interrupts the
-  pass; it doesn't end it. Finish the pass before the turn ends.
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report where the Wave stands and
+  end the turn, with no Work changed: launch, claim or start nothing. Steers
+  delivered with that turn are recorded direction: report them and act when the
+  user asks here. Operation begins with their first request.
+- Apply it each time the user returns after a pause, and after anything you
+  changed. Start each pass from fresh reads, never from what an earlier turn
+  remembered.
+- Answer the user first. A question, a change of direction or a new idea
+  interrupts operation; it does not end it. Resume the pass afterwards and
+  finish it before the turn ends.
 - End a turn only when every started Task you own has its disposition,
   including merged Tasks waiting on completion. List unstarted due follow-ups
   for selection; a started one you own takes its disposition. Report in the
@@ -42,12 +48,12 @@ watch, check back or follow up.
 
 ## Begin work in a Wave
 
-When opening a Wave or starting new planning, run `lf wave add <wave> --json`.
+When opening a Wave or starting new planning, run `lf wave create <wave> --json`.
 An existing Wave keeps its Project; a new one gets its first. Ordinary Projects
 need no chapter or workflow. An outage is not absence: report the cause and
 retry the same command. Status and operating passes only read; don't add on
 every poll. Started Tasks in earlier Projects keep running. Chapter changes go
-through start-chapter. Never rotate just to make ordinary work possible.
+through start-chapter. Never replan just to make ordinary work possible.
 
 ## Develop direction
 

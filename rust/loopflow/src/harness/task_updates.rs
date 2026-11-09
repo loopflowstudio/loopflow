@@ -1,6 +1,6 @@
 //! Native Session updates read existing Task/Graph facts. Receipts live in the
 //! Session history; they are delivery evidence, never another workflow cursor.
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{RecordingGap, StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
+use crate::work::task::comment::TaskCommentAuthor;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TaskUpdate {
@@ -25,6 +26,9 @@ pub(crate) struct TaskUpdate {
 struct TaskObservation {
     position: Option<TaskGraphPosition>,
     runs: HashMap<LfProcessId, RunObservation>,
+    /// Comment IDs this conversation has heard about. Observations recorded
+    /// before comments were reported have none; they baseline on next read.
+    comments: Option<BTreeSet<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,6 +143,7 @@ impl TaskUpdates {
                     old.and_then(|observation| observation.position.clone())
                 },
                 runs: HashMap::new(),
+                comments: None,
             };
             let mut changes = Vec::new();
             for graph in graphs {
@@ -161,7 +166,7 @@ impl TaskUpdates {
                 }
                 let run = RunObservation {
                     name: graph.entry.summary.name,
-                    outcome: store.process(&id)?.and_then(|process| process.outcome),
+                    outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
                     completed: graph.entry.ended_at.is_some(),
                     step: graph.steps.last().cloned(),
                 };
@@ -174,7 +179,30 @@ impl TaskUpdates {
                     observation.runs.insert(id, prior.clone());
                 }
             }
-            if position_changed || !changes.is_empty() {
+            let thread = store.task_comments(&task)?;
+            let heard = old.and_then(|observation| observation.comments.as_ref());
+            // A comment this conversation posted is not news to it.
+            let arrived: Vec<String> = heard
+                .map(|heard| {
+                    thread
+                        .comments
+                        .iter()
+                        .filter(|comment| !heard.contains(&comment.id))
+                        .filter(|comment| !written_here(&comment.author, session_id))
+                        .map(|comment| {
+                            format!("New comment from {}: {}", comment.author, comment.body)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            observation.comments = Some(
+                thread
+                    .comments
+                    .into_iter()
+                    .map(|comment| comment.id)
+                    .collect(),
+            );
+            if position_changed || !changes.is_empty() || !arrived.is_empty() {
                 let identifier = store
                     .task(&task)?
                     .map(|task| task.identifier)
@@ -184,6 +212,7 @@ impl TaskUpdates {
                     position_text(observation.position.as_ref()),
                     changes.join(" ")
                 ));
+                lines.extend(arrived);
             }
             facts.insert(task, observation);
         }
@@ -200,6 +229,10 @@ impl TaskUpdates {
         Ok(Some(TaskUpdate { key, observation, text: format!(
             "<lf:task-update>\n{}\nReport this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.\n</lf:task-update>", lines.join("\n")) }))
     }
+}
+
+fn written_here(author: &TaskCommentAuthor, session_id: &str) -> bool {
+    matches!(author, TaskCommentAuthor::Session { session_id: id, .. } if id == session_id)
 }
 
 fn position_text(position: Option<&TaskGraphPosition>) -> String {
@@ -266,10 +299,11 @@ pub(crate) fn watch(
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
         Err(error) => return Err(error.into()),
     }
+    let mut sync_started = false;
     let mut updates = TaskUpdates::default();
     let mut gap = RecordingGap::default();
     loop {
-        if crate::journal::process_evidence(&store, &adapter.agent_process_id)
+        if crate::journal::agent_evidence(&store, &adapter.agent_process_id)
             == crate::journal::ProcessIdentityEvidence::Dead
         {
             return Ok(());
@@ -280,6 +314,30 @@ pub(crate) fn watch(
         let pending = match pending {
             Ok(pending) => {
                 gap.recovered();
+                // Baseline local comments before syncing, so a quick tracker
+                // response cannot swallow newly fetched comments as old history.
+                if !sync_started {
+                    for task in store.session_task_ids(&adapter.session)? {
+                        if let Some(task) = store.task(&task)? {
+                            std::thread::spawn(move || {
+                                crate::agent_input_timing::record(
+                                    "task_sync_begin",
+                                    &task.identifier,
+                                );
+                                if let Err(error) =
+                                    crate::ops::task::sync_for_conversation(&task.identifier)
+                                {
+                                    tracing::info!(task = %task.identifier, %error, "Task sync after launch pending");
+                                }
+                                crate::agent_input_timing::record(
+                                    "task_sync_end",
+                                    &task.identifier,
+                                );
+                            });
+                        }
+                    }
+                    sync_started = true;
+                }
                 pending
             }
             Err(StoreError::InvalidAuthority(_)) => return Ok(()),
@@ -308,6 +366,7 @@ mod tests {
     use crate::durable::TaskId;
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, Instant};
 
@@ -656,6 +715,51 @@ mod tests {
             !at_end.text.contains(older.as_str()),
             "unchanged history isn't repeated for position-only changes"
         );
+    }
+
+    fn comment(store: &SqliteStore, task: &TaskId, body: &str, author: TaskCommentAuthor) {
+        store
+            .append_task_comment(
+                task,
+                &TaskComment {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    body: body.into(),
+                    author,
+                    created_at: Some("2026-11-07T22:00:00Z".into()),
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn comments_after_launch_reach_the_conversation_but_its_own_do_not() {
+        let (_home, store, task) = task_session();
+        let person = || TaskCommentAuthor::Person {
+            name: Some("jack".into()),
+        };
+        comment(&store, &task, "already in the prompt", person());
+        let mut updates = TaskUpdates::default();
+        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        comment(
+            &store,
+            &task,
+            "the conversation's own progress\n<!-- loopflow-session: reader -->",
+            TaskCommentAuthor::Session {
+                session_id: "reader".into(),
+                requester: None,
+            },
+        );
+        assert!(
+            updates.pending(&store, "reader").unwrap().is_none(),
+            "a conversation is not told about its own comment"
+        );
+        comment(&store, &task, "use the staging bucket", person());
+        let update = updates.pending(&store, "reader").unwrap().unwrap();
+        assert!(update
+            .text
+            .contains("New comment from jack: use the staging bucket"));
+        assert!(!update.text.contains("already in the prompt"));
+        assert!(!update.text.contains("own progress"));
     }
 
     #[test]

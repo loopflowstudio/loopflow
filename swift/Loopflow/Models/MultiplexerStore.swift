@@ -220,15 +220,6 @@ public final class MultiplexerStore {
         return _record(.shellTab(tabs[index], index: index))
     }
 
-    /// Drop a shell tab whose process on `machineId` exited, open or kept for Undo.
-    public func removeExitedShell(_ id: String, machineId: String) {
-        if case .shellTab(let tab, _) = lastClosed, tab.id == id, tab.location?.machineId == machineId {
-            lastClosed = nil
-        }
-        guard shell(id)?.location?.machineId == machineId else { return }
-        _removeShell(id)
-    }
-
     private func _removeShell(_ id: String) {
         guard let pane = shellPane, case .shell(let tabs, let selected) = pane.content,
               let (remaining, next) = Self._closing(id, in: tabs, selected: selected) else { return }
@@ -302,6 +293,8 @@ public final class MultiplexerStore {
                         switch tab {
                         case .files: files ?? .files(id: tab.id, tabs: [], selected: nil)
                         case .graphLog: .graphLog(id: tab.id)
+                        case .task: .task(id: tab.id)
+                        case .changes(let comparison): .changes(id: tab.id, comparison: comparison)
                         case .url(let id, let url): .url(id: id, url: url.absoluteString)
                         }
                     }, selected: selected)
@@ -336,6 +329,8 @@ public final class MultiplexerStore {
                         switch tab {
                         case .files: .files
                         case .graphLog: .graphLog
+                        case .task: .task
+                        case .changes(_, let comparison): .changes(comparison: comparison)
                         case .url(let id, let url): URL(string: url).flatMap { BrowserTab.page($0, id: id) }
                         }
                     }

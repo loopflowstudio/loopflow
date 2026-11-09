@@ -27,6 +27,26 @@ pub fn run(
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
+    run_with_io(
+        target,
+        forward_agent,
+        cli,
+        lf_args,
+        task_route,
+        &std::env::current_dir()?,
+        None,
+    )
+}
+
+pub(super) fn run_with_io(
+    target: &str,
+    forward_agent: bool,
+    cli: &Cli,
+    lf_args: &[String],
+    task_route: Option<TaskExecutionRoute>,
+    directory: &std::path::Path,
+    mut io: Option<&mut super::mutation::CommandIo<'_>>,
+) -> anyhow::Result<()> {
     let preview = cli.context
         || cli.explain
         || matches!(
@@ -48,13 +68,16 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
-                | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
+                | crate::lf::TaskCommand::Changes { .. }
+                | crate::lf::TaskCommand::Show { .. }
                 | crate::lf::TaskCommand::Save { .. }
                 | crate::lf::TaskCommand::Create { run: false, .. }
+        }) | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Shell { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
         })
@@ -77,7 +100,7 @@ pub fn run(
     let source = if preview || resident_operation {
         None
     } else {
-        runtime.block_on(resolve_task_source(cli.task.as_deref()))?
+        runtime.block_on(resolve_task_source(cli.task.as_deref(), directory))?
     };
     let target = if preview || resident_operation {
         let store = crate::store::read_existing_registry()?
@@ -118,10 +141,11 @@ pub fn run(
     {
         Some(repository) => Some(repository),
         None if cli.repo.is_some() => None,
-        None => current_repository()?,
+        None => current_repository(directory)?,
     };
-    // Preview forwards only authored selectors. Account lookup/connection and
-    // isolation preparation belong to launch, on neither side of this read.
+    // Preview forwards only authored selectors. Account lookup and connection
+    // belong to launch, on neither side of this read. The target launches in
+    // its own shared home.
     let selection = if preview || resident_operation {
         None
     } else {
@@ -136,12 +160,9 @@ pub fn run(
         )
     };
     let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
-    let user_name = crate::config::participant_name()?.unwrap_or_default();
+    let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
     let origin = runtime.block_on(super::machine::local_machine())?;
-    let profile = crate::config::remote::outgoing(
-        std::env::current_dir().ok().as_deref(),
-        origin.id.as_str(),
-    )?;
+    let profile = crate::config::remote::outgoing(Some(directory), origin.id.as_str())?;
     let profile = serde_json::to_string(&profile)?;
     let mut extra_env = vec![
         (crate::config::remote::PROFILE_ENV, profile.as_str()),
@@ -153,7 +174,6 @@ pub fn run(
             crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
             selection,
         ));
-        extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
     let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
@@ -169,7 +189,7 @@ pub fn run(
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
         if let Some(repository) = &repository {
-            cmd.extend(["--repository".into(), repository.to_string()]);
+            cmd.extend(["--repo-id".into(), repository.to_string()]);
         }
     }
     cmd.extend(if preview {
@@ -184,19 +204,31 @@ pub fn run(
         })
     ) {
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
-        print!("{}", String::from_utf8(bytes)?);
+        output(&mut io, &String::from_utf8(bytes)?)?;
         return Ok(());
     }
-    let preparation = match &cli.command {
+    let connection = match &cli.command {
         Some(crate::lf::Commands::Session {
             cmd:
                 crate::lf::SessionCommand::Resume { connection, .. }
                 | crate::lf::SessionCommand::New { connection, .. },
-        }) if connection.prepare && !preview => Some(connection),
+        }) if !preview => Some(connection),
         _ => None,
     };
-    if let Some(connection) = preparation {
-        if !connection.json {
+    let replace = connection.is_none_or(|connection| {
+        connection.intent() == crate::lf::commands::write::SessionOpenIntent::Resume
+    });
+    // Only a person at a terminal views the remote Session; scripts and pipes
+    // keep the plain SSH command, whose stdin reaches the provider directly.
+    let attended = !cli.batch && std::io::stdin().is_terminal();
+    if let Some(connection) = connection.filter(|connection| {
+        connection.prepare
+            || ((connection.json || cli.json) && attended && connection.message.is_none())
+    }) {
+        if !connection.prepare {
+            cmd.push("--prepare".into());
+        }
+        if !connection.json && !cli.json {
             cmd.push("--json".into());
         }
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
@@ -211,22 +243,144 @@ pub fn run(
         if !record.open_argv.is_empty() {
             let script = build_preamble(
                 &record.open_argv,
-                &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
+                &[
+                    (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+                    (crate::transport::STREAM_ENV, "1"),
+                ],
             );
-            record.open_argv = ssh_argv(&target.route, forward_agent, &script, true)?;
+            record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
         }
-        if connection.json {
-            println!("{}", serde_json::to_string(&record)?);
-        } else {
-            println!(
-                "{}",
-                shlex::try_join(record.open_argv.iter().map(String::as_str))?
+        if !connection.prepare {
+            anyhow::ensure!(
+                !record.open_argv.is_empty(),
+                "Session has no viewer launch command"
             );
+            crate::transport::relay_over(&record.open_argv, replace)?;
+            // Read the returned Session without repeating New/fork or starting
+            // another provider. JSON belongs after the terminal has returned.
+            let bytes = runtime.block_on(request(
+                &target,
+                &[
+                    "session".into(),
+                    "resume".into(),
+                    record.id.to_string(),
+                    "--prepare".into(),
+                    "--json".into(),
+                ],
+                None,
+            ))?;
+            output(&mut io, &String::from_utf8(bytes)?)?;
+            return Ok(());
+        }
+        if !record.open_argv.is_empty() {
+            record.open_argv.splice(
+                0..0,
+                [
+                    std::env::current_exe()?.to_string_lossy().into_owned(),
+                    "session".into(),
+                    "attach".into(),
+                    "--".into(),
+                ],
+            );
+        }
+        if !replace && !record.open_argv.is_empty() {
+            record
+                .open_argv
+                .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
+        }
+        if connection.json || cli.json {
+            output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
+        } else {
+            output(
+                &mut io,
+                &format!(
+                    "{}\n",
+                    shlex::try_join(record.open_argv.iter().map(String::as_str))?
+                ),
+            )?;
         }
         return Ok(());
     }
+    let viewer = connection
+        .is_some_and(|connection| !connection.prepare && connection.message.is_none() && attended)
+        || (!preview
+            && matches!(
+                &cli.command,
+                Some(crate::lf::Commands::Desktop {
+                    cmd: crate::lf::DesktopCommand::Shell { args },
+                }) if !args.close
+            ));
+    if viewer {
+        extra_env.push((crate::transport::STREAM_ENV, "1"));
+    }
     let preamble = build_preamble(&cmd, &extra_env);
-    run_ssh(&target.route, forward_agent, &preamble)
+    match io {
+        Some(io) => run_ssh_io(&target.route, forward_agent, &preamble, cli, io),
+        None if viewer => crate::transport::relay_over(
+            &ssh_argv(&target.route, forward_agent, &preamble)?,
+            replace,
+        ),
+        None => run_ssh(&target.route, forward_agent, &preamble),
+    }
+}
+
+fn output(io: &mut Option<&mut super::mutation::CommandIo<'_>>, text: &str) -> anyhow::Result<()> {
+    match io {
+        Some(io) => io.output.write_all(text.as_bytes())?,
+        None => {
+            use std::io::Write;
+            std::io::stdout().write_all(text.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn run_ssh_io(
+    dest: &str,
+    forward_agent: bool,
+    preamble: &str,
+    cli: &Cli,
+    io: &mut super::mutation::CommandIo<'_>,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+    let args = ssh_argv(dest, forward_agent, preamble)?;
+    let mut input = Vec::new();
+    let reads_input = matches!(
+        &cli.command,
+        Some(crate::lf::Commands::Task {
+            cmd: crate::lf::TaskCommand::Save { .. }
+                | crate::lf::TaskCommand::Create {
+                    request: None,
+                    notes: None,
+                    ..
+                },
+        }) | Some(crate::lf::Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
+        })
+    );
+    if reads_input {
+        io.input.read_to_end(&mut input)?;
+    }
+    let mut child = Command::new(&args[0])
+        .args(&args[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("piped SSH stdin");
+    // Drain output while sending large drafts: either pipe can fill first.
+    let output = std::thread::scope(|scope| {
+        let sending = scope.spawn(move || stdin.write_all(&input));
+        let output = child.wait_with_output()?;
+        let sent = sending.join().expect("SSH input writer panicked");
+        if output.status.success() {
+            sent?;
+        }
+        Ok::<_, std::io::Error>(output)
+    })?;
+    io.output.write_all(&output.stdout)?;
+    io.error.write_all(&output.stderr)?;
+    command_result(dest, output.status.code())
 }
 
 fn resident_args(
@@ -239,7 +393,6 @@ fn resident_args(
     let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
     let mut remove_repo = routed && cli.repo.is_some();
     let mut remaining = cli.account.len() + cli.only_account.len();
-    let mut shared = cli.shared;
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -260,9 +413,6 @@ fn resident_args(
             && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
         {
             remaining -= 1;
-        } else if shared && arg == "--shared" {
-            result.push("--isolate".into());
-            shared = false;
         } else if let Some(source) = source.filter(|_| {
             (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
                 || task_flag.as_ref() == Some(arg)
@@ -285,7 +435,10 @@ fn resident_args(
     result
 }
 
-async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<TaskSource>> {
+async fn resolve_task_source(
+    selector: Option<&str>,
+    directory: &std::path::Path,
+) -> anyhow::Result<Option<TaskSource>> {
     let Some(selector) = selector else {
         return Ok(None);
     };
@@ -296,9 +449,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let source = TaskSource::resolve(&store, selector).await?;
     let repo = match store.get_task_by_issue(selector).await? {
         Some(task) => Some(crate::ops::task::repository_for_task(&store, &task)?),
-        None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
-            .ok()
-            .flatten(),
+        None => crate::repo::discover_repo_root(directory).ok().flatten(),
     };
     if let Some(repo) = repo {
         if crate::ops::planning_client::connected(&repo.to_string_lossy()) {
@@ -395,9 +546,11 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 }
 
 /// The caller's repository by identity; `None` outside a repository or before
-/// `lf repository`, when the destination runs in its home directory.
-fn current_repository() -> anyhow::Result<Option<crate::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+/// `lf repo`, when the destination runs in its home directory.
+fn current_repository(
+    directory: &std::path::Path,
+) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
+    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
         return Ok(None);
     };
     let Some(store) = crate::store::read_existing_registry()? else {
@@ -440,20 +593,8 @@ fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
 }
 
 /// Carry the script as an argument: stdin belongs to file drafts or terminal input.
-fn ssh_argv(
-    dest: &str,
-    forward_agent: bool,
-    preamble: &str,
-    terminal: bool,
-) -> anyhow::Result<Vec<String>> {
-    let mut args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
-    if terminal {
-        for arg in &mut args {
-            if arg == "-T" {
-                *arg = "-tt".into();
-            }
-        }
-    }
+fn ssh_argv(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<Vec<String>> {
+    let args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
     let mut argv = vec!["ssh".into()];
     argv.extend(args);
     argv.push(preamble.into());
@@ -461,12 +602,14 @@ fn ssh_argv(
 }
 
 fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let argv = ssh_argv(
-        dest,
-        forward_agent,
-        preamble,
-        std::io::stdin().is_terminal(),
-    )?;
+    let mut argv = ssh_argv(dest, forward_agent, preamble)?;
+    if std::io::stdin().is_terminal() {
+        for arg in &mut argv {
+            if arg == "-T" {
+                *arg = "-t".into();
+            }
+        }
+    }
     let status = Command::new(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::inherit())
@@ -541,7 +684,7 @@ mod tests {
         let script = build_preamble(
             &[
                 "lf".into(),
-                "--repository".into(),
+                "--repo-id".into(),
                 "repo_exact".into(),
                 "--task".into(),
                 "task_exact".into(),
@@ -568,7 +711,7 @@ mod tests {
         assert_eq!(
             &lines[1..],
             &[
-                "--repository",
+                "--repo-id",
                 "repo_exact",
                 "--task",
                 "task_exact",
@@ -580,17 +723,16 @@ mod tests {
 
     #[test]
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
-        let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
+        let args = ["--account", "person@", "skill", "implement"].map(str::to_string);
         assert_eq!(
             resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["--isolate", "skill", "implement"]
+            ["skill", "implement"]
         );
     }
     #[test]
-    fn remote_prompt_preserves_literal_account_and_home_flags() {
+    fn remote_prompt_preserves_literal_account_flags() {
         let args = [
             "--only-account=codex=person@",
-            "--shared",
             "skill",
             "implement",
             "--",
@@ -600,14 +742,7 @@ mod tests {
         .map(str::to_string);
         assert_eq!(
             resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            [
-                "--isolate",
-                "skill",
-                "implement",
-                "--",
-                "--shared",
-                "--account=other@"
-            ]
+            ["skill", "implement", "--", "--shared", "--account=other@"]
         );
     }
     #[test]

@@ -14,10 +14,16 @@ an empty repository.
 The operating procedure at the end of this skill is the whole method; this
 section says when to run it.
 
-- When there is work, run it without waiting for a greeting: when the
-  conversation starts, whenever someone returns after a pause, and after
-  anything you changed. Start each pass from fresh reads.
-- Answer questions first. A question or new idea interrupts the pass; resume and
+- Opening this conversation asks for nothing. A first turn without the user's
+  request is a reading pass: read fresh state, report what is happening and end
+  the turn, with no Work changed: launch, claim or start nothing. Steers
+  delivered with that turn are recorded direction: report them and act when the
+  user asks here. Operation begins with their first request.
+- When Work exists, apply it each time the user returns after a pause, and
+  after anything you changed. Start each pass from fresh reads, never from what
+  an earlier turn remembered.
+- Answer the user first. A question, a change of direction or a new idea
+  interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
 - End a turn only when every started Task you own has its disposition. Report
   in the procedure's order: available to work on, moving, stuck, others' work.
@@ -42,11 +48,11 @@ watch, check back or follow up.
 
 ## Begin work in a Wave
 
-To open a Wave or start new planning, run `lf wave add <wave> --json`. An
+To open a Wave or start new planning, run `lf wave create <wave> --json`. An
 existing Wave keeps its Project; a new one gets its first. Ordinary Projects
 need no chapter or workflow. An outage is not absence: report it and retry the
 same command. Status reads and operating passes add nothing. Chapter changes go
-through start-chapter; never rotate just to make ordinary work possible.
+through start-chapter; never replan just to make ordinary work possible.
 
 ## Develop direction
 

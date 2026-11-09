@@ -52,7 +52,7 @@ as well as the app's release version. A matching version string alone is insuffi
 
 Running Session owners and Graphs keep their process images. Promotion never kills
 bundled `lf` processes; renamed bundles remain while they are in use. A superseded
-owner ends itself once its Sessions hold no work or input, and `lf monitor rollover`
+owner ends itself once its Sessions hold no work or input, and `lf process rollover`
 moves every eligible owner at once. Installed files and already-running processes
 can therefore report different builds during an update. Promotion retains the
 prior published artifacts, which are [not a rollback path](../docs/architecture/machines.md#one-main-machine),
@@ -142,6 +142,12 @@ Every install of a build schedules `lf install` daily (launchd, or cron on Linux
 unless a cadence is already installed, so a Machine stays on its stream unasked.
 [Turning it off](../docs/ops.md#updates) is a launchd step; on Linux the next
 install adds the line back.
+
+Installation also provisions a separate minute-based cleanup job: `lf task retire`
+reads completed Tasks' local retirement queue and exits after one pass. It pins
+the installed executable and Machine home; alternate HOME or LF_HOME skips
+account-wide scheduling. Cleanup does not update LF, and the updater does not
+execute cleanup. See [Task shell cleanup](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
 appcast. `dev` has no appcast and runs no updater: each `lf install --dev`

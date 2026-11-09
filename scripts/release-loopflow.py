@@ -32,6 +32,7 @@ from bundle_version import (
     stamp_bundle_version,
     stamp_release_bundle_id,
 )
+from check_desktop_launch import check_launch
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -246,6 +247,8 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    agents = app_macos_dir.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
     release_binary = os.environ.get("LF_RELEASE_BINARY")
     if release_binary:
         bin_dir = Path(release_binary).parent
@@ -313,7 +316,6 @@ def _verify_app_resource_self_containment(
         dir=build_dir.parent,
     ) as temp:
         holding_dir = Path(temp)
-        snapshot = holding_dir / "snapshot.png"
         (holding_dir / "app").mkdir()
         executable = _resource_check_copy(app_path, holding_dir / "app", identity, entitlements)
         moved: list[tuple[Path, Path]] = []
@@ -323,30 +325,10 @@ def _verify_app_resource_self_containment(
                 bundle.rename(held)
                 moved.append((held, bundle))
 
-            result = run_capture(
-                [str(executable), "-ui-test-mode", "empty-workspaces"],
-                timeout=30,
-                env={
-                    **os.environ,
-                    "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(snapshot),
-                    "LOOPFLOW_UI_TEST_DELAY": "0.2",
-                    "LOOPFLOW_UI_TEST_WIDTH": "900",
-                    "LOOPFLOW_UI_TEST_HEIGHT": "600",
-                },
-            )
+            check_launch(executable, holding_dir)
         finally:
             for held, bundle in reversed(moved):
                 held.rename(bundle)
-
-        if result.returncode != 0:
-            diagnostic = (result.stderr.strip() or result.stdout.strip())[-2000:]
-            detail = f": {diagnostic}" if diagnostic else ""
-            raise RuntimeError(
-                "Packaged app failed without SwiftPM build resources "
-                f"(exit {result.returncode}){detail}"
-            )
-        if not snapshot.is_file() or snapshot.stat().st_size == 0:
-            raise RuntimeError("Packaged app produced no resource-check snapshot")
     print(
         "Verified packaged app renders without SwiftPM build resources",
         flush=True,
@@ -359,15 +341,6 @@ def release() -> int:
         return _notarize_dmg(dmg_path)
     print("Building Loopflow release...", flush=True)
 
-    # The app links Loopflow's Rust library from target/release.
-    result = run(
-        ["cargo", "build", "--locked", "-p", "loopflow-ffi", "--lib", "--release"],
-        cwd=REPO_ROOT,
-        check=False,
-        timeout=20 * 60,
-    )
-    if result.returncode != 0:
-        return result.returncode
     result = run(
         ["swift", "build", "-c", "release"],
         cwd=SWIFT_DIR,

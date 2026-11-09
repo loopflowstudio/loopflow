@@ -3,6 +3,7 @@ pub(crate) mod scratch;
 pub mod worktree_name;
 pub mod worktrees;
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, Write};
@@ -10,7 +11,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -180,27 +181,44 @@ fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
 type Question = (PathBuf, Vec<String>);
 type RetainedReads = HashMap<Question, (Instant, Output)>;
 
-/// Set only by a process that never writes through Git.
-static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
+/// Shared by subscription readings, never by ordinary reads or writes.
+static RETAINED_READS: LazyLock<Mutex<RetainedReads>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// How long a retained answer stands: repository layout rarely moves, while a
 /// checkout's files change under a working agent.
 const LAYOUT_RETENTION: Duration = Duration::from_secs(600);
 const CONTENT_RETENTION: Duration = Duration::from_secs(60);
 
-fn retained() -> MutexGuard<'static, Option<RetainedReads>> {
+fn retained() -> MutexGuard<'static, RetainedReads> {
     RETAINED_READS.lock().expect("git read cache poisoned")
 }
 
-/// Let this process reuse a Git answer for a short time instead of spawning
-/// `git` again. For a long-lived reader that asks the same questions on every
-/// reading and changes nothing itself; one-shot commands never call this.
-pub(crate) fn retain_reads() {
-    *retained() = Some(HashMap::new());
+thread_local! {
+    static RETAINING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Reuse Git answers only while driving a subscription reading on this thread.
+/// Never install this scope on a shared async executor.
+pub(crate) fn retain_reads<T>(enabled: bool, read: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RETAINING.set(self.0);
+        }
+    }
+    let _restore = Restore(RETAINING.replace(enabled));
+    read()
 }
 
 pub(crate) fn retains_reads() -> bool {
-    retained().is_some()
+    RETAINING.get()
+}
+
+/// Carry the reading's retention scope into a bounded worker.
+pub(crate) fn inherit_reads<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
+    let enabled = retains_reads();
+    move || retain_reads(enabled, read)
 }
 
 fn is_layout(args: &[String]) -> bool {
@@ -216,13 +234,11 @@ fn ask(question: Question) -> std::io::Result<Output> {
         .args(&question.1)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .output()?;
-    if let Some(reads) = retained().as_mut() {
-        reads.insert(question, (Instant::now(), output.clone()));
-    }
+    retained().insert(question, (Instant::now(), output.clone()));
     Ok(output)
 }
 
-/// `git -C repo args`, reusing a retained answer when this process keeps them.
+/// `git -C repo args`, reusing an answer only in a subscription reading.
 ///
 /// The retained answers are never held while Git runs: a listing asks about
 /// every checkout side by side.
@@ -240,8 +256,7 @@ pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Out
         CONTENT_RETENTION
     };
     let standing = retained()
-        .as_ref()
-        .and_then(|reads| reads.get(&question))
+        .get(&question)
         .filter(|(read_at, _)| read_at.elapsed() < stands)
         .map(|(_, output)| output.clone());
     match standing {
@@ -255,7 +270,6 @@ pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Out
 pub(crate) fn reread_retained(repo: &Path) -> bool {
     let questions = retained()
         .iter()
-        .flatten()
         .filter(|((asked, args), _)| asked == repo && !is_layout(args))
         .map(|(question, (_, output))| (question.clone(), output.clone()))
         .collect::<Vec<_>>();
@@ -1184,9 +1198,7 @@ pub(crate) fn worktree_add_inheriting(
             ),
         });
     }
-    if let Err(error) = _mark_lf_created(path, inherit) {
-        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
-    }
+    mark_lf_created(path, inherit);
     Ok(())
 }
 
@@ -1194,7 +1206,15 @@ pub(crate) fn worktree_add_inheriting(
 /// the worktree; the working tree never sees it.
 const LF_CREATED_MARKER: &str = "loopflow-created";
 
-fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
+/// Record that lf just created the worktree at `path`. Every creation calls
+/// this; a checkout lf adopted stays unmarked and keeps Claude's own dialog.
+pub(crate) fn mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) {
+    if let Err(error) = _write_lf_created(path, inherit) {
+        tracing::warn!(path = %path.display(), %error, "failed to mark worktree as lf-created");
+    }
+}
+
+fn _write_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     let marker = git_stdout_inheriting(
         path,
         &["rev-parse", "--git-path", LF_CREATED_MARKER],
@@ -1658,7 +1678,7 @@ mod tests {
     }
 
     #[test]
-    fn git_reads_from_several_threads_run_side_by_side() {
+    fn subscription_git_retention_reads_several_threads_side_by_side() {
         let dir = tempfile::tempdir().expect("create temp dir");
         // Each read leaves its mark, then succeeds only once the other's is
         // there too: reads taken in turn would both give up.
@@ -1673,9 +1693,11 @@ mod tests {
                 .success()
         };
 
-        let (one, other) = thread::scope(|scope| {
-            let one = scope.spawn(|| read(&first, &second));
-            (read(&second, &first), one.join().expect("reader panicked"))
+        let (one, other) = retain_reads(true, || {
+            thread::scope(|scope| {
+                let one = scope.spawn(inherit_reads(|| read(&first, &second)));
+                (read(&second, &first), one.join().expect("reader panicked"))
+            })
         });
 
         assert!(one && other);
@@ -2022,6 +2044,47 @@ mod tests {
             origin_branch(repo.path()).unwrap().as_deref(),
             Some("feature")
         );
+    }
+
+    #[test]
+    fn subscription_git_retention_follows_only_subscription_workers() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let status = || git_stdout(repo.path(), &["status", "--porcelain"]).unwrap();
+        retain_reads(true, || assert_eq!(status(), ""));
+        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
+        assert!(status().contains("new.txt"));
+        retain_reads(true, || {
+            assert_eq!(status(), "", "another reading shares the first answer");
+            std::thread::scope(|scope| {
+                assert_eq!(scope.spawn(inherit_reads(status)).join().unwrap(), "");
+                assert!(scope.spawn(status).join().unwrap().contains("new.txt"));
+            });
+        });
+    }
+
+    #[test]
+    fn subscription_git_retention_refreshes_shared_answers() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let status = || git_stdout(repo.path(), &["status", "--porcelain"]).unwrap();
+        retain_reads(true, || assert_eq!(status(), ""));
+        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
+        assert!(reread_retained(repo.path()));
+        retain_reads(true, || assert!(status().contains("new.txt")));
+    }
+
+    #[test]
+    fn subscription_git_retention_restores_fresh_reads_after_unwind() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let status = || git_stdout(repo.path(), &["status", "--porcelain"]).unwrap();
+        let failure = std::panic::catch_unwind(|| {
+            retain_reads(true, || {
+                assert_eq!(status(), "");
+                panic!("failed subscription");
+            });
+        });
+        assert!(failure.is_err());
+        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
+        assert!(status().contains("new.txt"), "unwind restores fresh reads");
     }
 
     #[test]

@@ -13,6 +13,8 @@ struct ConfigurationSettingsView: View {
     @State private var locator = ""
     @State private var explanation = ""
     @State private var notice = ""
+    @State private var saving = false
+    @State private var selectionID = UUID()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,28 +41,29 @@ struct ConfigurationSettingsView: View {
                     }
                 }
             }
-            if let definition = catalogue.filter({ key == $0.key || key.hasPrefix($0.key + ".") }).max(by: { $0.key.count < $1.key.count }) {
+            if let definition = catalogue.filter({ definition in ([definition.key] + definition.shorthands).contains { key == $0 || key.hasPrefix($0 + ".") } }).max(by: { $0.key.count < $1.key.count }) {
                 Text(definition.description).font(.callout)
                 Text("\(definition.applicability) · \(definition.combination) · \(definition.portability)")
                     .font(.caption).foregroundStyle(.secondary)
             }
             TextEditor(text: $value).font(.system(.body, design: .monospaced)).frame(minHeight: 100)
             HStack {
-                Button("Reload", action: load)
-                Button("Apply") { save(unset: false) }
-                Button("Unset") { save(unset: true) }
+                Button("Reload") { Task { await load() } }
+                Button("Apply") { Task { await save(unset: false) } }
+                Button("Unset") { Task { await save(unset: true) } }
             }
-            Button("Explain effective value", action: inspect)
+            Button("Explain effective value") { Task { await inspect() } }
             if !notice.isEmpty { Text(notice).font(.callout).textSelection(.enabled) }
             ScrollView { Text(explanation).font(.caption).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
         }
+        .disabled(saving)
         .padding(24).frame(minWidth: 620, minHeight: 550)
         .onChange(of: destination) { _, _ in resetSelection() }
         .onChange(of: repository) { _, _ in resetSelection() }
         .onChange(of: wave) { _, _ in resetSelection() }
         .onChange(of: key) { _, _ in resetSelection() }
-        .onAppear {
-            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: LoopflowLibrary.configuration(["action": "catalog"])); load() }
+        .task {
+            do { catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: await ServerClient.configuration(.configCatalog)); await load() }
             catch { notice = error.localizedDescription }
         }
     }
@@ -71,13 +74,8 @@ struct ConfigurationSettingsView: View {
         }
     }
 
-    private var address: [String: Any] {
+    private var address: JSONValue {
         destination.address(repository: (repository as NSString).expandingTildeInPath, wave: wave)
-    }
-
-    private func request(value: String?, unset: Bool) -> [String: Any] {
-        ["action": "declaration", "destination": address, "key": key,
-         "value": value as Any? ?? NSNull(), "unset": unset]
     }
 
     private func resetSelection() {
@@ -85,35 +83,45 @@ struct ConfigurationSettingsView: View {
         locator = ""
         explanation = ""
         notice = ""
-        load()
+        selectionID = UUID()
+        Task { await load() }
     }
 
-    private func load() {
+    private func load() async {
+        let selection = selectionID
         do {
-            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: LoopflowLibrary.configuration(request(value: nil, unset: false)))
+            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(.configGet(destination: address, key: key)))
+            guard selection == selectionID else { return }
             locator = result.path
             if result.value != .null {
                 value = try configurationText(result.value)
                 notice = "Loaded from \(result.path)"
             } else { value = ""; notice = "No declaration in this file. Unset reveals values from other sources." }
-        } catch { notice = error.localizedDescription }
+        } catch { if selection == selectionID { notice = error.localizedDescription } }
     }
 
-    private func save(unset: Bool) {
+    private func save(unset: Bool) async {
+        guard !saving else { return }
+        saving = true
+        selectionID = UUID()
+        defer { saving = false }
         do {
-            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: LoopflowLibrary.configuration(request(value: unset ? nil : value, unset: unset)))
+            let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: await ServerClient.configuration(
+                unset ? .configUnset(destination: address, key: key) : .configSet(destination: address, key: key, value: value)))
             locator = result.path
             if unset { value = "" }
             notice = "\(unset ? "Removed declaration from" : "Saved to") \(result.path) · \(result.lifecycle.replacingOccurrences(of: "_", with: " "))"
-            inspect()
+            await inspect()
         } catch { notice = error.localizedDescription }
     }
 
-    private func inspect() {
+    private func inspect() async {
+        let selection = selectionID
         explanation = ""
         do {
-            let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: LoopflowLibrary.configuration(
-                ["action": "explain", "destination": address, "key": key]))
+            let data = try await ServerClient.configuration(.configExplain(destination: address, key: key))
+            let result = try JSONDecoder().decode(ConfigurationExplanation.self, from: data)
+            guard selection == selectionID else { return }
             locator = result.path
             let effectiveKey = result.key
             let rootKey = effectiveKey.components(separatedBy: ".")[0]
@@ -127,15 +135,15 @@ struct ConfigurationSettingsView: View {
                     "\($0.reason): \($0.source) · \($0.locator) · \($0.scope) · \(try configurationText($0.target)) = \(try configurationText($0.value))"
                 }.joined(separator: "\n"))
             }.joined(separator: "\n\n")
-        } catch { notice = error.localizedDescription }
+        } catch { if selection == selectionID { notice = error.localizedDescription } }
     }
 }
 
 // This mirrors destination identity only; Rust derives paths and applicability.
 enum ConfigurationDestination: String, CaseIterable, Identifiable {
     case personalGlobal = "personal_global"
-    case personalRepository = "personal_repository"
-    case sharedRepository = "shared_repository"
+    case personalRepository = "personal_repo"
+    case sharedRepository = "shared_repo"
     case personalWave = "personal_wave"
     case sharedWave = "shared_wave"
 
@@ -151,11 +159,11 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
         }
     }
 
-    func address(repository: String, wave: String) -> [String: Any] {
-        var value: [String: Any] = ["kind": rawValue]
-        if self != .personalGlobal { value["repository"] = repository }
-        if isWave { value["wave"] = wave }
-        return value
+    func address(repository: String, wave: String) -> JSONValue {
+        var value: [String: JSONValue] = ["kind": .string(rawValue)]
+        if self != .personalGlobal { value["repo"] = .string(repository) }
+        if isWave { value["wave"] = .string(wave) }
+        return .object(value)
     }
 }
 
@@ -166,7 +174,9 @@ struct ConfigurationExplanation: Decodable {
 }
 
 struct ConfigurationDefinition: Decodable {
+    /// The canonical key on its primitive; `shorthands` are the other spellings lf accepts.
     let key: String
+    let shorthands: [String]
     let category: String
     let schema: JSONValue
     let `default`: String

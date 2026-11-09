@@ -1,19 +1,30 @@
 //! Export saved planning identities on the foreground connection's lifetime.
+//! A pass costs no requests when nothing changed; `README.md` holds the policy.
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::json;
 
 use crate::durable::WorkRef;
 use crate::store::sqlite::planning_changes::PlanningChanges;
-use crate::store::sqlite::planning_export::PlanningExport;
+use crate::store::sqlite::planning_export::{ExportAttempts, PlanningExport};
 use crate::store::Store;
 
 use super::planning_client::{PlanningClient, StateScope};
 use super::{OpsError, OpsResult};
 
+/// Seconds between looks at a creation that stays uncertain while the Linear
+/// budget is healthy. A paced or reserved budget stretches the window to its
+/// pacing interval or its reset through `delta_fresh_secs`.
+const UNCERTAIN_EXPORT_WINDOW_SECS: i64 = 600;
+
 fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
+}
+
+fn now() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsResult<()> {
@@ -33,20 +44,90 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
     Ok(())
 }
 
+/// A pass: waits out the window after an uncertain creation was looked for.
 pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
-    // Creations spend the reserved Linear budget so they never fail behind sync.
-    crate::linear::urgent(export(store, repo, work, false)).await
+    export(store, repo, work, false).await
 }
 
-pub(crate) async fn retry_task_export(
+/// Deliver one pending export. `force` looks for an uncertain creation now,
+/// however recently a pass looked, and re-sends it when absent (`lf task sync`).
+pub(crate) async fn export(
     store: &Store,
     repo: &Path,
-    task: &crate::durable::TaskId,
+    work: &WorkRef,
+    force: bool,
 ) -> OpsResult<()> {
-    crate::linear::urgent(export(store, repo, &WorkRef::Task(task.clone()), true)).await
+    // Creations spend the reserved Linear budget so they never fail behind sync.
+    crate::linear::urgent(deliver(store, repo, work, force)).await
 }
 
-async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool) -> OpsResult<()> {
+/// What the store knows before the provider is asked.
+struct PreparedExport {
+    wave_id: Option<crate::id::WaveId>,
+    team: String,
+    export: PlanningExport,
+    attempts: ExportAttempts,
+}
+
+async fn prepare(
+    store: &Store,
+    repo: &Path,
+    owner: PlanningChanges<'_>,
+) -> OpsResult<Option<PreparedExport>> {
+    let (wave_id, mapped) = match owner {
+        PlanningChanges::Task(id) => {
+            let task = store
+                .get_task(id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Task is missing"))?;
+            (task.wave_id, task.linear_id.is_some())
+        }
+        PlanningChanges::Project(id) => {
+            let project = store
+                .get_project(id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Project is missing"))?;
+            (Some(project.wave_id), project.linear_id.is_some())
+        }
+    };
+    if mapped {
+        return Ok(None);
+    }
+    let initiative = match &wave_id {
+        Some(id) => {
+            let wave = store
+                .get_wave(id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Wave is missing"))?;
+            Some(
+                super::planning_client::wave_scope(repo, wave.slug())?.ok_or_else(|| {
+                    message("Wave has no Linear Initiative; export remains pending")
+                })?,
+            )
+        }
+        None => None,
+    };
+    let team = super::planning_client::repository_scope(repo)?;
+    let export = store
+        .sqlite
+        .prepare_planning_export(owner, &team, initiative.as_deref())
+        .map_err(message)?;
+    let attempts = store
+        .sqlite
+        .planning_export_attempts(owner)
+        .map_err(message)?;
+    Ok(Some(PreparedExport {
+        wave_id,
+        team,
+        export,
+        attempts,
+    }))
+}
+
+async fn deliver(store: &Store, repo: &Path, work: &WorkRef, force: bool) -> OpsResult<()> {
     if !super::planning_client::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
@@ -58,64 +139,66 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
     let Some(_lock) = super::planning_delivery::lock_fields(store, owner)? else {
         return Ok(());
     };
+    let linear = super::planning_client::is_linear(&repo.to_string_lossy());
+    let prepared = match prepare(store, repo, owner).await {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => return Ok(()),
+        Err(error) => return record(store, owner, Err(error)),
+    };
+    // An uncertain creation is looked for once per window. The refusal is not
+    // recorded: the receipt keeps the error that made the creation uncertain.
+    if prepared.attempts.creation && !force {
+        let window = if linear {
+            UNCERTAIN_EXPORT_WINDOW_SECS.max(crate::linear::delta_fresh_secs())
+        } else {
+            UNCERTAIN_EXPORT_WINDOW_SECS
+        };
+        if let Some(ago) = prepared
+            .attempts
+            .observed_at
+            .map(|at| now() - at)
+            .filter(|ago| *ago < window)
+        {
+            return Err(message(format!(
+                "Creation remains uncertain; looked {ago}s ago, next look in {}s",
+                window - ago
+            )));
+        }
+    }
+    // Names the step a timeout interrupts; the future must be `Send`.
+    let step = Mutex::new("validating the Team");
+    let set_step = |name: &'static str| *step.lock().expect("export step poisoned") = name;
     let attempt = async {
-        let (wave_id, mapped) = match owner {
-            PlanningChanges::Task(id) => {
-                let task = store
-                    .get_task(id)
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("Task is missing"))?;
-                (task.wave_id, task.linear_id.is_some())
-            }
-            PlanningChanges::Project(id) => {
-                let project = store
-                    .get_project(id)
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("Project is missing"))?;
-                (Some(project.wave_id), project.linear_id.is_some())
-            }
-        };
-        if mapped {
-            return Ok(());
-        }
-        let linear = super::planning_client::is_linear(&repo.to_string_lossy());
-        let initiative = match &wave_id {
-            Some(id) => {
-                let wave = store
-                    .get_wave(id)
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("Wave is missing"))?;
-                Some(
-                    super::planning_client::wave_scope(repo, wave.slug())?.ok_or_else(|| {
-                        message("Wave has no Linear Initiative; export remains pending")
-                    })?,
-                )
-            }
-            None => None,
-        };
-        let team = super::planning_client::repository_scope(repo)?;
-        let export = store
-            .sqlite
-            .prepare_planning_export(owner, &team, initiative.as_deref())
-            .map_err(message)?;
+        let PreparedExport {
+            wave_id,
+            team,
+            export,
+            attempts,
+        } = &prepared;
         let client = PlanningClient::for_repository(repo).await?;
-        if observe(store, repo, owner, &client, &export, wave_id.as_ref()).await? {
+        set_step("looking for the saved creation");
+        if observe(
+            store,
+            repo,
+            owner,
+            &client,
+            export,
+            wave_id.as_ref(),
+            attempts.creation,
+        )
+        .await?
+        {
             return Ok(());
         }
-        let (attempted, _) = store
-            .sqlite
-            .planning_export_attempts(owner)
-            .map_err(message)?;
-        if attempted && !retry_creation {
-            return Err(message(
-                "Creation remains uncertain; no repeated create issued",
-            ));
+        if attempts.creation {
+            tracing::info!(
+                id = %export.id,
+                "uncertain creation is absent; re-sending it with its saved id"
+            );
         }
         let mut input = export.input.clone();
         let project = matches!(owner, PlanningChanges::Project(_));
+        set_step("resolving the workflow state");
         if project && linear {
             input["statusId"] = client
                 .linear()?
@@ -143,11 +226,12 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &input, false, retry_creation)
+            .attempt_planning_export(owner, &input, false)
             .map_err(message)?
         {
             return Ok(());
         }
+        set_step("sending the creation");
         let creation = match (project, linear) {
             (true, true) => {
                 client
@@ -157,7 +241,7 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
             }
             (true, false) => match client.create_project(&input).await {
                 Ok(revision) => Ok(crate::linear::PlanningResponse::Project {
-                    project: Box::new(export.mirrored_project(&team, revision).map_err(message)?),
+                    project: Box::new(export.mirrored_project(team, revision).map_err(message)?),
                     content: String::new(),
                 }),
                 Err(error) => Err(error),
@@ -168,7 +252,9 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
             Ok(response) => response,
             Err(error) => {
                 // A rejected retry cannot disprove the earlier uncertain attempt.
-                if !attempted && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                if !attempts.creation
+                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
+                {
                     store
                         .sqlite
                         .reject_planning_export(owner, false)
@@ -177,13 +263,14 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
                 return Err(message(error));
             }
         };
+        set_step("recording the created item");
         match response {
             crate::linear::PlanningResponse::Project { project, .. } => {
                 attach_project(
                     store,
                     owner,
                     &client,
-                    &export,
+                    export,
                     wave_id
                         .as_ref()
                         .ok_or_else(|| message("Project export has no Wave"))?,
@@ -199,8 +286,18 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
     };
     let result = tokio::time::timeout(Duration::from_secs(5), attempt)
         .await
-        .map_err(|_| message("Export timed out; creation identity and uncertainty retained"))
+        .map_err(|_| {
+            message(format!(
+                "Export timed out while {}; creation identity and uncertainty retained",
+                step.lock().expect("export step poisoned")
+            ))
+        })
         .and_then(|result| result);
+    record(store, owner, result)
+}
+
+/// Keep the receipt's error current with the outcome.
+fn record(store: &Store, owner: PlanningChanges<'_>, result: OpsResult<()>) -> OpsResult<()> {
     if let Err(error) = &result {
         store
             .sqlite
@@ -210,6 +307,9 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
     result
 }
 
+/// Whether the saved creation already exists in the provider. A look at an
+/// uncertain creation is stamped before asking, so a slow or failed answer
+/// still counts for the window.
 async fn observe(
     store: &Store,
     repo: &Path,
@@ -217,11 +317,14 @@ async fn observe(
     client: &PlanningClient,
     export: &PlanningExport,
     wave: Option<&crate::id::WaveId>,
+    attempted: bool,
 ) -> OpsResult<bool> {
-    let (attempted, _) = store
-        .sqlite
-        .planning_export_attempts(owner)
-        .map_err(message)?;
+    if attempted {
+        store
+            .sqlite
+            .observe_planning_export(owner, now())
+            .map_err(message)?;
+    }
     match owner {
         PlanningChanges::Project(_) => {
             let found = match client {
@@ -272,14 +375,8 @@ async fn observe(
                     "Issue identity already exists without an attempted creation; receipt retained",
                 ));
             }
-            super::planning_delivery::ingest_task(
-                store,
-                repo,
-                &item,
-                project.as_ref(),
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            )
-            .await?;
+            super::planning_delivery::ingest_task(store, repo, &item, project.as_ref(), now())
+                .await?;
         }
     }
     Ok(true)
@@ -298,18 +395,19 @@ async fn attach_project(
         .as_deref()
         .ok_or_else(|| message("Project export has no Initiative"))?;
     if project.initiative_ids.is_empty() {
-        let (_, attempted) = store
+        if store
             .sqlite
             .planning_export_attempts(owner)
-            .map_err(message)?;
-        if attempted {
+            .map_err(message)?
+            .link
+        {
             return Err(message(
                 "Project attachment remains uncertain; no repeated attachment issued",
             ));
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &export.input, true, false)
+            .attempt_planning_export(owner, &export.input, true)
             .map_err(message)?
         {
             return Ok(());
@@ -341,7 +439,7 @@ async fn attach_project(
         wave,
         initiative,
         &project,
-        time::OffsetDateTime::now_utc().unix_timestamp(),
+        now(),
     )
     .map_err(message)?;
     Ok(())

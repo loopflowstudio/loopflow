@@ -90,8 +90,6 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         )
         .unwrap();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,
@@ -190,7 +188,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             )
             .unwrap();
         runtime
-            .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
+            .block_on(super::retirement::schedule(&fixture.store, &fixture.task))
             .unwrap();
     }
     assert!(repo.path().exists());
@@ -201,7 +199,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         WorkStatus::Done
     );
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
@@ -465,8 +463,6 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     // A reboot proves stale execution exited without settling the Graph.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let process = crate::process::LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
         os_started_at: None,
         id: crate::id::LfProcessId::new(),
         pid: None,
@@ -522,7 +518,7 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     assert!(unresolved[0].contains(process.id.as_str()));
     assert!(after_boot.is_empty(), "{after_boot:?}");
     assert_eq!(
-        fixture.store.sqlite.process(&process.id).unwrap(),
+        fixture.store.sqlite.lf_process(&process.id).unwrap(),
         Some(process)
     );
     assert_eq!(
@@ -714,10 +710,11 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             ] {
                 let file = super::task_file(issue, "scratch/note.md", false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
-                let changes = super::task_changes(issue, "parent").unwrap();
+                let changes = super::task_changes(issue, "parent", None).unwrap();
                 assert_eq!(changes.base_commit, pr.base_commit);
                 assert_eq!(changes.scratch, ["scratch/note.md"]);
-                let diff = super::task_diff(issue, Some("scratch/note.md"), "head", None).unwrap();
+                let diff =
+                    super::task_diff(issue, Some("scratch/note.md"), "head", None, None).unwrap();
                 assert!(diff.patch.contains("+local note"));
             }
             let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
@@ -768,7 +765,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             assert_eq!(saved.file.content.as_deref(), Some("no PR needed\n"));
             let directory = super::task_files("FILES-1", "scratch", None, false).unwrap();
             assert_eq!(directory.entries[0].path, "scratch/note.md");
-            let changes = super::task_changes("FILES-1", "parent").unwrap();
+            let changes = super::task_changes("FILES-1", "parent", None).unwrap();
             assert_eq!(changes.base_commit, pr.base_commit);
             assert_eq!(changes.scratch, ["scratch/note.md"]);
             let conflict = super::task_save(
@@ -837,7 +834,7 @@ fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
                     .unwrap_err()
                     .to_string()
                     .contains(expected));
-                assert!(super::task_changes("LOCATION-1", "head")
+                assert!(super::task_changes("LOCATION-1", "head", None)
                     .unwrap_err()
                     .to_string()
                     .contains(expected));
@@ -907,6 +904,7 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
             worktree: repo.path(),
         },
         base_commit: &parent,
+        head_commit: None,
     };
     let changes = super::snapshot::changes_snapshot(workspace).unwrap();
     assert!(!changes
@@ -923,6 +921,23 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
     let patch = super::snapshot::diff_snapshot(workspace, Some("new.txt")).unwrap();
     assert!(patch.patch.contains("rename from old.txt"));
     let head = super::resolve_file_base(repo.path(), &parent, "head").unwrap();
+    let committed = super::TaskComparison {
+        head_commit: Some(&head),
+        ..workspace
+    };
+    let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
+    assert!(committed_files
+        .files
+        .iter()
+        .any(|file| file.path == "cancelled.txt"));
+    assert!(!committed_files
+        .files
+        .iter()
+        .any(|file| file.untracked || file.staged || file.unstaged));
+    let committed_patch = super::snapshot::diff_snapshot(committed, None).unwrap();
+    assert!(committed_patch.patch.contains("+committed"));
+    assert!(!committed_patch.patch.contains("scratch/nested/notes.md"));
+    assert_eq!(committed_patch.head_commit.as_deref(), Some(head.as_str()));
     let head_changes = super::snapshot::changes_snapshot(super::TaskComparison {
         base_commit: &head,
         ..workspace

@@ -14,12 +14,12 @@ lf resume                       # return to this scope’s conversation
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
-| A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
-| A stopped Graph | Its step Processes, as history | `lf graph list --processes --for-task <ID>` |
+| A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
+| A stopped Graph | Its step Processes, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
-checkout, with the Task's comments and its open PR.
+checkout, with the Task's thread and its open PR.
 
 ## What went wrong
 
@@ -28,9 +28,9 @@ Read before you relaunch anything.
 ```bash
 lf doctor                                    # installation, store and process health
 lf task status <ID>                          # the Task's execution and the reason for it
-lf graph show <GRAPH_ID> --processes         # each step, its Process and how it exited
-lf history show <SESSION_ID> --final         # the agent's last word in that conversation
-lf ps                                        # what is running right now
+lf process show <GRAPH_ID>         # each step, its Process and how it exited
+lf session history show <SESSION_ID> --final # the agent's last word in that conversation
+lf process list                                        # what is running right now
 ```
 
 `lf task status` reports execution separately from the Task's own status:
@@ -42,8 +42,8 @@ liveness stays unknown; lf never guesses a process is dead.
 | You see | Run |
 |---|---|
 | A question waiting for you | `lf resume --task <ID>` |
-| The run is going the wrong way | `lf comment <ID> "address the latest feedback"` |
-| It must stop now | `lf interrupt <ID>` |
+| The run is going the wrong way | `lf task steer <ID> "address the latest feedback"` |
+| It must stop now | `lf task interrupt <ID>` |
 | It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
 
 ## Doctor reports a failure
@@ -66,6 +66,50 @@ and any write that held the store lock for 3 s or more, grouped by the lf
 binary that logged them, with the holder's pids and the function that held the
 lock. Lines from binaries older than this check group as `unidentified (older lf)`.
 
+## Desktop cannot connect
+
+```bash
+lf server status   # readiness, socket, server instance and connection diagnosis
+lf doctor          # selected installation and store health
+```
+
+**Reconnecting…** means Desktop is trying the same Session owner. Keep the pane
+open; its screen and local reading actions remain available. If automatic retries
+end, **Retry** reconnects without replaying input or restarting the provider.
+A read-only pane's **Move here** requests control explicitly; a lost connection
+alone never takes it from another viewer.
+
+If the diagnosis reports disabled background access, enable Loopflow in macOS
+System Settings, or enable its user service on Linux. Retry and status do not
+change that setting. Use `lf install` for an installation/build mismatch; do not
+start a second foreground server. A server outage alone is no reason to relaunch
+the Task's Graph. See [Connect clients](server.md).
+
+## A launch reports `outcome_unknown`
+
+After starting a Task from a connected client, check whether its Graph started
+before trying again:
+
+```bash
+lf task status <ID> --json
+lf task runs <ID>
+```
+
+`outcome_unknown` means the launch may have taken effect but did not report a
+usable result. If the command exits, the server stops waiting. If it cannot
+determine whether the command is still running, it continues checking for a
+bounded time before returning the error. Access to the Machine's records can
+recover during that wait.
+
+This error does not stop or repeat the launched work. Leave a running Graph
+alone. If status is unavailable, use `lf doctor` and check again once reads work.
+Retry only after inspecting the affected work; for launches other than Tasks,
+inspect the operation's result and `lf process list` first.
+
+For a Graph launched directly, `lf graph list --processes` also finds finished
+runs. Inspect one with `lf process show <ID>`; a finished run no longer appears
+in the live process list.
+
 ## A Task stopped advancing
 
 **Symptom:** the Task is not done, but nothing is moving, or its agent
@@ -73,7 +117,7 @@ exited.
 
 ```bash
 lf task status <ID> --json
-lf usage --days 0 --task <ID> --json        # every Session input the Task ever made
+lf session usage --days 0 --task <ID> --json   # every Session input the Task ever made
 lf session list --task <ID>
 ```
 
@@ -81,7 +125,7 @@ Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
 prove helper Sessions are idle, and a finished launcher does not prove its
 interactive Session closed: check Sessions separately.
 
-`lf interrupt <ID>` stops a running Graph: an agent step ends at once, an
+`lf task interrupt <ID>` stops a running Graph: an agent step ends at once, an
 operation finishes and nothing follows, and the run exits 130. With nothing
 live it records nothing and says so.
 
@@ -92,11 +136,11 @@ names the exact path and branch to restore before launching.
 
 Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
 …); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
-`reason`; Desktop's condition, with the evidence behind it, is in `lf desktop task`:
+`reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
 
 ```bash
 lf task status <ID> --json
-lf desktop task <ID> --json
+lf task show <ID> --json
 ```
 
 Resolve the named fact: open the conversation, inspect the child, repair CI,
@@ -135,7 +179,7 @@ lf account connect claude
 
 With no agent preference configured, lf uses the sole installed harness. If more
 than one is installed, choose with `lf set --global default_agent claude` or pass
-`-a claude` for one command. `lf config show --explain` shows the selection.
+`-a claude` for one command. `lf config settings --explain` shows the selection.
 
 ## Context too large
 
@@ -143,7 +187,7 @@ than one is installed, choose with `lf set --global default_agent claude` or pas
 
 ```bash
 lf --context qa --docs src/small/    # see what the input is made of, launch nothing
-lf usage --context --task <ID>       # each step's input by source, against its budget
+lf session usage --context --task <ID>   # each step's input by source, against its budget
 ```
 
 The provider loads `AGENTS.md` natively. lf adds `LOOPFLOW.md`, `scratch/` and
@@ -155,7 +199,7 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
-lf monitor prune                   # only lf's records: dead Process rows and receipts, then vacuum
+lf process prune                   # only lf's records: dead Process rows and receipts, then vacuum
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
@@ -205,8 +249,8 @@ lf sync                            # refresh main, keeping its unpublished commi
 ## Orphaned agent processes
 
 ```bash
-lf monitor prune --dry-run --json  # each candidate and why
-lf monitor prune --json            # recheck, then reap
+lf process prune --dry-run --json  # each candidate and why
+lf process prune --json            # recheck, then reap
 ```
 
 Pruning reports each agent process it settles or keeps, with the reason, then
@@ -215,15 +259,15 @@ references, and compacts the store; a dry run changes none of it. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 
-When `lf self doctor` fails `lineage` and says `lf monitor prune` repairs the
+When `lf machine doctor` fails `lineage` and says `lf process prune` repairs the
 parents, an AgentProcess points at an lf process that was never recorded:
 
 ```bash
-lf monitor prune --dry-run         # lists the ancestry it would release
-lf monitor prune                   # releases it; the Session can resume
+lf process prune --dry-run         # lists the ancestry it would release
+lf process prune                   # releases it; the Session can resume
 ```
 
-The release is kept as a Session fact in `lf history show <session>`.
+The release is kept as a Session fact in `lf session history show <session>`.
 
 ## A Wave isn't moving
 

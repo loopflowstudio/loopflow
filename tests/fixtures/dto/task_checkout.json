@@ -41,7 +41,7 @@
   "pr": null,
   "branch": "jack/workspace",
   "base_commit": "1111111111111111111111111111111111111111",
-  "repository_id": "repo_00000000000040008000000000000001",
+  "repo_id": "repo_00000000000040008000000000000001",
   "started_by": {
     "kind": "session",
     "id": "session_05214bdabd2e4f66b4a8951aac87e9e7",

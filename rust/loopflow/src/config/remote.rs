@@ -197,6 +197,9 @@ fn validate_document(value: &Value, scope: SettingScope) -> Result<()> {
 }
 
 pub fn incoming() -> Result<Option<Profile>> {
+    if crate::journal::request::active() {
+        return Ok(None);
+    }
     std::env::var(PROFILE_ENV)
         .ok()
         .map(|text| {

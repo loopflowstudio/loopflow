@@ -25,7 +25,8 @@ use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
-use crate::process::{LfProcess, ProcessKind};
+use crate::portfolio::{self, PortfolioCommand};
+use crate::process::LfProcess;
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
@@ -46,7 +47,7 @@ const PERSON: &str = "Demo";
 /// (`GUIProcessEnvironment.enrichedPath` in
 /// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
 /// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
-const DESKTOP_PATH: [&str; 6] = [
+pub(crate) const DESKTOP_PATH: [&str; 6] = [
     "~/.local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
@@ -289,10 +290,13 @@ impl World {
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)?;
-        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
-            paths: vec![repo.clone()],
-        })?;
+        portfolio::change(&PortfolioCommand::Manual, &repo)?;
+        portfolio::change(
+            &PortfolioCommand::Add {
+                paths: vec![repo.clone()],
+            },
+            &repo,
+        )?;
         crate::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
@@ -373,12 +377,14 @@ impl World {
         for (name, value) in env.vars() {
             std::env::set_var(name, value);
         }
-        let registered = crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)
-            .and_then(|_| {
-                crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
+        let registered = portfolio::change(&PortfolioCommand::Manual, &repo).and_then(|_| {
+            portfolio::change(
+                &PortfolioCommand::Add {
                     paths: vec![repo.clone()],
-                })
-            });
+                },
+                &repo,
+            )
+        });
         for (name, value) in self.env.vars() {
             std::env::set_var(name, value);
         }
@@ -768,7 +774,7 @@ impl World {
         let store = self.store()?;
         let session = self
             .runtime
-            .block_on(provider_conversation::admit(&store, &id))?
+            .block_on(provider_conversation::admit(&store, &id, &cwd))?
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {
@@ -791,13 +797,13 @@ impl World {
         Ok(session_id)
     }
 
-    /// Comment on a Task the way `lf task comment` does.
+    /// Post to a Task's thread the way `lf task report` does.
     pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
         crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
         Ok(())
     }
 
-    /// Open `wave`'s ongoing conversation the way `lf wave session` does and
+    /// Open `wave`'s ongoing conversation the way `lf --wave W session connect` does and
     /// give it `turns` as its Claude history.
     pub fn wave_conversation(
         &self,
@@ -1105,8 +1111,6 @@ impl World {
         LfProcess {
             id: LfProcessId::new(),
             pid: None,
-            kind: ProcessKind::Lf,
-            agent_session_id: None,
             os_started_at: None,
             trace_id: trace.clone(),
             parent_lf_process_id: parent.cloned(),

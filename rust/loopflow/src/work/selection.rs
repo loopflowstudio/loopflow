@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 mod panes;
 mod query;
 pub use panes::{
-    BrowserTab, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab, WorkPaneLayout,
+    BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
+    TaskLayoutTemplate, WorkPaneLayout,
 };
 
 #[derive(
@@ -120,7 +121,10 @@ pub enum SelectionState {
     Active,
     Moving,
     Shipping,
+    /// Board axis: the Task's `TaskSection`.
     Backlog,
+    Working,
+    Autonomous,
     Done,
 }
 
@@ -376,17 +380,10 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository and a Wave list Working Tasks: idle,
-                            // active or moving. Unstarted Tasks live on the Wave
-                            // board's Backlog; Shipping Tasks leave for `state:shipping`.
-                            in_scope
-                                && [
-                                    SelectionState::Idle,
-                                    SelectionState::Active,
-                                    SelectionState::Moving,
-                                ]
-                                .iter()
-                                .any(|state| item.states.contains(state))
+                            // The repository and a Wave list the board's Working
+                            // section; the others are `state:backlog`, `state:autonomous`
+                            // and `state:done`.
+                            in_scope && item.states.contains(&SelectionState::Working)
                         }
                     };
                     if included {
@@ -697,6 +694,7 @@ impl SlotLayout {
 /// A custom view with its own identity; members reference existing Work workspaces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Dashboard {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub id: DashboardId,
     pub revision: i64,
@@ -722,6 +720,7 @@ pub struct ViewPlan {
     pub name: Option<String>,
     pub pinned: bool,
     pub dashboard_id: Option<DashboardId>,
+    #[serde(rename = "repo")]
     pub repository: String,
     pub selection: Selection,
     pub saved_revision: Option<i64>,

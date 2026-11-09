@@ -1,7 +1,7 @@
-//! The one Task row Task reads print: `lf task list`, `lf task status` and the
-//! Task rows of `lf wave show` and `lf wave status`. Each fact appears once.
-//! Desktop's presentation of the same Tasks (sections, conditions, controls)
-//! is `lf desktop`'s, from `RoadmapTask`.
+//! `lf task status`'s Task row: each fact once, with the Task's Sessions, Graph
+//! processes and comments. Every list read (`lf task list`, `lf wave show`,
+//! `lf wave status`) prints `RoadmapTask` records, the same record the server
+//! sends.
 
 use std::collections::HashMap;
 
@@ -90,7 +90,7 @@ impl TaskGraphRow {
     }
 }
 
-/// The Task's comment thread, as `lf task comment` keeps it, without restating
+/// The Task's comment thread, as `lf task steer` and `lf task report` keep it, without restating
 /// the Task's identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskThread {

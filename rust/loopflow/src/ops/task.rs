@@ -1,8 +1,9 @@
 pub(crate) mod adoption;
+pub(crate) mod limit_recovery;
 pub use adoption::TaskAdoptionOptions;
 pub(crate) mod remote;
 mod workspace;
-pub use workspace::{task_shell, watch_task_files, TaskFilesFrame};
+pub use workspace::{watch_task_files, TaskFilesFrame};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
@@ -18,7 +19,8 @@ mod handoff;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
-pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
+pub mod retirement;
+pub(crate) use lifecycle::{notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod delivery;
 pub(crate) use delivery::{
@@ -50,7 +52,6 @@ use crate::config::ConfigSource;
 use crate::work::task::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
@@ -71,9 +72,16 @@ use crate::work::task::{
 use crate::work::wave::Wave;
 use time::format_description::well_known::Rfc3339;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What `lf task wait --until` waits for.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskWaitUntil {
+    /// Its PR is open, or it finished first.
+    #[serde(rename = "submitted")]
     Open,
+    /// It is done or abandoned.
     Terminal,
 }
 
@@ -99,7 +107,7 @@ impl TaskProcessOptions {
             }
             if let Some(task) = existing {
                 return Err(task_error(format!(
-                    "Task {} already exists; use `lf task comment {} <new-direction>`",
+                    "Task {} already exists; use `lf task steer {} <new-direction>`",
                     task.identifier, task.identifier
                 )));
             }
@@ -137,7 +145,9 @@ pub struct TaskCreateInput {
     pub report: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskControlResult {
     pub issue_id: String,
     pub task_id: String,
@@ -145,7 +155,7 @@ pub struct TaskControlResult {
     pub observation: Observation,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
     pub issue_id: Option<String>,
@@ -157,6 +167,7 @@ pub struct TaskSnapshot {
     pub pm_writeback: crate::work::task::LinearWritebackState,
     pub wave: Option<String>,
     pub project_id: Option<String>,
+    #[serde(rename = "repo_id")]
     pub repository_id: String,
     /// Completion and abandonment are independent of the Task's Graph position.
     pub status: TaskState,
@@ -171,8 +182,10 @@ pub struct TaskSnapshot {
     pub provider: Option<String>,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
+    #[schemars(with = "String")]
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: time::OffsetDateTime,
     /// Freshness of the PR state against GitHub as of this read. `Degraded`
@@ -189,13 +202,17 @@ pub struct TaskSnapshot {
 }
 
 /// When someone approved or stopped Auto-Ship, and who.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ShipMark {
     pub at: i64,
     pub by: crate::process::Starter,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskChangedFile {
     pub path: String,
     pub old_path: Option<String>,
@@ -205,7 +222,9 @@ pub struct TaskChangedFile {
     pub untracked: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskChangesSnapshot {
     pub recovery_directory: Option<String>,
     pub issue_identifier: String,
@@ -217,18 +236,23 @@ pub struct TaskChangesSnapshot {
     pub scratch_truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
+    pub head_commit: Option<String>,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFileState {
     Text,
@@ -238,7 +262,9 @@ pub enum TaskFileState {
     Missing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TaskFileSnapshot {
     pub recoveries: Vec<TaskFileRecovery>,
     pub issue_identifier: String,
@@ -272,6 +298,7 @@ impl<'a> From<&'a TaskCheckout> for TaskWorkspace<'a> {
 struct TaskComparison<'a> {
     checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
+    head_commit: Option<&'a str>,
 }
 
 impl<'a> TaskComparison<'a> {
@@ -283,24 +310,13 @@ impl<'a> TaskComparison<'a> {
                 worktree: task.worktree()?,
             },
             base_commit: &task.base_commit,
+            head_commit: None,
         })
     }
 }
 
-fn active_pr(task: &Task) -> OpsResult<TaskPr> {
-    let task_id = task.id.clone();
-    block_on_task(async move {
-        task_store()
-            .await?
-            .active_task_pr(&task_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error("Task has no active PR"))
-    })
-}
-
 // File access reads recorded checkout location without reconciling PR or execution state.
-fn file_store() -> OpsResult<SqliteStore> {
+pub(crate) fn file_store() -> OpsResult<SqliteStore> {
     #[cfg(test)]
     let test_path = super::linear::LINEAR_TEST_CONTEXT
         .try_with(|context| context.path.clone())
@@ -321,7 +337,7 @@ fn file_store() -> OpsResult<SqliteStore> {
         .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
 }
 
-fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
+pub(crate) fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
     let task_id = store
         .resolve_task_id(issue, None)
         .map_err(task_error)?
@@ -626,7 +642,7 @@ impl TaskRunSelection {
     }
 }
 
-/// The graph a Task takes up when it names none: your `lf set graph`, then its
+/// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
     let repo = repository_for_task(store, task)?;
@@ -719,8 +735,12 @@ pub(crate) fn select_task_run(
                 graph.describe_steps()
             ))
         })?),
-        // A run that stopped starts again from where it began.
-        (None, Some((cursor, _))) => graph.place_of(cursor),
+        // A run that stopped starts again from where it began, or from the
+        // step it was waiting at on a usage limit: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
+            .map_err(task_error)?
+            .and_then(|wait| graph.find(&wait.step))
+            .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {
             return Err(task_error(format!(
@@ -1102,6 +1122,7 @@ async fn restore_task_checkout(
         args.extend([worktree.display().to_string(), task.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    crate::git::mark_lf_created(worktree, &|_| {});
     finish_task_checkout(store, task).await
 }
 
@@ -1770,14 +1791,17 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskStatus {
     pub sync: Option<crate::store::planning_sync::PlanningSyncStatus>,
     pub task: Option<Task>,
     pub project: Option<crate::work::project::Project>,
     pub observed_at: Option<i64>,
+    #[serde(rename = "plan_error")]
     pub planning_error: Option<String>,
+    #[serde(rename = "plan_stale")]
     pub planning_stale: bool,
+    #[serde(rename = "plan_state")]
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<crate::durable::TaskOwnership>,
@@ -1877,7 +1901,9 @@ pub async fn read_task_status(
         .map_err(task_error)?
         .flatten()
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    registered_task_status(store, task).await
+    let mut result = registered_task_status(store, task).await?;
+    result.planning_stale = planning_stale(&result);
+    Ok(result)
 }
 
 async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
@@ -1958,6 +1984,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let _retirement = retirement::lock(&task.id)?;
         let task = store
             .sqlite
             .reopen_task(&task.id, note)
@@ -1968,7 +1995,36 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsResult<String> {
+/// Start the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
+pub fn start_conversation_beside(task: &Task) {
+    let started = block_on_task(async {
+        let store = task_store().await?;
+        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        Ok(())
+    });
+    if let Err(error) = started {
+        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    }
+}
+
+/// One Task's tracker sync beside a conversation that just started: pending
+/// writes out, then comments made elsewhere in. Nothing else in the repository.
+pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
+    let outbound = task_sync(issue, false);
+    let inbound = block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        super::linear_observe::refresh_task_comments(&store, &task).await
+    });
+    outbound.and(inbound)
+}
+
+pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -1984,23 +2040,14 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             ));
         };
         if task.linear_id.is_none() {
-            if let Some(project) = &task.project_id {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Project(project.clone()),
-                )
-                .await?;
-            }
-            if retry_creation {
-                super::planning_export::retry_task_export(&store, repo, &task.id).await?;
-            } else {
-                super::planning_export::sync_export(
-                    &store,
-                    repo,
-                    &crate::durable::WorkRef::Task(task.id.clone()),
-                )
-                .await?;
+            let project = task
+                .project_id
+                .clone()
+                .map(crate::durable::WorkRef::Project);
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            // The person's explicit look: ahead of the pass window if need be.
+            for work in project.iter().chain([&work]) {
+                super::planning_export::export(&store, repo, work, true).await?;
             }
         }
         let task = store
@@ -2108,7 +2155,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         let repo = repository_for_task(store, task)?;
         super::planning_sync::sync_after_save(store, &repo.to_string_lossy()).await;
         // Cleanup retains live work and unpublished artifacts independently of status.
-        cleanup_completed_task(store, task).await?;
+        retirement::schedule(store, task).await?;
         Ok(())
     }
     .await;
@@ -2272,7 +2319,7 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct TaskEdit {
     pub id: String,
     pub sync: crate::store::planning_sync::PlanningSyncStatus,
@@ -2515,8 +2562,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?
         .pop()
         .filter(|graph| {
-            crate::journal::process_evidence(&store.sqlite, graph.id())
-                != ProcessIdentityEvidence::Dead
+            crate::journal::lf_evidence(&store.sqlite, graph.id()) != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();
@@ -2534,7 +2580,9 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
-            TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),
+            TaskExecutionState::Running
+            | TaskExecutionState::Stalled
+            | TaskExecutionState::Waiting => Some(format!("at {step}")),
             TaskExecutionState::Starting => Some(format!("between steps after {step}")),
             TaskExecutionState::Unknown => Some(format!("at {step} (liveness unknown)")),
             TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
@@ -2550,8 +2598,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
     let open = crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?;
     Ok(open.first().map(|(process, evidence)| {
         let command = process
-            .command
-            .as_deref()
+            .command()
             .and_then(|command| serde_json::from_str::<Vec<String>>(command).ok())
             .map(|argv| format!(" running `{}`", argv.join(" ")))
             .unwrap_or_default();
@@ -2561,36 +2608,46 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         };
         format!(
             "interrupt recorded for Process {}{command}{unknown}; a Task run or a `--task` Session stops on it",
-            process.id
+            process.id()
         )
     }))
 }
 
-pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
-    let started = Instant::now();
-    loop {
-        let (task, status) = block_on_task(async {
-            let store = task_store().await?;
-            let task = store
-                .get_task_by_issue(issue)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-            let status = task_work_status(&store, &task).await?;
-            Ok((task, status))
-        })?;
-        let reached = match until {
-            TaskWaitUntil::Open => {
-                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
-                    || active_pr(&task).is_ok_and(|pr| pr.phase() == PrPhase::Open)
-            }
-            TaskWaitUntil::Terminal => matches!(status, WorkStatus::Done | WorkStatus::Abandoned),
-        };
-        if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
-            return Ok(task);
+/// [`task_wait_reading`] in the Machine's store.
+pub fn task_wait_now(issue: &str, until: TaskWaitUntil) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        task_wait_reading(&store, issue, until).await
+    })
+}
+
+/// The Task `issue` names as it stands in `store`, and whether it has reached
+/// `until`; `None` when no Task has that name.
+pub async fn task_wait_reading(
+    store: &SharedStore,
+    issue: &str,
+    until: TaskWaitUntil,
+) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+        return Ok(None);
+    };
+    let finished = matches!(
+        task_work_status(store, &task).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    );
+    let reached = match until {
+        TaskWaitUntil::Open => {
+            finished
+                || store
+                    .active_task_pr(&task.id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|pr| pr.phase() == PrPhase::Open)
         }
-        std::thread::sleep(Duration::from_secs(1));
-    }
+        TaskWaitUntil::Terminal => finished,
+    };
+    Ok(Some((read_task_snapshot(store, task).await?, reached)))
 }
 
 /// Read the saved Task thread or save a comment without allocating execution state.

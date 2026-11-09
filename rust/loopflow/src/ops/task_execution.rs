@@ -8,29 +8,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
 use crate::durable::TaskId;
-use crate::journal::{process_evidence, ProcessIdentityEvidence};
+use crate::journal::ProcessIdentityEvidence;
 use crate::ops::graph_process::GraphProcess;
-use crate::process::LfProcess;
+use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
-use crate::store::sqlite::{entry_of, GraphExecutionFacts, SqliteStore};
+use crate::store::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
 use crate::store::{SharedStore, StoreResult};
 use crate::work::task::Task;
 
 use super::error::{OpsError, OpsResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskExecutionState {
     Idle,
     Starting,
     Running,
     Stalled,
+    /// Its step is waiting out a usage limit until an account frees up.
+    Waiting,
     Blocked,
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskExecutionSnapshot {
     pub state: TaskExecutionState,
     pub reason: String,
@@ -76,13 +78,11 @@ pub(crate) async fn execution_of_latest_graph(
     let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
     let evidence = |process: &crate::process::LfProcess| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::recorded_process_evidence(
+        None => crate::journal::lf_process_evidence(
             process,
             &match facts.receipts.get(&process.id) {
-                Some(path) if process.kind != crate::process::ProcessKind::Agent => {
-                    crate::journal::read_process_receipt(path)
-                }
-                _ => Ok(None),
+                Some(path) => crate::journal::read_process_receipt(path),
+                None => Ok(None),
             },
             crate::journal::process_identity_evidence,
         ),
@@ -96,6 +96,16 @@ pub(crate) async fn execution_of_latest_graph(
         step.map_or(ProcessIdentityEvidence::Dead, evidence),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
+    if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
+        apply_limit_recovery(&mut snapshot, recovery, &task.identifier, || {
+            crate::ops::task::limit_recovery::restarts_by_itself(sqlite, &task.id).unwrap_or_else(
+                |error| {
+                    tracing::warn!("limit recovery for {}: {error}", task.identifier);
+                    false
+                },
+            )
+        });
+    }
     if snapshot.state == TaskExecutionState::Running {
         if let (Some((session, _, captured)), Some(step)) = (input, step) {
             match activity::read(sqlite, session, step.started_at) {
@@ -112,6 +122,43 @@ pub(crate) async fn execution_of_latest_graph(
         }
     }
     Ok((snapshot, Some(graph.detail(entry))))
+}
+
+/// A step recovering from a limit says so. One that died waiting is where the
+/// next `lf task run` starts; status promises that happens by itself only when
+/// the recovery sweep would do it (`restarts_by_itself`).
+fn apply_limit_recovery(
+    snapshot: &mut TaskExecutionSnapshot,
+    recovery: &AgentLimitRecovery,
+    issue: &str,
+    restarts_by_itself: impl FnOnce() -> bool,
+) {
+    let label = snapshot.step.as_deref().unwrap_or("Step");
+    let provider = &recovery.provider;
+    let reason = &recovery.reason;
+    match (snapshot.state, recovery.retry_at) {
+        (TaskExecutionState::Running, Some(retry_at)) => {
+            snapshot.state = TaskExecutionState::Waiting;
+            snapshot.reason = format!(
+                "{label} is waiting for {provider} capacity until {}: {reason}. It goes on by itself.",
+                crate::lf::output::format_time(retry_at)
+            );
+        }
+        (TaskExecutionState::Running, None) => {
+            snapshot.reason =
+                format!("{label} went on under another {provider} account after: {reason}");
+        }
+        (TaskExecutionState::Blocked, Some(retry_at)) => {
+            snapshot.state = TaskExecutionState::Waiting;
+            let after = crate::lf::output::format_time(retry_at);
+            snapshot.reason = if restarts_by_itself() {
+                format!("{label} ended while waiting for {provider} capacity; the run starts again at it by itself after {after}")
+            } else {
+                format!("{label} ended while waiting for {provider} capacity until {after}; `lf task run {issue}` starts the run again at it")
+            };
+        }
+        _ => {}
+    }
 }
 
 /// A Graph runs while a process of its own does; with both gone, how its
@@ -187,15 +234,13 @@ fn error(error: impl std::fmt::Display) -> OpsError {
 /// so it never does; that exempts waiting and grants no authority.
 pub(crate) fn execution_blockers(
     store: &SqliteStore,
-    processes: &[LfProcess],
+    processes: &[ProcessEntry],
 ) -> OpsResult<Vec<String>> {
     Ok(unresolved_processes(store, processes)?
         .into_iter()
         .map(|(process, _)| {
-            format!(
-                "Process {} has live or unresolved execution; inspect `lf history show {}`",
-                process.id, process.id
-            )
+            let id = process.id();
+            format!("Process {id} has live or unresolved execution; inspect `lf history show {id}`")
         })
         .collect())
 }
@@ -204,20 +249,30 @@ pub(crate) fn execution_blockers(
 /// with their liveness evidence.
 pub(crate) fn unresolved_processes<'a>(
     store: &SqliteStore,
-    processes: &'a [LfProcess],
-) -> OpsResult<Vec<(&'a LfProcess, ProcessIdentityEvidence)>> {
+    processes: &'a [ProcessEntry],
+) -> OpsResult<Vec<(&'a ProcessEntry, ProcessIdentityEvidence)>> {
     let mut lineage = HashSet::new();
     let mut next = crate::journal::current_lf_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
-            .process(&id)
+            .lf_process(&id)
             .map_err(error)?
             .and_then(|process| process.parent_lf_process_id);
     }
     Ok(processes
         .iter()
-        .filter(|process| process.completed_at.is_none() && !lineage.contains(&process.id))
-        .map(|process| (process, process_evidence(store, &process.id)))
+        .filter(|process| {
+            process.completed_at().is_none()
+                && !process
+                    .as_lf()
+                    .is_some_and(|process| lineage.contains(&process.id))
+        })
+        .map(|process| {
+            (
+                process,
+                crate::journal::process_entry_evidence(store, process),
+            )
+        })
         .filter(|(_, evidence)| *evidence != ProcessIdentityEvidence::Dead)
         .collect())
 }
@@ -233,10 +288,73 @@ pub(crate) fn task_execution_blockers(
 
 #[cfg(test)]
 mod tests {
-    use super::{project_execution, TaskExecutionState};
+    use super::{
+        apply_limit_recovery, project_execution, TaskExecutionSnapshot, TaskExecutionState,
+    };
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
+    use crate::store::sqlite::AgentLimitRecovery;
     use crate::store::sqlite::SqliteStore;
+
+    fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {
+        TaskExecutionSnapshot {
+            state,
+            reason: "implement: provider_rate_limited".into(),
+            step: Some("implement".into()),
+            captured: None,
+        }
+    }
+
+    fn recovery(retry_at: Option<i64>) -> AgentLimitRecovery {
+        AgentLimitRecovery {
+            provider: "claude".into(),
+            reason: "rejected: five_hour".into(),
+            retry_at,
+            agent: None,
+        }
+    }
+
+    #[test]
+    fn status_tells_waiting_retrying_and_a_plain_failure_apart() {
+        let mut waiting = snapshot(TaskExecutionState::Running);
+        apply_limit_recovery(
+            &mut waiting,
+            &recovery(Some(1_900_000_000)),
+            "LOO-1",
+            || true,
+        );
+        assert_eq!(waiting.state, TaskExecutionState::Waiting);
+        assert!(waiting.reason.contains("waiting for claude capacity until"));
+
+        let mut retrying = snapshot(TaskExecutionState::Running);
+        apply_limit_recovery(&mut retrying, &recovery(None), "LOO-1", || true);
+        assert_eq!(retrying.state, TaskExecutionState::Running);
+        assert!(retrying.reason.contains("another claude account"));
+
+        // A step that moved accounts and then failed for its own reasons failed.
+        let mut failed = snapshot(TaskExecutionState::Blocked);
+        apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
+        assert_eq!(failed.state, TaskExecutionState::Blocked);
+
+        let mut ended = snapshot(TaskExecutionState::Blocked);
+        apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)), "LOO-1", || true);
+        assert_eq!(ended.state, TaskExecutionState::Waiting);
+        assert!(ended.reason.contains("starts again at it by itself"));
+
+        // An unassigned Task's run waits for someone to start it.
+        let mut unassigned = snapshot(TaskExecutionState::Blocked);
+        apply_limit_recovery(
+            &mut unassigned,
+            &recovery(Some(1_900_000_000)),
+            "LOO-1",
+            || false,
+        );
+        assert_eq!(unassigned.state, TaskExecutionState::Waiting);
+        assert!(!unassigned.reason.contains("by itself"));
+        assert!(unassigned
+            .reason
+            .contains("`lf task run LOO-1` starts the run again at it"));
+    }
 
     #[test]
     fn a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step() {

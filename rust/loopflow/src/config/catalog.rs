@@ -12,7 +12,7 @@ use super::{
     PlanningConfig, ReleaseConfig, SessionConfig, SummaryConfig, UserConfig,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Applicability {
     Launch,
@@ -22,7 +22,7 @@ pub enum Applicability {
     PersonalScoped,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Combination {
     Replace,
@@ -30,7 +30,7 @@ pub enum Combination {
     Merge,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Portability {
     Portable,
@@ -38,7 +38,7 @@ pub enum Portability {
     ReferencedAssets,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Lifecycle {
     NextRead,
@@ -48,7 +48,7 @@ pub enum Lifecycle {
 }
 
 /// Display order and feature ownership, independent of settings precedence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, schemars::JsonSchema)]
 pub enum Category {
     #[serde(rename = "Agents and context")]
     Agents,
@@ -74,11 +74,13 @@ impl Category {
     }
 }
 
-#[derive(Debug, Serialize)]
+/// One typed setting. `key` is its typed path, the layout `Config` and the
+/// files resolve; the wire and `lf config catalog` show its canonical key on
+/// its primitive and the shorthands `config::keys` accepts for it.
+#[derive(Debug)]
 pub struct Definition {
     pub key: &'static str,
     pub category: Category,
-    #[serde(serialize_with = "serialize_schema")]
     pub schema: fn() -> schemars::Schema,
     pub default: &'static str,
     pub applicability: Applicability,
@@ -88,7 +90,57 @@ pub struct Definition {
     pub description: &'static str,
 }
 
+/// What one [`Definition`] prints: its serialization and its schema.
+#[derive(Serialize, schemars::JsonSchema)]
+struct DefinitionRow {
+    key: String,
+    shorthands: Vec<String>,
+    category: Category,
+    schema: schemars::Schema,
+    default: &'static str,
+    applicability: Applicability,
+    combination: Combination,
+    portability: Portability,
+    lifecycle: Lifecycle,
+    description: &'static str,
+}
+
+impl Serialize for Definition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        DefinitionRow {
+            key: self.canonical_key(),
+            shorthands: self.shorthands(),
+            category: self.category,
+            schema: (self.schema)(),
+            default: self.default,
+            applicability: self.applicability,
+            combination: self.combination,
+            portability: self.portability,
+            lifecycle: self.lifecycle,
+            description: self.description,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl schemars::JsonSchema for Definition {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Definition".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        DefinitionRow::json_schema(generator)
+    }
+}
+
 impl Definition {
+    pub fn canonical_key(&self) -> String {
+        super::keys::canonical_key(self.key)
+    }
+
+    pub fn shorthands(&self) -> Vec<String> {
+        super::keys::shorthands(self.key)
+    }
+
     pub fn applies(&self, layer: ConfigSource, scope: SettingScope, targeted: bool) -> bool {
         (!targeted || self.applicability == Applicability::Launch)
             && match self.applicability {
@@ -105,13 +157,6 @@ impl Definition {
         let schema = (self.schema)().to_value();
         schema_path(&schema, &schema, &path[self.key.split('.').count()..])
     }
-}
-
-fn serialize_schema<S: serde::Serializer>(
-    schema: &fn() -> schemars::Schema,
-    serializer: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    schema().serialize(serializer)
 }
 
 fn schema_path(root: &serde_json::Value, node: &serde_json::Value, path: &[&str]) -> bool {
@@ -193,11 +238,11 @@ definitions! {
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] when no applicable agent choice exists; a comma list names the providers a step falls through to";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
-    isolate: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Run in the selected account home";
+    isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
     summaries: Vec<SummaryConfig> = "[]", Launch, AppendReset, ReferencedAssets, Inactive, Agents, "Parsed summary requests; no runtime consumer";
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]
@@ -214,6 +259,7 @@ definitions! {
     accounts: BTreeMap<String, BTreeMap<String, placement::AccountDeclaration>> = "{}", Personal, Merge, Portable, NextRead, Accounts, "Declared account identity, routing eligibility and subscription dates; credentials and observations stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
+    task_layout: Option<crate::work::selection::TaskLayoutTemplate> = "null", General, Replace, Portable, NextLaunch, Desktop, "Tools and splits for Task workspaces without a saved Desktop layout; the winning scope replaces the whole layout";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
     planning: Option<PlanningConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Tagged planning transport configuration";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
@@ -226,7 +272,9 @@ definitions! {
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 
+/// The definition owning `key`, in any spelling `config::keys` accepts.
 pub fn definition(key: &str) -> Option<&'static Definition> {
+    let key = &super::keys::typed_key(key);
     DEFINITIONS
         .iter()
         .chain(CONTEXT_DEFINITIONS)

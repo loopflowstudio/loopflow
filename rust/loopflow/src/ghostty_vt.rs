@@ -285,6 +285,17 @@ impl Terminal {
         &self.effects.status
     }
 
+    /// The current OSC 0/2 title, borrowed until the next terminal mutation.
+    pub fn title(&self) -> Option<&str> {
+        let title = self.data::<ffi::String>(ffi::DATA_TITLE, "title").ok()?;
+        if title.len == 0 {
+            return None;
+        }
+        // SAFETY: Ghostty owns these bytes until its next mutation, which needs
+        // exclusive access to self. The returned borrow cannot outlive self.
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(title.ptr, title.len) }).ok()
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
         // SAFETY: a live handle; pixel sizes are unused without images.
         check("terminal_resize", unsafe {
@@ -651,6 +662,7 @@ mod ffi {
     pub const OPT_PROGRAM_STATUS: i32 = 46;
 
     pub const DATA_COLS: i32 = 1;
+    pub const DATA_TITLE: i32 = 12;
     pub const DATA_ROWS: i32 = 2;
     #[cfg(test)]
     pub const DATA_CURSOR_X: i32 = 3;
@@ -678,7 +690,7 @@ mod ffi {
     pub type ProgramStatusFn = unsafe extern "C" fn(Terminal, *mut c_void, *const ProgramStatus);
     pub type SemanticPromptFn = unsafe extern "C" fn(Terminal, *mut c_void, *const SemanticPrompt);
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     #[repr(C)]
     pub struct String {
         pub ptr: *const u8,

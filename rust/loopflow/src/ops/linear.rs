@@ -28,6 +28,7 @@ use crate::store::{
 use crate::work::task::Task;
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use serde::{Deserialize, Serialize};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -40,7 +41,8 @@ pub struct LinearInitOptions {
     pub team_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearInitResult {
     pub wave: String,
     pub initiative_id: String,
@@ -87,7 +89,8 @@ pub struct LinearReteamOptions {
 
 /// One issue that moves into the repository Team. `new_identifier` is filled only
 /// after an applied move (Linear assigns the number then).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamMove {
     pub wave: String,
     pub project_id: String,
@@ -100,7 +103,8 @@ pub struct LinearReteamMove {
 /// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamProjectMove {
     pub wave: String,
     pub id: String,
@@ -108,8 +112,10 @@ pub struct LinearReteamProjectMove {
     pub from_teams: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LinearReteamResult {
+    #[serde(rename = "repo")]
     pub repository: String,
     pub waves: Vec<String>,
     pub team_id: String,
@@ -167,8 +173,8 @@ pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` before creating or mutating work."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -191,10 +197,16 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository Linear identity from Git origin: {error}. \
-             Configure an origin before running `lf wave connect`."
+             Configure an origin before running `lf wave plan connect`."
         ))
     })
 }
+
+/// Team claims this process has validated, by (Team, checkout). A claim changes
+/// only through `lf reteam`, so one `ListTeams` per process suffices; a
+/// long-lived process learns a rebinding on restart.
+static VALIDATED_TEAM_CLAIMS: std::sync::Mutex<BTreeSet<(String, std::path::PathBuf)>> =
+    std::sync::Mutex::new(BTreeSet::new());
 
 async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> {
     let team_id = repository_team_id(repo)?;
@@ -202,10 +214,21 @@ async fn resolve_repository_context(repo: &Path) -> OpsResult<LinearRepository> 
     let client = build_client(Some(team_id.clone()))
         .await?
         .for_repository(repo);
-    client
-        .validate_team_claim(&team_id, repo_id.as_str())
-        .await
-        .map_err(linear_error)?;
+    let claim = (team_id.clone(), repo.to_path_buf());
+    let validated = VALIDATED_TEAM_CLAIMS
+        .lock()
+        .expect("team claim cache poisoned")
+        .contains(&claim);
+    if !validated {
+        client
+            .validate_team_claim(&team_id, repo_id.as_str())
+            .await
+            .map_err(linear_error)?;
+        VALIDATED_TEAM_CLAIMS
+            .lock()
+            .expect("team claim cache poisoned")
+            .insert(claim);
+    }
     Ok(LinearRepository {
         client,
         repo_id,
@@ -231,7 +254,7 @@ pub(crate) async fn resolve_context(
     let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
             ".lf/wave/{wave}/GOAL.md has no `linear.initiative`. \
-             Run `lf wave connect {wave}` to connect its Linear Initiative."
+             Run `lf wave plan connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok((repository, initiative))
@@ -451,6 +474,8 @@ mod oauth_tests;
 #[cfg(test)]
 mod task_comments_tests;
 
+mod adoption;
+
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
@@ -642,7 +667,7 @@ async fn connect_async(
                 ".lf/config.yaml".to_string(),
                 super::wave_lifecycle::authored_path(&wave),
             ],
-            &format!("lf wave connect: {wave} to Linear"),
+            &format!("lf wave plan connect: {wave} to Linear"),
         )
     } else {
         super::wave_lifecycle::AuthoredFiles::Unchanged
@@ -1059,8 +1084,8 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `planning.team`. \
-             Run `lf wave connect <wave> --team-key <KEY>` to establish the migration target."
+            ".lf/config.yaml has no `repo.plan.team`. \
+             Run `lf wave plan connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -1522,7 +1547,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `planning.team`; run `lf wave connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1731,8 +1756,7 @@ async fn refresh_async(
                 team_id: team_id.clone(),
             };
             let store = planning_store().await?;
-            super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true)
-                .await?;
+            adoption::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true).await?;
             refresh_inventory(repo, wave, &ctx, &initiative).await?;
         }
     }
@@ -1805,47 +1829,46 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
+/// Declare `repo.plan` as Linear with `team_id`, at its canonical
+/// spelling; other keys keep their text and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
-    let mut root = match std::fs::read_to_string(&path) {
-        Ok(content) if !content.trim().is_empty() => {
-            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content).map_err(|error| {
-                OpsError::Message(format!(
-                    "invalid repository config {}: {error}",
-                    path.display()
-                ))
-            })?
-        }
-        Ok(_) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
-        }
-        Err(error) => return Err(error.into()),
+    let planning = serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+        team: Some(team_id.to_string()),
+    })
+    .map_err(|error| OpsError::Message(error.to_string()))?;
+    let config_error =
+        |error: anyhow::Error| OpsError::Message(format!("{}: {error:#}", path.display()));
+    let original = crate::config::files::read_text(&path).map_err(config_error)?;
+    let mut document: serde_yaml_ng::Value = if original.trim().is_empty() {
+        serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
+    } else {
+        serde_yaml_ng::from_str(&original).map_err(|error| config_error(error.into()))?
     };
-    let previous = root.clone();
-    let root_map = root.as_mapping_mut().ok_or_else(|| {
-        OpsError::Message(format!(
+    if !document.is_mapping() {
+        return Err(OpsError::Message(format!(
             "repository config {} must be a YAML mapping",
             path.display()
-        ))
-    })?;
-    root_map.insert(
-        "planning".into(),
-        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
-            team: Some(team_id.to_string()),
-        })
-        .map_err(|error| OpsError::Message(error.to_string()))?,
+        )));
+    }
+    let previous = document.clone();
+    let written = crate::config::keys::gather(
+        &mut document,
+        &["planning"],
+        crate::config::keys::Root::General,
     );
-    if root == previous {
+    crate::config::settings::insert(
+        &mut document,
+        &written.iter().map(String::as_str).collect::<Vec<_>>(),
+        planning,
+    );
+    if document == previous {
         return Ok(false);
     }
     std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
-    std::fs::write(
-        &path,
-        serde_yaml_ng::to_string(&root).map_err(|error| {
-            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
-        })?,
-    )?;
+    // The committed file takes no lock file beside it; comments and order stay.
+    let text = crate::config::files::edited_text(&original, &document).map_err(config_error)?;
+    crate::config::files::atomic_write(&path, &text).map_err(config_error)?;
     Ok(true)
 }
 
@@ -1877,7 +1900,7 @@ fn matching_initiative_id(
         [] => Ok(None),
         [initiative] => Ok(Some(initiative.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave plan connect`",
             many.iter()
                 .map(|initiative| initiative.id.as_str())
                 .collect::<Vec<_>>()
@@ -1903,17 +1926,6 @@ fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsRes
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) async fn checked_projects(
-    repo: &Path,
-    ctx: &LinearRepository,
-    initiative: &str,
-    wave: &str,
-) -> OpsResult<Vec<LinearProject>> {
-    let store = planning_store().await?;
-    checked_projects_with_store(repo, ctx, initiative, wave, &store).await
 }
 
 pub(super) async fn checked_projects_with_store(
@@ -1959,7 +1971,7 @@ pub(super) async fn checked_projects_with_store(
     }
 
     for adopted in
-        super::chapter::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
+        adoption::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
     {
         if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
             *project = adopted;
@@ -2357,7 +2369,8 @@ mod tests {
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
                     projects_response(json!([])),
-                    json_response(StatusCode::OK, team.clone()),
+                    // This process already validated the claim; the second
+                    // connect skips that ListTeams.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team),
                     projects_response(json!([])),
@@ -2482,7 +2495,7 @@ mod tests {
                         assert!(git(&["ls-files", ".lf/wave/ops"], &main).contains("GOAL.md"));
                         assert_eq!(git(&["status", "--porcelain"], &main), "");
                         let log = git(&["log", "--format=%s", "-3"], &main);
-                        assert!(log.contains("lf wave connect: ops to Linear"), "{log}");
+                        assert!(log.contains("lf wave plan connect: ops to Linear"), "{log}");
                         assert!(log.contains("lf wave add: ops"), "{log}");
                         assert_eq!(
                             read_initiative(&main, "ops").as_deref(),

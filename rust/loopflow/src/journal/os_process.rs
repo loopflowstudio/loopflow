@@ -22,6 +22,29 @@ pub(crate) struct OsProcess {
 }
 
 impl OsProcess {
+    /// Argument boundaries from the kernel, excluding the process environment.
+    pub(crate) fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::arguments(pid)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            match std::fs::read(format!("/proc/{pid}/cmdline")) {
+                Ok(bytes) => Ok(Some(
+                    bytes
+                        .strip_suffix(&[0])
+                        .unwrap_or(&bytes)
+                        .split(|byte| *byte == 0)
+                        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+                        .collect(),
+                )),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
         macos::read(pid)
@@ -65,6 +88,29 @@ impl OsProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn sample(_now: i64) -> io::Result<Vec<Self>> {
         macos::sample()
+    }
+
+    /// Only this owned OS session, without reading unrelated processes' argv.
+    pub(crate) fn session(session: u32) -> io::Result<Vec<Self>> {
+        #[cfg(target_os = "macos")]
+        let pids = macos::pids()?;
+        #[cfg(not(target_os = "macos"))]
+        let pids = std::fs::read_dir("/proc")?
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+            .collect::<Vec<_>>();
+        let mut processes = Vec::new();
+        for pid in pids {
+            // SAFETY: getsid reads the kernel's session membership for this PID.
+            if unsafe { libc::getsid(pid as i32) } != session as i32 {
+                continue;
+            }
+            if let Some(process) = Self::read(pid)? {
+                if !process.has_exited() {
+                    processes.push(process);
+                }
+            }
+        }
+        Ok(processes)
     }
 
     /// The executable file `pid` runs, resolved by the kernel rather than the
@@ -210,6 +256,14 @@ mod tests {
 
     use super::{parse, OsProcess};
     use crate::journal::ProcessIdentityEvidence;
+
+    #[test]
+    fn kernel_arguments_match_the_running_program() {
+        assert_eq!(
+            OsProcess::arguments(std::process::id()).unwrap(),
+            Some(std::env::args().collect())
+        );
+    }
 
     #[test]
     fn executable_is_the_running_file_not_its_launch_path() {

@@ -24,12 +24,8 @@ struct WorkspacePanesView: View {
             } else {
                 PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
                                description: "Your panes are retained. Show a pane to continue.") {
-                    if workspace.key.kind == .task,
-                       !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
-                        Button("Open conversation") {
-                            Task { await model.openTaskConversation(workspace.key.id) }
-                        }
-                        .accessibilityIdentifier("task-open-conversation")
+                    if !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
+                        ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
                     }
                     Button("Show pane") {
                         let pane = store.focusedPane
@@ -55,6 +51,61 @@ struct WorkspacePanesView: View {
 
     private func endWorkspaceAction() {
         Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+    }
+}
+
+/// The one action of a Work whose conversation is not open here: Rust's explicit
+/// Start after a refused reveal, Retry after a failure, else Open. The model
+/// routes it by the Work's kind.
+struct ConversationOpenButton: View {
+    let workspace: SessionsWorkspace
+    let model: WorkModel
+    let sessions: SessionsStore
+
+    var body: some View {
+        let failed = workspace.conversationError != nil
+        Button(workspace.conversationStart?.label ?? (failed ? "Retry" : "Open conversation")) {
+            Task { await model.openConversation(in: workspace, store: sessions) }
+        }
+        .buttonStyle(.bordered)
+        .help(workspace.conversationStart?.help ?? (failed ? "Try opening this conversation again" : "Show the recorded conversation"))
+        .accessibilityIdentifier("open-conversation")
+    }
+}
+
+/// The Session slot before any conversation is open here, in a pane or a
+/// Dashboard tile. Every Work opens its own; this says why it has not and
+/// offers the one next action. An unstarted Task has no checkout and so no
+/// conversation: it offers Start.
+struct ConversationPlaceholder: View {
+    @Environment(\.theme) private var theme
+    let workspace: SessionsWorkspace
+    let model: WorkModel
+    let sessions: SessionsStore
+
+    var body: some View {
+        if model.conversationIsOpening(workspace) {
+            ProgressView("Opening conversation…")
+                .foregroundStyle(theme.palette.text)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
+            TaskStartOffer(model: model, task: task)
+        } else {
+            let failed = workspace.conversationError != nil
+            PaneEmptyState(title: failed ? "Conversation failed to open" : "Conversation not open",
+                           systemImage: failed ? "exclamationmark.triangle" : "terminal",
+                           description: note) {
+                ConversationOpenButton(workspace: workspace, model: model, sessions: sessions)
+            }
+        }
+    }
+
+    private var note: String {
+        if let error = workspace.conversationError { return error }
+        if let start = workspace.conversationStart { return start.help }
+        if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
+        if model.showsSavedWork { return WorkCache.savedReason }
+        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
     }
 }
 
@@ -179,6 +230,8 @@ enum PaneGeometry {
     static let windowInset: CGFloat = 10
     static let spacing: CGFloat = 6
     static let cornerRadius = CornerRadius.md
+    /// Pane chrome and content keep clear of the corner arc on every edge.
+    static let inset = cornerRadius
     // Nested curves share a center at the workspace's lower corners.
     static let workspaceCornerRadius = cornerRadius + spacing
     /// Square across the titlebar; rounded where the workspace nests in the window.
@@ -368,7 +421,7 @@ struct SessionPaneView: View {
             }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
-                .padding(pane.terminal == nil ? 0 : PaneGeometry.cornerRadius)
+                .padding(pane.terminal == nil ? 0 : PaneGeometry.inset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -500,8 +553,7 @@ struct SessionPaneView: View {
                 .accessibilityIdentifier("pane-actions")
             }
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 4)
+        .padding(.horizontal, PaneGeometry.inset)
         .frame(height: 28)
         .contentShape(Rectangle())
         .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { [hover] inside in
@@ -539,6 +591,12 @@ struct SessionPaneView: View {
                         files.page = page
                     } catch { shellError = error.localizedDescription }
                 }
+            }
+            Button("Task & workflow", systemImage: "list.bullet") {
+                workspace.showBrowser(.task, from: pane)
+            }
+            Button("Changes", systemImage: "plus.forwardslash.minus") {
+                workspace.showBrowser(.changes(comparison: .workingTree(base: "parent")), from: pane)
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
                 workspace.showBrowser(.graphLog, from: pane)
@@ -692,16 +750,25 @@ struct SessionPaneView: View {
                     _sessionPlaceholder(item)
                 }
             } else {
-                emptyWorkspace
+                ConversationPlaceholder(workspace: workspace, model: model, sessions: sessions)
             }
         case .shell:
             VStack(spacing: 0) {
-                if !showsStrip { shellTabs.padding(4) }
+                if !showsStrip { shellTabs.padding(PaneGeometry.inset) }
                 if let tab = pane.content.selectedShell,
-                          let location = tab.location, let terminal = tab.terminal {
-                    if let command = tab.command {
+                          tab.location != nil, let terminal = tab.terminal {
+                    if workspace.disconnectedShells.contains(tab.id) {
+                        VStack {
+                            if let screen = workspace.shellScreens[tab.id] {
+                                ScrollView { Text(screen).font(.system(.body, design: .monospaced)).textSelection(.enabled) }
+                            }
+                            Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
+                            Button("Reconnect") { workspace.reconnectShell(tab) }
+                            Button("New Shell") { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                        }
+                    } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
-                            workingDirectory: location.machineId == workspace.localMachineId ? location.worktree : NSHomeDirectory(),
+                            workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
                             surfacePool: sessions.surfaces,
@@ -718,7 +785,7 @@ struct SessionPaneView: View {
             }
         case .browser(let taskId, _, _, let location, let execution):
             VStack(spacing: 0) {
-                if !showsStrip { browserTabs.padding(4) }
+                if !showsStrip { browserTabs.padding(PaneGeometry.inset) }
                 switch pane.content.selectedBrowserTab {
                 case .graphLog:
                     GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
@@ -726,16 +793,42 @@ struct SessionPaneView: View {
                         .id(pane.incarnation)
                         .background(PaneFocusTarget(isFocused: isFocused))
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
-                case .files:
+                case .files, .changes:
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
                         TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
                             checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                            .task(id: pane.content.selectedBrowserTab?.id) {
+                                if case .changes(let comparison) = pane.content.selectedBrowserTab {
+                                    files.comparison = comparison
+                                    files.page = .files; files.mode = .diff; files.navigator = .pinned
+                                    await files.refresh()
+                                    await files.loadDiff()
+                                } else if files.comparison != .workingTree(base: "parent") {
+                                    files.comparison = .workingTree(base: "parent")
+                                    await files.refresh()
+                                    await files.loadDiff()
+                                }
+                            }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
                     case .failure(let error):
                         Text(error.localizedDescription).textSelection(.enabled)
                     }
+                case .task:
+                    if let task = model.task(id: taskId)?.task {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(task.task.name).font(.headline)
+                                TaskPlanningFactsView(task: task)
+                                TaskWorkflowHeader(model: model, task: task, work: model.taskWork[taskId])
+                                MarkdownBlocks(source: task.task.description).equatable()
+                                TaskWorkView(model: model, task: task)
+                                GraphProcessLog(model: model, taskId: taskId, location: location,
+                                    execution: execution, query: sessions.query)
+                            }.padding(14)
+                        }.textSelection(.enabled)
+                    } else { Text("Task is unavailable") }
                 case .url(let id, let url):
                     BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
@@ -745,29 +838,6 @@ struct SessionPaneView: View {
                         Button("Files") { workspace.showBrowser(.files, from: pane) }
                     }
                 }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var emptyWorkspace: some View {
-        if workspace.openingConversation {
-            ProgressView("Opening conversation…")
-                .foregroundStyle(theme.palette.text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if workspace.key.kind == .task {
-            PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
-                description: workspace.conversationError ?? "Open this Task’s recorded conversation.") {
-                Button("Open conversation") { Task { await model.openTaskConversation(workspace.key.id) } }
-                    .accessibilityIdentifier("task-open-conversation")
-            }
-        } else {
-            PaneEmptyState(title: "No session open", systemImage: "terminal",
-                           description: "Open the retained conversation when you’re ready.") {
-                Button("Open conversation") {
-                    let wave = workspace.key.kind == .wave ? model.wave(id: workspace.key.id)?.wave.name : nil
-                    Task { await model.openPrimaryConversation(in: workspace, wave: wave, store: sessions) }
-                }.buttonStyle(.bordered)
             }
         }
     }
@@ -793,12 +863,17 @@ struct SessionPaneView: View {
                 }
                 openButton(item)
             }.padding()
+        case .unavailable(let message):
+            PaneEmptyState(title: "Conversation unavailable", systemImage: "terminal",
+                           description: message) {
+                openButton(item)
+            }
         case .failed(let message):
             PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
                            description: message) {
                 openButton(item)
             }
-        case .pending where workspace.openingConversation:
+        case .pending where model.conversationIsOpening(workspace):
             ProgressView("Opening conversation…")
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -810,52 +885,60 @@ struct SessionPaneView: View {
         }
     }
 
-    /// The one way back, as `lf resume`: Resume attaches to a running
-    /// conversation or reopens its saved history; Move here takes it over.
+    /// Retry uses the workspace opening intent; only Take back and a consumed
+    /// launch's Try again go past it.
     @ViewBuilder
     private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            Button(action.kind == .open ? "Resume" : action.label) {
+            let retry = item.error != nil && item.record.launchRetry == nil
+            Button(retry ? "Retry" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
-                    if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.resume(item.id) }
+                    if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
+                    else if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                    else { await sessions.start(item.id) }
                 }
             }
             .buttonStyle(.bordered)
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
-            .disabled(action.kind == .moveHere && action.unavailableReason != nil)
-            .help(action.kind == .open ? "Attach to the running conversation, or reopen its saved history" : action.unavailableReason ?? action.help)
+            .disabled(!retry && action.unavailableReason != nil)
+            .help(retry ? "Open the conversation without taking another terminal’s input" : action.unavailableReason ?? action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }
 
     /// A Session whose provider client lives in another terminal. The pane
     /// explains what that means and makes the takeover explicit: nothing is
-    /// stopped until Move here.
+    /// transferred until Take back.
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
         let action = item.record.action(.moveHere)
-        return SessionSlotOffer(
-            title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
-            action: action?.label, actionImage: "arrow.down.forward.square",
-            note: "Moving stops the other client. Unsent text typed there is lost.",
-            unavailable: action?.unavailableReason, help: action?.help ?? "",
-            accessibilityLabel: "Move session here",
-            accessibilityHint: "Stops the other client; unsent text typed there is lost",
-            actionIdentifier: "session-move-here-\(item.id)",
-            perform: {
-                sessions.beginPaneLoad(item.id)
-                Task { @MainActor in await sessions.moveHere(item.id) }
+        return ZStack {
+            if let screen = item.lastScreen {
+                ScrollView {
+                    Text(screen).font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.opacity(0.35).allowsHitTesting(false)
             }
-        ) {
-            Text(
-                """
-                \(item.record.title) is attached to a provider client outside \
-                this window — Warp, another Loopflow window, or an SSH session. \
-                It keeps running there until you move it.
-                """
-            )
+            SessionSlotOffer(
+                title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
+                action: action?.label, actionImage: "arrow.down.forward.square",
+                note: action?.help,
+                unavailable: action?.unavailableReason, help: action?.help ?? "",
+                accessibilityLabel: "Take back session",
+                accessibilityHint: action?.help,
+                actionIdentifier: "session-move-here-\(item.id)",
+                perform: {
+                    sessions.beginPaneLoad(item.id)
+                    Task { @MainActor in await sessions.moveHere(item.id) }
+                }
+            ) {
+                Text(item.record.action(.open)?.unavailableReason ?? "This conversation is controlled by another client.")
+                // Document explicit Take back; the prepared launcher keeps its own intent.
+                Text(item.record.openArgv.filter { !SessionOpenIntent.flags.contains($0) }
+                    .map(shellEscape).joined(separator: " "))
+                    .font(.caption.monospaced()).textSelection(.enabled)
+            }
         }
         .accessibilityIdentifier("session-elsewhere-\(item.id)")
     }
@@ -872,12 +955,19 @@ struct SessionPaneView: View {
                 isFocused: isFocused,
                 onSurfaceCreated: {
                     Perf.agentInput("surface_created", session: item.id)
-                    sessions.recordPaneLive(item.id)
+                    sessions.beginPaneLoad(item.id)
                 },
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
             .id(item.launchId)
+            .overlay(alignment: .topTrailing) {
+                if item.state == .prepared {
+                    ProgressView("Connecting…").controlSize(.small).padding(8)
+                        .background(theme.terminal.background.color)
+                        .allowsHitTesting(false)
+                }
+            }
         } else {
             Text("Session location unavailable")
         }

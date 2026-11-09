@@ -110,7 +110,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
     let caller_graph = crate::journal::current_lf_process_id()
-        .map(|process| store.process(&process))
+        .map(|process| store.lf_process(&process))
         .transpose()?
         .flatten()
         .and_then(|process| process.parent_lf_process_id);
@@ -430,18 +430,12 @@ fn prepare_task_input(
         } else {
             crate::store::open_store(&crate::store::storage_config_from_env()?).await?
         });
+        // The launch reads local state; the Task updates observer syncs this
+        // Task with its tracker after the provider starts.
         let task = store
             .get_task_by_issue(id)
             .await?
             .ok_or_else(|| anyhow!("Task {id} is missing"))?;
-        let repo = crate::ops::task::repository_for_task(&store, &task)?;
-        if !cli.context {
-            crate::ops::linear_observe::sync_repository(&store, &repo.to_string_lossy()).await;
-        }
-        let task = store
-            .get_task(&task.id)
-            .await?
-            .ok_or_else(|| anyhow!("Task is missing"))?;
         let wave = match &task.wave_id {
             Some(id) => store.get_wave(id).await?,
             None => None,
@@ -464,6 +458,8 @@ fn build_prompt_at(
 ) -> Result<PromptBuild> {
     let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
     let is_interactive = is_interactive_run(cli, skill, message);
+    let subject = cli.task.as_deref().unwrap_or_default();
+    crate::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
         Some((_, seed)) => {
@@ -564,6 +560,7 @@ fn build_prompt_at(
         elapsed_ms = prepare_start.elapsed().as_millis(),
         "prepared launch prompt"
     );
+    crate::agent_input_timing::record("prompt_end", subject);
     let agent = prepared
         .config
         .agent
@@ -584,6 +581,7 @@ fn build_prompt_at(
             .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
+        wait_for_capacity: !is_interactive && crate::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;

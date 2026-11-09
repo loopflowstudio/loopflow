@@ -725,6 +725,7 @@ fn prepare(
         Login::GitHub,
         None,
         None,
+        false,
         batch,
     ))?;
     runtime.block_on(super::machine_credentials::connect_claude_accounts(
@@ -739,6 +740,7 @@ fn prepare(
             Login::Linear,
             None,
             None,
+            false,
             batch,
         ))?;
     }
@@ -787,7 +789,7 @@ fn checkout_script(
         })
         .collect();
     let script = format!(
-        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {repository}",
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repo --bind {repository}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
     );
@@ -1349,7 +1351,7 @@ mod tests {
         // No store records either checkout: the Task alone names the repository.
         let repository = crate::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
-        assert!(script.ends_with(&format!("lf repository --bind {repository}")));
+        assert!(script.ends_with(&format!("lf repo --bind {repository}")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
         assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }

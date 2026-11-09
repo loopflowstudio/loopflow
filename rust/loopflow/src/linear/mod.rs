@@ -34,7 +34,7 @@ pub enum LinearBindingError {
 
 macro_rules! validated_string_id {
     ($name:ident, $label:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -919,7 +919,7 @@ impl LinearClient {
             ))),
             None => Err(LinearError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf wave connect --team-key {}` to claim it for {repository}",
+                 run `lf wave plan connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }
@@ -928,8 +928,8 @@ impl LinearClient {
     fn require_team_id(&self) -> LinearResult<String> {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
-                "Linear write requires `planning.team` in .lf/config.yaml; \
-                 run `lf wave connect <wave> --team-key <KEY>`"
+                "Linear write requires `repo.plan.team` in .lf/config.yaml; \
+                 run `lf wave plan connect <wave> --team-key <KEY>`"
                     .to_string(),
             )
         })
@@ -939,16 +939,8 @@ impl LinearClient {
     where
         T: DeserializeOwned,
     {
-        if query.trim_start().starts_with("mutation") {
-            if let Some(repo) = &self.repository {
-                // The delta reader uses an unbound client and performs no writes.
-                if let Err(error) =
-                    Box::pin(crate::ops::linear_observe::check_before_write(repo)).await
-                {
-                    tracing::debug!(%error, "pre-write Linear check pending");
-                }
-            }
-        }
+        // Freshness runs at work boundaries and before state delivery, never
+        // inside a write: a nested scope check consumed creation deadlines.
         let urgent = cooldown::is_urgent();
         let log = request_log::PendingRequest::start(
             &cooldown::home(&self.base_url),

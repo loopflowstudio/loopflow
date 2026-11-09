@@ -41,10 +41,10 @@ struct WorkNavigationProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "list": return #"{"entries":[],"next":null}"#
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
         }
@@ -119,7 +119,7 @@ struct WorkNavigationProofTests {
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
-            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
             terminals.append(terminal)
         }
@@ -155,10 +155,10 @@ struct WorkNavigationProofTests {
         let planning = RoadmapSource(roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("desktop", "plan"): return await planning.read()
+            case ("plan", "list"): return await planning.read()
             case ("wave", "list"): return "[]"
-            case ("history", _): return #"{"truncated":false,"items":[]}"#
-            case ("desktop", "sessions"): return try await named.page(args)
+            case ("session", "history"): return #"{"truncated":false,"items":[]}"#
+            case ("session", "list"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
             case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
@@ -426,7 +426,7 @@ struct WorkNavigationProofTests {
                 let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
                 terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
                 terminal.workingDirectory = NSTemporaryDirectory()
-                terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+                terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
                 terminal.createSurface(manager: GhosttyManager.shared)
                 terminals.append(terminal)
             }
@@ -435,7 +435,7 @@ struct WorkNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -445,9 +445,9 @@ struct WorkNavigationProofTests {
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return #"{"generated_at":1,"waves":[]}"#
+            case "plan" where args.dropFirst().first == "list": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
         }
@@ -587,20 +587,20 @@ struct WorkNavigationProofTests {
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {
-            case "desktop" where args.dropFirst().first == "plan": return roadmap
+            case "plan" where args.dropFirst().first == "list": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "desktop" where args.dropFirst().first == "sessions":
+            case "session" where args.dropFirst().first == "list":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
-            case "history": return #"{"truncated":false,"items":[]}"#
+            case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
         }

@@ -81,7 +81,9 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
     };
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
-        eprintln!("Saved locally; planning synchronization pending. See `lf planning status`.");
+        crate::journal::request::diagnostic(format_args!(
+            "Saved locally; planning synchronization pending. See `lf planning status`."
+        ));
     }
 }
 
@@ -208,9 +210,11 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
     };
     let sqlite = store.sqlite.clone();
     let repo = repo.to_owned();
-    tokio::task::spawn_blocking(move || exchange_destination(&sqlite, &repo, &destination, publish))
-        .await
-        .map_err(message)?
+    crate::journal::request::spawn_blocking(move || {
+        exchange_destination(&sqlite, &repo, &destination, publish)
+    })
+    .await
+    .map_err(message)?
 }
 
 fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
@@ -508,7 +512,7 @@ pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Sto
     }
     let config = config.clone();
     // Store opening uses synchronous SQLite I/O. Keep it off the deadline's executor.
-    tokio::task::spawn_blocking(move || {
+    crate::journal::request::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(open_store(&config))
     })
     .await

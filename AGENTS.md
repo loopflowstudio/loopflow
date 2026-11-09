@@ -150,13 +150,15 @@ A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.
 Only `lf task run` and `lf ship` move that position. `interactive:` steps are
 where a person takes part. Task state (`unstarted · idle · active · moving ·
-shipping · done · abandoned`) is derived, not stored. A stopped Graph is
-history; nothing resumes it. Started Tasks keep their identity, worktree and PR
+shipping · done · abandoned`) is derived, not stored. `TaskSection` is the
+one board bucketing every surface reads: Backlog (unstarted or unassigned),
+Working (owned idle, active or moving), Autonomous (owned shipping), Done,
+Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
 across replanning, and unreviewed backlog stays until someone decides.
 
 The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,
-is in [Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
-the [Architecture Reference](docs/architecture-reference.md) indexes the rest.
+is in [Core models and APIs](docs/dev/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/dev/reference.md) indexes the rest.
 
 # Development Environment
 
@@ -287,17 +289,34 @@ them.
 - Every `unsafe` block gets a `// SAFETY:` comment. Keyword clashes use `r#type` or `type_`.
 - `#[non_exhaustive]` on public enums that may grow.
 - SQLite read helpers that join statements use savepoints so they work inside the Work reader's pinned snapshot and standalone. Write transactions stay at their command boundaries.
+- Served mutations take a directory and `CommandIo`; never redirect process cwd, env or file descriptors. Nested blocking operations use `journal::request::spawn_blocking` to keep request attribution and diagnostics. A request trace is not an OS Process; execution launches keep their owners.
+- Forward stdin only to commands that consume it; a mutation with no body must finish while terminal stdin stays open.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
 
 **Rust tests:**
+- External terminal-host tests use an isolated socket, configuration, state directory
+  and process group. Check native identity and command replay separately: stable
+  pane IDs do not prove that the same processes survived a host restart.
+  Verify cwd with launcher-written evidence when host process telemetry still
+  reports a login wrapper; a displayed Task path does not prove the process cwd.
+  That wrapper is also what Rex itself sees: a `shell:"none"` program without job
+  control has no readable foreground cwd, so OSC 7 is the only directory a split
+  can inherit. Interactive shells stay unreported, or a launch report outlives `cd`.
+  Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
+  `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
-- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
+- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
 - Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
+- Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.
+- Every test binary runs with `HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
+- Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only under `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
+- With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
+- macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `SqliteStore::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
@@ -364,6 +383,10 @@ Required checks run headless, with no display, permission dialog or person.
 Desktop uses app builds and view tests. A check that can't run here goes to
 gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later.
+
+Swift async process fixtures install `terminationHandler` before `run()` and
+await its completion. Don't call blocking `waitUntilExit()` on a cooperative
+executor; it can stay in Foundation's run loop after the child has exited.
 
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.

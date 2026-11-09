@@ -97,7 +97,7 @@ struct LinkedSession {
     let task: RoadmapTask
     let showsChanges: Bool
     let location: TaskLocationObservation?
-    var prepared = false
+    var preparedIntent: SessionOpenIntent?
 }
 
 struct LinkedTaskPage: Equatable {
@@ -114,6 +114,8 @@ final class WorkModel {
 
     private var viewOpening: UUID?
     private var selectionOpening: DesktopOpening?
+    /// Tasks whose abandonment was requested; they leave the sidebar at once.
+    private(set) var abandoningTaskIDs: Set<String> = []
     var dashboardError: String?
     private(set) var dashboardSaving = false
 
@@ -184,7 +186,8 @@ final class WorkModel {
         workspaceRepository = retainedRepository ?? repository
         reconcileSelectionRepository()
         guard retainedRepository != nil, taskOpening?.status != .opening else {
-            openSelectedWorkspace()
+            registry.loadWarmIntent(repository: workspaceRepository ?? repository)
+            openSelectedWorkspace(deliberate: false)
             return
         }
         // Retained Work may all be hidden; nil selection must not reopen it.
@@ -195,36 +198,118 @@ final class WorkModel {
         }
     }
 
-    func openSelectedWorkspace() {
+    func openSelectedWorkspace(deliberate: Bool = true) {
         if let plan = selectedViewPlan { presentView(plan); return }
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         let key = workspaceKey(for: selection, repository: repository)
         let location: WorkspaceIdentity?
-        if key.kind == .task, let task = task(id: key.id)?.task {
-            location = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+        if key.kind == .task, !showsSavedPlanning, let task = task(id: key.id)?.task {
+            location = taskWorkspaceIdentity(task)
         } else if key.kind != .task, let machine = registry.localMachineId, let repoPath {
             location = WorkspaceIdentity(machineId: machine, worktree: repoPath)
         } else { location = nil }
-        let workspace = registry.open(key, title: workspaceTitle(key), location: location)
+        let workspace = registry.open(key, title: workspaceTitle(key), location: location, deliberate: deliberate)
+        if key.kind == .task, showsSavedWork {
+            workspace.requiresLocationValidation = true
+            workspace.present(false)
+        }
         workspace.startPersistence(query: query, repoPath: repoPath)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
-        revealPrimaryConversation()
+        openWarmConversations()
         presentWaveTiles()
     }
 
-    /// Observation can display an existing conversation without acquiring its provider.
-    func revealPrimaryConversation() {
-        guard let registry = workspaceRegistry, let key = registry.selectedWork,
-              key.kind != .task, let workspace = registry.retained(key),
-              workspace.multiplexer.sessionPane?.sessionId == nil,
-              let record = sessions.value?.first(where: {
-                  key.kind == .repository ? $0.primaryScope == "repository"
-                      : $0.primaryScope == "wave" && $0.waveId == key.id
-              }) else { return }
-        registry.revealSession(record, in: workspace)
-        workspace.presentation.selectedSessionId = record.id
-        workspace.presentation.content = .terminals
+    /// Working Tasks and the repository and Wave primaries initialize their
+    /// conversation; navigation never takes input from another terminal, launches
+    /// a Graph or runs an operator.
+    func openWarmConversations() {
+        guard let registry = workspaceRegistry, let repository = workspaceRepository,
+              let repoPath, !showsSavedWork, roadmap.errorMessage == nil,
+              let machine = registry.localMachineId, sessions.errorMessage == nil, let records = sessions.value else { return }
+        prefetchConversations(in: registry, repository: repository,
+                              primaries: WorkspaceIdentity(machineId: machine, worktree: repoPath))
+        let store = registry.sessionStore(repository: repository, repoPath: repoPath, query: query)
+        store.reconcile(records)
+        let warm = registry.warmWork
+        // Off-page tiles too: focusing one opens it from this state, with no refresh between.
+        for key in Set(warm + registry.openWork) where key.kind == .task {
+            guard let workspace = registry.retained(key), let task = task(id: key.id)?.task else { continue }
+            // A refused reveal does not outlive the Task that can now start.
+            if workspace.conversationIntent == .reveal, task.conversationIntent == .start {
+                workspace.conversationError = nil
+                workspace.conversationStart = nil
+            }
+            workspace.conversationIntent = task.conversationIntent
+            workspace.location = taskWorkspaceIdentity(task)
+            registry.updateCompletion(key, completed: task.isCompleted)
+        }
+        for key in warm {
+            guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
+            workspace.startPersistence(query: query, repoPath: repoPath)
+            if workspace.multiplexer.sessionPane?.sessionId == nil,
+               let record = records.first(where: { record in
+                   switch key.kind {
+                   case .repository: record.primaryScope == "repository"
+                   case .wave: record.primaryScope == "wave" && record.waveId == key.id
+                   case .task: record.taskPrimary && record.names(task: key.id)
+                   }
+               }) {
+                workspace.conversationError = nil
+                workspace.conversationStart = nil
+                registry.presentSession(record, in: workspace)
+            }
+        }
+        registry.openWarmConversations(store: store)
+    }
+
+    /// Includes a working Task or a primary queued behind the preparation slots or
+    /// before its Sessions read lands. Close, a failure or a missing location leaves
+    /// a person something to do instead.
+    func conversationIsOpening(_ workspace: SessionsWorkspace) -> Bool {
+        if workspace.openingConversation { return true }
+        guard !workspace.conversationClosed, !showsSavedWork,
+              workspace.conversationError == nil, workspace.conversationStart == nil,
+              roadmap.errorMessage == nil, sessions.errorMessage == nil else { return false }
+        guard workspace.key.kind == .task else { return workspaceRegistry?.localMachineId != nil && repoPath != nil }
+        guard let task = task(id: workspace.key.id)?.task else { return false }
+        return task.conversationIntent == .start && taskWorkspaceIdentity(task) != nil
+    }
+
+    private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
+        navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+    }
+
+    /// The repository and every Wave open beside the Task bound; fresh working
+    /// Tasks lead that bound and saved unfinished Tasks fill its remaining capacity.
+    private func prefetchConversations(in registry: SessionsWorkspaceRegistry, repository: String, primaries location: WorkspaceIdentity) {
+        registry.loadWarmIntent(repository: repository)
+        let repositoryKey = workspaceKey(for: nil, repository: repository)
+        registry.prefetchPrimary(repositoryKey, title: workspaceTitle(repositoryKey), location: location)
+        for roadmap in visibleRoadmaps {
+            let key = workspaceKey(for: .wave(id: roadmap.wave.id), repository: repository)
+            registry.prefetchPrimary(key, title: roadmap.wave.name, wave: roadmap.wave.name, location: location)
+        }
+        let savedOrder = Dictionary(registry.restoreCandidates.enumerated().map { ($0.element, $0.offset) },
+                                    uniquingKeysWith: min)
+        let working = visibleTasks.filter { $0.conversationIntent == .start }.map { task in
+            (task: task, key: workspaceKey(for: .task(id: task.id), repository: repository))
+        }.sorted {
+            let firstVisit = savedOrder[$0.key] ?? Int.max
+            let secondVisit = savedOrder[$1.key] ?? Int.max
+            if firstVisit != secondVisit { return firstVisit < secondVisit }
+            let first = $0.task.runtime?.updatedAt ?? "", second = $1.task.runtime?.updatedAt ?? ""
+            return first == second ? $0.task.id < $1.task.id : first > second
+        }
+        for (task, key) in working {
+            guard let location = task.reference.workspace?.identity else { continue }
+            registry.prefetch(key, title: task.task.name, location: location, completed: false)
+        }
+        for key in registry.restoreCandidates {
+            guard let task = task(id: key.id)?.task,
+                  let location = task.reference.workspace?.identity else { continue }
+            registry.prefetch(key, title: task.task.name, location: location, completed: task.isCompleted)
+        }
     }
 
     @ObservationIgnored var openRepository: ((String, LinkedWork?) -> Void)?
@@ -239,7 +324,8 @@ final class WorkModel {
     @ObservationIgnored private var taskLinkExpectedID: String?
     @ObservationIgnored private var taskLinkConversation = false
 
-    func openTaskLink(_ link: TaskLink, expectedTaskID: String? = nil) async {
+    /// Without an intent, the opening follows the Task's own.
+    func openTaskLink(_ link: TaskLink, expectedTaskID: String? = nil, intent: SessionOpenIntent? = nil) async {
         guard !Task.isCancelled else { return }
         dismissTaskLink()
         let generation = destinationGeneration
@@ -257,7 +343,7 @@ final class WorkModel {
             // Already observed planning opens directly, like the outline and palette.
             // Unscoped links and identity mismatches still resolve through a read.
             if let loaded = loadedTask(link), expectedTaskID == nil || loaded.task.id == expectedTaskID {
-                try await openLinkedTask(wave: loaded.wave, task: loaded.task, link: link, generation: generation)
+                try await openLinkedTask(wave: loaded.wave, task: loaded.task, link: link, generation: generation, intent: intent)
                 return
             }
             taskLinkReading = .loading
@@ -275,7 +361,7 @@ final class WorkModel {
             }
             taskLinkReading = .available(result)
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
-                try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation)
+                try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation, intent: intent)
             } else {
                 taskOpening = DesktopOpening(url: link.address, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
                 showsTaskLink = true
@@ -331,30 +417,38 @@ final class WorkModel {
         return matches.count == 1 ? matches[0] : nil
     }
 
-    private func openLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+    private func openLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int, intent requested: SessionOpenIntent? = nil) async throws {
+        let intent = requested ?? task.conversationIntent
         let opensConversation = link.session != nil || link.diff || taskLinkConversation
         let isLocalRepository = repoPath?.normalizedFilePath == task.task.repo.normalizedFilePath
-        if opensConversation, isLocalRepository {
-            openTaskDestination(wave: wave, task: task, preservingOpening: true)
-            navigation.content = .terminals
-        }
         let key = workspaceKey(for: .task(id: task.id), repository: workspaceRepository ?? "")
         // The Task's workspace carries the opening's spinner and error, retained or not.
         let workspace = opensConversation && isLocalRepository
             ? workspaceRegistry?.workspace(for: key, title: task.task.name, location: nil) : nil
         let request = UUID()
         workspace?.conversationRequest = request
+        workspace?.conversationIntent = intent
         workspace?.conversationError = nil
+        if opensConversation, isLocalRepository {
+            openTaskDestination(wave: wave, task: task, preservingOpening: true)
+            navigation.content = .terminals
+        }
         defer { if workspace?.conversationRequest == request { workspace?.conversationRequest = nil } }
         do {
-            try await prepareLinkedTask(wave: wave, task: task, link: link, generation: generation)
+            try await prepareLinkedTask(wave: wave, task: task, link: link, generation: generation, workspace: workspace, request: request, intent: intent)
+        } catch where destinationGeneration == generation && workspace?.conversationRequest == request
+                        && workspace?.conversationIntent != intent {
+            // Superseded: the queue opens with the current intent.
+            workspace?.conversationRequest = nil
+            taskOpening = nil
+            openWarmConversations()
         } catch {
-            if destinationGeneration == generation { workspace?.conversationError = error.localizedDescription }
+            if destinationGeneration == generation, workspace?.conversationRequest == request { workspace?.conversationError = error.localizedDescription }
             throw error
         }
     }
 
-    private func prepareLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+    private func prepareLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int, workspace: SessionsWorkspace?, request: UUID, intent: SessionOpenIntent) async throws {
         try Task.checkCancellation()
         guard destinationGeneration == generation else { return }
         var task = task
@@ -367,7 +461,7 @@ final class WorkModel {
         var location: TaskLocationObservation?
         var executionQuery = query
         var executionTask = task.runtime?.workId ?? task.id
-        var executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+        var executionIdentity = taskWorkspaceIdentity(task)
         if let machine = link.machine, let repository = link.repository {
             let identity = try await query.repositoryIdentity(cwd: task.task.repo)
             guard identity.locators.contains(repository) else {
@@ -401,7 +495,17 @@ final class WorkModel {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
             Perf.agentInput("primary_begin", task: task.id)
-            let record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: task.task.repo)
+            let record: SessionRecord
+            do {
+                record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: task.task.repo, intent: intent)
+            } catch {
+                let action = await executionQuery.startOffer(refused: intent, issue: executionTask, cwd: task.task.repo)
+                if !Task.isCancelled, destinationGeneration == generation, workspace?.conversationRequest == request,
+                   workspace?.conversationIntent == intent {
+                    workspace?.conversationStart = action
+                }
+                throw error
+            }
             Perf.agentInput("primary_returned", task: task.id, session: record.id, detail: "provider=\(record.provider ?? "unknown")")
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
@@ -437,8 +541,7 @@ final class WorkModel {
                 after = page.next
             } while after != nil
         }
-        guard let record = records.first(where: { $0.id == sessionID }),
-              record.taskIds.contains(executionTask) || record.workspace?.taskId == executionTask else {
+        guard let record = records.first(where: { $0.id == sessionID }), record.names(task: executionTask) else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
         if location != nil {
@@ -450,6 +553,13 @@ final class WorkModel {
             guard let identity = record.workspace?.identity,
                   identity == executionIdentity else {
                 throw RegistryQueryError("The Session and Task do not share a recorded checkout; no Changes pane was opened.")
+            }
+        }
+        guard !Task.isCancelled, destinationGeneration == generation else { return }
+        if let workspace {
+            guard workspace.conversationRequest == request, !workspace.conversationClosed else {
+                taskOpening = DesktopOpening(url: link.address, status: .failed, reason: "Opening was closed or released.")
+                return
             }
         }
         if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
@@ -466,7 +576,8 @@ final class WorkModel {
         } else {
             sessions = .available(records)
         }
-        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, prepared: preparation != nil)
+        workspace?.conversationStart = nil
+        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, preparedIntent: preparation == nil ? nil : intent)
         try await installConversation(destination, repository: task.task.repo)
     }
 
@@ -485,6 +596,7 @@ final class WorkModel {
         store.reconcile(sessions.value ?? [])
         let key = workspaceKey(for: .task(id: destination.task.id), repository: repositoryID)
         let target = registry.workspace(for: key, title: destination.task.task.name, location: record.workspace?.identity)
+        if record.workspace?.identity != nil { registry.confirmLocation(in: target) }
         let workspace = placeSession(record, in: target, store: store, registry: registry)
         let files = try registry.openLinkedFiles(destination, in: workspace.key, query: store.query)
         if files != nil, let zoomed = workspace.multiplexer.zoomedPaneId {
@@ -500,8 +612,7 @@ final class WorkModel {
             select(retained.reference)
         } else {
             let selectedKey = workspaceKey(for: selection, repository: repository)
-            if selection?.kind == .task,
-               record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
+            if selection?.kind == .task, record.names(task: selectedKey.id) {
                 select(selection)
             } else if selection?.kind == .wave, record.waveId == selectedKey.id {
                 select(selection)
@@ -512,8 +623,8 @@ final class WorkModel {
         let key = workspaceKey(for: selection, repository: repository)
         let target = registry.workspace(for: key, title: workspaceTitle(key), location: record.workspace?.identity)
         store.reconcile([record])
-        _ = placeSession(record, in: target, store: store, registry: registry)
-        Task { await store.select(record.id) }
+        let workspace = placeSession(record, in: target, store: store, registry: registry)
+        Task { await store.select(record.id, intent: workspace.conversationIntent) }
     }
 
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
@@ -571,8 +682,8 @@ final class WorkModel {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
-        if destination.prepared { store.adoptPreparation(destination.record) }
-        await store.select(destination.record.id)
+        if let intent = destination.preparedIntent { store.adoptPreparation(destination.record, intent: intent) }
+        else { await store.select(destination.record.id, intent: workspace.conversationIntent) }
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         if let files { await files.refreshChanges() }
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
@@ -609,7 +720,7 @@ final class WorkModel {
             reason = "The Session checkout changed while opening; retry its current location."
         } else {
             switch item.state {
-            case .failed(let message), .ended(let message): reason = message
+            case .failed(let message), .unavailable(let message), .ended(let message): reason = message
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."
             default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError
@@ -651,19 +762,54 @@ final class WorkModel {
         if navigation.recentDestinations != recent { navigation.recentDestinations = recent }
     }
 
-    func openTaskConversation(_ id: String) async {
+    func openTaskConversation(_ id: String, intent: SessionOpenIntent? = nil) async {
         guard let found = task(id: id) else {
             guard let repoPath else { return }
-            await openTaskLink(TaskLink(issue: id, repo: repoPath, conversation: true))
+            await openTaskLink(TaskLink(issue: id, repo: repoPath, conversation: true), intent: intent)
             return
         }
         let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
         let retainedConversation = showsTaskConversation(found.task)
         Perf.agentInput("workspace_selected", task: id, detail: "retained=\(retainedConversation)")
-        openTaskDestination(wave: found.wave, task: found.task)
-        navigation.content = .terminals
-        if !retainedConversation {
-            await openTaskLink(link, expectedTaskID: found.task.id)
+        if retainedConversation {
+            openTaskDestination(wave: found.wave, task: found.task)
+            navigation.content = .terminals
+        } else {
+            await openTaskLink(link, expectedTaskID: found.task.id, intent: intent)
+        }
+    }
+
+    /// The placeholder's one action for any Work whose conversation is not open
+    /// here. A primary, or a Task shown in a tile of any presented board, opens in place through
+    /// the warm opener: Rust's Start after a refused reveal, else Retry on the
+    /// workspace intent. A selected Task's pane opens through its link, which can
+    /// resolve the checkout its Start creates. Automatic opening runs through the
+    /// warm queue.
+    func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
+        let key = workspace.key
+        // A presented board: a Dashboard, Working Tasks, a Wave view or the repository page.
+        let boardShown = selectedViewPlan != nil || navigation.waveView != nil
+        let inTile = boardShown && workspaceRegistry?.openWork.contains(key) == true
+        guard key.kind == .task, !inTile else {
+            guard let registry = workspaceRegistry else { return }
+            switch key.kind {
+            case .task:
+                if workspace.location == nil, let task = task(id: key.id)?.task { workspace.location = taskWorkspaceIdentity(task) }
+            case .wave:
+                if workspace.wave == nil { workspace.wave = wave(id: key.id)?.wave.name }
+            case .repository: break
+            }
+            await registry.openConversation(in: workspace, store: store)
+            return
+        }
+        if workspace.conversationStart != nil, let found = task(id: key.id) {
+            let remote = workspace.location?.machineId != workspace.localMachineId
+            let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo,
+                                machine: remote ? workspace.location?.machineId : nil,
+                                repository: remote ? key.repository : nil, conversation: true)
+            await openTaskLink(link, expectedTaskID: found.task.id, intent: .start)
+        } else {
+            await openTaskConversation(key.id, intent: workspace.conversationError != nil ? workspace.conversationIntent : nil)
         }
     }
 
@@ -675,23 +821,6 @@ final class WorkModel {
         else { return false }
         let held = Set(registry.sessionStore(repository: repository, repoPath: repoPath, query: query).sessions.map(\.id))
         return workspace.showsConversation(held: held)
-    }
-
-    /// Attach a Task's primary conversation in its retained workspace without
-    /// navigating: a Dashboard tile shows it in place and the Dashboard stays.
-    func attachTaskConversation(_ id: String, in workspace: SessionsWorkspace) async {
-        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository else { return }
-        await workspace.openConversation {
-            let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
-                                                            cwd: found.task.task.repo)
-            // One opened Session updates its own reading; an unrelated inventory failure stays.
-            let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
-            sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
-            let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
-            store.reconcile([record])
-            store.adoptPreparation(record)
-            _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
-        }
     }
 
     func openPaletteWave(_ id: String) {
@@ -760,7 +889,7 @@ final class WorkModel {
         let doneDays = WaveStandupDefaults.doneDays
         let tiles = boardTiles(view)
         let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
-        let page = min(navigation.wavePages[view] ?? 0, pages.count - 1)
+        let page = pageIndex(view, of: pages)
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
         return [
@@ -1032,9 +1161,9 @@ final class WorkModel {
             }
         }
     }
-    /// The latest row from a Task's own watch, current after the Task leaves
+    /// The latest row from a Task's own subscription, current after the Task leaves
     /// the plan (completed, canceled).
-    private var watchedTaskRow: RoadmapTask?
+    private var subscribedTaskRow: RoadmapTask?
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1200,8 +1329,9 @@ final class WorkModel {
                 sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
                 savedSessionRepos.insert(RepositoryReadingKey(machineId: saved.machineId, repository: repo))
             }
-            // Restore readings, not the previous launch's destination. Ordinary
-            // launches start at the repository; explicit links select their Work.
+            let navigation = WorkNavigation()
+            navigation.selection = entry.selection
+            navigationByRepo[repo] = navigation
         }
     }
 
@@ -1214,11 +1344,12 @@ final class WorkModel {
     /// Reads now come from `id`. A workspace saved under another Machine is dropped
     /// unless this launch has already replaced it.
     func confirmMachine(_ id: String) {
-        if workMachine != id {
-            sessionsGeneration &+= 1
-            if workMachine != nil { dropMachineContent() }
-        }
+        let changed = workMachine != id
+        if changed, workMachine != nil { dropMachineContent() }
         workMachine = id
+        // Readings are keyed by Machine: one taken before this confirmation is
+        // out of reach, and a quiet repository would never send another.
+        if changed { supersedeSessions() }
         if let savedMachineId, savedMachineId != id {
             if showsSavedPlanning {
                 roadmap = .loading
@@ -1240,7 +1371,7 @@ final class WorkModel {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
     }
 
-    /// One Wave's detail, from the planning reading the window already watches.
+    /// One Wave's detail, from the planning reading the window already subscriptions.
     func waveDetail(id: String) -> StreamedWaveDetail? {
         guard !roadmap.isLoading else { return nil }
         let wave = roadmap.value?.waves.first { $0.wave.id == id }
@@ -1331,11 +1462,11 @@ final class WorkModel {
             await refresh()
             return
         }
-        var delay = Duration.seconds(1)
+        var retry = WorkObservationRetry()
         while !Task.isCancelled {
             var observation: WorkObservation?
             do {
-                let opened = try await query.watchWork()
+                let opened = try await query.subscribeWork()
                 observation = opened
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
@@ -1352,21 +1483,21 @@ final class WorkModel {
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
+                    retry.receive(frame, scope: workScope, at: .now)
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
-                    delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch {
                 if !Task.isCancelled { workUnavailable(error.localizedDescription) }
             }
+            let delay = retry.failed(at: .now)
             workObservation = nil
             await observation?.cancel()
             resumePlanningWaiters(through: .max)
             finishCheckpoints(through: .max, reason: "Work observation ended before the update was confirmed")
             do { try await Task.sleep(for: delay) } catch { return }
-            delay = min(delay * 2, .seconds(30))
         }
     }
 
@@ -1516,14 +1647,15 @@ final class WorkModel {
             if savedSessionRepos.remove(repositoryReadingKey(repoPath)) != nil {
                 LaunchJournal.home.refreshed("sessions", ms: workOpened.elapsedMs, ok: true)
             }
+            openWarmConversations()
             endLaunchWhenCurrent()
             if let page = frame.wire?.sessionPage {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
             // A frame about its own Task stays true after the selection moves on.
-            if let body, let row = body.row, row.task.identifier == body.task, watchedTaskRow != row {
-                watchedTaskRow = row
+            if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
+                subscribedTaskRow = row
             }
             guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
@@ -1728,7 +1860,7 @@ final class WorkModel {
         projectCommands[id] != nil
     }
 
-    /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    /// Add a Wave through `lf wave create`; the planning stream then delivers its row.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
     func addWave(name: String, objective: String? = nil, repo: String) async throws -> WaveAdded {
@@ -1881,6 +2013,7 @@ final class WorkModel {
 
     var sidebarTaskIDs: [String] {
         taskIDs(in: sidebarMembers).filter { id in
+            if abandoningTaskIDs.contains(id) { return false }
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
@@ -1893,10 +2026,9 @@ final class WorkModel {
         }
     }
 
-    /// A Wave row's count: its board's Working and Autonomous columns, not Backlog or Done.
-    func startedTaskCount(_ wave: WaveRoadmap) -> Int {
-        let standup = WaveStandup(tasks: wave.tasks.items, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
-        return standup.working.count + standup.autonomous.count
+    /// A Wave or repository row's count: its board's Working and Autonomous columns.
+    func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
+        (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
     }
 
     /// Below the Working Tasks: the scope's Autonomous Tasks, as the Wave board buckets
@@ -1909,22 +2041,13 @@ final class WorkModel {
         case .wave(let id): board = .wave(id)
         case .dashboard: return []
         }
-        let tasks = standupTasks(board)?.items ?? []
-        let working = Set(sidebarTaskIDs)
-        return WaveStandup(tasks: tasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
-            .autonomous.map(\.task.id).filter { !working.contains($0) }
+        return (standupTasks(board)?.items ?? []).filter { $0.section == .autonomous && !abandoningTaskIDs.contains($0.id) }
+            .sorted { $0.task.rank < $1.task.rank }.map(\.id)
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
         let runtimeID = task(id: id)?.task.runtime?.workId ?? id
-        return (sessions.value ?? []).filter {
-            $0.taskIds.contains(runtimeID) || $0.workspace?.taskId == runtimeID
-        }
-    }
-
-    func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {
-        guard let workspaceRegistry else { return }
-        await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
+        return (sessions.value ?? []).filter { $0.names(task: runtimeID) }
     }
 
     /// ⌘N: the Nth Task row on screen.
@@ -2101,6 +2224,7 @@ final class WorkModel {
                 after = page.next
             } while after != nil
             savedSessionRepos.remove(repositoryReadingKey(repoPath))
+            openWarmConversations()
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: true)
             endLaunchWhenCurrent()
             cache?.saveSessions(wire.texts, repo: repoPath)
@@ -2319,22 +2443,38 @@ final class WorkModel {
     }
 
     func reopenTask(_ task: RoadmapTask) async {
+        abandoningTaskIDs.remove(task.id)
         await performTaskAction(task.id) {
             try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
+    /// The row leaves the sidebar and the selection moves on before the slow
+    /// cleanup (PRs, branches, checkout) returns; a failure puts the row back.
     func abandonTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
+        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
+        abandoningTaskIDs.insert(task.id)
+        if isSelected(.task(id: task.id)) {
+            let index = rows.firstIndex(of: task.id) ?? rows.count
+            let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
+            select(next.map { .task(id: $0) } ?? sidebarWave.map { .wave(id: $0.wave.id) })
+        }
+        let accepted = await performTaskAction(task.id) {
             try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        if !accepted {
+            abandoningTaskIDs.remove(task.id)
+            dashboardError = navigation.taskRunDrafts[task.id]?.error
         }
     }
 
     /// Feedback belongs to the navigation and Task that began the command.
-    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async {
+    /// Returns whether the command was accepted, refreshed or not.
+    @discardableResult
+    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async -> Bool {
         let owner = navigation
         let home = workDataDirectory
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
+        guard owner.taskRunDrafts[taskId]?.acting != true else { return false }
         owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
         owner.taskRunDrafts[taskId]?.error = nil
         do {
@@ -2342,12 +2482,14 @@ final class WorkModel {
             owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
             try await confirmWorkUpdate(after: home)
             owner.taskRunDrafts[taskId] = nil
+            return true
         } catch {
             let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
             owner.taskRunDrafts[taskId]?.phase = nil
             owner.taskRunDrafts[taskId]?.error = accepted
                 ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
                 : error.localizedDescription
+            return accepted
         }
     }
 
@@ -2529,7 +2671,7 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let row = watchedTaskRow, row.id == id || row.runtime?.workId == id {
+        if let row = subscribedTaskRow, row.id == id || row.runtime?.workId == id {
             return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
@@ -2703,6 +2845,7 @@ final class WorkModel {
         guard case .success(let (_, text)) = result else { return false }
         showsSavedPlanning = false
         if let text { cache?.saveRoadmap(text) }
+        openWarmConversations()
         return true
     }
 
@@ -2811,11 +2954,20 @@ extension WorkModel {
     }
 
     /// Turn a Wave view's footer to the page holding `work`; positions count the whole list.
-    /// Only Wave views read the page; a Dashboard's grid keeps its own.
     private func showWaveTile(_ work: WorkReference, in view: WorkNavigation.Board) {
         guard let plan = boardPlan(view),
               let index = taskIDs(in: boardTiles(view)).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
-        navigation.wavePages[view] = index / max(1, plan.slots.count)
+        navigation.boardPages[view] = index / max(1, plan.slots.count)
+    }
+
+    /// Arriving tiles open; departing ones return to the warm bound.
+    func turnPage(_ board: WorkNavigation.Board?, to page: Int) {
+        navigation.boardPages[board] = page
+        if let plan = selectedViewPlan { presentView(plan) } else { presentWaveTiles() }
+    }
+
+    private func pageIndex(_ board: WorkNavigation.Board?, of pages: [[WorkMemberRef]]) -> Int {
+        min(navigation.boardPages[board] ?? 0, pages.count - 1)
     }
 
     /// A board's Task tiles: a Dashboard's visible ones in arrangement order, a Wave's
@@ -2837,27 +2989,23 @@ extension WorkModel {
     /// The Wave view stays selected; its Tasks open after it, in tile order, so a
     /// script addresses them as it does a Dashboard's.
     private func presentWaveTiles() {
-        guard let registry = workspaceRegistry, let view = navigation.waveView,
-              let key = registry.selectedWork, key.kind != .task, let plan = boardPlan(view) else { return }
-        let tiles = boardTiles(view).map(\.work)
-        openTiles(plan, tiles, in: registry)
-        registry.present(open: [key] + tiles)
+        guard let view = navigation.waveView, let key = workspaceRegistry?.selectedWork, key.kind != .task,
+              let plan = boardPlan(view) else { return }
+        presentBoard(plan, boardTiles(view), on: view, after: [key])
     }
 
     private func presentView(_ plan: WorkViewPlan) {
-        guard let registry = workspaceRegistry else { return }
         // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
-        let open: [WorkWorkspaceKey] = if case .workingTasks = navigation.destination {
-            workingTaskMembers.map(\.work)
-        } else {
-            plan.projection.visible.map(\.work)
-        }
-        openTiles(plan, open, in: registry)
-        registry.present(open: open)
+        let members = if case .workingTasks = navigation.destination { workingTaskMembers } else { plan.projection.visible }
+        presentBoard(plan, members, on: navigation.trailBoard)
     }
 
-    private func openTiles(_ plan: WorkViewPlan, _ open: [WorkWorkspaceKey], in registry: SessionsWorkspaceRegistry) {
-        for content in plan.contents where open.contains(content.work) {
+    /// Every tile gets a workspace for `lf desktop` addressing; only the current page counts as shown.
+    private func presentBoard(_ plan: WorkViewPlan, _ members: [WorkMemberRef], on board: WorkNavigation.Board?,
+                              after lead: [WorkWorkspaceKey] = []) {
+        guard let registry = workspaceRegistry else { return }
+        let tiles = members.map(\.work)
+        for content in plan.contents where tiles.contains(content.work) {
             let entry = registry.workspace(for: content.work, title: content.title,
                 location: content.location.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) })
             if let primary = content.primarySession, entry.multiplexer.sessionPane?.sessionId == nil {
@@ -2865,6 +3013,9 @@ extension WorkModel {
             }
             entry.startPersistence(query: query, repoPath: repoPath)
         }
+        let pages = plan.slots.pages(members)
+        registry.present(open: lead + tiles, shown: lead + pages[pageIndex(board, of: pages)].map(\.work))
+        openWarmConversations()
     }
 
     func saveDashboard(id: String, expression: String, name: String, pinned: Bool, revision: Int64?) async {
@@ -2926,17 +3077,20 @@ extension WorkModel {
 
     /// The sidebar and the Working Tasks grid write the same order; both read the
     /// repository plan, so each shows the other's move.
-    /// The row moves on drop; the written order replaces it, and a failed write re-reads it.
-    func reorderWorkingTask(_ task: String, to target: String) async {
-        guard task != target, let repoPath else { return }
+    /// The row moves now; the returned write replaces it, and a failed write re-reads it.
+    @discardableResult
+    func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
+        guard task != target, let repoPath else { return Task {} }
         dashboardError = nil
         moveRepositoryMember(task, to: target)
-        do {
-            _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
-            try await refreshPlan(nil, repoPath: repoPath)
-        } catch {
-            dashboardError = error.localizedDescription
-            try? await refreshPlan(nil, repoPath: repoPath)
+        return Task {
+            do {
+                _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
+                try await refreshPlan(nil, repoPath: repoPath)
+            } catch {
+                dashboardError = error.localizedDescription
+                try? await refreshPlan(nil, repoPath: repoPath)
+            }
         }
     }
 

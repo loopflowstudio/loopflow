@@ -1,6 +1,7 @@
 //! Retain terminal state or a bounded pipe tail for replacement viewers.
 
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -20,7 +21,10 @@ pub(super) enum Output {
 pub(super) struct Terminal {
     terminal: ghostty_vt::Terminal,
     pending_reports: Vec<u8>,
-    directory: Option<Vec<u8>>,
+    directory: Option<PathBuf>,
+    /// A changed directory viewers have not been told to enter.
+    changed_directory: Option<PathBuf>,
+    title: Option<String>,
 }
 
 impl Output {
@@ -30,6 +34,8 @@ impl Output {
                 terminal: ghostty_vt::Terminal::new(80, 24).context("Open the owner's terminal")?,
                 pending_reports: Vec::new(),
                 directory: None,
+                changed_directory: None,
+                title: None,
             })))
         } else {
             Ok(Self::Pipes {
@@ -56,8 +62,20 @@ impl Output {
         };
         let mut bytes =
             terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
-        if let Some(directory) = &terminal.directory {
-            bytes.extend(directory);
+        if let Some(report) = terminal
+            .directory
+            .as_deref()
+            .and_then(local_directory_report)
+        {
+            bytes.extend(report.as_bytes());
+        }
+        // The launcher can publish its title before the Session lookup finishes.
+        if let Some(title) = terminal
+            .title
+            .as_deref()
+            .or_else(|| terminal.terminal.title())
+        {
+            bytes.extend(title_report(title));
         }
         bytes.extend(terminal.terminal.program_status().replay());
         bytes.extend(
@@ -144,28 +162,63 @@ impl Output {
 
     /// Publish the connected provider's cwd through the same serialized stream
     /// as status reports, including when a viewer attaches after the launch.
-    pub fn directory(&mut self, cwd: &std::path::Path) {
+    pub fn directory(&mut self, cwd: &Path) {
         let Self::Terminal(terminal) = self else {
             return;
         };
-        let host = gethostname::gethostname();
-        let Some(bytes) = directory_report(cwd, &host.to_string_lossy()) else {
+        let Some(report) = local_directory_report(cwd) else {
             return;
         };
-        if terminal.directory.as_ref() != Some(&bytes) {
-            terminal.pending_reports.extend(&bytes);
-            terminal.directory = Some(bytes);
+        if terminal.directory.as_deref() != Some(cwd) {
+            terminal.pending_reports.extend(report.as_bytes());
+            terminal.directory = Some(cwd.to_path_buf());
+            terminal.changed_directory = Some(cwd.to_path_buf());
         }
+    }
+
+    pub fn title(&mut self, title: &str) {
+        let Self::Terminal(terminal) = self else {
+            return;
+        };
+        terminal.title = Some(title.chars().filter(|ch| !ch.is_control()).collect());
+    }
+
+    /// The published directory, for a viewer that just attached.
+    pub fn current_directory(&self) -> Option<&Path> {
+        let Self::Terminal(terminal) = self else {
+            return None;
+        };
+        terminal.directory.as_deref()
+    }
+
+    /// The directory attached viewers have yet to enter.
+    pub fn take_changed_directory(&mut self) -> Option<PathBuf> {
+        let Self::Terminal(terminal) = self else {
+            return None;
+        };
+        terminal.changed_directory.take()
     }
 
     pub fn take_reports(&mut self) -> Option<Vec<u8>> {
         let Self::Terminal(terminal) = self else {
             return None;
         };
-        if terminal.pending_reports.is_empty() || !terminal.terminal.at_ground() {
+        if !terminal.terminal.at_ground() {
             return None;
         }
-        let reports = std::mem::take(&mut terminal.pending_reports);
+        // The Session owns its title even when a provider publishes an older
+        // launch-time name. Compare parsed state, without another OSC parser.
+        let title = terminal
+            .title
+            .as_deref()
+            .filter(|title| terminal.terminal.title().unwrap_or_default() != *title);
+        if terminal.pending_reports.is_empty() && title.is_none() {
+            return None;
+        }
+        let mut reports = std::mem::take(&mut terminal.pending_reports);
+        if let Some(title) = title {
+            reports.extend(title_report(title));
+        }
         // Reduce lf reports at the same stream boundary where viewers receive
         // them, through the same parser as native provider reports.
         terminal.terminal.write(&reports);
@@ -181,7 +234,16 @@ impl Output {
     }
 }
 
-fn directory_report(cwd: &std::path::Path, host: &str) -> Option<Vec<u8>> {
+fn title_report(title: &str) -> Vec<u8> {
+    format!("\x1b]0;{title}\x07").into_bytes()
+}
+
+/// A directory report naming this Machine, which owns `cwd`.
+pub(crate) fn local_directory_report(cwd: &Path) -> Option<String> {
+    directory_report(cwd, &gethostname::gethostname().to_string_lossy())
+}
+
+fn directory_report(cwd: &Path, host: &str) -> Option<String> {
     let mut uri = reqwest::Url::from_directory_path(cwd).ok()?;
     // The execution host owns this path. A remote viewer must never mistake it
     // for a directory on the viewer's Machine.
@@ -194,22 +256,82 @@ fn directory_report(cwd: &std::path::Path, host: &str) -> Option<Vec<u8>> {
     } else {
         normalized_host
     };
-    Some(format!("\x1b]7;file://{host}{}\x1b\\", uri.path()).into_bytes())
+    Some(format!("\x1b]7;file://{host}{}\x1b\\", uri.path()))
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{directory_report, Output};
+    use super::{directory_report, local_directory_report, Output};
     use crate::ghostty_vt::Terminal;
     use crate::program_status::{Kind, Records, Report, State};
+
+    #[test]
+    fn attachment_replays_launch_title_before_session_name_lookup() {
+        let mut output = Output::new(true).unwrap();
+        output.process(1, b"\x1b]0;checkout\x07", false);
+        let mut viewer = Terminal::new(80, 24).unwrap();
+        viewer.write(&output.snapshot().unwrap().unwrap());
+        assert_eq!(viewer.title(), Some("checkout"));
+
+        output.title("checkout");
+        assert!(output.take_reports().is_none());
+        output.title("Resume repair");
+        viewer.write(&output.take_reports().unwrap());
+        assert_eq!(viewer.title(), Some("Resume repair"));
+    }
+
+    #[test]
+    fn session_renames_wait_for_complete_sequences_and_replay_on_attach() {
+        for sequence in [
+            b"\x1b]0;provider title\x07".as_slice(),
+            b"\x1b]0;provider title\x1b\\",
+            b"\x1b[38;2;12;34;56m",
+            b"\x1bP$qm\x1b\\",
+            "雪".as_bytes(),
+        ] {
+            for split in 1..sequence.len() {
+                let mut output = Output::new(true).unwrap();
+                output.title("checkout");
+                assert_eq!(output.take_reports().unwrap(), b"\x1b]0;checkout\x07");
+                output.process(1, &sequence[..split], false);
+                output.title("intermediate name");
+                output.title("Resume repair\x07\x1b");
+                assert!(output.take_reports().is_none(), "{sequence:?} at {split}");
+                let snapshot = output.snapshot().unwrap().unwrap();
+                let title = b"\x1b]0;Resume repair\x07";
+                assert!(snapshot.windows(title.len()).any(|bytes| bytes == title));
+                let mut viewer = Terminal::new(80, 24).unwrap();
+                viewer.write(&snapshot);
+                output.process(1, &sequence[split..], false);
+                viewer.write(&sequence[split..]);
+                let report = output.take_reports().unwrap();
+                assert_eq!(report, title);
+                viewer.write(&report);
+                assert!(viewer.at_ground());
+                assert_eq!(viewer.title(), Some("Resume repair"));
+                output.title("Resume repair");
+                assert!(output.take_reports().is_none());
+                // A later Claude title or terminal reset cannot leave the
+                // launch-time name over the Session's current name.
+                for provider in [b"\x1b]2;old name\x07".as_slice(), b"\x1bc"] {
+                    output.process(1, provider, false);
+                    assert_eq!(output.take_reports().unwrap(), title);
+                    assert_eq!(output.terminal().unwrap().title(), Some("Resume repair"));
+                }
+            }
+        }
+        let mut pipes = Output::new(false).unwrap();
+        pipes.title("No terminal");
+        assert!(pipes.take_reports().is_none());
+    }
 
     #[test]
     fn directory_report_identifies_execution_host_and_escapes_paths() {
         assert_eq!(
             directory_report(Path::new("/work/research notes/雪"), "remote.example").unwrap(),
-            b"\x1b]7;file://remote.example/work/research%20notes/%E9%9B%AA/\x1b\\"
+            "\x1b]7;file://remote.example/work/research%20notes/%E9%9B%AA/\x1b\\"
         );
         assert!(directory_report(Path::new("relative"), "remote.example").is_none());
         assert_eq!(
@@ -218,7 +340,7 @@ mod tests {
                 "Jacks-MacBook-Pro-2.local"
             )
             .unwrap(),
-            b"\x1b]7;file://Jacks-MacBook-Pro-2.local/work/research%20notes/\x1b\\"
+            "\x1b]7;file://Jacks-MacBook-Pro-2.local/work/research%20notes/\x1b\\"
         );
         assert!(directory_report(Path::new("/work"), "host\x1b\\").is_none());
     }
@@ -230,11 +352,9 @@ mod tests {
         output.directory(Path::new("/work/research notes/雪"));
         assert!(output.take_reports().is_none());
         let snapshot = output.snapshot().unwrap().unwrap();
-        let expected = directory_report(
-            Path::new("/work/research notes/雪"),
-            &gethostname::gethostname().to_string_lossy(),
-        )
-        .unwrap();
+        let expected = local_directory_report(Path::new("/work/research notes/雪"))
+            .unwrap()
+            .into_bytes();
         assert!(snapshot
             .windows(expected.len())
             .any(|part| part == expected));
@@ -242,11 +362,9 @@ mod tests {
         output.process(1, b" title\x07", false);
         assert_eq!(output.take_reports().unwrap(), expected);
         output.directory(Path::new("/work/delivery"));
-        let moved = directory_report(
-            Path::new("/work/delivery"),
-            &gethostname::gethostname().to_string_lossy(),
-        )
-        .unwrap();
+        let moved = local_directory_report(Path::new("/work/delivery"))
+            .unwrap()
+            .into_bytes();
         assert_eq!(output.take_reports().unwrap(), moved);
         let snapshot = output.snapshot().unwrap().unwrap();
         assert!(snapshot.windows(moved.len()).any(|part| part == moved));

@@ -24,7 +24,10 @@ for hooks that are a fresh process at every boundary, in a `.store-gap` marker
 beside the delivery file. When a hook reaches the store again it writes the gap
 into the Session's history as one `store-gap` observation (first and last miss)
 before clearing the marker, so a turn lf never saw reads as unknown rather than
-as still running. The Pi extension and OpenCode plugin behave like Claude's
+as still running. Work that can outlast a hook's timeout runs beside it: Claude's
+`StopFailure` hook starts `--moment record-limit` in its own OS session and exits,
+because a kill between a token reply and the profile write would lose a rotated
+grant. The Pi extension and OpenCode plugin behave like Claude's
 hooks: an lf they cannot run goes to their own log (`logs/pi-extension.log`,
 OpenCode's stderr beside the capture), never to the conversation. The PTY
 owner delivers typed input even when it cannot record it, and holds the Session

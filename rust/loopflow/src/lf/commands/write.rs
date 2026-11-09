@@ -1,55 +1,122 @@
-//! The writes an app makes inside its own process. Each [`Write`] is an `lf`
-//! command: [`Write::argv`] names it, and [`Write::write`] calls the function
-//! that command calls, returns what it prints, and records the Process
-//! `lf <argv>` would, with the app's process as its OS process. Arrangement
-//! (Dashboards, the Task order, pane layouts) persists without a Process, as
-//! its command does.
-//!
-//! Every write names the directory the app ran it from: `--cwd <directory>`
-//! in its argv, and the same path in-process. A write `lf` would send to
-//! another Machine is not made here: [`Write::write`] returns `None`, and the
-//! app runs its command, which sends it.
+//! Writes submitted by native clients to the Loopflow server. [`Write::run`]
+//! calls the shared functions the CLI handlers call and returns the value the
+//! CLI prints with `--json`; the carrier owns its trace.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
-use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-use crate::lf::{Cli, Commands};
-use crate::ops::task::{
-    task_complete, task_edit, task_move_membership, task_reopen, task_repository, task_save,
-};
-use crate::work::task::TaskUpdate;
+use crate::engine::task;
 
-/// A write an app makes inside its own process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
+/// Whether opening may take control, start a thread, or only reveal history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOpenIntent {
+    Resume,
+    Start,
+    Reveal,
+}
+
+impl SessionOpenIntent {
+    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
+    pub fn flag(self) -> Option<&'static str> {
+        match self {
+            Self::Resume => None,
+            Self::Start => Some("--start-if-free"),
+            Self::Reveal => Some("--reveal-existing"),
+        }
+    }
+}
+
+/// A typed mutation with the same defaults and effects as its CLI spelling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+/// On the wire each write is a resource-named `kind` (`task.complete`);
+/// `desktop.*` writes are Desktop's own arrangement state.
+#[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Write {
+    /// `lf task create --session <id> --title <title> --json`, without launching.
+    #[serde(rename = "task.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
+    TaskCreate {
+        directory: PathBuf,
+        id: String,
+        title: String,
+    },
     /// `lf task complete <issue>`.
+    #[serde(rename = "task.complete")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
+    #[serde(rename = "task.reopen")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::Task>()))]
     TaskReopen { directory: PathBuf, issue: String },
     /// `lf task edit <issue> --notes=<notes>`.
-    TaskNotes {
+    #[serde(rename = "task.update")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
+    TaskUpdate {
         directory: PathBuf,
         issue: String,
         notes: String,
     },
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and
     /// branches.
+    #[serde(rename = "task.abandon")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
     TaskAbandon { directory: PathBuf, issue: String },
-    /// `lf task claim <issue> --json`, or `lf task unassign <issue> --json`
-    /// when not `claimed`.
-    TaskOwnership {
+    /// `lf task claim <issue> --json`.
+    #[serde(rename = "task.claim")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::TaskOwnership>()))]
+    TaskClaim { directory: PathBuf, issue: String },
+    /// `lf task unassign <issue> --json`.
+    #[serde(rename = "task.unassign")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::durable::TaskOwnership>()))]
+    TaskUnassign { directory: PathBuf, issue: String },
+    /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
+    /// detached: the Graph process it started, or where the Task now waits.
+    /// `approve` is `-b`: every step headless to `end`, approving Auto-Ship.
+    #[serde(rename = "task.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::TaskRun>()))]
+    TaskRun {
         directory: PathBuf,
         issue: String,
-        claimed: bool,
+        from: Option<String>,
+        agent: Option<String>,
+        approve: bool,
     },
-    /// `lf --task <issue> ship --stop`: withdraws the Task's Auto-Ship approval.
-    ShipStop { directory: PathBuf, issue: String },
+    /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
+    #[serde(rename = "task.ship")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::TaskShip>()))]
+    TaskShip { directory: PathBuf, issue: String },
+    /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
+    #[serde(rename = "task.hold")]
+    #[schemars(extend("x-result" = generator.subschema_for::<task::Hold>()))]
+    TaskHold { directory: PathBuf, issue: String },
+    /// `lf task steer <issue> <message> --json`: direction for the Task's
+    /// runs, whoever writes it.
+    #[serde(rename = "task.steer")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::comment::TaskComments>()))]
+    TaskSteer {
+        directory: PathBuf,
+        issue: String,
+        message: String,
+    },
+    /// `lf task report <issue> <message> --json`: progress for the Task's
+    /// thread; an agent's carries its Session's provenance.
+    #[serde(rename = "task.report")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::task::comment::TaskComments>()))]
+    TaskReport {
+        directory: PathBuf,
+        issue: String,
+        message: String,
+    },
+    /// `lf task interrupt <issue> --json`.
+    #[serde(rename = "task.interrupt")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskControlResult>()))]
+    TaskInterrupt { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
+    #[serde(rename = "task.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskEdit>()))]
     TaskMove {
         directory: PathBuf,
         issue: String,
@@ -57,6 +124,8 @@ pub enum Write {
     },
     /// `lf task save <issue> <path> --revision <revision> --json`, with
     /// `content` on stdin.
+    #[serde(rename = "task.save")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::task::TaskFileSave>()))]
     TaskSave {
         directory: PathBuf,
         issue: String,
@@ -64,172 +133,951 @@ pub enum Write {
         revision: String,
         content: String,
     },
+    /// `lf [--wave <wave>] session steer [<id>] <message> --json`: a steer
+    /// one Session, every Session of the Wave or, with neither, every Session
+    /// of the repository reads at its next boundary.
+    #[serde(rename = "session.steer")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::steer::Steer>()))]
+    SessionSteer {
+        directory: PathBuf,
+        session: Option<String>,
+        wave: Option<String>,
+        message: String,
+    },
     /// `lf session rename --json -- <id> <name>`.
+    #[serde(rename = "session.rename")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionRename {
         directory: PathBuf,
         id: String,
         name: String,
     },
-    /// `lf session bind --json --task <task> -- <id>`.
+    /// `lf session bind --json --task <task> -- <id>`; with `preview`,
+    /// `--dry-run`: the Task a bind would assign, assigning nothing.
+    #[serde(rename = "session.bind")]
+    #[schemars(extend("x-result" = (crate::server::schema::either::<crate::ops::human_session::SessionRecord, crate::ops::human_session::SessionBindingPreview>(generator))))]
     SessionBind {
         directory: PathBuf,
         id: String,
         task: String,
+        preview: bool,
     },
     /// `lf [--agent <agent>] session resume [<id>] [--task <task>] [--wave <wave>]
     /// --prepare --json`, with `--repo <directory>` when it names none of them:
     /// the conversation and the command that opens it, no provider started.
+    #[serde(rename = "session.resume")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionResume {
         directory: PathBuf,
         id: Option<String>,
         task: Option<String>,
         wave: Option<String>,
         agent: Option<String>,
+        intent: SessionOpenIntent,
     },
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
+    #[serde(rename = "session.new")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::SessionRecord>()))]
     SessionNew {
         directory: PathBuf,
         id: String,
         agent: Option<String>,
     },
+    /// `lf --agent <agent> session move --all [--blocked] [--on <on>]
+    /// --json`: the open Sessions the selector names continue on the agent;
+    /// the report says which moved, which move after their turn, and which
+    /// were skipped.
+    #[serde(rename = "session.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::human_session::moves_bulk::MoveReport>()))]
+    SessionMove {
+        directory: PathBuf,
+        blocked: bool,
+        on: Option<String>,
+        agent: String,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
-    WaveAdd {
+    #[serde(rename = "wave.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::wave_lifecycle::WaveAdded>()))]
+    WaveCreate {
         directory: PathBuf,
         wave: String,
         objective: Option<String>,
     },
-    /// `lf wave status <wave> --sync --json`: the planning refresh.
-    PlanningRefresh { directory: PathBuf, wave: String },
-    /// `lf wave new-chapter --all <name> --plan /dev/stdin --json`, with
-    /// `plan` (JSON) on stdin; `--dry-run` when `preview`, which records nothing.
-    NewChapter {
+    /// `lf wave sync <wave> --json`: the planning refresh.
+    #[serde(rename = "wave.sync")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]
+    WaveSync { directory: PathBuf, wave: String },
+    /// `lf wave plan bind <wave> <project> --json`: the tracker Project
+    /// bound as the Wave's current plan.
+    #[serde(rename = "wave.plan.bind")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::project::Project>()))]
+    WavePlanBind {
         directory: PathBuf,
-        name: String,
-        plan: String,
-        preview: bool,
+        wave: String,
+        project: String,
     },
+    /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
+    /// [--team-name <name>] --json`: one receipt per Wave connected.
+    #[serde(rename = "wave.plan.connect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::linear::LinearInitResult>>()))]
+    WavePlanConnect {
+        directory: PathBuf,
+        wave: Option<String>,
+        all: bool,
+        team_key: Option<String>,
+        team_name: Option<String>,
+    },
+    /// `lf wave plan reteam [--apply] --json`: the moves onto the
+    /// repository's Team; a plan without `apply`.
+    #[serde(rename = "wave.plan.reteam")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::linear::LinearReteamResult>()))]
+    WavePlanReteam { directory: PathBuf, apply: bool },
     /// `lf graph customize <name>`: copies a builtin Graph into the repository,
     /// recording nothing.
+    #[serde(rename = "graph.customize")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::graph::Customized>()))]
     GraphCustomize { directory: PathBuf, name: String },
-    /// `lf portfolio <change> --json`, run from `/`: which repositories the
-    /// app shows.
-    Portfolio { change: Vec<String> },
-    /// `lf desktop query [--revision <revision>] -- <id> <expression>`.
-    DashboardQuery {
+    /// `lf repo release run [<version>] [-t <target>] --json`, started
+    /// detached: the Process carrying the release.
+    #[serde(rename = "repo.release")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
+    RepoRelease {
+        directory: PathBuf,
+        version: Option<String>,
+        target: Option<String>,
+    },
+    /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
+    #[serde(rename = "checkout.commit")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Committed>()))]
+    CheckoutCommit {
+        directory: PathBuf,
+        message: Option<String>,
+        push: bool,
+        no_add: bool,
+        paths: Vec<String>,
+        agent: Option<String>,
+    },
+    /// `lf sync [<onto>] [--plan|--manual|--continue|--abort] [--adopt]
+    /// --json`: the plan, a finished continue or abort, or the Process
+    /// carrying a sync started detached.
+    #[serde(rename = "checkout.sync")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Sync>()))]
+    CheckoutSync {
+        directory: PathBuf,
+        onto: Option<String>,
+        preview: bool,
+        manual: bool,
+        #[serde(rename = "continue")]
+        continue_sync: bool,
+        abort: bool,
+        adopt: bool,
+    },
+    /// `lf wt create <name> [--plan] [--persistent] --json`.
+    #[serde(rename = "checkout.create")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::checkout::Checkout>()))]
+    CheckoutCreate {
+        directory: PathBuf,
+        name: String,
+        preview: bool,
+        persistent: bool,
+    },
+    /// `lf account disconnect <provider>[=<email>]`: forget the provider's
+    /// local credentials, or one managed login's.
+    #[serde(rename = "account.disconnect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
+    AccountDisconnect {
+        provider: String,
+        email: Option<String>,
+    },
+    /// `lf account connect <provider>[=<email>] [--chrome-profile] [--import]
+    /// [--api-key]`. Served, no profile is chosen interactively: a login with
+    /// no remembered profile needs `chrome_profile`.
+    #[serde(rename = "account.connect")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
+    AccountConnect {
+        provider: String,
+        email: Option<String>,
+        chrome_profile: Option<String>,
+        import: bool,
+        api_key: bool,
+    },
+    /// `lf account set <provider>[=<email>] …`: a managed login's lifecycle,
+    /// cooldown and browser choices, or the local credentials' browser choices.
+    #[serde(rename = "account.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Account>()))]
+    AccountSet {
+        provider: String,
+        email: Option<String>,
+        login_email: Option<String>,
+        plan: Option<String>,
+        clear_plan: bool,
+        paid_through: Option<String>,
+        clear_paid_through: bool,
+        clear_cooldown: bool,
+        chrome_profiles: Vec<String>,
+        clear_chrome_profiles: bool,
+    },
+    /// `lf account redeem-reset <provider>=<email> [--idempotency-key]
+    /// [--credit-id] --json`: spend one banked Codex reset.
+    #[serde(rename = "account.redeem_reset")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::account::Redemption>()))]
+    AccountRedeemReset {
+        provider: String,
+        email: String,
+        idempotency_key: Option<String>,
+        credit_id: Option<String>,
+    },
+    /// Hold one login on this Machine, or release holds with `auto`.
+    #[serde(rename = "account.use")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountUse { login: String },
+    /// Pause a login's automatic rotation.
+    #[serde(rename = "account.pause")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountPause { login: String },
+    /// Return a login to automatic rotation.
+    #[serde(rename = "account.unpause")]
+    #[schemars(extend("x-result" = generator.subschema_for::<()>()))]
+    AccountUnpause { login: String },
+    /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
+    /// Process carrying the Graph.
+    #[serde(rename = "graph.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
+    GraphRun {
+        directory: PathBuf,
+        name: String,
+        message: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf -b [--agent <agent>] skill <name> [message]`, started detached: the
+    /// Process carrying the skill's headless run.
+    #[serde(rename = "skill.run")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
+    SkillRun {
+        directory: PathBuf,
+        name: String,
+        message: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr publish [--title] [--body] --json`: push and
+    /// create or refresh the checkout's ready PR.
+    #[serde(rename = "pr.publish")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Published>()))]
+    PrPublish {
+        directory: PathBuf,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr open [--title] [--body] --json`: push and
+    /// create or refresh the checkout's draft PR; served, no review surface
+    /// opens.
+    #[serde(rename = "pr.open")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Published>()))]
+    PrOpen {
+        directory: PathBuf,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr submit [--strict] [--worktree] [--message]
+    /// [--title] [--body] --json`: prepare the PR for a teammate's merge.
+    #[serde(rename = "pr.submit")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Prepared>()))]
+    PrSubmit {
+        directory: PathBuf,
+        strict: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr arm [--strict] [--local] [--worktree]
+    /// [--message] [--title] [--body] --json`: arm exact-head auto-merge and
+    /// return.
+    #[serde(rename = "pr.arm")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Landed>()))]
+    PrArm {
+        directory: PathBuf,
+        strict: bool,
+        local: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] pr land [--wait-and-fix] [--strict] [--local]
+    /// [--worktree] [--message] [--title] [--body] --json`, started
+    /// detached: the Process carrying the landing.
+    #[serde(rename = "pr.land")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::launch::Launched>()))]
+    PrLand {
+        directory: PathBuf,
+        wait_and_fix: bool,
+        strict: bool,
+        local: bool,
+        worktree: Option<String>,
+        message: Option<String>,
+        title: Option<String>,
+        body: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf pr abandon [<branch>] [--force] --json`: close the PR and delete
+    /// its worktree and branches. Served, unpublished work is deleted only
+    /// with `force`.
+    #[serde(rename = "pr.abandon")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::Abandoned>()))]
+    PrAbandon {
+        directory: PathBuf,
+        branch: Option<String>,
+        force: bool,
+    },
+    /// `lf pr reconcile --json`: check recorded landings once and settle
+    /// verified merges.
+    #[serde(rename = "pr.reconcile")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::ops::pr_landing::DeliveryCheck>()))]
+    PrReconcile { directory: PathBuf },
+    /// `lf pr request-review [<pr>] -r <reviewer>… --json`.
+    #[serde(rename = "pr.request_review")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::pr::ReviewRequested>()))]
+    PrRequestReview {
+        directory: PathBuf,
+        pr: Option<String>,
+        reviewers: Vec<String>,
+    },
+    /// `lf desktop portfolio <change> --json`, run from `/`: which
+    /// repositories the app shows.
+    #[serde(rename = "desktop.portfolio.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::portfolio::Portfolio>()))]
+    DesktopPortfolioSet {
+        change: crate::portfolio::PortfolioCommand,
+    },
+    /// `lf desktop dashboard query [--revision <revision>] -- <id> <expression>`.
+    #[serde(rename = "desktop.dashboard.query")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
+    DesktopDashboardQuery {
         directory: PathBuf,
         id: String,
         expression: String,
         revision: Option<i64>,
     },
-    /// `lf desktop pin|unpin <id> --revision <revision>`.
-    DashboardPin {
+    /// `lf desktop dashboard pin <id> --revision <revision>`.
+    #[serde(rename = "desktop.dashboard.pin")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
+    DesktopDashboardPin {
         directory: PathBuf,
         id: String,
-        pinned: bool,
         revision: i64,
     },
-    /// `lf desktop rename --revision <revision> -- query:<id> <name>`.
-    DashboardRename {
+    /// `lf desktop dashboard unpin <id> --revision <revision>`.
+    #[serde(rename = "desktop.dashboard.unpin")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
+    DesktopDashboardUnpin {
+        directory: PathBuf,
+        id: String,
+        revision: i64,
+    },
+    /// `lf desktop dashboard rename --revision <revision> -- query:<id> <name>`.
+    #[serde(rename = "desktop.dashboard.rename")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
+    DesktopDashboardRename {
         directory: PathBuf,
         id: String,
         name: String,
         revision: i64,
     },
-    /// `lf desktop hide|show -p query:<id>/<member>`.
-    DashboardTile {
+    /// `lf desktop dashboard hide query:<id>/<member>`.
+    #[serde(rename = "desktop.dashboard.hide")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
+    DesktopDashboardHide {
         directory: PathBuf,
         id: String,
         member: String,
-        hidden: bool,
     },
-    /// `lf desktop layout query:<id> --save --revision <revision>`, with
+    /// `lf desktop dashboard show query:<id>/<member>`.
+    #[serde(rename = "desktop.dashboard.show")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
+    DesktopDashboardShow {
+        directory: PathBuf,
+        id: String,
+        member: String,
+    },
+    /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
     /// `slots` (JSON) on stdin.
-    DashboardSlots {
+    #[serde(rename = "desktop.dashboard.slots")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::Dashboard>()))]
+    DesktopDashboardSlots {
         directory: PathBuf,
         id: String,
         revision: i64,
         slots: String,
     },
-    /// `lf desktop move -p <board>/<member> --destination <destination>`: a
-    /// Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
-    TileMove {
+    /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
+    /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    #[serde(rename = "desktop.dashboard.move")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopTileRecord>()))]
+    DesktopDashboardMove {
         directory: PathBuf,
         board: String,
         member: String,
         destination: String,
     },
     /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
-    PaneLayout {
+    #[serde(rename = "desktop.layout.save")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::work::selection::WorkPaneLayout>()))]
+    DesktopLayoutSave {
         directory: PathBuf,
         work: String,
         layout: String,
     },
+    /// `lf config set <key> <value> <destination flags> --json`: declare a
+    /// setting in the destination's file; `value` is YAML.
+    #[serde(rename = "config.set")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
+    ConfigSet {
+        destination: crate::config::files::Destination,
+        key: String,
+        value: String,
+    },
+    /// `lf config unset <key> <destination flags> --json`: remove that
+    /// declaration so other sources choose.
+    #[serde(rename = "config.unset")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
+    ConfigUnset {
+        destination: crate::config::files::Destination,
+        key: String,
+    },
+    /// Appearance's theme file at `path`: set to `value`, or read when null.
+    /// Desktop owns its Apply/Cancel transaction; no CLI spells it.
+    #[serde(rename = "config.theme")]
+    #[schemars(extend("x-result" = generator.subschema_for::<crate::engine::config::Declaration>()))]
+    ConfigTheme {
+        path: PathBuf,
+        value: Option<String>,
+    },
 }
 
 impl Write {
-    /// The `lf` command this write equals, without the binary.
-    pub fn argv(&self) -> Vec<String> {
-        let mut argv = vec!["--cwd".to_owned(), self.directory().display().to_string()];
-        let (notes_flag, revision_flag, query, path);
-        let words: Vec<&str> = match self {
-            Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
-            Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
-            Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
-            Self::TaskNotes { issue, notes, .. } => {
-                notes_flag = format!("--notes={notes}");
-                vec!["task", "edit", issue, &notes_flag]
+    /// Make this write on the caller's thread and return what it wrote: the
+    /// value the CLI spelling prints with `--json`. CLI handlers call the same
+    /// shared functions and print that value.
+    pub fn run(&self) -> anyhow::Result<serde_json::Value> {
+        if let Some(value) = self.routed()? {
+            return Ok(value);
+        }
+        let directory = self.directory();
+        let task_repo = |issue: &str| crate::ops::task::task_repository(directory, Some(issue));
+        match self {
+            Self::TaskCreate { id, title, .. } => value(&crate::ops::task::task_create(
+                &crate::ops::task::task_repository(directory, None)?,
+                None,
+                Some(title.clone()),
+                None,
+                crate::ops::task::TaskAdoptionOptions {
+                    session: Some(id.clone()),
+                    worktree: None,
+                },
+            )?),
+            Self::TaskComplete { issue, .. } => value(&crate::ops::task::task_complete(
+                &task_repo(issue)?,
+                issue,
+                None,
+            )?),
+            Self::TaskReopen { issue, .. } => value(&crate::ops::task::task_reopen(issue, None)?),
+            Self::TaskUpdate { issue, notes, .. } => value(&crate::ops::task::task_edit(
+                &task_repo(issue)?,
+                issue,
+                None,
+                super::mutation::task_edit_update(&None, &Some(notes.clone()), None, &None),
+            )?),
+            Self::TaskAbandon { issue, .. } => value(&crate::ops::task::task_abandon(
+                &task_repo(issue)?,
+                Some(issue),
+                false,
+            )?),
+            Self::TaskClaim { issue, .. } => value(&task::ownership(
+                directory,
+                issue,
+                crate::ops::task_ownership::OwnershipChange::Claim,
+            )?),
+            Self::TaskUnassign { issue, .. } => value(&task::ownership(
+                directory,
+                issue,
+                crate::ops::task_ownership::OwnershipChange::Unassign,
+            )?),
+            Self::TaskRun {
+                issue,
+                from,
+                agent,
+                approve,
+                ..
+            } => value(&task::run(
+                directory,
+                issue,
+                from.as_deref(),
+                agent.as_deref(),
+                *approve,
+            )?),
+            Self::TaskShip { issue, .. } => value(&task::ship(directory, issue)?),
+            Self::TaskHold { issue, .. } => value(&task::hold(directory, issue, None)?),
+            Self::TaskSteer { issue, message, .. } => {
+                value(&task::steer(directory, issue, None, message)?)
             }
-            Self::TaskOwnership { issue, claimed, .. } => {
-                vec![
-                    "task",
-                    if *claimed { "claim" } else { "unassign" },
-                    issue,
-                    "--json",
-                ]
+            Self::TaskReport { issue, message, .. } => {
+                value(&task::report(directory, issue, None, message)?)
             }
-            Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop"],
-            Self::TaskMove { issue, wave, .. } => match wave {
-                Some(wave) => vec!["task", "move", issue, "--wave", wave],
-                None => vec!["task", "move", issue, "--no-wave"],
-            },
+            Self::TaskInterrupt { issue, .. } => value(&task::interrupt(issue)?),
+            Self::TaskMove { issue, wave, .. } => value(&crate::ops::task::task_move_membership(
+                &task_repo(issue)?,
+                issue,
+                wave.as_deref(),
+            )?),
             Self::TaskSave {
                 issue,
                 path,
                 revision,
+                content,
                 ..
-            } => vec![
-                "task",
-                "save",
-                issue,
-                path,
-                "--revision",
-                revision,
-                "--json",
-            ],
-            Self::SessionRename { id, name, .. } => {
-                vec!["session", "rename", "--json", "--", id, name]
+            } => {
+                let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
+                value(&crate::ops::task::task_save(
+                    issue, path, revision, &content,
+                )?)
             }
-            Self::SessionBind { id, task, .. } => {
-                vec!["session", "bind", "--json", "--task", task, "--", id]
+            Self::SessionSteer {
+                session,
+                wave,
+                message,
+                ..
+            } => {
+                use crate::engine::session::SteerScope;
+                let scope = match (session.as_deref(), wave.as_deref()) {
+                    (Some(id), _) => SteerScope::Session(id),
+                    (None, Some(wave)) => SteerScope::Wave(wave),
+                    (None, None) => SteerScope::Repository,
+                };
+                value(&tokio::runtime::Runtime::new()?.block_on(async {
+                    let store = super::session::open_shared_store().await?;
+                    anyhow::Ok(
+                        crate::engine::session::steer(&store, directory, scope, message).await?,
+                    )
+                })?)
             }
-            Self::SessionResume {
+            Self::SessionRename { id, name, .. } => value(&super::session::renamed(id, name)?),
+            Self::SessionBind {
+                id, task, preview, ..
+            } => super::session::bound(id, task, *preview),
+            Self::SessionMove {
+                blocked, on, agent, ..
+            } => value(&super::session::moved(*blocked, on.as_deref(), agent)?),
+            Self::SessionResume { .. } | Self::SessionNew { .. } => {
+                let (cli, _) = self
+                    .cli()
+                    .expect("a Session preparation has a CLI spelling")?;
+                value(&super::session::prepared(&cli, directory)?)
+            }
+            Self::WaveCreate {
+                wave, objective, ..
+            } => {
+                let repo = crate::repo::require_repo_root(directory, "this command")?;
+                value(&tokio::runtime::Runtime::new()?.block_on(
+                    crate::ops::wave_lifecycle::add(&repo, wave, objective.as_deref()),
+                )?)
+            }
+            Self::WaveSync { wave, .. } => {
+                let refreshed = super::ops::refresh_status(directory, Some(wave))?;
+                Ok(serde_json::from_str(&super::waves::status_json(
+                    directory,
+                    Some(refreshed.as_deref().unwrap_or(wave)),
+                    false,
+                )?)?)
+            }
+            Self::WavePlanBind { wave, project, .. } => value(&crate::engine::wave::planning_bind(
+                directory, wave, project,
+            )?),
+            Self::WavePlanConnect {
+                wave,
+                all,
+                team_key,
+                team_name,
+                ..
+            } => value(&crate::engine::wave::planning_connect(
                 directory,
+                wave.as_deref(),
+                *all,
+                team_key.as_deref(),
+                team_name.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::WavePlanReteam { apply, .. } => value(&crate::engine::wave::planning_reteam(
+                directory,
+                *apply,
+                &crate::engine::Diagnostics,
+            )?),
+            Self::GraphCustomize { name, .. } => value(&super::graph::Customized {
+                path: crate::graph::customize(
+                    name,
+                    &crate::repo::working_directory_in(directory)?,
+                )?,
+            }),
+            Self::RepoRelease {
+                version, target, ..
+            } => value(&crate::engine::repo::release(
+                directory,
+                version.as_deref(),
+                target.as_deref(),
+            )?),
+            Self::CheckoutCommit {
+                message,
+                push,
+                no_add,
+                paths,
+                agent,
+                ..
+            } => value(&crate::engine::checkout::commit(
+                directory,
+                message.as_deref(),
+                *push,
+                *no_add,
+                paths,
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::CheckoutSync {
+                onto,
+                preview,
+                manual,
+                continue_sync,
+                abort,
+                adopt,
+                ..
+            } => value(&crate::engine::checkout::sync(
+                directory,
+                &crate::engine::checkout::SyncInput {
+                    onto: onto.as_deref(),
+                    preview: *preview,
+                    manual: *manual,
+                    continue_sync: *continue_sync,
+                    abort: *abort,
+                    adopt: *adopt,
+                },
+            )?),
+            Self::AccountDisconnect { provider, email } => value(
+                &crate::engine::account::disconnect(provider, email.as_deref())?,
+            ),
+            Self::AccountConnect {
+                provider,
+                email,
+                chrome_profile,
+                import,
+                api_key,
+            } => value(&crate::engine::account::connect(
+                provider,
+                email.as_deref(),
+                chrome_profile.as_deref(),
+                *import,
+                *api_key,
+            )?),
+            Self::AccountSet {
+                provider,
+                email,
+                login_email,
+                plan,
+                clear_plan,
+                paid_through,
+                clear_paid_through,
+                clear_cooldown,
+                chrome_profiles,
+                clear_chrome_profiles,
+            } => value(&crate::engine::account::set(
+                provider,
+                email.as_deref(),
+                &crate::engine::account::Settings {
+                    login_email: login_email.clone(),
+                    plan: plan.clone(),
+                    clear_plan: *clear_plan,
+                    paid_through: paid_through.clone(),
+                    clear_paid_through: *clear_paid_through,
+                    clear_cooldown: *clear_cooldown,
+                    chrome_profiles: chrome_profiles.clone(),
+                    clear_chrome_profiles: *clear_chrome_profiles,
+                },
+            )?),
+            Self::AccountRedeemReset {
+                provider,
+                email,
+                idempotency_key,
+                credit_id,
+            } => value(&crate::engine::account::redeem_reset(
+                provider,
+                email,
+                idempotency_key.as_deref(),
+                credit_id.as_deref(),
+            )?),
+            Self::AccountUse { login } => value(&crate::engine::account::activate(login)?),
+            Self::AccountPause { login } => value(&crate::engine::account::pause(login, true)?),
+            Self::AccountUnpause { login } => value(&crate::engine::account::pause(login, false)?),
+            Self::GraphRun {
+                name,
+                message,
+                agent,
+                ..
+            } => value(&crate::engine::graph::run(
+                directory,
+                name,
+                message.as_deref(),
+                agent.as_deref(),
+            )?),
+            Self::SkillRun {
+                name,
+                message,
+                agent,
+                ..
+            } => value(&crate::engine::skill::run(
+                directory,
+                name,
+                message.as_deref(),
+                agent.as_deref(),
+            )?),
+            Self::PrPublish {
+                title, body, agent, ..
+            } => value(&crate::engine::pr::publish(
+                directory,
+                title.as_deref(),
+                body.as_deref(),
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrOpen {
+                title, body, agent, ..
+            } => value(&crate::engine::pr::open(
+                directory,
+                title.as_deref(),
+                body.as_deref(),
+                agent.as_deref(),
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrSubmit {
+                strict,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::submit(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: false,
+                    wait_and_fix: false,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrArm {
+                strict,
+                local,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::arm(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: *local,
+                    wait_and_fix: false,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrLand {
+                wait_and_fix,
+                strict,
+                local,
+                worktree,
+                message,
+                title,
+                body,
+                agent,
+                ..
+            } => value(&crate::engine::pr::land(
+                directory,
+                &crate::engine::pr::LandInput {
+                    strict: *strict,
+                    local: *local,
+                    wait_and_fix: *wait_and_fix,
+                    worktree: worktree.clone(),
+                    message: message.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                    agent: agent.clone(),
+                },
+            )?),
+            Self::PrAbandon { branch, force, .. } => value(&crate::engine::pr::abandon(
+                directory,
+                branch.as_deref(),
+                *force,
+                &crate::engine::Diagnostics,
+            )?),
+            Self::PrReconcile { .. } => value(&crate::engine::pr::reconcile(directory)?),
+            Self::PrRequestReview { pr, reviewers, .. } => value(
+                &crate::engine::pr::request_review(directory, pr.as_deref(), reviewers)?,
+            ),
+            Self::CheckoutCreate {
+                name,
+                preview,
+                persistent,
+                ..
+            } => value(&crate::engine::checkout::create(
+                directory,
+                name,
+                *preview,
+                *persistent,
+                &crate::engine::Diagnostics,
+            )?),
+            Self::DesktopPortfolioSet { change } => {
+                value(&crate::portfolio::change(change, directory)?)
+            }
+            Self::ConfigSet {
+                destination,
+                key,
+                value: declared,
+            } => value(&crate::engine::config::set(destination, key, declared)?),
+            Self::ConfigUnset { destination, key } => {
+                value(&crate::engine::config::unset(destination, key)?)
+            }
+            Self::ConfigTheme { path, value: theme } => {
+                value(&crate::engine::config::theme(path, theme.as_deref())?)
+            }
+            Self::DesktopDashboardQuery { .. }
+            | Self::DesktopDashboardPin { .. }
+            | Self::DesktopDashboardUnpin { .. }
+            | Self::DesktopDashboardRename { .. }
+            | Self::DesktopDashboardSlots { .. }
+            | Self::DesktopLayoutSave { .. } => {
+                use crate::lf::{DashboardCommand, DesktopCommand};
+                let dashboard = |cmd| DesktopCommand::Dashboard { cmd };
+                let command = match self {
+                    Self::DesktopDashboardQuery {
+                        id,
+                        expression,
+                        revision,
+                        ..
+                    } => dashboard(DashboardCommand::Query {
+                        container: id.clone(),
+                        expression: expression.clone(),
+                        revision: *revision,
+                    }),
+                    Self::DesktopDashboardPin { id, revision, .. } => {
+                        dashboard(DashboardCommand::Pin {
+                            query: id.clone(),
+                            revision: *revision,
+                        })
+                    }
+                    Self::DesktopDashboardUnpin { id, revision, .. } => {
+                        dashboard(DashboardCommand::Unpin {
+                            query: id.clone(),
+                            revision: *revision,
+                        })
+                    }
+                    Self::DesktopDashboardRename {
+                        id, name, revision, ..
+                    } => dashboard(DashboardCommand::Rename {
+                        target: format!("query:{id}"),
+                        name: name.clone(),
+                        revision: u64::try_from(*revision)?,
+                    }),
+                    Self::DesktopDashboardSlots { id, revision, .. } => {
+                        dashboard(DashboardCommand::Slots {
+                            query: format!("query:{id}"),
+                            revision: *revision,
+                        })
+                    }
+                    Self::DesktopLayoutSave { work, .. } => DesktopCommand::Layout {
+                        work: work.clone(),
+                        save: true,
+                    },
+                    _ => unreachable!("matched above"),
+                };
+                let mut input = self.input().unwrap_or_default().as_bytes();
+                super::desktop::save_arrangement(None, directory, &command, &mut input)
+            }
+            Self::DesktopDashboardHide { id, member, .. }
+            | Self::DesktopDashboardShow { id, member, .. } => {
+                let verb = if matches!(self, Self::DesktopDashboardHide { .. }) {
+                    "hide"
+                } else {
+                    "show"
+                };
+                super::desktop::save_tile(
+                    None,
+                    directory,
+                    &format!("query:{id}"),
+                    member,
+                    verb,
+                    &Default::default(),
+                )
+            }
+            Self::DesktopDashboardMove {
+                board,
+                member,
+                destination,
+                ..
+            } => super::desktop::save_tile(
+                None,
+                directory,
+                board,
+                member,
+                "move",
+                &[("destination".to_owned(), destination.clone())].into(),
+            ),
+        }
+    }
+
+    /// The Session writes whose Work can live on another Machine, and whose
+    /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
+    /// this spelling on the destination; nothing else parses it. Task writes
+    /// route through [`crate::engine::task`].
+    fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
+        let mut args = vec![
+            "lf".to_owned(),
+            "--cwd".to_owned(),
+            self.directory().display().to_string(),
+        ];
+        let words: Vec<&str> = match self {
+            Self::SessionResume {
                 id,
                 task,
                 wave,
                 agent,
+                intent,
+                ..
             } => {
                 let mut words = Vec::new();
                 if id.is_none() && task.is_none() && wave.is_none() {
-                    path = directory.display().to_string();
-                    words.extend(["--repo", path.as_str()]);
+                    args.extend(["--repo".to_owned(), self.directory().display().to_string()]);
                 }
                 if let Some(agent) = agent {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
+                words.extend(intent.flag());
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);
@@ -248,349 +1096,200 @@ impl Write {
                 words.extend(["session", "new", id, "--prepare", "--json"]);
                 words
             }
-            Self::WaveAdd {
-                wave, objective, ..
-            } => {
-                let mut words = vec!["wave", "add", wave.as_str()];
-                if let Some(objective) = objective {
-                    words.extend(["--objective", objective]);
-                }
-                words.push("--json");
-                words
-            }
-            Self::PlanningRefresh { wave, .. } => {
-                vec!["wave", "status", wave, "--sync", "--json"]
-            }
-            Self::NewChapter { name, preview, .. } => {
-                let mut words = vec![
-                    "wave",
-                    "new-chapter",
-                    "--all",
-                    name,
-                    "--plan",
-                    "/dev/stdin",
-                    "--json",
-                ];
-                if *preview {
-                    words.push("--dry-run");
-                }
-                words
-            }
-            Self::GraphCustomize { name, .. } => vec!["graph", "customize", name],
-            Self::Portfolio { change } => std::iter::once("portfolio")
-                .chain(change.iter().map(String::as_str))
-                .chain(["--json"])
-                .collect(),
-            Self::DashboardQuery {
-                id,
-                expression,
-                revision,
-                ..
-            } => {
-                let mut words = vec!["desktop", "query"];
-                if let Some(revision) = revision {
-                    revision_flag = format!("--revision={revision}");
-                    words.push(&revision_flag);
-                }
-                words.extend(["--", id, expression]);
-                words
-            }
-            Self::DashboardPin {
-                id,
-                pinned,
-                revision,
-                ..
-            } => {
-                revision_flag = format!("--revision={revision}");
-                let verb = if *pinned { "pin" } else { "unpin" };
-                vec!["desktop", verb, &revision_flag, "--", id]
-            }
-            Self::DashboardRename {
-                id, name, revision, ..
-            } => {
-                revision_flag = format!("--revision={revision}");
-                query = format!("query:{id}");
-                vec!["desktop", "rename", &revision_flag, "--", &query, name]
-            }
-            Self::DashboardTile {
-                id, member, hidden, ..
-            } => {
-                path = format!("query:{id}/{member}");
-                let verb = if *hidden { "hide" } else { "show" };
-                vec!["desktop", verb, "-p", &path]
-            }
-            Self::DashboardSlots { id, revision, .. } => {
-                revision_flag = format!("--revision={revision}");
-                query = format!("query:{id}");
-                vec!["desktop", "layout", &query, "--save", &revision_flag]
-            }
-            Self::TileMove {
-                board,
-                member,
-                destination,
-                ..
-            } => {
-                path = format!("{board}/{member}");
-                vec!["desktop", "move", "-p", &path, "--destination", destination]
-            }
-            Self::PaneLayout { work, .. } => vec!["desktop", "layout", work, "--save"],
+            _ => return None,
         };
-        argv.extend(words.into_iter().map(str::to_owned));
-        argv
+        args.extend(words.into_iter().map(str::to_owned));
+        Some(
+            <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
+                .and_then(crate::lf::Cli::checked)
+                .map_err(anyhow::Error::from)
+                .map(|cli| (cli, args)),
+        )
+    }
+
+    /// What the destination printed, when this write's Work lives on another
+    /// Machine: its `lf … --json` prints what its API returns.
+    fn routed(&self) -> anyhow::Result<Option<serde_json::Value>> {
+        let Some(spelled) = self.cli() else {
+            return Ok(None);
+        };
+        let (cli, args) = spelled?;
+        let Some(forward) = super::work_route::forward(&cli, &args, self.directory())? else {
+            return Ok(None);
+        };
+        let (mut output, mut error) = (Vec::new(), Vec::new());
+        let ran = forward.run(
+            &cli,
+            self.directory(),
+            &mut super::mutation::CommandIo {
+                input: &mut std::io::empty(),
+                output: &mut output,
+                error: &mut error,
+            },
+        );
+        let diagnostics = String::from_utf8_lossy(&error);
+        if let Err(failed) = ran {
+            return Err(match diagnostics.trim() {
+                "" => failed,
+                said => failed.context(format!("the destination said: {said}")),
+            });
+        }
+        for line in diagnostics.lines() {
+            crate::journal::request::diagnostic(format_args!("{line}"));
+        }
+        Ok(Some(serde_json::from_slice(&output)?))
     }
 
     /// What the command reads from stdin.
     pub fn input(&self) -> Option<&str> {
         match self {
             Self::TaskSave { content, .. } => Some(content),
-            Self::NewChapter { plan, .. } => Some(plan),
-            Self::DashboardSlots { slots, .. } => Some(slots),
-            Self::PaneLayout { layout, .. } => Some(layout),
+            Self::DesktopDashboardSlots { slots, .. } => Some(slots),
+            Self::DesktopLayoutSave { layout, .. } => Some(layout),
             _ => None,
         }
     }
 
-    fn directory(&self) -> &Path {
+    pub(crate) fn directory(&self) -> &Path {
         match self {
-            Self::TaskComplete { directory, .. }
+            Self::TaskCreate { directory, .. }
+            | Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
-            | Self::TaskNotes { directory, .. }
-            | Self::TaskOwnership { directory, .. }
-            | Self::ShipStop { directory, .. }
+            | Self::TaskUpdate { directory, .. }
+            | Self::TaskClaim { directory, .. }
+            | Self::TaskUnassign { directory, .. }
+            | Self::TaskRun { directory, .. }
+            | Self::TaskShip { directory, .. }
+            | Self::TaskHold { directory, .. }
+            | Self::TaskSteer { directory, .. }
+            | Self::TaskReport { directory, .. }
+            | Self::TaskInterrupt { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
+            | Self::SessionSteer { directory, .. }
             | Self::SessionRename { directory, .. }
             | Self::SessionBind { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
-            | Self::WaveAdd { directory, .. }
-            | Self::PlanningRefresh { directory, .. }
-            | Self::NewChapter { directory, .. }
+            | Self::SessionMove { directory, .. }
+            | Self::WaveCreate { directory, .. }
+            | Self::WaveSync { directory, .. }
+            | Self::WavePlanBind { directory, .. }
+            | Self::WavePlanConnect { directory, .. }
+            | Self::WavePlanReteam { directory, .. }
             | Self::GraphCustomize { directory, .. }
-            | Self::DashboardQuery { directory, .. }
-            | Self::DashboardPin { directory, .. }
-            | Self::DashboardRename { directory, .. }
-            | Self::DashboardTile { directory, .. }
-            | Self::DashboardSlots { directory, .. }
-            | Self::TileMove { directory, .. }
-            | Self::PaneLayout { directory, .. } => directory,
-            Self::Portfolio { .. } => Path::new("/"),
+            | Self::RepoRelease { directory, .. }
+            | Self::CheckoutCommit { directory, .. }
+            | Self::CheckoutSync { directory, .. }
+            | Self::CheckoutCreate { directory, .. }
+            | Self::GraphRun { directory, .. }
+            | Self::SkillRun { directory, .. }
+            | Self::PrPublish { directory, .. }
+            | Self::PrOpen { directory, .. }
+            | Self::PrSubmit { directory, .. }
+            | Self::PrArm { directory, .. }
+            | Self::PrLand { directory, .. }
+            | Self::PrAbandon { directory, .. }
+            | Self::PrReconcile { directory }
+            | Self::PrRequestReview { directory, .. }
+            | Self::DesktopDashboardQuery { directory, .. }
+            | Self::DesktopDashboardPin { directory, .. }
+            | Self::DesktopDashboardUnpin { directory, .. }
+            | Self::DesktopDashboardRename { directory, .. }
+            | Self::DesktopDashboardHide { directory, .. }
+            | Self::DesktopDashboardShow { directory, .. }
+            | Self::DesktopDashboardSlots { directory, .. }
+            | Self::DesktopDashboardMove { directory, .. }
+            | Self::DesktopLayoutSave { directory, .. } => directory,
+            Self::DesktopPortfolioSet { .. }
+            | Self::AccountDisconnect { .. }
+            | Self::AccountConnect { .. }
+            | Self::AccountSet { .. }
+            | Self::AccountRedeemReset { .. }
+            | Self::AccountPause { .. }
+            | Self::AccountUnpause { .. }
+            | Self::AccountUse { .. }
+            | Self::ConfigSet { .. }
+            | Self::ConfigUnset { .. }
+            | Self::ConfigTheme { .. } => Path::new("/"),
         }
-    }
-
-    /// Where the write runs and `lf` records its Process: a Task command runs
-    /// from the Task's repository, a Wave command from the repository it is in.
-    fn repo(&self) -> anyhow::Result<PathBuf> {
-        let directory = self.directory();
-        match self {
-            Self::TaskComplete { issue, .. }
-            | Self::TaskReopen { issue, .. }
-            | Self::TaskAbandon { issue, .. }
-            | Self::TaskNotes { issue, .. }
-            | Self::TaskOwnership { issue, .. }
-            | Self::ShipStop { issue, .. }
-            | Self::TaskMove { issue, .. }
-            | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
-            Self::WaveAdd { .. } | Self::NewChapter { .. } => {
-                crate::repo::require_repo_root(directory, "this command")
-            }
-            _ => crate::repo::working_directory_in(directory),
-        }
-    }
-
-    /// Make the write on the caller's thread and return what `lf <argv>`
-    /// prints to stdout, recording its Process around it when `lf` would.
-    /// `None` when `lf` would send it to another Machine: nothing was written.
-    pub fn write(&self) -> anyhow::Result<Option<String>> {
-        let argv: Vec<String> = std::iter::once("lf".to_owned())
-            .chain(self.argv())
-            .collect();
-        let cli = Cli::try_parse_from(&argv)?;
-        if super::work_route::forward(&cli, &argv, self.directory())?.is_some() {
-            return Ok(None);
-        }
-        let repo = self.repo()?;
-        if !cli.command.as_ref().is_some_and(Commands::changes_work) {
-            return self.perform(&repo, &cli).map(Some);
-        }
-        let _settings = crate::config::settings::select_invocation(cli.setting_values()?);
-        crate::journal::with_call_process(&repo, &argv, || self.perform(&repo, &cli)).map(Some)
-    }
-
-    fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {
-        let command = cli.command.as_ref().context("a write names its command")?;
-        Ok(match self {
-            Self::TaskComplete { issue, .. } => {
-                task_complete(repo, issue, None)?;
-                format!("{issue}: completed\n")
-            }
-            Self::TaskReopen { issue, .. } => {
-                task_reopen(issue, None)?;
-                format!("{issue}: reopened; its Graph unchanged\n")
-            }
-            Self::TaskAbandon { issue, .. } => {
-                let identifier = crate::ops::task::task_abandon(repo, Some(issue), false)?;
-                format!("{identifier}: canceled; PRs and branches removed\n")
-            }
-            Self::TaskNotes { issue, notes, .. } => {
-                let update = TaskUpdate {
-                    description: Some(notes.clone()),
-                    ..TaskUpdate::default()
-                };
-                // Planning delivery starts right after the local commit and
-                // prints to stderr in `lf`; one that fails stays pending for
-                // the app's planning refresh to retry.
-                format!("{}: updated\n", task_edit(repo, issue, None, update)?.id)
-            }
-            Self::TaskOwnership { issue, claimed, .. } => {
-                use crate::ops::task_ownership::{change, OwnershipChange};
-                let requested = if *claimed {
-                    OwnershipChange::Claim
-                } else {
-                    OwnershipChange::Unassign
-                };
-                format!(
-                    "{}\n",
-                    serde_json::to_string(&change(repo, issue, requested)?)?
-                )
-            }
-            Self::ShipStop { issue, .. } => super::ship::stop(issue, None)?,
-            Self::TaskMove { issue, wave, .. } => {
-                let moved = task_move_membership(repo, issue, wave.as_deref())?;
-                format!("{}: membership saved\n", moved.id)
-            }
-            Self::TaskSave {
-                issue,
-                path,
-                revision,
-                content,
-                ..
-            } => pretty(&task_save(issue, path, revision, content)?)?,
-            Self::SessionRename { id, name, .. } => pretty(&super::session::renamed(id, name)?)?,
-            Self::SessionBind { id, task, .. } => pretty(&super::session::bound(id, task)?)?,
-            Self::SessionResume { directory, .. } | Self::SessionNew { directory, .. } => {
-                pretty(&super::session::prepared(cli, directory)?)?
-            }
-            Self::WaveAdd {
-                wave, objective, ..
-            } => pretty(&tokio::runtime::Runtime::new()?.block_on(
-                crate::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
-            )?)?,
-            Self::PlanningRefresh { directory, wave } => {
-                format!(
-                    "{}\n",
-                    super::waves::refreshed_status(directory, Some(wave))?
-                )
-            }
-            Self::NewChapter {
-                name,
-                plan,
-                preview,
-                ..
-            } => pretty(&crate::ops::chapter::new_chapter(
-                repo,
-                name,
-                plan.as_bytes(),
-                None,
-                *preview,
-            )?)?,
-            Self::GraphCustomize { name, .. } => {
-                format!("{}\n", crate::graph::customize(name, repo)?.display())
-            }
-            Self::Portfolio { .. } => {
-                let Commands::Portfolio { cmd: Some(cmd), .. } = command else {
-                    unreachable!("a portfolio write names its change")
-                };
-                format!(
-                    "{}\n",
-                    serde_json::to_string(&crate::portfolio::change(cmd)?)?
-                )
-            }
-            // Arrangement parses its own argv, so the app and `lf` reach the
-            // command's one function with the same arguments.
-            Self::DashboardQuery { directory, .. }
-            | Self::DashboardPin { directory, .. }
-            | Self::DashboardRename { directory, .. }
-            | Self::DashboardTile { directory, .. }
-            | Self::DashboardSlots { directory, .. }
-            | Self::TileMove { directory, .. }
-            | Self::PaneLayout { directory, .. } => {
-                let Commands::Desktop { cmd } = command else {
-                    unreachable!("arrangement is a desktop command")
-                };
-                let input = self.input().unwrap_or_default();
-                let saved =
-                    super::desktop::save_arrangement(None, directory, cmd, &mut input.as_bytes())?;
-                format!("{saved}\n")
-            }
-        })
     }
 }
 
-fn pretty(value: &impl Serialize) -> anyhow::Result<String> {
-    Ok(format!("{}\n", serde_json::to_string_pretty(value)?))
+fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
+    Ok(serde_json::to_value(value)?)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::Write;
 
     /// The JSON `RegistryQueryTests.servedWriteEncodings` encodes in Swift.
     #[test]
     fn desktop_encodings_name_their_writes() {
-        let write = |json: &str| serde_json::from_str::<Write>(json).unwrap().argv();
+        for json in [
+            r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#,
+            r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
+            r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
+            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
+            r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
+            r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
+            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","from":"implement","agent":"claude","approve":false}"#,
+            r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
+            r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
+            r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
+            r#"{"kind":"wave.plan.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
+            r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
+            r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
+            r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,
+            r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
+            r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
+            r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
+            r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
+            r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
+            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
+            r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
+            r#"{"kind":"account.use","login":"claude=maya@example.com"}"#,
+            r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
+            r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
+            r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.open","directory":"/r","title":"Spike","body":null,"agent":"claude"}"#,
+            r#"{"kind":"pr.submit","directory":"/r","strict":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.arm","directory":"/r","strict":true,"local":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.land","directory":"/r","wait_and_fix":true,"strict":false,"local":false,"worktree":null,"message":null,"title":null,"body":null,"agent":null}"#,
+            r#"{"kind":"pr.abandon","directory":"/r","branch":"spike","force":true}"#,
+            r#"{"kind":"pr.reconcile","directory":"/r"}"#,
+            r#"{"kind":"pr.request_review","directory":"/r","pr":null,"reviewers":["alice"]}"#,
+        ] {
+            let write: Write = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                serde_json::to_value(&write).unwrap(),
+                serde_json::from_str::<serde_json::Value>(json).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn routed_writes_spell_the_command_ssh_runs() {
+        let spelled = |json: &str| {
+            let (_, args) = serde_json::from_str::<Write>(json)
+                .unwrap()
+                .cli()
+                .expect("a routed write")
+                .unwrap();
+            args
+        };
         assert_eq!(
-            write(r#"{"write":"task_move","directory":"/r","issue":"FIX-1","wave":null}"#),
-            ["--cwd", "/r", "task", "move", "FIX-1", "--no-wave"]
-        );
-        assert_eq!(
-            write(
-                r#"{"write":"dashboard_pin","directory":"/r","id":"picked","pinned":false,"revision":3}"#
+            spelled(
+                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#
             ),
             [
-                "--cwd",
-                "/r",
-                "desktop",
-                "unpin",
-                "--revision=3",
-                "--",
-                "picked"
-            ]
-        );
-        assert_eq!(
-            write(
-                r#"{"write":"dashboard_query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#
-            ),
-            [
-                "--cwd",
-                "/r",
-                "desktop",
-                "query",
-                "--",
-                "picked",
-                "-state:done"
-            ]
-        );
-        assert_eq!(
-            write(r#"{"write":"ship_stop","directory":"/r","issue":"FIX-1"}"#),
-            ["--cwd", "/r", "--task", "FIX-1", "ship", "--stop"]
-        );
-        assert_eq!(
-            write(r#"{"write":"portfolio","change":["remove","/r"]}"#),
-            ["--cwd", "/", "portfolio", "remove", "/r", "--json"]
-        );
-        let chapter = serde_json::from_str::<Write>(
-            r#"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#,
-        )
-        .unwrap();
-        assert_eq!(chapter.input(), Some("{}"));
-        assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
-        assert_eq!(
-            write(
-                r#"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
-            ),
-            [
+                "lf",
                 "--cwd",
                 "/r",
                 "--repo",
@@ -602,8 +1301,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            write(r#"{"write":"session_new","directory":"/r","id":"session_1","agent":"codex"}"#),
+            spelled(r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#),
             [
+                "lf",
                 "--cwd",
                 "/r",
                 "--agent",
@@ -615,223 +1315,12 @@ mod tests {
                 "--json"
             ]
         );
-        let save = serde_json::from_str::<Write>(
-            r#"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
-        )
-        .unwrap();
-        assert_eq!(save.input(), Some("text"));
-    }
-
-    #[test]
-    fn every_write_parses_as_the_lf_command_it_names() {
-        let directory = PathBuf::from("/tmp/repo");
-        let writes = [
-            Write::TaskComplete {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::TaskReopen {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::TaskNotes {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                notes: "--not a flag".into(),
-            },
-            Write::TaskMove {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                wave: None,
-            },
-            Write::TaskSave {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                path: "a.txt".into(),
-                revision: "r".into(),
-                content: "text".into(),
-            },
-            Write::SessionRename {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                name: "-n".into(),
-            },
-            Write::SessionBind {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                task: "FIX-1".into(),
-            },
-            Write::WaveAdd {
-                directory: directory.clone(),
-                wave: "product".into(),
-                objective: None,
-            },
-            Write::PlanningRefresh {
-                directory: directory.clone(),
-                wave: "product".into(),
-            },
-            Write::TaskAbandon {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::NewChapter {
-                directory: directory.clone(),
-                name: "October".into(),
-                plan: "{}".into(),
-                preview: false,
-            },
-            Write::Portfolio {
-                change: vec!["add".into(), "/tmp/repo".into()],
-            },
-            Write::TaskOwnership {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                claimed: false,
-            },
-            Write::ShipStop {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-            },
-            Write::SessionResume {
-                directory: directory.clone(),
-                id: None,
-                task: Some("FIX-1".into()),
-                wave: None,
-                agent: Some("codex".into()),
-            },
-            Write::SessionNew {
-                directory: directory.clone(),
-                id: "session_1".into(),
-                agent: None,
-            },
-        ];
-        // Arrangement, a customized Graph and a chapter preview record nothing.
-        let arrangement = [
-            Write::GraphCustomize {
-                directory: directory.clone(),
-                name: "code".into(),
-            },
-            Write::NewChapter {
-                directory: directory.clone(),
-                name: "October".into(),
-                plan: "{}".into(),
-                preview: true,
-            },
-            Write::DashboardQuery {
-                directory: directory.clone(),
-                id: "picked".into(),
-                expression: "-state:done".into(),
-                revision: Some(3),
-            },
-            Write::DashboardPin {
-                directory: directory.clone(),
-                id: "picked".into(),
-                pinned: false,
-                revision: 3,
-            },
-            Write::DashboardRename {
-                directory: directory.clone(),
-                id: "picked".into(),
-                name: "-n".into(),
-                revision: 3,
-            },
-            Write::DashboardTile {
-                directory: directory.clone(),
-                id: "picked".into(),
-                member: "task:task_1".into(),
-                hidden: true,
-            },
-            Write::DashboardSlots {
-                directory: directory.clone(),
-                id: "picked".into(),
-                revision: 3,
-                slots: "null".into(),
-            },
-            Write::TileMove {
-                directory: directory.clone(),
-                board: "working-tasks".into(),
-                member: "task:task_1".into(),
-                destination: "task:task_2".into(),
-            },
-            Write::PaneLayout {
-                directory,
-                work: "task:task_1".into(),
-                layout: "{}".into(),
-            },
-        ];
-        let command = |write: &Write| {
-            let argv = std::iter::once("lf".to_owned()).chain(write.argv());
-            Cli::try_parse_from(argv)
-                .unwrap_or_else(|error| panic!("{write:?}: {error}"))
-                .command
-                .unwrap()
-        };
-        for write in writes {
-            assert!(command(&write).changes_work(), "{write:?}");
+        for json in [
+            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.claim","directory":"/r","issue":"FIX-1"}"#,
+        ] {
+            assert!(serde_json::from_str::<Write>(json).unwrap().cli().is_none());
         }
-        for write in arrangement {
-            assert!(!command(&write).changes_work(), "{write:?}");
-        }
-    }
-
-    /// An in-app write lasts one call in a process that keeps running: one
-    /// that panics still ends its Process, and nothing it set outlives it.
-    #[test]
-    fn a_write_that_panics_ends_its_process_and_leaves_no_identity() {
-        use crate::journal::{
-            current_lf_process_id, has_caller, read_events, traces_root, with_call_process,
-            LfEventType, LF_PROCESS_ID_ENV, LF_TRACE_ID_ENV,
-        };
-        let guard = crate::journal::TestLedgerGuard::new();
-        std::env::remove_var(LF_PROCESS_ID_ENV);
-        std::env::remove_var(LF_TRACE_ID_ENV);
-        crate::journal::open_ledger().unwrap();
-        let repo = loopflow_test_support::TestRepo::new();
-        let write = Write::SessionRename {
-            directory: repo.path().to_path_buf(),
-            id: "session_1".into(),
-            name: "renamed".into(),
-        };
-        let argv: Vec<String> = std::iter::once("lf".to_owned())
-            .chain(write.argv())
-            .collect();
-
-        let panicked = std::cell::Cell::new(None);
-        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            with_call_process(repo.path(), &argv, || -> anyhow::Result<()> {
-                panicked.set(current_lf_process_id());
-                panic!("rename broke")
-            })
-        }));
-        assert!(unwound.is_err());
-        let panicked = panicked.take();
-        assert!(panicked.is_some());
-        assert_eq!(current_lf_process_id(), None);
-        assert_eq!(std::env::var_os(LF_PROCESS_ID_ENV), None);
-        assert_eq!(std::env::var_os(LF_TRACE_ID_ENV), None);
-
-        let (next, parented) = with_call_process(repo.path(), &argv, || {
-            Ok((current_lf_process_id(), has_caller()))
-        })
-        .unwrap();
-        assert!(next.is_some() && next != panicked);
-        assert!(!parented, "an in-app write has no parent");
-
-        let errors: Vec<_> = std::fs::read_dir(traces_root(repo.path()))
-            .unwrap()
-            .flat_map(|trace| read_events(&trace.unwrap().path()).unwrap())
-            .filter(|event| event.event == LfEventType::Errored)
-            .filter_map(|event| event.error)
-            .collect();
-        assert_eq!(errors, ["panicked: rename broke"]);
-        let running: i64 = rusqlite::Connection::open(guard.home().join("loopflow.db"))
-            .unwrap()
-            .query_row(
-                "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(running, 0);
     }
 }

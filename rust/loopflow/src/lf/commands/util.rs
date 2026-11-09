@@ -95,11 +95,8 @@ pub(crate) fn resume_session_with_env(
         config.agent()?,
         config.agent()?,
     );
-    if let Some(provider) = provider_session {
-        if session.provider.as_deref() != Some("codex") {
-            config.task_prompt.clear();
-        }
-        config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
+    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+        config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
     config.env.insert(
@@ -284,6 +281,17 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
+/// The model a native launch names (`--model opus`), when it does.
+fn native_model_argument(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == "--model" || arg == "-m")
+        .and_then(|index| args.get(index + 1).cloned())
+        .or_else(|| {
+            args.iter()
+                .find_map(|arg| arg.strip_prefix("--model=").map(str::to_owned))
+        })
+}
+
 fn native_provider_attachment(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -435,6 +443,23 @@ fn session_command_status_with_env(
     })
 }
 
+/// Claude's folder-trust question is the provider asking a person, before any
+/// hook can say so; a hidden pane would otherwise hold it unseen. The provider's
+/// first reading after an answer replaces this one.
+fn report_folder_trust_dialog(attachment: &crate::harness::agent_process::AttachmentOwner) {
+    let (store, session, expected) = attachment;
+    let reading = crate::session::SessionActivity {
+        preview: None,
+        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        open_tools: 0,
+        pending_input: 1,
+        yielded: false,
+    };
+    if let Err(error) = store.record_session_activity(session, expected, &reading) {
+        tracing::warn!(%error, session, "failed to report Claude's folder-trust dialog");
+    }
+}
+
 fn run_native_session(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -497,7 +522,8 @@ fn run_native_session(
                 agent_session.cloned(),
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
-                command.isolate,
+                native_model_argument(&command.args),
+                Some(command.cwd.clone()),
             )
         })
         .transpose()
@@ -534,6 +560,9 @@ fn run_native_session(
     }
     if command.program == "claude" {
         crate::harness::claude_trust::accept_created_worktree(&process);
+        if crate::harness::claude_trust::awaits_dialog(&process) {
+            report_folder_trust_dialog(&attachment);
+        }
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
     if let Some(context) = &command.context {
@@ -575,7 +604,6 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned(), account.clone());
         }
         let exit = crate::harness::native_exit::NativeExit {
-            isolate: command.isolate,
             session: attachment.1.clone(),
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
@@ -704,7 +732,7 @@ fn observe_client(
             endpoint: endpoint.clone(),
             thread: thread.clone(),
             account: account.clone(),
-            isolate: command.isolate,
+            cwd: command.cwd.clone(),
             client: (client, born),
             input: command.input.clone(),
         },
@@ -941,14 +969,13 @@ fn run_codex_native(
             .join()
             .map_err(|_| anyhow!("Codex startup worker panicked"))?
     })?;
-    let mut client = crate::agent::native_connection_command(
+    let client = crate::agent::native_connection_command(
         command.cwd.clone(),
         &opened.thread,
         opened.endpoint,
         opened.input,
         command.attachment.clone(),
     );
-    client.isolate = command.isolate;
     run_native_session(
         &client,
         environment,
@@ -1195,7 +1222,6 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1339,7 +1365,7 @@ mod tests {
             let rows = store.processes_since(0).unwrap();
             let agents = rows
                 .iter()
-                .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+                .filter_map(crate::process::ProcessEntry::as_agent)
                 .collect::<Vec<_>>();
             let saved = store
                 .session_for_artifact(&capture.artifact_key())
@@ -1352,7 +1378,7 @@ mod tests {
                     && agent.completed_at.is_some()));
             assert_eq!(
                 rows.iter()
-                    .filter(|row| row.kind == crate::process::ProcessKind::Lf)
+                    .filter_map(crate::process::ProcessEntry::as_lf)
                     .count(),
                 index + 1
             );
@@ -1360,6 +1386,7 @@ mod tests {
             assert!(attachment.lf_process_id.is_none());
             assert!(rows
                 .iter()
+                .filter_map(crate::process::ProcessEntry::as_lf)
                 .any(|row| row.id == attachment.provider_lf_process_id
                     && row.pid == Some(std::process::id())
                     && row.completed_at.is_some()));
@@ -1407,7 +1434,6 @@ mod tests {
             }
         });
         let command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1430,7 +1456,6 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             program: "/bin/sh".into(),
@@ -1471,7 +1496,7 @@ mod tests {
         let rows = store.processes_since(0).unwrap();
         let agents = rows
             .iter()
-            .filter(|row| row.kind == crate::process::ProcessKind::Agent)
+            .filter_map(crate::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         assert!(agents
@@ -1489,7 +1514,7 @@ mod tests {
         assert_eq!(failed, 1);
         for agent in agents {
             let parent = store
-                .process(agent.parent_lf_process_id.as_ref().unwrap())
+                .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap();
             assert_eq!(parent.pid, Some(std::process::id()));
@@ -1535,9 +1560,8 @@ mod tests {
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
-            let before = store.process(&attached.agent_process_id)?.unwrap();
+            let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
-                isolate: None,
                 launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
@@ -1550,7 +1574,7 @@ mod tests {
             let result =
                 session_command_status_with_env(&command, &environment, None, None, None, None);
             let alive = provider.try_wait()?.is_none();
-            let unchanged = store.process(&attached.agent_process_id)? == Some(before);
+            let unchanged = store.agent_process(&attached.agent_process_id)? == Some(before);
             command.remote = None;
             let local =
                 session_command_status_with_env(&command, &environment, None, None, None, None);
@@ -1619,7 +1643,6 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
-                isolate: None,
                 launch: None,
                 input: None,
                 context: None,
@@ -1643,7 +1666,7 @@ mod tests {
                 "{error:#}"
             );
             // The conflict is found before any provider runs.
-            let agent = store.process(&attachment.agent_process_id)?;
+            let agent = store.agent_process(&attachment.agent_process_id)?;
             assert!(
                 agent.as_ref().and_then(|process| process.pid).is_none(),
                 "a provider was launched despite the conflict: {agent:?}"

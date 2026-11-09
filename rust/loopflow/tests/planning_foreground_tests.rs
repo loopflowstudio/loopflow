@@ -235,7 +235,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let cold = run(
         &target,
         right.path(),
-        &["task", "comment", &first, "--json"],
+        &["task", "report", &first, "Cold read", "--json"],
     );
     assert!(serde_json::from_str::<serde_json::Value>(&cold).is_ok());
     assert_eq!(
@@ -318,7 +318,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         right.path(),
         &[
             "task",
-            "comment",
+            "report",
             fixture.task.id.as_str(),
             "Keep the running conversation",
             "--json",
@@ -329,7 +329,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         left.path(),
         &[
             "task",
-            "comment",
+            "report",
             fixture.task.id.as_str(),
             "Saved on source too",
             "--json",
@@ -758,7 +758,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|task| task["id"] == fixture.task.id.as_str()));
+            .any(|task| task["task"]["id"] == fixture.task.id.as_str()));
         let list: serde_json::Value =
             serde_json::from_str(&run(&target, right.path(), &["wave", "list", "--json"])).unwrap();
         let wave = list
@@ -984,13 +984,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
     run(
         &source,
         left.path(),
-        &[
-            "task",
-            "comment",
-            &task,
-            "Start with the CPU path",
-            "--json",
-        ],
+        &["task", "report", &task, "Start with the CPU path", "--json"],
     );
     assert!(!refs("refs/loopflow/planning/users/*").is_empty());
     assert!(refs("refs/loopflow/planning/shared/*").is_empty());
@@ -1004,7 +998,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
         left.path(),
         &[
             "task",
-            "comment",
+            "report",
             &task,
             "Moved to the shared plan",
             "--json",
@@ -1016,8 +1010,8 @@ fn personal_plan_moves_to_shared_default_with_identity() {
     // Lee's fresh Home, with no planning config, reads the same plan.
     let comments = |repo: &Path, home: &Path| -> Vec<String> {
         let listed: serde_json::Value =
-            serde_json::from_str(&run(repo, home, &["task", "comment", &task, "--json"])).unwrap();
-        listed["comments"]
+            serde_json::from_str(&run(repo, home, &["task", "status", &task, "--json"])).unwrap();
+        listed["comments"]["comments"]
             .as_array()
             .unwrap()
             .iter()

@@ -161,19 +161,20 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             _ => None,
         },
     };
-    let taken = conversation
-        .as_ref()
-        .map(|session| {
-            take(
+    let taken = match conversation.as_ref() {
+        Some(session) => {
+            await_provider_identity(&store.sqlite, &session.id).await?;
+            Some(take(
                 store,
                 session,
                 Departure::Machine {
                     machine: to.clone(),
                     task: Some(task.id.clone()),
                 },
-            )
-        })
-        .transpose()?;
+            )?)
+        }
+        None => None,
+    };
     let handoff = hand_off(&store.sqlite, &task.id, to)?;
     if let Some(session) = &conversation {
         store.sqlite.complete_moved_session(&session.id, to)?;
@@ -192,6 +193,25 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             graph: store.sqlite.task_graph_record(&task.id)?,
         }),
     })
+}
+
+/// A conversation checked out moments ago may still be launching: its
+/// attachment exists, but its provider has not recorded a PID. Give it the
+/// owner's bind time so the stop meets a provider, or an attempt that ended.
+async fn await_provider_identity(store: &SqliteStore, session: &str) -> Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let starting = store
+            .session_attachment(session)?
+            .is_some_and(|attachment| {
+                crate::journal::agent_evidence(store, &attachment.agent_process_id)
+                    == ProcessIdentityEvidence::Unknown
+            });
+        if !starting || std::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// The Session as it leaves: its agent stopped, its transcript read.
@@ -252,7 +272,7 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
 async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
     let live = |process: &crate::process::LfProcess| {
         process.completed_at.is_none()
-            && crate::journal::process_evidence(&store.sqlite, &process.id)
+            && crate::journal::lf_evidence(&store.sqlite, &process.id)
                 == ProcessIdentityEvidence::Live
     };
     let processes: Vec<crate::process::LfProcess> = store
@@ -288,7 +308,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
         let running: Vec<String> = processes
             .iter()
             .filter(|process| {
-                crate::journal::process_evidence(&store.sqlite, &process.id)
+                crate::journal::lf_evidence(&store.sqlite, &process.id)
                     == ProcessIdentityEvidence::Live
             })
             .map(|process| process.id.to_string())
@@ -372,13 +392,7 @@ fn history(store: &SqliteStore, session: &LfSession) -> Result<Option<MovedHisto
         );
     };
     let thread = reference.agent_session;
-    let located = crate::transcript::locate(
-        store,
-        harness,
-        &thread,
-        reference.account_id.as_ref(),
-        &session.cwd,
-    )?;
+    let located = crate::transcript::locate(store, harness, &thread, &session.cwd)?;
     let (path, home) = match located {
         Located::Found {
             source: Source::File(path),
@@ -475,13 +489,9 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     else {
         bail!("unknown provider {provider}");
     };
-    let home = crate::transcript::conversation_home(
-        &store.sqlite,
-        provider,
-        &history.agent_session_id,
-        None,
-    )?
-    .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
+    let home =
+        crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
+            .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
     let base = match provider {
         Provider::Claude => home.join("projects").join(claude_project(&cwd)),
         _ => home,
@@ -541,7 +551,7 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let path = root.join(name);
     anyhow::ensure!(
         !path.exists(),
-        "{} exists but is not repository {repository} here; run `lf repository --bind {repository}` in it, then move again",
+        "{} exists but is not repository {repository} here; run `lf repo --bind {repository}` in it, then move again",
         path.display()
     );
     fs::create_dir_all(&root)?;

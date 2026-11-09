@@ -118,6 +118,8 @@ struct TaskGraphTests {
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
+        let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
+        #expect(held.state == .waiting)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
@@ -175,7 +177,7 @@ struct TaskGraphTests {
         #expect(GraphLoopGeometry.below(1) > GraphLoopGeometry.below(0))
     }
 
-    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions", .requiresDisplay)
+    @Test("Task navigation reveals the existing conversation and keeps the Workflow and companions", .requiresDisplay)
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -209,16 +211,16 @@ struct TaskGraphTests {
                                     work: work, runs: [run])
         let calls = CallLog()
         let roadmapJSON = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
             case ("session", "resume") where args.contains("--task"):
                 return try await reader.ensure(issue: args[3])
             case ("session", "resume"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
-            case ("desktop", "sessions"): return try await reader.inventory()
-            case ("desktop", "plan"): return roadmapJSON
-            case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
+            case ("session", "list"): return try await reader.inventory()
+            case ("plan", "list"): return roadmapJSON
+            case ("machine", "self"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }
@@ -255,20 +257,19 @@ struct TaskGraphTests {
         try await eventually("planning arrives") { model.task(id: "issue-now") != nil }
         let task = try #require(model.task(id: "issue-now")?.task)
         let identity = try #require(task.reference.workspace?.identity)
+        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
         model.bindWorkspaces(registry, repository: "fixture-repository")
         model.select(.task(id: task.id))
         let key = model.workspaceKey(for: .task(id: task.id), repository: "fixture-repository")
         let panes = registry.workspace(for: key, title: task.task.name, location: identity).multiplexer
-        try await settle()
-        #expect(panes.focusedPane.sessionId == nil)
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "resume", "--task"]) })
+        try await eventually("Task navigation reveals its existing conversation") { panes.focusedPane.sessionId == record.id }
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["task", "run"]) })
 
-        // A separate explicit link opens the known conversation, not bare navigation.
-        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
+        // An exact link reuses the automatically revealed conversation.
         let link = TaskLink(issue: task.task.identifier, repo: repo, session: record.id)
         await model.openTaskLink(link)
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "resume", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["task", "run"]) })
 
         // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
@@ -317,7 +318,7 @@ private actor CallLog {
     func add(_ args: [String]) { calls.append(args) }
 }
 
-/// Scripted watches: every request is answered with the plan, Sessions and
+/// Scripted subscriptions: every request is answered with the plan, Sessions and
 /// Task status as they stand.
 @MainActor
 private final class ScriptedReader {
@@ -411,7 +412,7 @@ struct TaskGraphProofTests {
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
-            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+            terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
             terminals.append(terminal)
         }
@@ -696,11 +697,11 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("desktop", "plan"):
+        case ("plan", "list"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"truncated":false,"items":[]}"#
-        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
+        case ("session", "history"): return #"{"truncated":false,"items":[]}"#
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)

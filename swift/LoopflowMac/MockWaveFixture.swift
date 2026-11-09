@@ -205,7 +205,7 @@ enum MockWaveFixture {
             "items": [
               {
                 "task": {
-                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo_id": "repo_00000000000040008000000000000001",
                   "repo": "/src/loopflow",
                   "project_id": "project-1",
                   "wave_id": "wave-1",
@@ -288,11 +288,11 @@ enum MockWaveFixture {
                     "merge_commit": null,
                     "abandoned_at": null
                   },
-                "section": "waiting"
+                "section": "working"
               },
               {
                 "task": {
-                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo_id": "repo_00000000000040008000000000000001",
                   "repo": "/src/loopflow",
                   "project_id": "project-1",
                   "wave_id": "wave-1",
@@ -335,7 +335,7 @@ enum MockWaveFixture {
                   "reason": "Task is ready to start"
                 },
                 "pr": null,
-                "section": "not_started"
+                "section": "backlog"
               }
             ],
             "truncated": false

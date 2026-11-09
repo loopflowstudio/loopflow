@@ -16,3 +16,6 @@ demo or QA; no open product question resulted from these failures.
 The credential-recovery write-docs retry reported: "Error: No Desktop window
 shows repo_30115cfb3a8ecb51494082029703a1fa. Open one with `lf open`; nothing
 changed." The docs remain at their recorded paths; no alternate editor opened.
+
+The latest November 8 write-docs retry returned success and reported both
+document paths opening in Loopflow Desktop. No visual inspection was performed.

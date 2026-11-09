@@ -7,6 +7,12 @@ Reuse the local attach flow and wire shapes. The planned contract lives in
 This checkout contains the planned contract only. The listener, mobile settings
 and bulk protocol are outside this Task; no product decision is missing.
 
+The existing local service issues 22-character base64url tickets for one Unix
+UID, consumes them on every redemption attempt and sweeps expired tickets on
+issue. Its 60-second lifetime uses `Instant`; expiry across host sleep remains
+unfinished alongside remote identity binding. The existing local test covers
+foreign consumption, single use, the exact expiry boundary and sweeping.
+
 ## Transport dependency — November 8, 2026
 
 LOO-718's PR #1812 supplies `Admission::Remote { node: String, user: u64 }` through
@@ -26,7 +32,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9, 00:08 UTC implementation recheck reconfirmed the dependency:
+The November 9, 00:45 UTC implementation recheck reconfirmed the dependency:
 `lf task status LOO-718 --json` reported the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -38,6 +44,10 @@ above are from the earlier inspection, not a landed implementation.
 The authenticated transport is still absent from this checkout and origin/main.
 Remote attach implementation and authenticated acceptance checks remain
 unfinished; the existing local UID tests cannot exercise that transport.
+The Graph decision remains stop for the external dependency: LOO-718's
+authenticated transport must land before this Task can implement and validate
+remote tickets. No product decision is missing; the separate mobile PR is
+outside this Task's landing authorization.
 
 ## Delete — do not maintain
 
@@ -66,6 +76,9 @@ or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
 60 seconds with a clock advance representing host sleep, expired-ticket sweeping,
 and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
+
+Retain local attachment and its consume-on-attempt behavior through the shared
+store, including the unchanged ticket response and bridge wire fixtures.
 
 Visual review remains for demo or QA; Desktop opening results are in
 `questions.md`.

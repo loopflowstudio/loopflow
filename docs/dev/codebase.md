@@ -8,7 +8,7 @@ Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
 ```bash
-rg "CaptureHandle" rust/loopflow/src
+rg "LfProcessRuntime" rust/loopflow/src
 rg "WorkRef" rust/loopflow/src
 uv run python scripts/check_architecture.py
 ```
@@ -41,6 +41,7 @@ subprocess edge to one concept.
 | Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
+| invocation resources | [`process/runtime.rs`](../../rust/loopflow/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |

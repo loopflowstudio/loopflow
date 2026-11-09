@@ -149,6 +149,19 @@ The LOO-441 names are integrated. Process inventory readers return
 `AgentProcess`. Both IDs are UUID text in the one `processes.id` column; only
 the row's `kind` decides which type it reads as.
 
+A skill invocation keeps one `LfProcess` identity while retries replace its
+`AgentProcess`. `process::LfProcessRuntime` is the shared in-memory resource
+handle for that work: its private state holds the current attachment, provider
+thread/account and outcome. It has no separate execution ID or persisted
+lifecycle. Helper requests inside a mechanical command can scope their own
+runtime resources under the same command provenance.
+
+`session_record::SessionRecorder` publishes the captured input and writes attempt
+history and the terminal receipt. It cannot launch or stop a provider. Native
+exit adopts only its recording position through `CaptureHandoff`; attachment
+cleanup remains with the process owner. Runtime cleanup runs before receipt
+writing, so a recording failure cannot skip cleanup or stop a replacement.
+
 ## Definition and execution projections
 
 `GraphCatalogEntry` carries the compiled graph and `GraphComposition`

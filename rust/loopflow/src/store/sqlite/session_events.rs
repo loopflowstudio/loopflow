@@ -1507,7 +1507,7 @@ mod tests {
                     .claim_session_attachment(&session.id, Some(&original), &second, false)
                     .unwrap();
                 assert!(matches!(
-                    crate::session_record::finish_session_attachment(
+                    crate::process::finish_session_attachment(
                         &store,
                         &session.id,
                         &original,
@@ -1521,13 +1521,8 @@ mod tests {
             } else {
                 original
             };
-            crate::session_record::finish_session_attachment(
-                &store,
-                &session.id,
-                &current,
-                "completed",
-            )
-            .unwrap();
+            crate::process::finish_session_attachment(&store, &session.id, &current, "completed")
+                .unwrap();
             // Close leaves reaping to the parent; an unreaped zombie is dead.
             assert_eq!(
                 crate::journal::process_identity_evidence(child.id(), started),

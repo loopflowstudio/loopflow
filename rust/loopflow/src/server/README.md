@@ -393,9 +393,8 @@ and send `attach` as its first message, without a `hello` exchange:
 Both connections must authenticate with the same Tailscale node stable ID and
 user ID; the same account on another device does not match. A ticket, `hello`
 name, `client_id`, login text or proxy's Unix UID cannot replace that authentication.
-Local and remote tickets are not interchangeable. Each ticket opens one bridge
-within 60 seconds of issuance, including host sleep; expiry does not close an
-open bridge.
+Local and remote tickets are not interchangeable. The 60-second deadline includes
+host sleep; expiry does not close an open bridge.
 
 Redemption uses the same consume-on-attempt and rejection rules as local
 attachment above. Request a fresh ticket before reconnecting; never replay a

@@ -2,6 +2,9 @@
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
+The shipping docs are `docs/server.md` and `rust/loopflow/src/server/README.md`;
+read both before implementation. The write-docs pass retained their existing
+contract and planned/local-only wording.
 
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the shared attach rules in one place; the remote section adds only its
@@ -9,29 +12,23 @@ exchange example, authentication and expiry requirements.
 
 ## Transport dependency — November 9, 2026 UTC
 
-LOO-718's PR #1812 supplies `Admission::Remote { node: String, user: u64 }` through
+Previously inspected LOO-718 revisions supply `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
 `UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
 through `host.permits`.
 
-Two inspected revisions differ:
+Those revisions share `server/ticket.rs` between terminal and bulk transfer,
+leave foreign attempts unconsumed and expire with `Instant`, contrary to this
+Task's consume-on-attempt and host-sleep requirements. Their wire and lifetime
+differences are recorded in
+`9de33d514bb85801b3ff24bbc7f229aaaae0bc46:scratch/design.md`.
 
-- Earlier published head `b222504a8ededd0f26dbe01e404b1bcb9f446d14`: 30-second UUID-text
-  tickets and the older `ticket` / `admitted` wire flow.
-- Clean mobile checkout `682e2492bb791dbc7b3c786a68cdfcce00943138`: shared
-  60-second lifetime and 22-character base64url tokens.
-
-Both share `server/ticket.rs` between terminal and bulk transfer, bind tickets to
-node and user, leave foreign attempts unconsumed and expire with `Instant`.
-The mobile checkout tests redemption after foreign attempts, contrary to this
-Task's consume-on-attempt contract.
-
-The November 9 implementation check at 18:54 UTC found PR #1812 OPEN at
+The November 9 implementation check at 19:32 UTC found PR #1812 still OPEN at
 `2f89c2558347e63e40a679a0d59adefa1cf2d84b`, without auto-merge (`gh pr view`).
-That revision's ticket implementation has not been inspected; the two revisions
-above remain historical findings. `git fetch origin main`
-returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
-transport file. The separate mobile checkout findings above are not a landed
+That revision's ticket implementation has not been inspected; the earlier
+findings do not establish its behavior. `git fetch origin main`
+returned `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b`; `git ls-tree` found neither
+transport file. The separate mobile checkout findings are not a landed
 implementation. `lf task status LOO-718 --json` still reports `feature` at `demo`,
 with PR #1812 open.
 

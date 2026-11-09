@@ -90,6 +90,37 @@ thread; same-account retry retains it. Generic stop still preserves takeover.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
 
+## Runtime and recording
+
+```text
+LfProcess: lf implement
+├── AgentProcess A: exits before completing the work
+└── AgentProcess B: retries → completes
+```
+
+Provider replacement keeps the skill's `LfProcess` identity. Its
+`process::LfProcessRuntime` shares the current attachment, retry identity and
+outcome across callers. It is an in-memory resource handle, with no additional
+execution ID or persisted lifecycle. Helper requests can scope resources under
+their command's provenance.
+
+`SessionRecorder` publishes captured input and writes attempt history and the
+terminal receipt. Recording grants no process control. The runtime retains the
+store that admitted its attachment; harness dispatch keeps an immutable snapshot
+so an old callback cannot stop a replacement. Account and thread observations
+update runtime state before best-effort recording, keeping retries on the known
+conversation even when history writes fail.
+
+Completion settles the attachment before writing its receipt. A headless caller
+still returns an error if that write fails; retrying the receipt can record the
+same outcome but cannot restart provider work or change the settled result.
+Native exit instead adopts a plain recorder through `CaptureHandoff`, with
+attachment cleanup owned separately by the process owner. Its recording failures
+are logged without changing the provider's exit result.
+
+The [harness guide](../../rust/loopflow/src/harness/README.md) maps these
+responsibilities to source files.
+
 ## Publish before spawn
 
 1. Resolve one Machine for the store and payload root; validate typed ancestry.

@@ -39,7 +39,7 @@ pub(crate) fn latest_in(
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
     let row = conn.query_row(
-        "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type') IN ('provider_transition','agent_session_selected') ORDER BY seq DESC LIMIT 1",
+        "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND (CASE WHEN json_valid(payload) THEN json_extract(payload,'$.type') END) IN ('provider_transition','agent_session_selected') ORDER BY seq DESC LIMIT 1",
         [session], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))).optional()?;
     row.map(|(payload, at)| decode(&payload, at)).transpose()
 }
@@ -95,8 +95,8 @@ pub(crate) fn observe_in(
     }
     let lineage: Option<String> = conn.query_row(
         "SELECT e.payload FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-         WHERE s.id=?1 AND e.captured_event=s.current_capture AND json_extract(e.payload,'$.type')='provider_lineage'
-         AND NOT EXISTS(SELECT 1 FROM session_events changed WHERE changed.session_id=s.id AND changed.captured_event=s.current_capture AND json_extract(changed.payload,'$.type')='provider_transition')
+         WHERE s.id=?1 AND e.captured_event=s.current_capture AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.type') END)='provider_lineage'
+         AND NOT EXISTS(SELECT 1 FROM session_events changed WHERE changed.session_id=s.id AND changed.captured_event=s.current_capture AND (CASE WHEN json_valid(changed.payload) THEN json_extract(changed.payload,'$.type') END)='provider_transition')
          ORDER BY e.seq DESC LIMIT 1", [session], |row| row.get(0)).optional()?;
     let lineage: Option<ProviderLineage> = lineage.map(|s| serde_json::from_str(&s)).transpose()?;
     let from_thread = lineage
@@ -143,7 +143,7 @@ impl SqliteStore {
 
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare("SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type') IN ('provider_transition','agent_session_selected') ORDER BY seq")?;
+        let mut statement = conn.prepare("SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND (CASE WHEN json_valid(payload) THEN json_extract(payload,'$.type') END) IN ('provider_transition','agent_session_selected') ORDER BY seq")?;
         let rows = statement.query_map([session], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -235,6 +235,11 @@ mod tests {
         let first = store
             .claim_session_attachment("conversation", None, &owner, false)
             .unwrap();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed','unreadable',1,'not JSON',current_capture FROM agent_sessions WHERE id='conversation'",
+            [],
+        ).unwrap();
         store
             .record_session_agent_session("conversation", &first, &"native".into())
             .unwrap();
@@ -282,5 +287,6 @@ mod tests {
         let empty = store.provider_transition("conversation").unwrap().unwrap();
         assert_eq!(empty.kind, TransitionKind::Started);
         assert_eq!(empty.from_provider_session.as_deref(), Some("fork"));
+        assert_eq!(store.provider_transitions("conversation").unwrap().len(), 4);
     }
 }

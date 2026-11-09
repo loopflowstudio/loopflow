@@ -1316,15 +1316,15 @@ mod tests {
     #[test]
     fn desktop_encodings_name_their_writes() {
         for json in [
-            r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null}"#,
+            r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#,
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
-            r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#,
+            r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
-            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","from":"implement","agent":"claude","approve":false}"#,
+            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
             r#"{"kind":"task.ship","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
@@ -1388,7 +1388,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            spelled(r#"{"kind":"session.new","directory":"/r","id":"session_1","agent":"codex"}"#),
+            spelled(
+                r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#
+            ),
             [
                 "lf",
                 "--cwd",
@@ -1399,7 +1401,9 @@ mod tests {
                 "new",
                 "session_1",
                 "--prepare",
-                "--json"
+                "--json",
+                "--request-id",
+                "new-thread"
             ]
         );
         for json in [

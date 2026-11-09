@@ -803,7 +803,7 @@ fn assert_background_conversation(run_graph: bool) {
             ]),
     ))
     .unwrap();
-    let id = created["id"].as_str().unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
     let worktree = if run_graph {
         succeed(
@@ -912,7 +912,7 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
             .args(["task", "create", "--title", "Checkout alone", "--json"]),
     ))
     .unwrap();
-    let id = created["id"].as_str().unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
     // A Machine with no provider installed has nothing to start. A real
     // Machine always has its logs directory, where the skip is recorded.
     fs::create_dir_all(home.path().join("machine/logs")).unwrap();

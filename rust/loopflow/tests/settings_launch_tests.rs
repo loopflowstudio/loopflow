@@ -832,7 +832,7 @@ def worker(task):
 
 worker(os.environ['SETTINGS_TASK'])
 receipt = json.loads(run('task', 'create', '--title', 'Child created by selected Session', '--json'))
-child = receipt['id']
+child = receipt['task']['id']
 worker(child)
 with (home / 'session-children.jsonl').open('a') as output:
     output.write(json.dumps({'args': args, 'child': child}) + '\n')

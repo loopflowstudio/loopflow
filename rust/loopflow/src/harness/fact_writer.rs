@@ -1264,6 +1264,14 @@ mod tests {
     #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
+        let turns = || {
+            store
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.provider_turn.is_some())
+                .collect::<Vec<_>>()
+        };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut writer = writer(&store, &attachment);
             let mut decoder = CodexDecoder::default();
@@ -1283,7 +1291,7 @@ mod tests {
             for message in messages {
                 hear(&mut decoder, &mut writer, message);
             }
-            let before = store.session_history("conversation", 0, 0).unwrap();
+            let before = turns();
             assert_eq!(
                 before.last().unwrap().lf_process_id,
                 attachment.lf_process_id.as_ref().map(ToString::to_string)
@@ -1306,7 +1314,7 @@ mod tests {
                 &mut writer,
                 json!({"id":2,"result":{"turn":{"id":turn}}}),
             );
-            assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
+            assert_eq!(turns(), before);
         }
         let mut writer = writer(&store, &attachment);
         let mut current = CodexDecoder::default();

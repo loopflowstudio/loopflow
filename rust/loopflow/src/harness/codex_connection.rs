@@ -1034,6 +1034,16 @@ mod tests {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let (store, attachment, database) = fixture(home.path());
         store
+            .record_agent_process_identity(
+                "conversation",
+                &attachment,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        store
             .record_session_agent_session("conversation", &attachment, &"native-thread".into())
             .unwrap();
         let selected = || -> String {
@@ -1107,7 +1117,10 @@ mod tests {
         let history = store.session_history("conversation", 0, 0).unwrap();
         let selection = history
             .iter()
-            .find(|event| event.payload["type"] == "provider_transition")
+            .find(|event| {
+                event.payload["type"] == "provider_transition"
+                    && event.payload["transition"]["to_provider_session"] == "fresh"
+            })
             .expect("the change is in selection history");
         assert_eq!(
             selection.payload["transition"]["from_provider_session"],

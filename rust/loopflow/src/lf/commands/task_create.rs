@@ -64,6 +64,17 @@ pub fn create(
             return Err(error);
         }
     };
+    if let Some(provider) = crate::config::load_config_or_default(Some(repo))
+        .planning_transport()
+        .remote_name()
+        .filter(|_| receipt.task.linear_id.is_none())
+    {
+        writeln!(
+            io.error,
+            "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
+            receipt.task.identifier
+        )?;
+    }
     if *json {
         writeln!(io.output, "{}", serde_json::to_string_pretty(&receipt)?)?;
     } else {

@@ -180,7 +180,7 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
             String::from_utf8_lossy(&output.stderr)
         );
         let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(ids.insert(task["id"].as_str().unwrap().to_owned()));
+        assert!(ids.insert(task["task"]["id"].as_str().unwrap().to_owned()));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("Creation identity"));
     }
     let id = ids.first().unwrap();
@@ -631,7 +631,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         "Keep quoted input",
         "--json",
     ];
-    let created = lf(repo.path(), home.path(), &args);
+    let created = lf(repo.path(), home.path(), &args)["task"].clone();
     let identity = created["id"].as_str().unwrap().to_owned();
     loopflow::durable::TaskId::parse(&identity).unwrap();
     assert!(created["linear_id"].is_null());
@@ -1720,15 +1720,16 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 connected
             );
             let created: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let created = &created["task"];
             let id = TaskId::parse(created["id"].as_str().unwrap()).unwrap();
             let saved = store.task(&id).unwrap().unwrap();
-            assert_eq!(created, serde_json::to_value(saved).unwrap());
+            assert_eq!(*created, serde_json::to_value(saved).unwrap());
             assert_eq!(created["title"], "Independent same title");
             assert_eq!(created["description"], "Original notes");
             assert_eq!(created["project_id"], project_id.as_str());
             assert!(created.get("name").is_none());
             assert!(created["worktree"].is_null());
-            created
+            created.clone()
         };
         let first = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
         let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
@@ -2434,7 +2435,8 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
                 repo.path(),
                 home.path(),
                 &["task", "create", "--title", "Original", "--json"],
-            )
+            )["task"]
+                .clone()
         })
         .collect();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -3609,6 +3611,7 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
                 String::from_utf8_lossy(&output.stderr)
             );
             let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let task = &task["task"];
             assert_eq!(task["repo_id"], parent["repo_id"]);
             if flags.first() == Some(&"--wave") {
                 assert_eq!(task["wave_id"], parent["wave_id"]);

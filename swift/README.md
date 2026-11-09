@@ -1105,6 +1105,8 @@ windows and therefore needs a display session. It is not in gate or CI.
 which reads the event stream and ends the whole run, naming the test, when one
 test function outlives 300 s. Swift Testing's `.timeLimit` only records an
 issue; a test blocked on a child process still holds the run.
+CI passes `--skip-build` after its separate Rust and Swift builds so compilation
+does not consume the test deadline.
 
 On a pull request the Swift tests get 5 minutes after the build (161 s on
 2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes

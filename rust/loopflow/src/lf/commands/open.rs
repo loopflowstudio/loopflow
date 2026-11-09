@@ -493,11 +493,8 @@ fn describe(
     };
     let mut url = WorkUrl::new(short_name.clone(), target);
     url.qualifier = own.and_then(|own| qualifier_for(&registered, own, &short_name));
-    // An exact Session travels with a Task link; elsewhere the connect argv carries it.
-    if task.is_some() {
-        url.session = session.clone();
-        url.diff = diff;
-    }
+    url.session = session.clone();
+    url.diff = diff;
     let (primary, primary_machine) = match store {
         Some(store) => {
             let scope = match (&task, &context.wave) {
@@ -1313,11 +1310,6 @@ fn open_desktop(
     if !cfg!(target_os = "macos") {
         return Err(RouteError::Definite(
             "Loopflow Desktop requires macOS; use --host terminal".into(),
-        ));
-    }
-    if target.session.is_some() && target.task.is_none() {
-        return Err(RouteError::Definite(
-            "Desktop opens exact Sessions through their Task".into(),
         ));
     }
     let url = target.url.to_string();

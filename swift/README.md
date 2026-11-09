@@ -110,7 +110,8 @@ the Dashboard leaves. A board's other pages wait: past the bound, a tile opens w
 page turns up or it is selected, and a tile that leaves returns to the bound.
 Repository and Wave conversations stay warm beside that bound.
 Return lands at the bottom. Older conversations reconnect or resume the same
-provider history automatically. After relaunch, the saved selected Work opens
+provider history automatically. `lf open --session <ID> --host desktop`
+opens the exact conversation, including repository and Wave conversations without a Task. After relaunch, the saved selected Work opens
 first, then the bounded warm set reconnects with at most two preparations at once.
 Fresh completion and recorded Machine/checkout evidence must arrive before
 background retention. Close removes warm intent; refresh does not reopen it, and a

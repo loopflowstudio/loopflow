@@ -26,6 +26,32 @@ struct WorkDestinationTests {
         return model.sessions.value?.first { $0.id == id }
     }
 
+    @Test("A taskless exact link selects its conversation without enumerating history", arguments: [false, true])
+    func tasklessSessionLink(waveScoped: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let record = try renameFixtureRecord("exact-taskless", title: "Retained research",
+                                            work: waveScoped ? .wave(id: wave.wave.id) : nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--reveal-existing") { return encoded }
+            throw RegistryQueryError("Only the exact conversation may be prepared")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let address = "loopflow://loopflow?session=exact-taskless"
+        let resolved = WorkLink(label: record.title ?? "Conversation", url: address, markdown: "", fallbackArgv: [],
+                                target: .init(kind: waveScoped ? .wave : .repository, repositoryPath: wave.wave.repo,
+                                              repositoryId: "repo", task: nil, taskId: nil,
+                                              wave: waveScoped ? wave.wave.id : nil, session: record.id, diff: false,
+                                              executionMachine: nil),
+                                conversation: .otherConversation, conversationReason: nil,
+                                route: .init(hosts: [.desktop], reason: "Selected Desktop"))
+        await model.receiveWorkLink(try #require(LinkedWork(resolved)))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.selection == (waveScoped ? .wave(id: wave.wave.id) : nil))
+    }
+
     @Test(arguments: [false, true])
     func taskEntryOpensConversationThenRetainsWorkspace(standalone: Bool) async throws {
         var data = try fixture()

@@ -1,5 +1,455 @@
 # Desktop session recovery
 
+## 5whys disposition, 2026-11-09
+
+**The incident remains open.** The 80-Session Loopflow/manabot inventory and
+29 same-thread Codex account recoveries are complete; four taskless exact opens
+are repaired and infrastructure's composer is recovered. Physical typing after
+reopen is still unresolved, demonstrated on MTG-269 after account recovery and
+Refresh. Nineteen clients with missing owner paths remain alive and unverified.
+This analysis changed only this note; no live Session was probed or replaced.
+
+Jack Heart's report was:
+
+> every session that i close and reopen (maybe only codex, i only have codx right now bc im out of claude credit) isnt receiving keystrokes anymore
+
+### Why recovery did not establish working typing
+
+1. **Visible silence sometimes concealed accepted input.** On Nov 9, LOO-515
+   accepted two physical `x` keys after reopen without displaying them; literal
+   insertion of `y` revealed `xxy`. MTG-269 retained `sssjs`, then paste revealed
+   `sssjsxy` after a physical probe. Thus those keys reached the native draft.
+   This does not locate the delay: native redraw, relay delivery, terminal
+   viewport and screen presentation were not observed together during failure.
+2. **Account recovery addressed a separate failure.** Fresh verification
+   rejected three logins and accepted engineering; 29 conversations reopened on
+   their original provider threads. MTG-269 still failed physical repaint after
+   that move, Refresh and focus-away/back. Authentication recovery therefore
+   cannot explain or close this symptom. Capacity readings establish account
+   access, not visible typing or a successful model response; no model request
+   or goal resume was sent.
+3. **The earlier checks exercised a narrower path.** Desktop literal insertion
+   calls `insertTerminalText` → `ghostty_surface_text`; it bypasses physical
+   `performKeyEquivalent`/`keyDown` dispatch. Addressed special keys also bypass
+   AppKit dispatch. `readText(.screen)` reads Ghostty's viewport text under its
+   renderer lock, not the pixels on screen. A successful API receipt alone
+   establishes neither native consumption nor display. In this incident the
+   literal probe itself revealed hidden text, changing the condition being
+   investigated before the capture. Those checks were useful for drafts and
+   routing, but could not establish the reported physical workflow.
+4. **The remaining experiments did not reproduce that workflow.** CLI raw and
+   Kitty probes produced redraws and `sssjsx`; separate deletion restored
+   `sssjs`. The first synthetic test expected literal `x` but received valid
+   `CSI 120u`, so its failure was not dropped input. The corrected flags 5/7
+   viewport test passed. Pinned Ghostty queues rendering and, when configured,
+   scrolls after encoded non-modifier keys; missing `key.text` alone is not the
+   cause shown here. Final CUA attempts returned `cgWindowNotFound`; the test
+   environment also reported CoreVideo -6661 and timer rendering. Neither a
+   passing synthetic event nor unavailable screen capture closes the live bug.
+
+The verification gap is a mismatch between the reported action and the check,
+not proof of a particular renderer defect. Earlier notes already qualified
+physical input as unverified; retain that qualification through planning.
+
+### Proven adjacent causes and repairs
+
+- **Misleading account readiness:** the Nov 8 `account/read` rejection used
+  JSON-RPC -32603 with revoked-refresh wording. Subscription polling treated it
+  as unavailable and retained connected state because its classifier was
+  narrower than the runner's. Reusing the existing classifier fixes that
+  discrepancy; the recorded rejection/working-copy regression passed. It does
+  not implement automatic interactive quota handoff, which remains unfinished.
+- **Opening depended on unrelated context:** Task location required cwd even
+  with a named repository; saved navigation cleared an opening request; an
+  unpaged subscription silently inherited the 100-row limit. Separate branch
+  regressions cover each repair. Taskless exact links additionally lost or
+  rejected their Session selector, and Rex refused a missing current viewer.
+  Those restrictions are removed; exact taskless preparation avoids a history
+  scan that stalled locally. Installed receipts, selected panes and composer
+  captures confirm all four original threads. In `exact-results.json`, three
+  receipts still say `opening`; selection and capture, not that status alone,
+  support recovery. None of these checks proves physical input.
+
+### Contradictions and remaining experiment
+
+Refresh repaired LOO-515 in one later check but not MTG-269; focus alone and raw
+focus reporting did not reliably reveal text. The earlier 08:00 LOO-515 probe
+revealed only `y`, and its long draft differed after reopen. Do not generalize
+the later hidden-key finding into “all input and drafts survived.” The cause of
+that draft change, infrastructure's original blank pane, and the unlinked
+owner sockets remains unknown. Six of the nineteen PIDs are app-server
+companions, not terminal clients. A live PID does not establish a saved draft.
+The parent has a pending locked-screen question; `cgWindowNotFound` alone does
+not answer it or explain the earlier visible failure.
+
+**Proposals for launch-plan, not additional fixes:**
+
+- Make the physical close/reopen sequence the acceptance check for this bug.
+  Keep account acceptance, exact opening, API editing and physical repaint as
+  separate results. A missing display leaves that check unverified.
+- When a native screen is available, identify MTG-269's exact surface and saved
+  `sssjs` draft. Capture owner output, Ghostty viewport text and screen together
+  before and after one physical key, **before any paste**; remove that key in a
+  separate operation and repeat across close/reopen. No Enter or goal resume.
+  Missing owner redraw points upstream; owner redraw without viewport change
+  points toward relay/terminal ingestion; changed viewport without changed
+  pixels points toward presentation. Record actual key encoding and surface
+  identity so a different viewer or protocol cannot explain the comparison.
+- Once that trace reproduces the failure, add the smallest regression at the
+  failing stage, retaining a display check for the full sequence. No speculative
+  focus, reset or renderer patch is justified by the current results. Investigate
+  socket unlinking separately before considering replacement of those clients.
+
+Read-only review rechecked the full incident note, branch diff, input paths,
+pinned Ghostty callback, saved CLI probes, four opening results and the log with
+131 passing Swift tests. No builds or tests were rerun for this note-only step.
+Next: return to launch-plan with the synchronized screen experiment still needed;
+do not mark the incident resolved.
+
+## Debug disposition, 2026-11-09 08:57 local
+
+- **Invisible physical typing remains unresolved.** No input/render production
+  change was justified by the experiments. Corrected Kitty flags 5/7 regression
+  passes against the viewport; native raw/encoded key probes redraw and leave
+  the original MTG-269 draft `sssjs`. Final passive snapshot after both installs
+  still reads `sssjs`. Physical keys and close/reopen in the installed app could
+  not be verified: CUA repeatedly returned `cgWindowNotFound`, including the
+  final release installation. API captures do not establish visible typing.
+- **Four taskless exact opens are repaired.** Desktop rejected repository/Wave
+  Session selectors and had no receiver for them; Rex also refused agents whose
+  current viewer was gone. Exact links now retain their Session ID, prepare that
+  exact existing conversation, and use the existing pane placement. Rex opens
+  on its local server when the caller has no current viewer, ignoring inherited
+  stale placement. The first implementation's history scan stalled on this
+  machine; the final code uses exact preparation without enumerating history.
+  All four original IDs selected their own pane and returned their native
+  composer through addressed Desktop text reads; every provider thread matched
+  the saved pre-install ID. Results: `/tmp/loo813-debug/exact-results.json`,
+  with per-Session state, capture and opening receipts beside it. No message sent.
+- **Infrastructure is recovered, original blank-pane cause unknown.** Final
+  installed exact opening selected `09a40b4c78b2411ab30bfbc3203d7304`, reported
+  usable/current, and returned its composer with fresh 12% capacity. Final
+  capture: `/tmp/loo813-debug/infra-final-capture.json`. Refresh earlier restored
+  the saved conversation after its owner socket had disappeared; this is not a
+  demonstrated root-cause fix for blank rendering.
+- **Nineteen missing-owner clients remain untouched.** All nineteen original
+  PIDs were alive at the final check. Six are Codex app-server companions, thirteen
+  Claude clients; older owners hold sockets whose pathname is absent. No safe
+  draft observation or in-place rebind was available. Neither socket deletion's
+  cause nor these clients' draft state was established. No blanket restart.
+- Matching signed **release** app and CLI installed through normal promotion at
+  `/Applications/Loopflow.app` and `~/.local/bin/lf`; preflight found current
+  `server_request_stops`, compatible references, and no migration to apply.
+  Shared server reports ready on the selected build. Dev app started for this
+  investigation was stopped; no temporary viewers, test runners or build jobs
+  remain. Parent PID 88257 and this run's native PID 27873 remained alive and
+  received no input or signals. No goal resumed, account login, publication or
+  merge performed. Prior changes and notes remain.
+
+Final checks: focused Swift suites **131 passed** in
+`/tmp/loo813-debug/swift-direct-session-final.log`; the preceding direct-session
+run failed because its fixture expected `--reveal` instead of
+`--reveal-existing`, and the corrected rerun passes. Final Xcode
+`build-for-testing` passed (`xcode-direct-session.log`); release Swift build,
+release Rust build, signature verification and normal promotion passed.
+Earlier unchanged-code checks: Rust opening regressions 34 passed/2 opt-in
+skipped; Work links 5 passed; Kitty viewport diagnostic both cases passed;
+`cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Final Swift
+platform-boundary check and `git diff --check` passed.
+
+Return for incident 5whys and launch-plan with the physical-rendering failure
+still open. Next useful experiment needs an available native screen: capture
+owner output and Desktop viewport together during one physical key, then repeat
+close/reopen, preserving `sssjs`. Do not treat the repaired route or encoded-key
+diagnostic as closure of that failure.
+
+## Debug continuation, 2026-11-09 08:27 onward
+
+- Protected parent `session_55fdf896fde94f92aec807061df59417` still has native
+  PID 88257; this debug run is `session_87fbf5e08fd2475592b61e35d0e498ff`,
+  native PID 27873. Neither was signaled or sent input.
+- MTG-269 still had draft `sssjs`. A temporary CLI viewer tested raw `x`,
+  Kitty `CSI 120u`, press followed by `CSI 120;1:3u`, repeat, and shifted
+  encoding. Every case produced native redraw bytes and an owner snapshot with
+  the appended character; separate Backspace restored `sssjs` each time.
+  Temporary viewers detached with Ctrl+]. No message or goal resume was sent.
+  Raw per-case output and snapshots: `/tmp/loo813-debug/`.
+- The original `typingAfterKeyboardRestore` assertion confused valid Kitty
+  encoding with missing input. Its corrected display diagnostic exercises flags
+  5 and 7, starts at the top of 80 rows of scrollback, and reads the **viewport**
+  through production `readText(.screen)`. Both cases returned to the live
+  viewport and displayed the encoded key. This rules out missing `key.text`
+  alone preventing auto-scroll in the pinned build. Ghostty revision
+  `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0`, `Surface.zig` keyCallback,
+  scrolls after any encoded non-modifier key. No speculative input/render patch.
+- CUA requests for both production and Dev repeatedly returned
+  `cgWindowNotFound`; the native test reported CoreVideo error -6661 and timer
+  rendering. Synthetic NSEvent/viewport checks are not physical-screen checks.
+  The invisible-typing cause is still unknown. Next distinguishing check:
+  observe owner output and Desktop viewport/active screen during one physical
+  key on MTG-269, then close/reopen and repeat once the screen is available.
+- Infrastructure's retained surface captured an empty string. At the later
+  passive check its owner socket was absent. Refresh opened the saved conversation
+  and its composer, with fresh 15% capacity and the old revoked-token message
+  in history. No fresh login or model request. This is recovery; the original
+  blank surface's cause remains unestablished.
+- All nineteen missing-owner PIDs remain alive. Six are **Codex app servers**,
+  not terminal clients: MTG-225, 235, 236, 237, 238, 239. The other thirteen
+  are Claude processes. Process ancestry and `lsof` show older lf owners still
+  holding listening socket descriptors whose paths no longer exist. No owner,
+  provider or companion was stopped. Drafts cannot be inferred from an app-server
+  PID or from the absence of the socket path. Full read-only process/stdio
+  observations: `/tmp/loo813-debug/missing-owner-processes.json`.
+
+Checks: `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests|DesktopPaneControlTests'`: 131 passed. `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter typingAfterKeyboardRestore --no-parallel`: both viewport cases passed, with the screen limitation above. Rust work-opening suite: 32 passed and two fixture expectations corrected; both corrected cases passed separately (34 total, two opt-in host diagnostics skipped). `cargo test -p loopflow --lib work::link::tests`: five passed. `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Swift platform-boundary checks and `git diff --check`: passed. Xcode `build-for-testing`: passed before the final shared shell-pane selection adjustment; the final incremental build follows. The affected-suite wrapper was stopped after it queued duplicate Rust work; Xcode was run directly.
+
+The initial Dev request met the previous shared server and did not establish
+a working opening. The final release installation and verification are recorded
+in the disposition above. No migration is introduced by this change.
+
+## Unbreak sweep, 2026-11-09 08:06 onward
+
+- Scope: 80 active/detached interactive Sessions, 43 Loopflow and 37 manabot.
+  Fresh passive snapshots reached 61 owners; 19 returned ENOENT. Raw observations
+  are in `/tmp/loo813-unbreak/`; no missing-owner client was replaced.
+- Physical CUA `x` and Backspace worked in original LOO-813 after clicking its
+  composer. Its draft at this observation was `s`, not the earlier long draft.
+- LOO-515: addressed focus accepted physical `x` and Backspace. Close/reopen
+  showed “Active in another terminal”; Take back restored its surface. Two
+  physical `x` keys then remained invisible, including after clicking the composer.
+  Desktop literal `y` revealed `xxy`. All three characters were deleted.
+  Refresh then made physical `x` visible immediately; physical Backspace restored
+  the empty composer. This establishes stale display after native key acceptance,
+  not that the native editor rejected those keys.
+- Display diagnostic `/tmp/loo813-keyboard-native-test.log`: failed the literal
+  `x` assertion, but captured `ready\n^[[120u`. It emitted the encoded key;
+  this result does not establish that `performKeyEquivalent` swallowed it.
+- Fresh `lf account codex --json` at 08:08 accepted engineering with 18% weekly
+  remaining; jack, jackstah and manabot-eng were rejected with no login.
+- New steer authorizes restarting auth-failed clients on the verified account,
+  keeping saved conversations and drafts where possible. Process ancestry showed
+  this run under 80759 → 88257; original LOO-813 PID 30832 was not an ancestor.
+  Explicit-account resume replaced 30832 on the same provider thread, restored
+  its saved `s` draft, and passed physical insert/delete after Desktop Refresh.
+  Current parent `session_55fdf896fde94f92aec807061df59417` remains untouched.
+- Account recovery and complete per-Session dispositions are recorded below.
+
+### Unbreak result, 2026-11-09 08:25 local
+
+**29 Codex conversations reopened on the freshly verified engineering login,
+all on the same provider thread.** At the last inventory, 25 were active or
+detached and four were idle/closed after temporary terminal detachment. Idle
+retirement is not by itself a failed reopen: all four reached the restored
+composer and fresh capacity reading before detach. Desktop exact opening refused
+those four taskless conversations; Rex opening refused stale viewer placement.
+Their saved history and engineering account selection remain available to
+`lf session resume <ID>`.
+
+The complete sweep covered 80 Sessions: 43 Loopflow, 37 manabot. Final passive
+snapshots reached 57, with the 19 original missing owners plus the four retired
+clients absent. Every original Session is listed below. Passive reachability
+is not a physical-keyboard check.
+
+- 14 of the 18 retained Desktop panes passed addressed literal insertion and
+  deletion after Take back. LOO-811's additional multiline draft contained
+  `uasasfaasfasfa`, then `a` and blank lines: the check's simple composer parser
+  stopped at that blank line. Its test `x` was subsequently seen and removed;
+  `/tmp/loo813-unbreak/811-probe-cleaned.txt` records the retained draft.
+  Engine-performance's delayed `x` was likewise seen and removed, leaving an
+  empty composer. MTG-269 was not probed again by the final batch. Infrastructure
+  had an input-ownership refusal; exact-Work switch succeeded, but its last
+  Desktop capture was empty. Do not count its Desktop input as verified.
+- LOO-515 physical typing worked after Refresh and after a later close/reopen.
+  The earlier close/reopen failure remains reproduced: `x`, `x` invisible,
+  literal paste `y` reveals `xxy`. All three probe characters were removed.
+- MTG-269 still received physical keys without visible repaint after account
+  recovery, Refresh, and an addressed focus-away/back. Paste revealed `sssjsxy`;
+  the test suffix `xy` was removed, retaining `sssjs`. Further keyboard testing
+  stopped for debug. Refresh is therefore not a reliable general repair.
+- On 15 stale native composers, raw `CSI I` did not reveal hidden probe text.
+  Paste did. These checks do not establish why focus reporting or repaint fails.
+- Revealed drafts restored through account recovery: original LOO-813 `s`,
+  LOO-775 `2as`, MTG-241 `isis uusfs\nafasfadsfaasdfasfsdf`, MTG-260
+  `what is whsd`, MTG-269 `sssjs`. Probe cleanup receipts and before/after snapshots
+  are in `/tmp/loo813-unbreak/`. No diagnostic character remains in these drafts.
+- Agent platform craft and LOO-718 reopened at the paused-goal chooser. Escape
+  dismissed 718; encoded Escape (`CSI 27u`) dismissed Agent platform craft after
+  the first raw Escape was not confirmed. Both final captures show
+  `Goal hit usage limits (/goal resume)`. No goal was resumed.
+- Fresh account verification accepted engineering (17% weekly remaining at
+  08:18). The other logins were rejected; no credentials were read or copied by
+  these diagnostics. Replayed old auth errors remain in conversation history.
+  No new model request was sent to prove generation access.
+- Parent PID 88257 and this run's PID 80759 remain alive. Original PID 30832 was
+  replaced only after the new restart direction and an ancestry check. Native
+  lifecycle events in the inspected saved Codex transcripts did not change
+  outside the protected active parent. No production code or build changed.
+  The pre-existing uncommitted Swift hypothesis test is untouched.
+
+Unresolved cases:
+
+| Case | Exact remaining check / next requirement |
+|---|---|
+| Physical redraw after reopen | MTG-269 still fails visible physical typing despite received keys. LOO-515 reproduced the same symptom earlier. Debug the native input/render path. |
+| Infrastructure Desktop pane | Account resume reached a prompt; final exact-Work switch returned success, then capture returned empty. Verify its actual surface and input ownership. |
+| Four taskless conversations | Codex session connections, Competitor architecture research, Land resume fixes, and default `session_aedeca…` resumed on engineering, then retired after detach. Desktop says “Desktop opens exact Sessions through their Task”; Rex says “Current conversation viewer is unavailable; refusing stale Rex startup placement”. CLI resume is the confirmed opening path; Desktop path remains unavailable. |
+| Remaining passive Sessions | Physical input was not tested on each detached or Claude client. Reachability and historical completion are not a claim that every composer repaints. Claude quota fallback remains outside this recovery. |
+| Nineteen original missing owners | Each `connect(owner.sock)` returned ENOENT. Their native processes and uncertain drafts were kept; inspect/recover native state before replacement. Names and IDs follow. |
+
+| Missing owner Session | Native PID |
+|---|---|
+| Active work status (`f505abc0e07647b58fdf9d33c5017c25`) | 82207 |
+| Fantasia repository operations (`ea5bcb72bd404139a2704faa083edd40`) | 50794 |
+| LOO-669 Revamp the release process: minors from main, release streams, lessons f (`f090e9dcf80641afb8d1a0f486979871`) | 66000 |
+| MTG-212 Benchmark MTG-183's best checkpoint against the Jev decision model over (`636b009eccd244db836492c431b0ba4e`) | 64105 |
+| MTG-219 TLA Card Authoring (`d9c467555ed34b169e20acaf67694088`) | 43702 |
+| MTG-220 Decklist import (`1fb1694142e3486e9ddad9e40b945733`) | 78926 |
+| MTG-221 TLA T2: Casting, costs, zone permissions and private zones (`a17891fe2e26441382555d7332b5c6ad`) | 72522 |
+| MTG-222 TLA T3 Characteristics (`session_89ffcdf8d2444e88a9ae3249095c0609`) | 80851 |
+| MTG-222 TLA T3: Characteristics, counters, replacements and attachments (`b239e5500dfb4c9190c126484537559c`) | 88006 |
+| MTG-223 TLA T4: Triggers, history and stack behavior (`af0e58a294e547df806225111e9b3170`) | 29585 |
+| MTG-224 TLA T5: Permanent copying and linked-ability primitives (`e76c4e99e66a4cbcb9935767c661b97b`) | 53356 |
+| MTG-225 T6 Engine Foundations (`5d552358ea0940a1beca11c09a0110ab`) | 40286 |
+| MTG-233 Cull everything the codebase no longer needs (`fa6178b2144c47339d9db37f19bf1068`) | 47023 |
+| MTG-235 Effect Vocabulary (`81c33e7abbfc4484bf7d81f103db4501`) | 41897 |
+| MTG-236 Derived state revisions (`e5d9d2b388ee43349d8b7f3e249c107a`) | 38711 |
+| MTG-237 Engine budget review (`7f20038b9d4f48c9b3f9952a0ac44756`) | 39371 |
+| MTG-238 Catalog scale types (`eac235f5c3ed403eb9b7f3a94d3a3e75`) | 37552 |
+| MTG-239 Five Card Completion (`e2a4b3267d404a61885a763832bfbea5`) | 68037 |
+| Repository operator (`session_4ff317503562462cb15dd4ce15b59cf0`) | 71643 |
+
+### Complete 2026-11-09 sweep disposition
+
+| Session | Disposition |
+|---|---|
+| 30df0c Embed fact and effect ids through the card encoder's exact vocabulary ins (`5c46a82e3afb49b0a92e9df5ad26e71e`) | Passive snapshot; native client untouched. |
+| Active work status (`f505abc0e07647b58fdf9d33c5017c25`) | Owner socket missing; native client untouched; input unverified. |
+| Agent platform craft (`session_21feb1903a7c4c8f87a8ded394421dbe`) | Same thread reopened on engineering. |
+| Codex session connections (`session_b68a12875148418f8361de1f2e5b8387`) | Same thread reopened on engineering. Idle after temporary viewer detach; taskless Desktop opening unavailable. |
+| Competitor architecture research (`session_bc1dd22044004fd5a5cbbe748e3e5a20`) | Same thread reopened on engineering. Idle after temporary viewer detach; taskless Desktop opening unavailable. |
+| Definitions as code (`session_3c7a3f1076944badb32d253c544b07e4`) | Passive snapshot; native client untouched. |
+| Engbot Wave (`617d2a8eaa7b40b5880cc610f4ea098b`) | Same thread reopened on engineering. |
+| Fantasia repository operations (`ea5bcb72bd404139a2704faa083edd40`) | Owner socket missing; native client untouched; input unverified. |
+| HumanLayer study (`session_ff1b9e68cd2c4055b8b8bdf42c0a82d2`) | Passive snapshot; native client untouched. |
+| LOO-312 Newcomer setup (`d566a570e17f465cb266110ae85f3a23`) | Passive snapshot; native client untouched. |
+| LOO-434 workflow experience (`01f484c818004d53b393cd8d59c2d090`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| LOO-498 Open and restore (`session_d08da070c64442f68dacef019a3c9c86`) | Passive snapshot; native client untouched. |
+| LOO-498 Rex workspace (`310fb7b6015843e498316cd921a348b9`) | Passive snapshot; native client untouched. |
+| LOO-515 Task prototypes (`1a2185651fce4f078f44b2201f49d660`) | Passive snapshot; native client untouched. Desktop literal insert/delete passed; physical input not implied. Physical typing passed after Refresh; earlier close/reopen failure recorded. |
+| LOO-558 stage handover (`eb1f9cfd9a5045a79b16e262de519f7f`) | Passive snapshot; native client untouched. |
+| LOO-593 CI incident (`0ad63132a5314ec996bac303c03859bd`) | Passive snapshot; native client untouched. |
+| LOO-669 Revamp the release process: minors from main, release streams, lessons f (`f090e9dcf80641afb8d1a0f486979871`) | Owner socket missing; native client untouched; input unverified. |
+| LOO-696 Task concepts (`87d0876bb32941b8a97f81e44872c76f`) | Passive snapshot; native client untouched. Desktop literal insert/delete passed; physical input not implied. |
+| LOO-718 Mobile architecture (`session_71e26e01ca6f41a1a9a6f1b4469b3813`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| LOO-723 coherent installation (`322bfd3c1877409d9eea5205d3cd1e14`) | Passive snapshot; native client untouched. |
+| LOO-732 telemetry explore (`f24f2497f3fe4753a8a6d23cbcf84e99`) | Passive snapshot; native client untouched. |
+| LOO-733 review surface (`942a90ad9a5347d897dbe22c0922e8da`) | Passive snapshot; native client untouched. |
+| LOO-747 Ship recovery (`03d6e18c7c6146c2a0e3938cd6baba96`) | Same thread reopened on engineering. |
+| LOO-747 default (`session_fc498228861845a39262491f0706d78a`) | Same thread reopened on engineering. |
+| LOO-772 Task conversation (`session_8ebcd369c5e9479fbfe989fea0f7b65d`) | Passive snapshot; native client untouched. |
+| LOO-775 Watch recovery (`6c0210c03a964af1bc8cc31cd6fd8fd6`) | Same thread reopened on engineering. Revealed draft restored. |
+| LOO-776 Keep keystrokes a viewer sent just before it disconnected (`99cbee9948054bdd8795f38b184075b1`) | Passive snapshot; native client untouched. |
+| LOO-788 Demo: measure a Task conversation launch (`fcb7642a89c34c4292eb03d080cd5ca5`) | Passive snapshot; native client untouched. |
+| LOO-793 Reply references (`85c52002fe524d5daeb4ee4a8e7f8102`) | Same thread reopened on engineering. |
+| LOO-800 launch checks (`a1f6ee01550d42cea338c291d1231b00`) | Passive snapshot; native client untouched. |
+| LOO-809 Attach tickets for remote clients (`aff39379845f44b8a64b682a75705da9`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| LOO-810 creation recovery (`f53a9069597341d497c56a105eab2e3f`) | Same thread reopened on engineering. |
+| LOO-811 Recovery review (`e47ba8ae55044365af58d39fba6c2f83`) | Passive snapshot; native client untouched. Multiline draft revealed; probe removed separately. |
+| LOO-812 Session ownership (`a4f6654f7c0f43f4b5273601f739549d`) | Same thread reopened on engineering. |
+| LOO-813 Desktop recovery (`ce8db5ba4fcb45a59769b7aaacf19d8a`) | Passive snapshot; native client untouched. |
+| LOO-813 Desktop recovery (`session_e52c5b3724d6486d901c84e643e09005`) | Same thread reopened on engineering. Revealed draft restored. Desktop literal insert/delete passed; physical input not implied. |
+| LOO-813 Reopened input (`session_55fdf896fde94f92aec807061df59417`) | Protected active parent; passive only. |
+| Land resume fixes (`session_cd7e1aab97e8425da06951bb1271c65c`) | Same thread reopened on engineering. Idle after temporary viewer detach; taskless Desktop opening unavailable. |
+| List Wave (`6cf8740c22eb4236b5f27cbf90ece384`) | Passive snapshot; native client untouched. |
+| MTG-175 Live Eval Reports (`f294041cf95f4c62bdb6b64ac8e56d33`) | Passive snapshot; native client untouched. |
+| MTG-212 Benchmark MTG-183's best checkpoint against the Jev decision model over (`636b009eccd244db836492c431b0ba4e`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-219 TLA Card Authoring (`d9c467555ed34b169e20acaf67694088`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-220 Decklist import (`1fb1694142e3486e9ddad9e40b945733`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-221 TLA T2: Casting, costs, zone permissions and private zones (`a17891fe2e26441382555d7332b5c6ad`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-222 TLA T3 Characteristics (`session_89ffcdf8d2444e88a9ae3249095c0609`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-222 TLA T3: Characteristics, counters, replacements and attachments (`b239e5500dfb4c9190c126484537559c`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-223 TLA T4: Triggers, history and stack behavior (`af0e58a294e547df806225111e9b3170`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-224 TLA T5: Permanent copying and linked-ability primitives (`e76c4e99e66a4cbcb9935767c661b97b`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-225 T6 Engine Foundations (`5d552358ea0940a1beca11c09a0110ab`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-233 Cull everything the codebase no longer needs (`fa6178b2144c47339d9db37f19bf1068`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-235 Effect Vocabulary (`81c33e7abbfc4484bf7d81f103db4501`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-236 Derived state revisions (`e5d9d2b388ee43349d8b7f3e249c107a`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-237 Engine budget review (`7f20038b9d4f48c9b3f9952a0ac44756`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-238 Catalog scale types (`eac235f5c3ed403eb9b7f3a94d3a3e75`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-239 Five Card Completion (`e2a4b3267d404a61885a763832bfbea5`) | Owner socket missing; native client untouched; input unverified. |
+| MTG-241 Rules execution (`7e0bc5c92dd54c99b67e2cdea689197e`) | Same thread reopened on engineering. Revealed draft restored. |
+| MTG-242 Mana Payment Resources (`e30ecfae91b84e97b2049b9d74318439`) | Passive snapshot; native client untouched. |
+| MTG-243 Catalog naming choices (`bbac3df212f24f2db8154ac1538f488e`) | Same thread reopened on engineering. |
+| MTG-244 Composable Layer Evaluation (`cac2909324d54d76bc1e28099e30245b`) | Same thread reopened on engineering. |
+| MTG-245 Growing Pool Protocol (`ebabbc8406ea42d5a524640af9789582`) | Passive snapshot; native client untouched. |
+| MTG-249 Representation experiments (`39a4fa719f2e4399880838fa94905c98`) | Passive snapshot; native client untouched. |
+| MTG-250 Sparse attention comparison (`312884d8ee3d4eaaa25b8b84719aca81`) | Passive snapshot; native client untouched. Desktop literal insert/delete passed; physical input not implied. |
+| MTG-251 Separate learning seats from batch closure; compare closure and lambda (`7bc9684e2cba48e49a703732b9d4212c`) | Passive snapshot; native client untouched. |
+| MTG-252 Resume Claude session (`session_99ffa20715cd497fada9abfce92cbaee`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| MTG-260 Elemental comparisons (`8eeadf4c3bae40448241e4b23dfa0335`) | Same thread reopened on engineering. Revealed draft restored. Desktop literal insert/delete passed; physical input not implied. |
+| MTG-261 Development speedups (`ee411e2f7d2c415eb83899367441b93a`) | Same thread reopened on engineering. |
+| MTG-267 Frontier self-play (`8f977fd226214c7eb489e6fb6ac6a390`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| MTG-268 Batched rollout status (`6c1c2159e220471e97887187d01d49eb`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| MTG-269 Magic Mirror search (`session_c73fe3a8e9e94b56b1ffe915b575a9c0`) | Same thread reopened on engineering. Revealed draft restored. Physical redraw still fails; probe removed. |
+| Release hang fix (`session_4386223ba09a4f0e8bdb1df40c445963`) | Passive snapshot; native client untouched. |
+| Repository operator (`session_4ff317503562462cb15dd4ce15b59cf0`) | Owner socket missing; native client untouched; input unverified. |
+| Spend Wave (`c76153e219f549b5a5aa5fbede5926f0`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| Study status (`f5acdee3953a449ea8529d905bbf2d3e`) | Passive snapshot; native client untouched. Desktop literal insert/delete passed; physical input not implied. |
+| b015d5 Training throughput (`881aafe7262040e486a79a1c429dfe16`) | Same thread reopened on engineering. Desktop literal insert/delete passed; physical input not implied. |
+| default (`session_136d7b61eafc4c1a8137ddabb2941051`) | Passive snapshot; native client untouched. |
+| default (`session_aedeca37725c4897ad28414ed780af58`) | Same thread reopened on engineering. Idle after temporary viewer detach; taskless Desktop opening unavailable. |
+| default (`session_e42c8f360cc64026ab0003f998c304dd`) | Passive snapshot; native client untouched. |
+| default (`session_f90a21bc15dd44dfb6c4fa67f2d100de`) | Passive snapshot; native client untouched. |
+| engine-performance (`5e99643c30514c3b95e78063030848c7`) | Same thread reopened on engineering. Delayed API probe removed separately; empty composer captured. |
+| infrastructure (`09a40b4c78b2411ab30bfbc3203d7304`) | Same thread reopened on engineering. Desktop input unresolved; final capture empty. |
+
+## Reopened input report, 2026-11-09 08:00 local
+
+Jack Heart:
+
+> every session that i close and reopen (maybe only codex, i only have codx right now bc im out of claude credit) isnt receiving keystrokes anymore
+> why didnt lf task open loo-515 work then in terminal (it opened it but didnt accept intput)
+> now 813 isnt receiving input
+> can you go through all my loopflow and manabot sessions then
+> $incident
+
+This continuation is `session_55fdf896fde94f92aec807061df59417`; keep it and
+the original LOO-813 native process PID 30832 alive. No provider restart or
+model turn was submitted during this pass.
+
+- LOO-515 initially captured an empty composer. Desktop API insertion of `x`
+  revealed a long existing draft; Backspace removed only `x`. A CUA `x` and
+  Backspace also worked before closing. After `desktop close` and `desktop
+  view` reopened it, CUA `x` had no visible effect; API insertion of `y`
+  displayed only `y`. Backspace removed `y`. The native PID remains 95992,
+  started Nov 8 at 19:07 local. Do not claim the earlier draft survived this
+  close/reopen: the current empty composer differs, with no established cause.
+- A temporary `lf session resume 1a2185651fce4f078f44b2201f49d660` PTY
+  accepted both raw `x` and CSI `120u`, and produced redraw output. It detached
+  with Ctrl+]. Backspace combined in the same write as Ctrl+] was discarded
+  by the relay's detach branch; the remaining test `x` was removed separately
+  through Desktop after Refresh. No diagnostic text was submitted.
+- LOO-813 initially showed an empty composer and Codex's “New activity”
+  scrollback view. API Escape did not visibly change it. API `x` revealed an
+  existing multiline draft; Backspace removed only that character. Draft ends
+  `asdfasfasdfasasdfasfdasdfasdfasdfasdfafasdfasdfaasdfasasfasfsdfdsdfsdfsdsdf`.
+- Passive owner snapshots: 515 restores Kitty flags 5, 813 flags 7, on both
+  primary and alternate screens. `/tmp/loo813-input-{515,813}.vt` retain raw
+  snapshots. Initial Desktop state, Sessions and process rows are in
+  `/tmp/loo813-input-{state,sessions,processes}.json`.
+- Added an uncommitted diagnostic `typingAfterKeyboardRestore` in
+  `GhosttyTerminalInputTests.swift`, investigating `performKeyEquivalent`
+  swallowing plain keys with `key.text == nil`. This is a hypothesis, not a
+  fix. `swift test --package-path swift --filter typingAfterKeyboardRestore`
+  built successfully but SKIPPED the display suite. Enable its documented
+  display-test option before interpreting a result. No production code changed.
+- CUA works now, including screenshots and native keys. The app binding follows
+  the current window, and the person is navigating concurrently; inspect the
+  intended window before input. Prefer addressed Desktop API for draft checks.
+
+The incident skill was invoked now; run unbreak, debug, 5whys, launch-plan in
+that order. Prior incident commands are historical, not this invocation.
+
 2026-11-08 report, Jack Heart:
 
 > (a) sessions that hit usage limits didnt auto transfer to codex accounts with space, despite recent diff attempting ot help with this

@@ -43,7 +43,7 @@ a replay queue with its own overflow failure.
 
 ## Remaining
 
-- Gate and delivery remain. The branch includes upstream
+- Delivery remains. The branch includes upstream
   operation-name alignment (#1855), Git watch freshness (#1860), exact Session
   opening/recovery (#1863), and pre-disconnect keystroke handling (#1839).
   These remain separate from subscription recovery; sync again before delivery.
@@ -53,9 +53,9 @@ a replay queue with its own overflow failure.
   replacement, received subsequent edits and cancelled during another outage.
   No mounted Desktop or phone recovery result is claimed; phone access stays in
   LOO-718. Scenarios and transcripts: `scratch/qa.html`. No product decision is open.
-- Gate reaches `server::`, `lf::commands::subscribe::tests::`, `served_reads`,
-  `transport_tests`' server watch/restart cases, and Swift's server/Work observation
-  consumers. Protocol revision changes also reach installation readiness.
+- Gate passed the server, subscription, served-read, DTO and transport recovery
+  suites, headless Swift consumers, and isolated installation replacement below.
+  CI owns the full Rust matrix and Linux installation checks.
 
 Shipping docs: `rust/loopflow/src/server/README.md` (“Reconnect a watch”, including
 the resumed wire exchange) and `docs/server.md` (“Keep editing through a
@@ -96,3 +96,25 @@ changed since QA. `cargo fmt --check`, `cargo clippy --all-targets -- -D warning
 (44.93 s, inherited `LF_*` unset, stdin closed), and `git diff --check` passed.
 PR copy now records the November 9 real-socket and headless Work-model checks;
 broader affected suites and installation readiness remain with gate.
+
+Gate plan (2026-11-09): synced onto `4848816f7`; no new upstream changes.
+`server/{service,wire,client}.rs` and subscription identity reach `server::`,
+`lf::commands::subscribe::tests::`, `served_reads`, DTO fixtures, session-list
+subscriptions and transport's `server_` cases (watch updates, restart, readiness,
+terminal reconnect). Swift protocol/client and Work recovery reach the runner's
+headless app/model/view suite. Docs and QA skill changes reach website and
+architecture checks. Run the changed-aware runner with those Rust filters and
+reuse enabled, followed by the two isolated installation/registration checks
+outside its network sandbox. Use rustup stable 1.99.1 (CI equivalent), resolved
+TMPDIR, inherited `LF_*` unset and closed stdin. Full Rust matrix stays with CI.
+
+Gate preflight attempt: resource inventory exceeded its 15 s uv-cache deadline;
+no suites ran. Direct `du -sk ~/.cache/uv` then completed in 12.13 s with
+14,275,436 KiB (13.6 GiB, below the 16 GiB limit), no permission errors; disk
+had 171.6 GiB free. This was a slow shared-cache scan, not disk exhaustion.
+Retry the unchanged check plan after that successful inventory; no limits changed.
+
+Gate results (2026-11-09, rustup stable 1.99.1; same production tree as QA):
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(server::) | test(lf::commands::subscribe::tests::) | binary(served_reads) | test(dto_fixtures::) | test(session_list_subscribe::) | (binary(transport_tests) & test(server_))'`: PASS, four suites in 491 s; 108 Rust, 73 website and 783 headless Swift tests, architecture, rustfmt, Clippy with warnings denied, and Swift boundaries. Resource preflight/postflight passed. Log: `/tmp/loo775-gate-retry.log`; artifacts: `.lf/tmp/gate/run-64497/`.
+- `cargo test -p loopflow --test transport_tests server_ -- --ignored --test-threads=1` with the prepared `LOOPFLOW_TEST_LF`, outside the network sandbox: PASS, 2 tests in 13.71 s; isolated service registration/disabled choice and signed installed-helper replacement retained the owner and Graph. Log: `/tmp/loo775-installation.log`.
+- `git diff --check`: PASS. No production repair needed. Mounted Desktop/phone recovery and payloads near 32 MiB remain unverified; no display-dependent result claimed. Full Rust matrix and Linux installation remain CI-owned.

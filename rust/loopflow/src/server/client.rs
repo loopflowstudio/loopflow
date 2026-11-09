@@ -227,6 +227,7 @@ impl Connection {
             id: id.clone(),
             operation,
             select: None,
+            resume: None,
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),

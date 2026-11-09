@@ -6,6 +6,8 @@ Reuse the local attach flow and wire shapes documented in
 still bind to Unix UID and expire with `Instant`.
 
 The listener, mobile settings and bulk protocol are outside this Task.
+The remote contract reuses the local owner-selection and control description;
+only the exchange example and remote ticket rules need their own section.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -26,11 +28,11 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-November 9 checks at 00:47–03:13 UTC and 16:25 UTC found PR #1812 OPEN at the
+November 9 checks at 00:47–03:13 UTC, 16:28 UTC and 17:02 UTC found PR #1812 OPEN at the
 published head above, without auto-merge (`gh pr view`). `git fetch origin main`
 returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
-transport file. The earlier checks also found LOO-718 at its interactive
-`feature` demo step (`lf task status LOO-718 --json`). The separate mobile checkout
+transport file. `lf task status LOO-718 --json` still reports its interactive
+`feature` demo step. The separate mobile checkout
 findings above are not a landed implementation.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
@@ -67,9 +69,7 @@ satisfy these checks.
 Retain local attachment and its consume-on-attempt behavior through the shared
 store, including the unchanged ticket response and bridge wire fixtures.
 
-Desktop review and opening results are in `questions.md`. The contract keeps the
-wire examples and identity rules together; compression removes repeated prose,
-leaving the UID-only store untouched until its replacement lands.
+Desktop review and opening results are in `questions.md`.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

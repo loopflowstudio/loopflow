@@ -371,7 +371,8 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 ## Remote attach contract
 
 Planned for the authenticated endpoint in [Phone access](../../../../docs/server.md#phone-access);
-this build supports local attachment only.
+this build supports local attachment only. Owner selection and terminal control
+follow `session.attach` above.
 
 After `welcome`, request `session.attach` on the authenticated client connection:
 
@@ -379,10 +380,6 @@ After `welcome`, request `session.attach` on the authenticated client connection
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
-
-`owner_lf_process_id: null` selects the Session's running terminal owner; attaching
-never starts one. Send a specific owner ID to reconnect only to that owner;
-a changed owner returns `not_found`.
 
 Open a separate authenticated bridge connection and send the ticket first:
 
@@ -392,8 +389,7 @@ Open a separate authenticated bridge connection and send the ticket first:
 ```
 
 After `bridged`, use the [binary owner protocol](../transport/README.md) for
-terminal data and input/geometry control. Attaching does not take another viewer's
-control.
+terminal data and input/geometry control.
 
 Both connections must authenticate with the same Tailscale node stable ID and
 user ID; the same account on another device does not match. A `hello` name,

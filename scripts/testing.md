@@ -74,6 +74,9 @@ After building the candidate, prepend its directory to `PATH` for the gate or
 website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.
 The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
 the docs check on the candidate's command tree inside that boundary.
+Before gate, regenerate the portable architecture page after edits to
+`docs/dev/index.md` or its rendering, following [website/README.md](../website/README.md#testing).
+Include `docs/dev/index.html` in the change; the website suite checks it for drift.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
 unless the diff reaches them; together they exceed the 2400 s Rust budget, and

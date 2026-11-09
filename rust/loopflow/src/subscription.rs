@@ -518,7 +518,7 @@ async fn codex_request(
     })?;
     if let Some(error) = response.get("error") {
         let message = error.get("message").and_then(Value::as_str).unwrap_or("");
-        if message.contains("token_invalidated")
+        if crate::agent::credential_invalidated_failure(message).is_some()
             || message.contains("401 Unauthorized")
             || error.get("code").and_then(Value::as_i64) == Some(401)
         {

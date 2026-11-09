@@ -1,6 +1,6 @@
 # Desktop session recovery
 
-## Recurrence, 2026-11-09 10:04–10:20 local
+## Recurrence, 2026-11-09 10:04–10:17 local
 
 Jack Heart:
 

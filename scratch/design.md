@@ -2,9 +2,6 @@
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
-The shipping docs are `docs/server.md` and `rust/loopflow/src/server/README.md`;
-read both before implementation. The write-docs pass retained their existing
-contract and planned/local-only wording.
 
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the shared attach rules in one place; the remote section adds only its
@@ -57,17 +54,10 @@ service-level bridge tests and wire fixtures for the surviving protocol.
 
 ## Remaining implementation
 
-Integrate against the landed transport's shared store, without maintaining the
-UID-only predecessor. Restore terminal consume-on-attempt in that store; replace
-ticket timing with `SystemTime` so the 60-second
-deadline includes host sleep. Leave unrelated throttles on `Instant`.
-The terminal ticket contract must not silently change bulk transfer redemption
-policy when both use the shared store.
-
-Carry the local test `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`'s
-identity, single-use, expiry and sweep coverage onto the shared store. Retain the
-service-level bridge tests and wire fixtures. Recheck the landed revision for
-changes beyond the inspected PR head before integrating.
+Recheck the landed revision before integrating. Restore terminal consume-on-attempt
+in the shared store without changing bulk redemption policy. Replace ticket timing
+with `SystemTime` so the 60-second deadline includes host sleep; leave unrelated
+throttles on `Instant`. The deletion section owns the store and test cutover.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.
@@ -80,8 +70,6 @@ or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
 60 seconds with a clock advance representing host sleep, expired-ticket sweeping,
 and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
-
-Retain local attachment and its consume-on-attempt behavior through the shared store.
 
 Desktop review and opening results are in `questions.md`.
 

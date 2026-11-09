@@ -1,6 +1,7 @@
 # 5bfda1: Keep keystrokes a viewer sent just before it disconnected
 
-Status: implemented 2026-11-06; gate and Linux CI remain. No product decision is open.
+Status: implemented; local gate checks complete 2026-11-09. Linux CI and review of
+the earlier unexplained startup timeout remain. No product decision is open.
 
 ## Problem
 
@@ -84,8 +85,8 @@ owner's name for "closed for writing, still has input"; it never surfaces in
 CLI, Desktop or the wire, and replaces the old "first failed write means gone"
 rule rather than adding a second one. `live()`, resume matching, poll interest
 and `stream` all agree on it. No rename or merge is implied; no product choice
-is open in the design. Steer 5b95d9a5's "waits for Jack's go at explore" has no
-recorded answer; see `scratch/questions.md`.
+is open in the design. On November 9, asked whether to continue the built fix
+or return to explore, Jack Heart said "yeah continue"; see `scratch/questions.md`.
 
 ## Alternatives considered
 
@@ -103,8 +104,8 @@ recorded answer; see `scratch/questions.md`.
 - Peer that shuts down only its read side and keeps sending: under `Draining`
   it stays a writer that gets no output until it closes. That is what it asked
   for; it can't overrun anything because output is discarded. No bound added.
-- `survive` still drops on read errors immediately. Correct per the kernel
-  ordering above; the macOS run of the new test and Linux CI confirm it.
+- `survive` still drops on read errors immediately. The macOS regression covers
+  queued input before EOF; Linux CI still needs to confirm it there.
 - Other write sites (`end_viewers`, `ending` replies, `ReconnectRequired`) already
   ignore flush errors; with `Draining` they become no-ops on a closed peer.
 
@@ -124,7 +125,8 @@ admission) waiting on the 15 s `SQLITE_WRITE_BUSY_TIMEOUT`, then the 5 s
 attachment ack: past 20 s. Not reproduced; inferred from timings and code.
 
 Fix in the test: before `fixture.pause`, wait until `processes.viewed` for the
-owner reads 0, so the pause lands on an owner that holds no write. A frozen
+owner reads 0, so the pause follows that transaction's commit. Other store
+writes are not excluded by this observation. A frozen
 owner holding a store lock in production is a separate question (resume would
 wait out the busy timeout); not this Task.
 
@@ -154,7 +156,7 @@ Out: busy-timeout behavior of `lf resume` against a frozen owner.
 
 ## Checks
 
-- gate: `uv run python scripts/test.py --reuse-passing --rust-filter 'binary(transport_tests)'` — transport suite passes.
+- gate: see the November 9 plan below; earlier transport results are recorded separately.
 - implement: `cargo test -p loopflow --test transport_tests viewer_input_survives_its_disconnect` (focused).
 - CI Linux: the integration partition runs both tests; re-run the relay test 5× via `cargo nextest run --test transport_tests -E 'test(unanswering_superseded_owner)' --retries 0` in a loop if a Linux host is at hand, else CI.
 
@@ -169,5 +171,40 @@ Out: busy-timeout behavior of `lf resume` against a frozen owner.
   paused-owner case is the deterministic regression.
 - compress: `viewer_input_survives_its_disconnect` re-run after the `flush` reshape, macOS: pass.
 - publish, macOS: `cargo fmt --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
-- publish, macOS: full `transport_tests` run 1 failed `unanswering_superseded_owner…` at `until_out(first, "EDITOR_READY")` (line 2571, first viewer startup, before the pause this branch changes); run 2 passed 67/67; the test alone passed 3/3. A startup-wait timeout under full-suite load, not the frozen-owner cause.
+- publish, macOS: full `transport_tests` run 1 failed `unanswering_superseded_owner…` at `until_out(first, "EDITOR_READY")` (line 2571, first viewer startup, before the pause this branch changes); run 2 passed 67/67; the test alone passed 3/3. Startup stalled before the frozen-owner exercise; suite load was suspected, not established.
 - Remaining: Linux CI for both tests.
+
+## Gate plan (2026-11-09)
+
+Comparison: checkout base `237a107261572d08e4ffa3c8baf72b1c164c110e`, including
+uncommitted notes. Wave memory has no diff and remains read-only.
+
+- `transport.rs`: run `test(transport::)` for connection, input retry, ownership,
+  output and relay unit coverage; `binary(transport_tests)` for real owner/viewer
+  disconnects, takeover, server restart and the changed relay fixture.
+- `transport_tests.rs`: the same binary exercises the 20 KB deterministic
+  regression and 50 attach/type/close rounds. Prior startup timeout occurred at
+  `EDITOR_READY`, before the pause; its cause was not established by later passes.
+- Transport ownership also reaches `test(agent_startup_tests::)` and
+  `test(interactive_graph_keeps_input_and_advances_only_after_each_provider_exits)`
+  per the tests README.
+- README and scratch changes: review prose, run the changed-aware architecture
+  check, Rust inventory, format check and all-target Clippy with the filtered gate.
+- Linux socket behavior, Linux Clippy and the disposable installation proof
+  `declared_agent_can_start_another_tasks_graph` remain with Linux CI. No Swift
+  rendering or native UI code changes; the owner protocol tests exercise this fix.
+
+Command: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | binary(transport_tests) | test(agent_startup_tests::) | test(interactive_graph_keeps_input_and_advances_only_after_each_provider_exits)'`.
+
+## Gate results (2026-11-09, macOS)
+
+All commands cleared inherited `LF_*` and used closed stdin.
+
+- Planned gate command above — architecture, inventory, formatting and CLI build passed; 158/159 tests passed in 222.4 s, one environment-dependent failure; Clippy was not reached. Logs: `.lf/tmp/gate/run-60454/`.
+- `viewer_input_survives_its_disconnect` — passed in 3.38 s: 20,000/20,000 bytes and all 50 attach/type/close rounds. Historical unfixed result: 4,096/20,000 bytes.
+- `unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn` — passed in 19.58 s; server restart/draft preservation and newer-viewer input/geometry tests also passed.
+- `env -u GHOSTTY_RESOURCES_DIR LOOPFLOW_TEST_LF="$PWD/target/debug/lf" cargo --config 'target."cfg(all())".runner = ["uv", "run", "--no-sync", "python", "scripts/test_network.py"]' nextest run -p loopflow --test transport_tests --no-tests fail --build-jobs 4 --test-threads 4 -E 'test(desktop_shell_reconnects_without_replay_and_close_settles_its_jobs)'` — passed in 19.16 s. The failed first run inherited Desktop's installed Ghostty resource path where the generic-shell fixture expected `integration:unset`; only this test was rerun.
+- Test-binary compilation emitted macOS ld's `__eh_frame section too large` warning; compilation and test execution completed.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed in 48.99 s.
+- Earlier `EDITOR_READY` timeout remains unexplained: this fixture's socket read has a 15 s timeout, and its stand-in runs SessionStart and an initial turn before printing readiness. No log from that failing startup remains in this checkout. Today's pass does not establish why it stalled; retain this limit for delivery review.
+- Linux socket behavior/Clippy and `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` — deferred to Linux CI, not passed locally.

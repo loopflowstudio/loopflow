@@ -372,10 +372,12 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 ## Remote attach contract
 
 Planned for the authenticated endpoint in [Phone access](../../../../docs/server.md#phone-access);
-this build supports local attachment only. Owner selection and terminal control
-follow `session.attach` above.
+this build supports local attachment only. Owner selection, terminal control,
+ticket consumption and rejection follow `session.attach` above.
 
-After `welcome`, request `session.attach` on the authenticated client connection:
+After `welcome`, request `session.attach` on the authenticated client connection.
+Use a Session ID from `session.list`; `owner_lf_process_id: null` selects its
+current running terminal owner:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
@@ -396,6 +398,4 @@ name, `client_id`, login text or proxy's Unix UID cannot replace that authentica
 Local and remote tickets are not interchangeable. The 60-second deadline includes
 host sleep; expiry does not close an open bridge.
 
-Redemption uses the same consume-on-attempt and rejection rules as local
-attachment above. Request a fresh ticket before reconnecting; never replay a
-ticket or terminal input.
+Request a fresh ticket before reconnecting; never replay a ticket or terminal input.

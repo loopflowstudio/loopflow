@@ -3,14 +3,19 @@
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
 
+Shipping docs: `docs/server.md` and `rust/loopflow/src/server/README.md`.
+Read both before implementation; the latter owns the exchange and ticket rules.
+
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the shared attach rules in one place; the remote section adds only its
 exchange example, authentication and expiry requirements.
+The remote contract references the shared rules once to avoid maintaining
+duplicate descriptions of owner selection and ticket rejection.
 
 ## Transport dependency — November 9, 2026 UTC
 
-The 19:34 UTC realign check inspected PR #1812 head
-`2f89c2558347e63e40a679a0d59adefa1cf2d84b`. It supplies
+The 20:14 UTC realign check inspected PR #1812 head
+`f0c77e31fa569f13748ad29506af56670bcde3b1`. It supplies
 `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
 `UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
@@ -26,22 +31,24 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-The same check found PR #1812 still OPEN without auto-merge (`gh pr view`).
+The 20:49 UTC implementation check found PR #1812 still OPEN without auto-merge and with
+`mergedAt: null` (`gh pr view`).
 `git fetch origin main` returned `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b`;
 `git ls-tree` found neither `mobile.rs` nor `ticket.rs` there.
-`lf task status LOO-718 --json` still reports `feature` at `demo`, with PR #1812
-open. These inspected changes are not a landed implementation.
+These inspected changes are not a landed implementation.
+The PR head remains the inspected `f0c77e31fa569f13748ad29506af56670bcde3b1`.
+`lf task status LOO-718 --json` confirms `feature` at `demo`, with PR #1812
+open. The LOO-809 status read returned no output before interruption; its
+current Graph position was not reverified.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
+Graph decision: stop for the external dependency; implementation and publication
+remain incomplete until the authenticated transport lands. The existing checkout
+and documentation edits remain available for continuation.
 
-The 20:09 UTC implementation check found PR #1812 still OPEN, now at
-`f0c77e31fa569f13748ad29506af56670bcde3b1`, with `mergedAt: null`.
-That head has not been inspected; the behavior above describes only the 19:34
-revision. Fetching main still returned `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b`,
-with neither transport file present. Dependent implementation remains stopped.
-`lf task status LOO-809 --json` produced no result before interruption; the
-queued LOO-718 read did not run. Current Graph positions were not reverified.
+Earlier dependency observations are in
+`cda7cf5c96f5896800c12d34f8c71126308fbb87:scratch/design.md`.
 
 ## Delete — do not maintain
 

@@ -858,9 +858,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         .env(OWNER_ENV, id.as_str())
         .env(PARENT_ENV, std::process::id().to_string());
     let pair = terminal.then(terminal_pair).transpose()?;
+    // A Desktop pane's relay variables describe that pane's viewer, not the
+    // program: an agent that inherits `LF_SERVER` takes every attach it makes
+    // for a server-bridged pane relay.
     command
         .env_remove("LF_TERMINAL_ID")
-        .env_remove("LF_TERMINAL_TTY");
+        .env_remove("LF_TERMINAL_TTY")
+        .env_remove("LF_SERVER")
+        .env_remove("LF_SERVER_STATUS");
     if let (Some(placement), Some((_, slave))) = (placement, &pair) {
         if let Some(tty) = tty_name(slave.as_raw_fd()) {
             // This owned PTY continues the validated viewer placement. Native

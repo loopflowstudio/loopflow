@@ -255,7 +255,8 @@ viewer detaches. Read these logs from another terminal while editing a draft.
 Desktop Session panes set `LF_SERVER=1` for their terminal relay. The
 relay passes `--session` and obtains a `session.attach` bridge for its exact owner from the local client API server before speaking
 this same owner protocol. No owner or provider is created on bridge failure.
-Ordinary CLI attachments keep their direct socket path. See
+Ordinary CLI attachments keep their direct socket path. The owner strips `LF_SERVER` and `LF_SERVER_STATUS`
+from the program it runs, so an agent in a Desktop pane attaches like any CLI. See
 [current server protocol](../server/README.md) for admission and framing.
 The [server boundary](../../../../docs/dev/server.md) separates
 client access from Machine routing. `lf session serve` remains the execution-owner

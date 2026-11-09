@@ -30,6 +30,9 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
+        /// No interactive step is left ahead: Auto-Ship is approved and the
+        /// run may merge the PR.
+        ships: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
         /// terminal (`-b`, `-i`) keeps it.
@@ -48,10 +51,16 @@ impl TaskRun {
             Self::Running {
                 issue,
                 run,
+                ships,
                 graph_process,
                 log: Some(log),
             } => Some(format!(
-                "{issue} · {run} running as Graph process {graph_process}\n  follow: lf task status {issue}\n  log:    {}",
+                "{issue} · {run} running as Graph process {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
+                if *ships {
+                    format!("\n  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {issue}` withdraws")
+                } else {
+                    String::new()
+                },
                 log.display()
             )),
             Self::Running { log: None, .. } => None,
@@ -354,10 +363,30 @@ mod tests {
         let running: TaskRun = result(include_str!(
             "../../../../tests/fixtures/dto/server/task_running.json"
         ));
-        assert!(running
+        let text = running.render().unwrap();
+        assert!(text.contains("running as Graph process"));
+        assert!(!text.contains("may merge the PR"));
+        let TaskRun::Running {
+            issue,
+            run,
+            graph_process,
+            log,
+            ..
+        } = running
+        else {
+            panic!("the fixture is a running Task")
+        };
+        let ships = TaskRun::Running {
+            issue,
+            run,
+            ships: true,
+            graph_process,
+            log,
+        };
+        assert!(ships
             .render()
             .unwrap()
-            .contains("running as Graph process"));
+            .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
         let shipping: TaskShip = result(include_str!(
             "../../../../tests/fixtures/dto/server/task_shipping.json"
         ));

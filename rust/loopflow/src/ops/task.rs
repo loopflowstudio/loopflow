@@ -558,8 +558,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`.
-    Run(String),
+    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
+    /// interactive step is left ahead, and the run may merge the PR.
+    Run { step: String, ships: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -836,7 +837,7 @@ async fn start_task_run(
             graph.name
         )));
     }
-    Ok(TaskRunStart::Run(label))
+    Ok(TaskRunStart::Run { step: label, ships })
 }
 
 /// The run this process carried ended; settle a completion its arrival at

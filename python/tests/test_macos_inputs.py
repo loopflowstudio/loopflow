@@ -48,6 +48,7 @@ def test_native_build_changes_run_both_desktop_builds(path: str) -> None:
         "tests/fixtures/dto/work_first_entry.json",
         "python/tests/test_desktop_performance.py",
         "scripts/swift_test_limit.py",
+        "scripts/check_desktop_launch.py",
     ],
 )
 def test_wire_fixtures_and_swift_scripts_run_swift_test(path: str) -> None:

@@ -1030,15 +1030,14 @@ telemetry red; fresh failures join existing work.
   checkpoint index restores pre-staged telemetry from HEAD. Whitespace-only
   filenames are work: never trim them to detect an empty checkpoint. Installed
   LOO-661 recovery is unproved by fixture.
-- **Commit failures need both Git streams** (2026-10-11): retain stdout, stderr
-  and a silent failure's exit status.
+- **Commit failures need both Git streams**: stdout, stderr and the exit status.
 - **Desktop gates are headless** (rechecked at `bc6d11661`); flags live in `scripts/testing.md`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
+- **A check that runs only after merge reddens main** (LOO-800). #1811's quit hang passed PR checks and reddened `Packages (main)` ~22h; a debug build reproduces it, so `swift-test` runs the launch check.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
-  ledger before ratifying history. Exact-frontier repairs need no migration. July 20
-  recovery and #1123 evidence: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas.
-- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks in `tests/e2e/README.md` (getpwuid bypasses HOME/LF_HOME); PR #1444's disposable-account proofs stay with isolated CI until integrated.
+  ledger before ratifying history. History: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas.
+- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks in `tests/e2e/README.md` (getpwuid bypasses HOME/LF_HOME); disposable-account proofs (#1444) run in isolated CI.
 - **One writer owns a checkout and its Git sequencer.** Concurrent-edit/rebase incident: `6016eca30585:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Canonical local
   Project fields own content; optional Linear bindings and observations retain
@@ -1060,10 +1059,7 @@ telemetry red; fresh failures join existing work.
   installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
   firings remain LOO-645's evidence.
 - **Release orchestration, publication and caller edits are separate evidence**
-  (August 2026, `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge
-  product state; keep same-tag recovery singular; LOO-261 owns clean-host
-  candidate validation and LOO-266 preserving caller branch, index and working
-  bytes across every release exit.
+  (`24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge product state.
 
 ## Durable model lessons (curated 2026-10-02)
 

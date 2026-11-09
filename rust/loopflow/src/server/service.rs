@@ -372,7 +372,7 @@ impl Connection<'_> {
         // A Machine registry that is unavailable or uninitialized leaves `machine`
         // null; file settings stay reachable through the same connection.
         let machine = tokio::task::spawn_blocking(|| {
-            crate::journal::request::isolate(|| Read::MachineId.read())
+            crate::journal::request::isolate(|| Read::MachineSelf.read())
         })
         .await?
         .ok();
@@ -1234,7 +1234,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     select: None,
                 })
                 .await;
@@ -1388,7 +1388,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::MonitorPs,
+                    operation: Read::ProcessList,
                     select: Some(vec!["absent".into()]),
                 })
                 .await;

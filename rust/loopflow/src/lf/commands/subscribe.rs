@@ -503,11 +503,6 @@ where
         select: Option<Vec<String>>,
     ) -> Result<Self> {
         let database = crate::store::database_path_from_env()?;
-        if wakes.checkouts {
-            // Every reading asks Git the same questions about the same checkouts;
-            // only a checkout that changed on disk is asked again.
-            crate::git::retain_reads();
-        }
         let inbox: Arc<dyn Inbox> = shared.clone();
         follow_store(&database, &inbox, parent);
         Ok(Self {
@@ -630,9 +625,10 @@ where
                 let probed = self.probe();
                 let reading = match &self.refused {
                     Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
-                    None => self
-                        .runtime
-                        .block_on((self.read)(self.store.clone(), self.args.clone())),
+                    None => crate::git::retain_reads(self.wakes.checkouts, || {
+                        self.runtime
+                            .block_on((self.read)(self.store.clone(), self.args.clone()))
+                    }),
                 };
                 (probed, reading)
             });
@@ -920,6 +916,49 @@ mod tests {
                 return serde_json::from_slice(&frame).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn subscription_git_retention_does_not_escape_readings_or_reset_for_new_subscriptions() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let subscribe = || {
+            let (sender, wakes) = mpsc::channel();
+            let directory = repo.path().to_owned();
+            let subscription = start_pull(
+                (),
+                Wake::following_checkouts(PLANNING_CLOCK),
+                move |_, ()| {
+                    let directory = directory.clone();
+                    async move {
+                        Ok(crate::git::git_stdout(
+                            &directory,
+                            &["status", "--porcelain"],
+                        )?)
+                    }
+                },
+                Box::new(move || {
+                    let _ = sender.send(());
+                }),
+                None,
+            )
+            .unwrap();
+            (subscription, wakes)
+        };
+        let (first, wakes) = subscribe();
+        assert_eq!(next_frame(&first, &wakes)["body"], "");
+        std::fs::write(repo.path().join("new.txt"), "text").unwrap();
+        let seen = crate::journal::request::isolate(|| {
+            crate::git::git_stdout(repo.path(), &["status", "--porcelain"]).unwrap()
+        });
+        assert!(seen.contains("new.txt"), "{seen:?}");
+        // No store registers this checkout, so filesystem observation cannot
+        // refresh the answer before the second subscription reads it.
+        let (second, wakes) = subscribe();
+        assert_eq!(next_frame(&second, &wakes)["body"], "");
     }
 
     #[test]

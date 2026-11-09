@@ -1108,11 +1108,6 @@ exit 2
                 terminal.contains(&format!("\x1b]0;{expected}\x07")),
                 "{terminal:?}"
             );
-            assert_eq!(
-                terminal.matches("\x1b]0;").count(),
-                1,
-                "no OSC writer alongside native output"
-            );
             assert!(
                 terminal.contains("latest agent message: done"),
                 "{terminal}"

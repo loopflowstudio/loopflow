@@ -104,7 +104,7 @@ enum ThemeConfig {
 
     /// Read and edit the same typed declaration as the CLI through the server.
     static func read(_ url: URL, location: ServerLocation = .shared) async throws -> String? {
-        let data = try await ServerClient.configuration(.theme(path: url.path, value: nil), location: location)
+        let data = try await ServerClient.configuration(.configTheme(path: url.path, value: nil), location: location)
         let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
         guard case .string(let value) = result.value else { return nil }
         return value
@@ -112,6 +112,6 @@ enum ThemeConfig {
 
     static func write(_ value: String, to url: URL, location: ServerLocation = .shared) async throws {
         let encoded = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-        _ = try await ServerClient.configuration(.theme(path: url.path, value: encoded), location: location)
+        _ = try await ServerClient.configuration(.configTheme(path: url.path, value: encoded), location: location)
     }
 }

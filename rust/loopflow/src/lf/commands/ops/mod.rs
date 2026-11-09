@@ -2031,7 +2031,7 @@ fn process_skill_agent(
         &crate::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
-    let capture = crate::session_record::CaptureHandle::begin_with_context(
+    let capture = crate::session_record::SessionRecorder::begin_with_context(
         crate::session_record::SessionCaptureSpec {
             harness: provider,
             model,
@@ -2048,13 +2048,14 @@ fn process_skill_agent(
         Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
         )?),
-    )?;
+    )
+    .map(crate::process::LfProcessRuntime::new)?;
 
     let launch = prepared.config;
     let process = ProcessConfig {
         auto: true,
         stream: true,
-        capture: Some(capture.clone().into()),
+        runtime: Some(capture.clone()),
         ..Default::default()
     };
 

@@ -26,7 +26,7 @@ pub(crate) struct CpuProcess {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct Observer {
+pub(crate) struct Observer {
     body: Option<(u32, String)>,
     previous: Option<(OffsetDateTime, Vec<CpuProcess>)>,
     quiet_since: Option<OffsetDateTime>,
@@ -39,7 +39,7 @@ impl Observer {
 
     /// Since when the body and its tools used no CPU; `None` when this sample
     /// could not read them or the PID now names another process.
-    fn observe(
+    pub(crate) fn observe(
         &mut self,
         now: OffsetDateTime,
         body_pid: Option<u32>,
@@ -69,29 +69,6 @@ impl Observer {
         };
         self.previous = processes.map(|processes| (now, processes));
         self.quiet_since
-    }
-}
-
-impl super::CaptureHandle {
-    pub(crate) async fn observe_activity(&self, body_pid: Option<u32>) {
-        let processes = sample(body_pid).await;
-        self.with_capture(|capture| {
-            let now = OffsetDateTime::now_utc();
-            let quiet_since = capture.activity.observe(now, body_pid, processes);
-            let Some((session, attachment)) = &capture.attachment else {
-                return Ok(());
-            };
-            super::row_store(&capture.dir)
-                .and_then(|store| {
-                    store.record_session_cpu(
-                        session,
-                        attachment,
-                        now.unix_timestamp(),
-                        quiet_since.map(OffsetDateTime::unix_timestamp),
-                    )
-                })
-                .map_err(std::io::Error::other)
-        });
     }
 }
 

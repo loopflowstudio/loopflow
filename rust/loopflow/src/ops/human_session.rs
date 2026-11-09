@@ -498,7 +498,7 @@ pub(crate) fn publish_prepared_input(
         session.captured.is_some(),
         "Session input must be reserved before artifact publication"
     );
-    crate::session_record::CaptureHandle::prepare(
+    crate::session_record::SessionRecorder::prepare(
         crate::session_record::SessionCaptureSpec {
             harness: session.provider.clone().unwrap_or_default(),
             model: session.model.clone(),

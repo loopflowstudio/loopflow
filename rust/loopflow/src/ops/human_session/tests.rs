@@ -13,7 +13,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 ))
                 .await?,
             );
-            let capture = crate::session_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::SessionRecorder::begin_at(
                 home,
                 crate::session_record::SessionCaptureSpec {
                     harness: "claude".into(),
@@ -27,7 +27,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                     graph: crate::session_record::SessionGraphMembership::Independent,
                     work: None,
                 },
-            )?;
+            ).map(crate::process::LfProcessRuntime::new)?;
             let session = store
                 .sqlite
                 .session_for_artifact(&capture.artifact_key())?

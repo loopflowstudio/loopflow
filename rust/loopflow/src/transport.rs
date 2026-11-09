@@ -1160,12 +1160,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                     cwd: cwd.to_path_buf(),
                                 });
                             }
-                            if let Some(snapshot) = output.snapshot()? {
-                                viewer.stream(Tag::Snapshot, &snapshot)?;
-                            }
-                            for (stream, bytes) in output.tail() {
-                                viewer.stream(Tag::stream(stream), bytes)?;
-                            }
                         }
                         Request::Resume(resume) => {
                             viewer.resuming = Some((answers, resume));
@@ -1279,6 +1273,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
             // Fresh streams and ownership changes share the same appearance.
             let fresh = attaching.contains(&viewer.id);
+            if fresh {
+                // Select the new owner's dimensions before painting its first
+                // screen, without waiting for a provider redraw.
+                if let Some(snapshot) = output.snapshot()? {
+                    viewer.stream(Tag::Snapshot, &snapshot)?;
+                }
+                for (stream, bytes) in output.tail() {
+                    viewer.stream(Tag::stream(stream), bytes)?;
+                }
+            }
             if new_size.is_some() || fresh {
                 viewer.event(Event::Resize {
                     rows: size.0,
@@ -1835,10 +1839,7 @@ impl ViewerState {
             self.alternate.entered = false;
             self.output.stdout.write_all(terminal::RESET_MODES)?;
         }
-        // Restore the drawing state too; soft reset support varies by terminal.
-        self.output
-            .stdout
-            .write_all(b"\x1b[?6l\x1b[?7h\x1b[r\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\")
+        self.output.stdout.write_all(terminal::RESET_DRAWING)
     }
 
     fn restore(&mut self) {
@@ -2339,6 +2340,7 @@ fn view(
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
     let mut heartbeat = SystemTime::now() + HEARTBEAT_INTERVAL;
+    let mut last_response = SystemTime::now();
     'relay: loop {
         if status.as_ref().is_some_and(connection::Status::closed) {
             return Ok(());
@@ -2359,6 +2361,7 @@ fn view(
                 return Ok(());
             };
             socket = stream::Stream::socket(next)?;
+            last_response = SystemTime::now();
             decoder = Decoder::default();
             controlled = false;
             owned = false;
@@ -2427,6 +2430,7 @@ fn view(
                 Ok(_) => bail!("Execution owner disconnected; outcome is unknown"),
                 Err(error) => return Err(error.into()),
             };
+            last_response = SystemTime::now();
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 if tag != Tag::Reply {
@@ -2484,7 +2488,7 @@ fn view(
                                     terminal.as_ref().expect("terminal entered").make_raw()?;
                                 }
                                 if let Some(status) = &mut status {
-                                    status.connected(controlled)?;
+                                    status.connected(controlled);
                                 }
                             }
                             Reply::Busy if recovery.is_some() => {
@@ -2585,8 +2589,8 @@ fn view(
                             return Ok(());
                         }
                         Event::ChildExited { code } => {
-                            if let Some(status) = &status {
-                                status.ended()?;
+                            if let Some(status) = &mut status {
+                                status.ended();
                             }
                             return if code == 0 {
                                 Ok(())
@@ -2601,6 +2605,9 @@ fn view(
                         }
                         Event::Return { detach } => {
                             returning = Some(detach);
+                            if let Some(status) = &mut status {
+                                status.native_ready();
+                            }
                             // This marker comes from the acknowledged live relay, never
                             // the owner's saved screen. Desktop consumes it as readiness.
                             if controlled && crate::session_record::current_terminal_id().is_some()
@@ -2619,11 +2626,22 @@ fn view(
                 }
             }
         }
+        // Drain available replies before checking elapsed wall time: after sleep,
+        // a healthy connection may already have its heartbeat answer queued.
+        if acknowledgement_deadline.is_none()
+            && last_response.elapsed().unwrap_or_default() >= HEARTBEAT_TIMEOUT
+        {
+            if server {
+                interrupted = Some("The bridge stopped answering".to_owned());
+                continue;
+            }
+            bail!("Execution owner stopped answering; outcome is unknown, no provider was restarted and no input was replayed");
+        }
         if let Some(status) = &mut status {
             if status.closed() {
                 return Ok(());
             }
-            if status.take_move(acknowledgement_deadline.is_none() && !controlled)? {
+            if status.take_move(acknowledgement_deadline.is_none() && !controlled) {
                 controlled = false;
                 owned = false;
                 recovery = Some(Recovery::Takeover);

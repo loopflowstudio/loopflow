@@ -265,7 +265,7 @@ fn delegate(
         };
         let cwd = std::env::current_dir()?;
         let owner = match preview_session {
-            Some(session) => start_session(session, &argv, terminal, &cwd)?,
+            Some(session) => start_session(session, &argv, terminal, &cwd, &|_| {})?,
             None => start(&argv, terminal, &cwd, &|_| {})?,
         };
         let session = preview_session.map(LfSessionId::from);
@@ -282,13 +282,15 @@ fn delegate(
 }
 
 /// Start or obtain the Session's existing terminal owner without becoming a
-/// viewer. Ordinary Desktop delegation uses this same startup boundary. This
-/// lock differs from the provider launch lock the child must acquire itself.
+/// viewer. Task background startup, Desktop delegation and mobile creation
+/// share this lock, which differs from the provider launch lock the child
+/// must acquire itself.
 pub(crate) fn start_session(
     session: &str,
     argv: &[String],
     terminal: bool,
     cwd: &Path,
+    inherit: &dyn Fn(&mut Command),
 ) -> Result<LfProcessId> {
     let _startup = crate::ops::human_session::lock_session_process(&format!("owner:{session}"))?;
     let registry =
@@ -302,7 +304,7 @@ pub(crate) fn start_session(
             return Ok(owner);
         }
     }
-    let owner = start(argv, terminal, cwd, &|_| {})?;
+    let owner = start(argv, terminal, cwd, inherit)?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if registry.sqlite.session_transport(session)?.as_ref() == Some(&owner) {

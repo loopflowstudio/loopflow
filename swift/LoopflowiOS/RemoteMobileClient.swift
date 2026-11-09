@@ -14,9 +14,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
         let connection = try await MachineConnection.open(endpoint: endpoint)
         defer { connection.close() }
-        guard let machineID = try? identity(connection.welcome) else {
-            throw RegistryQueryError("Update the Machine service to connect from this phone.")
-        }
+        let machineID = try identity(connection.welcome)
         if let replacing, replacing.machineID != machineID {
             throw RegistryQueryError("This address belongs to a different Machine. Scan the code from your original Machine’s Mobile settings.")
         }

@@ -379,8 +379,14 @@ pub(super) async fn welcome<C: Carrier>(
     let machine = tokio::task::spawn_blocking(|| {
         crate::journal::request::isolate(|| Read::MachineSelf.read())
     })
-    .await?
-    .ok();
+    .await?;
+    let machine = match machine {
+        Ok(machine) => Some(machine),
+        Err(error) => {
+            tracing::warn!(client = %listed.id, %error, "Machine identity unavailable during server welcome");
+            None
+        }
+    };
     send(
         carrier,
         &ServerMessage::Welcome(Welcome {

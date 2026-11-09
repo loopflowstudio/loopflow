@@ -82,28 +82,26 @@ impl Configuration {
 }
 
 pub fn configured() -> Result<Option<Configuration>> {
-    let value = crate::config::files::read(&crate::store::lf_home_dir().join("config.yaml"))?;
+    let value = crate::config::files::read(&configuration_path())?;
     configuration(&value)
 }
 
+fn configuration_path() -> PathBuf {
+    crate::store::lf_home_dir().join("mobile.yaml")
+}
+
 fn configuration(value: &serde_yaml_ng::Value) -> Result<Option<Configuration>> {
-    value
-        .get("mobile")
-        .cloned()
-        .map(serde_yaml_ng::from_value)
-        .transpose()
+    if value.as_mapping().is_some_and(|mapping| mapping.is_empty()) {
+        return Ok(None);
+    }
+    serde_yaml_ng::from_value(value.clone())
+        .map(Some)
         .context("Read mobile setup")
 }
 
 pub(super) fn save(configuration: &Configuration) -> Result<()> {
-    crate::config::files::update(&crate::store::lf_home_dir().join("config.yaml"), |value| {
-        let mapping = value
-            .as_mapping_mut()
-            .context("Machine configuration is not a mapping")?;
-        mapping.insert(
-            serde_yaml_ng::Value::String("mobile".into()),
-            serde_yaml_ng::to_value(configuration)?,
-        );
+    crate::config::files::update(&configuration_path(), |value| {
+        *value = serde_yaml_ng::to_value(configuration)?;
         Ok(())
     })
 }
@@ -137,9 +135,9 @@ pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
     let host = Host::discover()?;
     let owner = host.identity()?.0;
-    let value = crate::config::files::read(&crate::store::lf_home_dir().join("config.yaml"))?;
-    // Explicit setup replaces obsolete mobile settings. Whole-file read/parse
-    // errors still surface so unrelated Machine settings cannot be discarded.
+    let value = crate::config::files::read(&configuration_path())?;
+    // Explicit setup replaces obsolete mobile settings; file read/parse errors
+    // still surface instead of discarding an unreadable document.
     let previous = configuration(&value).ok().flatten();
     let port = previous
         .as_ref()
@@ -156,19 +154,13 @@ pub fn enable() -> Result<Configuration> {
 }
 
 pub(super) fn save_disabled() -> Result<Option<Configuration>> {
-    crate::config::files::update(&crate::store::lf_home_dir().join("config.yaml"), |value| {
+    crate::config::files::update(&configuration_path(), |value| {
         let mut saved = configuration(value).ok().flatten();
-        let mapping = value
-            .as_mapping_mut()
-            .context("Machine configuration is not a mapping")?;
-        let key = serde_yaml_ng::Value::String("mobile".into());
         if let Some(config) = &mut saved {
             config.enabled = false;
-            mapping.insert(key, serde_yaml_ng::to_value(config)?);
+            *value = serde_yaml_ng::to_value(config)?;
         } else {
-            // An explicit disable also removes obsolete mobile settings. It
-            // does not migrate their authority into the current configuration.
-            mapping.remove(&key);
+            *value = serde_yaml_ng::Value::Mapping(Default::default());
         }
         Ok(saved)
     })

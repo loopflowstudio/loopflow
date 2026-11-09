@@ -6033,6 +6033,52 @@ fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
 }
 
 #[test]
+fn task_creation_confirms_its_live_terminal_owner() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    fixture
+        .repo
+        .create_file(".lf/config.yaml", "agent: claude\ngraph: mobile\n");
+    fixture
+        .repo
+        .create_file(".lf/graphs/mobile.yaml", "- interactive: demo\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Interactive Task creation");
+    fixture.repo.push();
+    let created = fixture
+        .command(&[
+            "task",
+            "create",
+            "Create and open",
+            "--run",
+            "--json",
+            "--terminal",
+            "--request-id",
+            &uuid::Uuid::new_v4().to_string(),
+        ])
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    let outcome: Value = serde_json::from_slice(&created.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&created.stderr)));
+    let session = outcome["receipt"]["session_id"].as_str().unwrap();
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let _cleanup = StopOwner(&fixture, owner.clone());
+    assert_eq!(outcome["state"], "started", "{outcome}");
+    assert_eq!(outcome["owner_lf_process_id"], owner);
+    assert_eq!(fixture.launches(1).len(), 1);
+    let observer = fixture.viewer(&owner, false);
+    assert!(observer.token.is_none());
+}
+
+#[test]
 fn start_only_opens_one_session_without_taking_existing_viewer_claims() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
@@ -6475,11 +6521,8 @@ printf 'output-final\r\n'
     mobile_host(&fixture, &host_status, &certificate);
     let config = json!({"enabled":true,"endpoint":endpoint,"owner":{
         "node":host_status["Self"]["ID"],"user":host_status["Self"]["UserID"]}});
-    let config_path = fixture.home.path().join("config.yaml");
-    let mut saved: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    saved["mobile"] = serde_yaml_ng::to_value(config).unwrap();
-    std::fs::write(config_path, serde_yaml_ng::to_string(&saved).unwrap()).unwrap();
+    let config_path = fixture.home.path().join("mobile.yaml");
+    std::fs::write(config_path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
     let mut service = ServerProof {
         fixture: &fixture,
         child: None,
@@ -6500,6 +6543,8 @@ printf 'output-final\r\n'
     };
     service.child = Some(launch());
     let first_instance = service.ready();
+    let machine = service.request(json!({"kind":"machine.self"}));
+    assert!(machine["id"].is_string(), "{machine}");
 
     let integration_directory = || {
         let container = Command::new("xcrun")
@@ -6891,10 +6936,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         );
         std::thread::sleep(Duration::from_millis(20));
     };
-    let saved = fixture.home.path().join("config.yaml");
+    let saved = fixture.home.path().join("mobile.yaml");
     let persisted: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
-    assert_eq!(persisted["mobile"], config);
+    assert_eq!(persisted, config);
     let port = reqwest::Url::parse(config["endpoint"].as_str().expect("enabled endpoint"))
         .unwrap()
         .port()
@@ -6936,7 +6981,9 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
                 .into(),
             ))
             .unwrap();
-        assert_eq!(text(reader)["type"], "welcome");
+        let welcome = text(reader);
+        assert_eq!(welcome["type"], "welcome");
+        assert!(welcome["machine"]["id"].is_string(), "{welcome}");
         reader
             .send(Message::Text(
                 json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
@@ -7117,7 +7164,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         .success());
     let persisted: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(saved).unwrap()).unwrap();
-    assert_eq!(persisted["mobile"]["enabled"], false);
+    assert_eq!(persisted["enabled"], false);
     assert!(!fixture.home.path().join("server.plist").exists());
 }
 
@@ -7136,10 +7183,11 @@ fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
             certificate.signing_key.serialize_pem()
         ),
     );
-    let saved = fixture.home.path().join("config.yaml");
-    let unrelated = json!({"shell":"/bin/zsh"});
-    let mut settings = unrelated.clone();
-    settings["mobile"] = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
+    let saved = fixture.home.path().join("mobile.yaml");
+    let preferences = fixture.home.path().join("config.yaml");
+    let unrelated = "agent: claude\n";
+    std::fs::write(&preferences, unrelated).unwrap();
+    let settings = json!({"enabled":true,"endpoint":"https://obsolete.tail.ts.net:8443"});
     std::fs::write(&saved, serde_yaml_ng::to_string(&settings).unwrap()).unwrap();
     let service = ServerProof::start(&fixture, false);
     let instance = service.ready();
@@ -7168,11 +7216,13 @@ fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
     let first = setup();
     assert_eq!(service.ready(), instance);
     assert_eq!(first["owner"], json!({"node":"node1","user":1}));
-    let mut persisted: Value =
+    let persisted: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
-    assert_eq!(persisted["mobile"], first);
-    persisted.as_object_mut().unwrap().remove("mobile");
-    assert_eq!(persisted, unrelated);
+    assert_eq!(persisted, first);
+    assert_eq!(std::fs::read_to_string(&preferences).unwrap(), unrelated);
+    let machine = service.request(json!({"kind":"machine.self"}));
+    assert!(machine["id"].is_string(), "{machine}");
+    assert_eq!(service.connect().welcome().machine.as_ref(), Some(&machine));
 
     let port = reqwest::Url::parse(first["endpoint"].as_str().unwrap())
         .unwrap()
@@ -7208,7 +7258,7 @@ fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
     assert_eq!(ready["configuration"], repaired);
     let persisted: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
-    assert_eq!(persisted["mobile"], repaired);
+    assert_eq!(persisted, repaired);
     assert_eq!(occupied.local_addr().unwrap().port(), port);
 
     drop(service);
@@ -7225,13 +7275,15 @@ fn server_mobile_setup_repairs_obsolete_settings_and_occupied_ports() {
     let persisted: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        persisted, unrelated,
-        "Offline disable removes only obsolete mobile settings"
+        persisted,
+        json!({}),
+        "Offline disable clears obsolete mobile settings"
     );
     assert!(!fixture.home.path().join("server.plist").exists());
 
-    // A damaged whole file cannot be repaired without losing unrelated data.
-    let invalid = "shell: [unfinished";
+    assert_eq!(std::fs::read_to_string(preferences).unwrap(), unrelated);
+    // A damaged file stays available for inspection.
+    let invalid = "enabled: [unfinished";
     std::fs::write(&saved, invalid).unwrap();
     let off = fixture
         .command(&["server", "mobile", "--off"])

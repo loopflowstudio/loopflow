@@ -360,7 +360,7 @@ pub fn recoverable(
                 "resume".into(),
                 session.to_string(),
             ];
-            crate::transport::start_session(session.as_str(), &argv, true, &repo)
+            crate::transport::start_session(session.as_str(), &argv, true, &repo, &|_| {})
         })();
         match opening {
             Ok(owner) => outcome.owner = Some(owner),

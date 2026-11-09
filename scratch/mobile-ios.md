@@ -237,10 +237,11 @@ The Simulator proofs over real HTTPS/WSS with a second-node identity fixture and
 stand-in, Claude and Codex providers passed through November 4 (see the history).
 Still open, in priority order:
 
-1. Rerun the host-Tailscale native acceptance on revision 3 (terminal by ticket,
-   32 MiB paced output, service interruption, creation recovery). Earlier
-   sustained-output runs twice missed deadlines with misleading socket attribution
-   and passed on rerun; the cause is unresolved and no batching change remains.
+1. Revision-3 native acceptance passed November 9 (terminal by ticket, 32 MiB
+   paced output, service interruption, creation recovery), using isolated Machine
+   data and a fixture second-node identity. Earlier sustained-output runs twice
+   missed deadlines with misleading socket attribution and passed on rerun;
+   their cause remains unresolved and no batching change remains.
 2. Physical phone over installed Tailscale: identity, network and account
    transitions, camera scanning, share sheet, cellular. Everything so far is
    Simulator evidence.
@@ -282,7 +283,7 @@ desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
 - `cargo test -p loopflow --lib server::`: 33 passed; stale schema regenerated, then `server::schema::tests::the_checked_in_schema_is_what_describe_prints` passed. macOS linker warned that the unwind table exceeds 16 MiB; gate/CI own static analysis.
 - `swift test --package-path swift --filter 'ServerProtocolTests|RegistryQueryTests|ServerClientTests'`: 47 passed after aligning the mobile operation names with main. Device and host-Tailscale acceptance remain for demo.
 - November 9 live-connection preparation: iOS `MachinePairingTests`, `OwnerStreamTests`, and `MobileTerminalTests` on Simulator `1FE57D5C-9173-49D7-B295-704E442231E9`: 55 passed after fixing the stale `roadmap` test call and waiting for foreground recovery's state. The first run had an integer/number expectation mismatch in the new heartbeat test and a foreground assertion before recovery finished.
-- Live owner heartbeat remains to verify over the transport. The opt-in native acceptance now observes for 35 seconds before taking control, exceeding the owner's 30-second expiry; this added check has not run. The real Machine installation prerequisites and open sample app are recorded in `scratch/mobile-demo.md`.
+- The native acceptance observes for 35 seconds before taking control, exceeding the owner's 30-second expiry; this check passed in the November 9 native integration below. The real Machine installation prerequisites and open sample app are recorded in `scratch/mobile-demo.md`.
 
 ## November 9 gate continuation
 
@@ -335,3 +336,40 @@ older conversations. Added the optional Task field to main's new Rust fixture.
 The branch remains local after `lf sync --manual`. Real Machine installation
 still needs the migration on main and a published build; no release, landing or
 database change happened during this sync.
+
+### Native integration repair — November 9
+
+An isolated native TLS run reached the revision-3 server but failed on missing
+Machine identity. A direct served `machine.self` request exposed the cause:
+`invalid graph: unknown or ineligible setting mobile`. Mobile setup was writing
+service state into the typed preferences file. Move the single saved setup to
+Machine-local `mobile.yaml`; retain the shared atomic writer and setup lock, and
+leave preferences untouched. No compatibility reader is needed for an unreleased
+branch-only key. Pairing should keep the identity error rather than claim that
+the installed server is old.
+
+The test uses a generated one-day CA/leaf certificate trusted only in a fresh
+Simulator, an isolated registry, and a fixture second-node identity. It neither
+fetches the host's TLS key nor proves physical Tailscale admission. First native
+failure log: `/tmp/mobile-native-missing-identity.log`; direct read failure:
+`/tmp/mobile-native-run-identity.log`. Both owned test Simulators were removed.
+
+The repaired native run passed idle viewing, service restart and all 32 MiB/512
+edited input acknowledgements, then exposed a real creation failure. Creation
+settled after 17 seconds as `failed`: its startup wait watched a different owner
+from the Session's recorded owner. A process sample caught `start_session` in
+that wait (`/tmp/mobile-create-sample.txt`). The focused backend regression
+failed twice before the repair, including `/tmp/mobile-task-start-owner.log`.
+Task background startup used raw `transport::start`, bypassing the Session
+startup lock. It now uses the same `start_session` path as explicit creation and
+opening, carrying its existing Wave environment through that path. The new
+regression passes (7.61 s including fixture startup/cleanup, versus 21.68 s for
+the failed run).
+The native creation test now waits for the same request's final receipt instead
+of assuming two immediate responses must finish asynchronous admission.
+
+- `server_mobile_`: 2 passed, including untouched preferences, served Machine identity and remote welcome identity after setup.
+- Focused startup regression: 1 passed. Filtered nextest for simultaneous opening, start-only recovery and Task background startup: 6 passed (`/tmp/mobile-session-checks.log`).
+- `mobile_machine_native_acceptance --exact --ignored --nocapture`: passed in 98.34 s; native XCTest passed in 80.269 s. Idle viewing exceeded 35 s, service loss was detected in 23.9 ms, creation settled in 2.468 s, and all 32 MiB plus 512 edited-input acknowledgements completed. Input-response p95 was 13.5 ms; main-actor scheduling p95 was 29.3 ms; longest terminal feed was 1.60 ms. These are Simulator measurements, not physical phone latency or energy.
+- Final logs: `/tmp/mobile-native-run-final.log`, `swift/.build/mobile-acceptance.log`. Owned test Simulator `99BA6759-17AE-4F01-A790-0E442C27580D` was removed after completion. The open personal demo and real Machine were not changed.
+- `uv run python scripts/check_architecture.py`, `cargo fmt --check`, `git diff --check`, and `cargo clippy --all-targets -- -D warnings`: passed.

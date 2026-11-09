@@ -196,8 +196,9 @@ async fn start_in_background(
         "resume".into(),
         id.clone(),
     ];
+    let starting = id.clone();
     tokio::task::spawn_blocking(move || {
-        crate::transport::start(&argv, true, &worktree, &|command| {
+        crate::transport::start_session(&starting, &argv, true, &worktree, &|command| {
             let key = crate::work::wave::context::WAVE_ID_ENV;
             match &wave {
                 Some(wave) => command.env(key, wave.id().as_str()),

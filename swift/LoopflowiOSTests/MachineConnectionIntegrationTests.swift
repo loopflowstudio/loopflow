@@ -306,13 +306,22 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         creation.selectRepository(directory)
         creation.editText("Create a Task from the native phone")
         XCTAssertTrue(creation.canCreate)
+        let began = Date()
         await creation.submit()
-        // A slow build/Graph may outlast one carrier deadline. Recover the same
-        // admission; never create another request just to make the proof pass.
-        if !creation.settled { await creation.submit() }
+        let submission = try XCTUnwrap(creation.draft.submission)
+        // Admission may still be running after a carrier deadline. Wait for its
+        // saved result; a second immediate response can legitimately be pending.
+        while !creation.settled {
+            guard Date().timeIntervalSince(began) < 45 else {
+                throw RegistryQueryError("Task creation did not settle: \(creation.error ?? String(describing: creation.draft.outcome))")
+            }
+            try await Task.sleep(for: .milliseconds(250))
+            await creation.submit()
+            XCTAssertEqual(creation.draft.submission?.id, submission.id)
+        }
+        print("Mobile creation settlement: \(Date().timeIntervalSince(began)) seconds")
         let outcome = try XCTUnwrap(creation.draft.outcome, creation.error ?? "No creation result")
         XCTAssertEqual(outcome.state, .started, outcome.message ?? "Terminal did not start")
-        let submission = try XCTUnwrap(creation.draft.submission)
         XCTAssertTrue(creation.saveForLater())
         creation.editText("A separate idea that must not be submitted")
         XCTAssertTrue(creation.saveDraft())

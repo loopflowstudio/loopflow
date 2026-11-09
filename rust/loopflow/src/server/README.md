@@ -43,7 +43,9 @@ The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
 bytes. It admits another untagged node of the approved owner through
-`tailscale whois`.
+`tailscale whois`. Setup saves the endpoint, owner and enabled choice in
+Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
+add service state to `config.yaml` or the preferences catalogue.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
 mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.

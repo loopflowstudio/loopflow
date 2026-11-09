@@ -222,7 +222,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 argv.extend(["session".into(), "resume".into(), "--".into(), id.clone()]);
                 let starting = id.clone();
                 tokio::task::spawn_blocking(move || {
-                    crate::transport::start_session(&starting, &argv, true, &cwd)
+                    crate::transport::start_session(&starting, &argv, true, &cwd, &|_| {})
                 })
                 .await??;
                 let session = crate::ops::human_session::session_by_id(&store, &id)

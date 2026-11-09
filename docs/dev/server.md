@@ -209,6 +209,7 @@ cannot listen concurrently. No socket alias or second path exists.
 No Work, credential or remote-setting files move in this local cutover.
 
 Remote admission lives under `lf server mobile`, with the owner's Tailscale
-node and user saved in the Machine's `config.yaml`. The
+node, user and endpoint saved in the Machine's `mobile.yaml`. This service state
+is separate from the typed preferences in `config.yaml`. The
 [protocol README](../../rust/loopflow/src/server/README.md) owns operation
 shapes, bounds and the ticket flow shared by both carriers.

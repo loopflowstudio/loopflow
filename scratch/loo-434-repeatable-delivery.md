@@ -1,6 +1,52 @@
 # LOO-434: repeatable delivery you can approach from the Task workspace
 
-Status: kickoff plan, before `explore`. Nothing here is chosen by a person yet.
+Status: explore, round 1. Three proposals in [explore.html](explore.html); no
+implementation direction chosen yet. The technical plan below is the kickoff
+candidate, not a settled design.
+
+## Explore: what should organize the experience? (2026-11-08)
+
+**A. Follow the route.** The captured workflow is the main view. Review stops,
+execution, iterations and delivery all sit on one route; select a stop to inspect
+what happened and what continuing does. Closest to the kickoff plan and smallest
+change. Its cost is asking a newcomer to read the route before doing useful work.
+
+**B. Work the next decision.** A compact action area accompanies the current review
+page or conversation. It says what finished, what needs a response and what the
+next move runs. The whole route and run history open on demand. Same shared Rust
+moves as A; the main difference is progressive disclosure and keeping the review
+in view. Risk: hiding the route can hide the larger plan, so the next stop and
+merge effect must stay visible. Recommended starting point.
+
+**C. Start from a delivery that worked.** A past verified delivery becomes the
+entry point for the next Task: inspect its checks and recorded instructions,
+compare the current definition, then start a new Task from the current workflow
+or prepare an editable improvement. The aspiration is a library of useful,
+repeatable deliveries without a second template engine. Largest scope: linking
+verification, exact instructions and definition changes well enough to compare
+them. A successful old run proves nothing about a new Task's checks or approval.
+
+All three keep the same Task conversation, existing Graph engine, explicit moves,
+Stop and honest failure recovery. A and B still support reuse through history;
+C makes reuse the starting experience. All expose merging before the move.
+The page uses fictional example runs; it is not a native Desktop acceptance test.
+
+LOO-733's local design was read on November 8. Its settled direction is a built-in
+interactive review panel, off the Task thread, with buttons and one participant.
+Its round-3 alternatives remain open. This Task does not choose that panel's
+layout or implement Send/round storage. Its move projection is shared work;
+ownership must be reconciled before either Task implements it.
+
+Open review: **1a** route, **1b** next decision, **1c** past delivery, or a combination.
+**2a** taskless terminal Continue requires `c`; **2b** Enter continues. Recommendation:
+2a, so leaving a provider and an extra Return cannot accidentally advance.
+Storage shape and bug/maintenance entry-point curation stay implementation/design
+work, rather than five unrelated decisions required before exploring.
+
+Fresh observation: Graph run `c070ec5d-0e3b-41c2-84c9-1a75b9386c82` completed
+kickoff (`046ff13c-777c-4557-9b1e-be75c97f3838` succeeded); Task stands at explore.
+PR #1851 is open with planning files only. The current Session remains
+`01f484c818004d53b393cd8d59c2d090` after changing providers.
 
 ## Problem
 
@@ -77,7 +123,7 @@ back-edges in `TaskGraph`, and designs the review panel (rounds) plus
 LOO-733's panel consumes `TaskGraph.moves` from this Task. If LOO-733 lands moves
 first, this Task consumes theirs instead; there is one implementation either way.
 
-## Chosen approach
+## Kickoff candidate
 
 ### 1. Rust owns moves; every surface renders them
 
@@ -192,7 +238,9 @@ existing Customize/Edit opens the file.
 ## Forbidden
 
 - Swift computing what a move crosses, or a second position phrase.
-- A Desktop Continue that approves Auto-Ship; only Ship (or `-b`) does, labelled so.
+- A move whose label hides merging or reaching `end`. The existing Graph can merge
+  during ordinary Continue after demo, and reaching end has shipping/completion
+  effects; expose those effects rather than promising Continue never approves them.
 - A new review Session per step, or a move inferred from a quiet or closed provider.
 - Two diagrams for one workflow.
 
@@ -220,6 +268,11 @@ existing Customize/Edit opens the file.
 
 ## Checks
 
+- Explore page: `node /tmp/loo434-explore-check.cjs` passed simulated moves,
+  stop/failure/recovery, reuse, terminal choice and reply composition; no JS errors
+  or horizontal overflow at 1100/390 px. Light/dark and narrow viewport renders
+  inspected. Default Playwright browser was absent; installed Chrome ran the check.
+  These check the prototype only; native/provider acceptance remains for demo.
 - `cargo test -p loopflow --lib task_graph::` — moves for `feature` at start/explore/
   demo/verify/end and a stopped run; demo's Continue has `merges: true`.
 - Rust integration (`tests/integration.rs`): two-step interactive graph under a PTY

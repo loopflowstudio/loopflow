@@ -1,4 +1,13 @@
-# LOO-434 open choices (kickoff, headless)
+# LOO-434 open choices
+
+Explore round 1: [explore.html](explore.html). No choice recorded.
+
+1. Organize the Task around **a** its route, **b** its next decision, or **c** a
+   past delivery to reuse? Recommendation: b; history still supports reuse.
+2. Taskless Continue: **a** require `c`, or **b** Enter continues? Recommendation:
+   a; provider exit alone never advances in either proposal.
+
+## Kickoff implementation questions (still drafts)
 
 - **"Keep the repository healthy"** has no matching builtin Graph. Candidates: a new
   `maintain` graph (`reduce` survey → interactive pick → pursue → deliver), or leave the

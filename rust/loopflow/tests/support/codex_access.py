@@ -45,6 +45,12 @@ def main() -> None:
             events.write(json.dumps(event) + "\n")
         result = {}
         if method == "account/read":
+            if token == "revoked-refresh":
+                _send({"id": request["id"], "error": {
+                    "code": -32603,
+                    "message": "Your refresh token was revoked. Please sign in again.",
+                }})
+                continue
             refreshed = home / "refresh-to"
             if request["params"].get("refreshToken") and refreshed.exists():
                 refreshed.replace(home / "auth.json")

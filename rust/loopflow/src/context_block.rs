@@ -29,11 +29,19 @@ pub enum ContextMoment {
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
+    /// A native turn ended on a usage limit: start `RecordLimit` and return.
+    Limit,
+    /// Started by a limit hook: record the limit and move the shared login to
+    /// an account with capacity.
+    RecordLimit,
     /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
     PiEvent,
     /// A Pi bash command is about to run: join its tool group to the watchdog
     /// that ends the group with its provider.
     ToolGroup,
+    /// Started by a Stop hook: once that hook exits, apply the Session's
+    /// pending move.
+    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -261,6 +269,7 @@ impl ContextDelivery {
         Ok(serde_json::json!({
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
                 {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
+            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [
@@ -774,6 +783,7 @@ mod tests {
     #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempdir().unwrap();
         let delivery = delivery(repo.path());

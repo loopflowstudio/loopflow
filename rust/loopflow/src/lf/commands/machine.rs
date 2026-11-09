@@ -68,6 +68,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             provider,
             email,
             chrome_profile,
+            owned,
         } => {
             let machine = super::ssh::resolve_target(target, false).await?;
             return super::machine_credentials::connect(
@@ -75,6 +76,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 *provider,
                 email.as_deref(),
                 chrome_profile.as_deref(),
+                *owned,
                 batch,
             )
             .await;
@@ -82,7 +84,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
         }
-        MachineCommand::Id { json } => {
+        MachineCommand::Self_ { json } => {
             let machine = local_machine().await?;
             if *json {
                 println!("{}", serde_json::to_string(&machine)?);
@@ -254,8 +256,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
         MachineCommand::Connect { .. }
         | MachineCommand::Credentials { .. }
-        | MachineCommand::Id { .. } => {
-            unreachable!("credential and identity commands dispatch before opening the store")
+        | MachineCommand::Self_ { .. }
+        | MachineCommand::Doctor { .. } => {
+            unreachable!(
+                "credential, identity and doctor commands dispatch before opening the store"
+            )
         }
         MachineCommand::End { .. }
         | MachineCommand::Pool { .. }
@@ -297,7 +302,7 @@ pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Resul
 }
 
 /// A Machine with your Wave and repository defaults that name it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,

@@ -45,8 +45,9 @@ if stream:
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
     record['input'] = sys.stdin.read()
-with open(os.environ['HOME']+'/received.json', 'w') as out:
+with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
     json.dump(record, out)
+os.replace(os.environ['HOME']+'/received.json.tmp', os.environ['HOME']+'/received.json')
 if stream:
     token = args[args.index('--resume')+1] if '--resume' in args else 'stream-fixture'
     print(json.dumps({'type':'system','subtype':'init','session_id':token}), flush=True)
@@ -788,7 +789,6 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
             "-i",
             "--only-account",
             "fixture@example.com",
-            "--isolate",
             "--yolo",
             ":",
             "Preserve this initial request",
@@ -886,7 +886,141 @@ fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
 }
 
 #[test]
-fn native_resume_preserves_the_selected_account_and_account_home_mode() {
+fn a_running_claude_named_onto_another_login_keeps_its_client_and_says_where_it_runs() {
+    let fixture = Fixture::new("claude");
+    let machine = fixture.home.path().join("machine");
+    let bin = fixture.home.path().join("bin");
+    // Signing the shared home in goes through the Keychain on macOS.
+    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+    fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        bin.join("claude"),
+        r#"#!/usr/bin/python3
+import os, sys, time
+if '--version' in sys.argv:
+    print('fixture'); sys.exit(0)
+home = os.environ['LF_HOME']
+open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
+while not os.path.exists(home+'/quit'):
+    time.sleep(0.05)
+"#,
+    )
+    .unwrap();
+    support::register_claude_login(&machine, "fixture");
+    support::register_claude_login(&machine, "other");
+    let signed_in = |name: &str| {
+        let token = format!("{name}-token");
+        let mut stores = vec![fixture.home.path().join(".claude/.credentials.json")];
+        if let Ok(items) = fs::read_dir(bin.join("keychain")) {
+            stores.extend(items.map(|item| item.unwrap().path()));
+        }
+        stores
+            .iter()
+            .any(|store| fs::read_to_string(store).is_ok_and(|text| text.contains(&token)))
+    };
+    let wait = |what: &str, done: &mut dyn FnMut() -> bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "{what}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    };
+    let mut first = fixture
+        .command()
+        .env("USER", "fixture")
+        .args([
+            "-i",
+            "--account",
+            "claude=fixture@example.com",
+            ":",
+            "hello",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pids = machine.join("claude-pids");
+    wait("Claude never started", &mut || {
+        assert!(first.try_wait().unwrap().is_none(), "first launch ended");
+        pids.exists()
+    });
+    assert!(signed_in("fixture"));
+    let session = fixture.session();
+
+    let output = fixture
+        .command()
+        .env("USER", "fixture")
+        .args(["--account", "claude=other@example.com", "resume", &session])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait("the login never moved", &mut || signed_in("other"));
+    fs::write(machine.join("quit"), "").unwrap();
+    let output = output.wait_with_output().unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        printed.contains("claude is now signed in as other@example.com"),
+        "{printed}"
+    );
+    first.wait().unwrap();
+    // The same client carried on: a resume that relaunched would add a pid.
+    assert_eq!(fs::read_to_string(&pids).unwrap().lines().count(), 1);
+    // `--account` names one resume; nothing is held.
+    assert!(!machine.join("accounts/claude/held").exists());
+}
+
+#[test]
+fn a_held_login_takes_next_and_the_launch_over_an_order_naming_another() {
+    let fixture = Fixture::new("codex");
+    let machine = fixture.home.path().join("machine");
+    support::register_codex_account(&machine);
+    support::register_codex_login(&machine, "other");
+    let lf = |args: &[&str]| {
+        let output = fixture.command().args(args).output().unwrap();
+        success(&output);
+        output
+    };
+    let next = || -> Value {
+        let launches: Vec<Value> =
+            serde_json::from_slice(&lf(&["account", "next", "--json"]).stdout).unwrap();
+        launches
+            .into_iter()
+            .find(|launch| launch["provider"] == "codex")
+            .unwrap()
+    };
+    let launch = |args: &[&str]| -> String {
+        let launched = fixture.run(&[args, &["-i", "--yolo", ":", "hello"]].concat());
+        launched["account"].as_str().unwrap().to_owned()
+    };
+    // What `lf account use` leaves behind; its own switch needs a Codex daemon.
+    let hold = || fs::write(machine.join("accounts/codex/held"), "fixture").unwrap();
+    lf(&["set", "account.codex", "other@example.com"]);
+    assert_eq!(next()["login"], "other@example.com");
+    assert_eq!(launch(&[]), "other");
+
+    hold();
+    let held = next();
+    assert_eq!(held["login"], "fixture@example.com");
+    assert_eq!(held["reason"], "held by lf account use until it fills up");
+    assert_eq!(launch(&[]), "fixture");
+
+    assert_eq!(launch(&["--account", "codex=other@example.com"]), "other");
+    assert_eq!(next()["login"], "fixture@example.com");
+
+    // Paused, the login is out of rotation but not out of a hold.
+    lf(&["account", "pause", "codex=fixture@example.com"]);
+    hold();
+    assert_eq!(next()["login"], "fixture@example.com");
+    assert_eq!(launch(&[]), "fixture");
+}
+
+#[test]
+fn native_resume_preserves_the_selected_account_in_the_shared_home() {
     for selection in ["--account", "--only-account"] {
         let fixture = Fixture::new("codex");
         let machine = fixture.home.path().join("machine");
@@ -895,23 +1029,23 @@ fn native_resume_preserves_the_selected_account_and_account_home_mode() {
             "-i",
             selection,
             "fixture@example.com",
-            "--isolate",
             "--yolo",
             ":",
             "hello",
         ]);
         assert_eq!(first["account"], "fixture");
-        let profile = machine.join("accounts/codex/fixture");
-        assert_eq!(Path::new(first["codex_home"].as_str().unwrap()), profile);
+        let shared = fixture.home.path().join(".codex");
+        assert_eq!(Path::new(first["codex_home"].as_str().unwrap()), shared);
+        assert_eq!(
+            fs::read(shared.join("auth.json")).unwrap(),
+            fs::read(machine.join("accounts/codex/fixture/auth.json")).unwrap()
+        );
         let session = fixture.session();
         fixture.settings("codex", false, false);
-        let resumed = fixture.run(&["--isolate", "session", "resume", &session]);
+        let resumed = fixture.run(&["session", "resume", &session]);
         assert_eq!(resumed["account"], "fixture");
         assert_eq!(resumed["codex_home"], first["codex_home"]);
         bypass(&resumed, "codex", false);
-        let shared = fixture.run(&["--shared", "session", "resume", &session]);
-        assert_eq!(shared["account"], "fixture");
-        assert_eq!(Path::new(shared["codex_home"].as_str().unwrap()), profile);
     }
 }
 
@@ -1009,6 +1143,96 @@ fn codex_headless_start_receives_current_policy_on_the_wire() {
         .as_str()
         .unwrap()
         .contains("<lf:user>"));
+}
+
+#[test]
+fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input() {
+    let fixture = Fixture::new("claude");
+    let script = fixture.home.path().join("bin/claude");
+    let source = fs::read_to_string(&script).unwrap().replace(
+        "if stream:\n    token =",
+        "if not stream:\n    import time\n    while True: time.sleep(0.1)\nif stream:\n    token =",
+    );
+    fs::write(script, source).unwrap();
+    let mut first = fixture
+        .command()
+        .args(["-i", ":", "original request"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !fixture.home.path().join("received.json").exists() {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "first launch ended early"
+        );
+        if std::time::Instant::now() >= deadline {
+            let _ = first.kill();
+            first.wait().unwrap();
+            panic!("Claude fixture never started");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let received = fixture.received();
+    let native = args(&received)[args(&received)
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1];
+    let session = fixture.session();
+    let transcript = fixture
+        .home
+        .path()
+        .join(format!(".claude/projects/fixture/{native}.jsonl"));
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(
+        &transcript,
+        serde_json::json!({
+            "type": "user", "userType": "external",
+            "message": {"content": "Preserve the original design"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let machine = fixture.home.path().join("machine");
+    support::register_codex_account(&machine);
+    let store = loopflow::store::sqlite::SqliteStore::new(&machine.join("loopflow.db")).unwrap();
+    let before = store.session(&session).unwrap().unwrap();
+    assert!(before.completed_at.is_none());
+    assert!(before.task_id.is_none() && before.wave_id.is_none());
+    let switched = fixture
+        .command()
+        .args(["-i", "resume", &session, "-a", "codex"])
+        .output()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while first.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = first.kill();
+    first.wait().unwrap();
+    success(&switched);
+    let imported = fixture.received();
+    assert!(
+        imported["turns"][0]
+            .to_string()
+            .contains("Preserve the original design"),
+        "{imported}"
+    );
+    assert_eq!(fixture.session(), session);
+    let after = store.session(&session).unwrap().unwrap();
+    assert_eq!(after.title, before.title);
+    assert_eq!(after.provider.as_deref(), Some("codex"));
+    assert_ne!(after.captured, before.captured);
+    assert_eq!(
+        store
+            .session_for_artifact(before.artifact_key.as_deref().unwrap())
+            .unwrap()
+            .unwrap()
+            .id,
+        after.id
+    );
 }
 
 #[test]

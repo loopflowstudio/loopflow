@@ -3660,26 +3660,14 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
                 .await
                 .unwrap()
                 .unwrap();
-            crate::ops::chapter::rotate(
-                repo,
-                &crate::ops::chapter::ChapterPlan {
-                    name: "Next chapter".into(),
-                    waves: vec![crate::ops::chapter::WaveChapterPlan {
-                        wave_id: task.wave_id.clone().unwrap(),
-                        successor_id: destination.id.to_string(),
-                        create: false,
-                        project_name: "Next chapter".into(),
-                        metric_targets: Vec::new(),
-                        krs: vec![crate::work::project::ProjectKR {
-                            text: "Retain Task identity".into(),
-                            holds: false,
-                        }],
-                    }],
-                },
-                None,
-                false,
+            // The Wave selects its next Project; the Task follows it with its identity.
+            crate::store::sqlite::project_selection::write_project_binding(
+                &fixture.store.sqlite,
+                task.wave_id.as_ref().unwrap(),
+                Some("project-1"),
+                "project-2",
+                &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
             )
-            .await
             .unwrap();
             fixture
                 .store

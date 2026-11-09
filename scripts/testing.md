@@ -13,6 +13,19 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+After syncing, rerun affected tests when main changed APIs they call, even if
+Git merged cleanly. A passing check from before the sync does not cover that
+combination; renamed enum variants can leave new branch tests uncompilable.
+
+CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
+These parser and routing checks exercise canonical commands directly; navigation
+aliases are covered separately by the `cli_discovery::` integration suite.
+
+Terminal-title changes run `test(transport::output::tests::)` and
+`binary(transport_tests)`. Cover attachment before the asynchronous Session-name
+lookup completes in a deterministic output test; a live attachment can miss that
+startup race locally.
+
 Changes to `scripts/resource_envelope.py` or its imports also include
 `test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
 recovery outside pytest's configured import path. Use the gate's prepared CLI
@@ -45,14 +58,13 @@ native archives and Cargo dependencies are fetched before networking is disabled
 suites inside `integration` take `test(name::)`, and an unknown binary name
 fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
-A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
-separately when the app's library changed. Substring filters such as
+A filtered run covers `-p loopflow` only. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
-`local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
+`local_planning`) and can exhaust the Rust phase's 2400 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
-pin/build reach both Desktop link paths: run `--swift --loopflow`. SwiftPM
-links GhosttyKit alongside the Rust archive; Xcode runs the build phases.
-The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
+pin/build reach both Desktop build paths: run `--swift --loopflow`. Desktop
+talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
+the selected helper. The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
@@ -64,7 +76,7 @@ The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
 the docs check on the candidate's command tree inside that boundary.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
-unless the diff reaches them; together they exceed the 1200 s Rust budget, and
+unless the diff reaches them; together they exceed the 2400 s Rust budget, and
 CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
 the union first: `(test(a::) | test(b::)) - test(slow)`; without the
 parentheses the subtraction applies only to the last term.
@@ -81,6 +93,20 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
   If they fail, first check whether `fseventsd` is pinned at 100% CPU.
+
+- The runner runs tests from the checkout with this Machine's PATH. Account
+  routing fixtures then read repository-scoped routes ("has no resident login"),
+  and Graph fixtures see every installed harness ("No agent selected"). Rerun
+  such failures from the built binary in an empty directory with a temp `HOME`
+  and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  The test constructor supplies its private home with a fixture Git identity;
+  repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
+  repair a test: it hides missing setup in that private home.
+- Changes to the test environment constructor reach the library suites too.
+  Run `store::tests::` and `transport::viewer_tests::` from an empty cwd: they
+  exercise claims for absent repositories and children with cleared environments.
+  Such children set both `HOME` and `PATH` before the constructor adds its
+  Keychain stand-in; an absent PATH would otherwise contain only the stand-in.
 
 ## Builds
 

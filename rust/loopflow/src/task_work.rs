@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::durable::GraphProcessInventoryEntry;
 
 /// All retained work in a checkout, plus explicitly attributed work elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<GraphProcessInventoryEntry>,
@@ -15,7 +15,7 @@ pub struct TaskWork {
 }
 
 /// Workspace facts needed before opening diagnostic Process history.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOverview {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<GraphProcessInventoryEntry>,
@@ -23,7 +23,7 @@ pub struct TaskOverview {
 }
 
 /// Conversation identity and completion, without loading its input or transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskSession {
     pub id: crate::id::LfSessionId,
     pub title: String,

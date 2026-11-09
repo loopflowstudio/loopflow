@@ -142,7 +142,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
         ))
         .unwrap();
 
-    for target in [vec!["codex", "fresh@example.com"], vec!["linear"]] {
+    for target in [vec!["codex=fresh@example.com"], vec!["linear"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(["account", "connect"])
             .args(&target)
@@ -257,12 +257,16 @@ esac
                     used_percent: 34,
                     resets_at: None,
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 },
                 loopflow::store::AccountLimitWindow {
                     window: "session".into(),
                     used_percent: 100,
                     resets_at: Some(1),
                     plan: None,
+                    model: None,
+                    limited_until: None,
                 },
             ],
             "stream",
@@ -338,7 +342,7 @@ esac
     assert_eq!(revoked_row["verification"], "rejected");
     assert_eq!(
         revoked_row["recovery"],
-        "lf account connect codex revoked@example.com"
+        "lf account connect codex=revoked@example.com"
     );
     let active_row = verified_rows
         .iter()
@@ -366,7 +370,7 @@ esac
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("auth: active (verified)"));
     assert!(stdout.contains("auth: needs login (identity or credential rejected)"));
-    assert!(stdout.contains("recover: lf account connect codex revoked@example.com"));
+    assert!(stdout.contains("recover: lf account connect codex=revoked@example.com"));
     let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
     let revoked = runtime
         .block_on(store.get_provider_account("codex", &revoked_id))
@@ -410,7 +414,7 @@ esac
     assert!(cached_text.contains("session: 12%"));
     assert!(cached_text.contains("cached"));
     assert!(
-        cached_text.contains("recover: lf account connect codex revoked@example.com"),
+        cached_text.contains("recover: lf account connect codex=revoked@example.com"),
         "cached rejection must retain its recovery command: {cached_text}"
     );
     assert_eq!(
@@ -484,7 +488,7 @@ esac
     assert!(missing_text.contains("auth: cached missing"));
     assert!(!missing_text.contains("cached connected"));
     assert!(missing_text.contains("session: 12%"));
-    assert!(missing_text.contains("recover: lf account connect codex active@example.com"));
+    assert!(missing_text.contains("recover: lf account connect codex=active@example.com"));
     assert_eq!(
         runtime
             .block_on(store.provider_account_limits(None))
@@ -544,8 +548,8 @@ esac
     assert!(unknown.status.success());
     let unknown_text = String::from_utf8_lossy(&unknown.stdout);
     assert!(unknown_text.contains("active (verified)"));
-    assert!(!unknown_text.contains("recover: lf account connect codex active@example.com"));
-    assert!(unknown_text.contains("observed plan: team"));
+    assert!(!unknown_text.contains("recover: lf account connect codex=active@example.com"));
+    assert!(unknown_text.contains("team observed"), "{unknown_text}");
     assert!(unknown_text.contains("usage response has no recognized percentage windows"));
     let window_line = unknown_text
         .lines()
@@ -564,7 +568,7 @@ esac
         .unwrap()
         .unwrap();
     let cleared = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["account", "set", "codex", "active@", "--clear-cooldown"])
+        .args(["account", "set", "codex=active@", "--clear-cooldown"])
         .output()
         .unwrap();
     assert!(
@@ -594,14 +598,7 @@ esac
         observed
     );
     for args in [
-        vec![
-            "account",
-            "set",
-            "codex",
-            "active@",
-            "--routing",
-            "automatic",
-        ],
+        vec!["account", "unpause", "codex=active@"],
         vec!["set", "account.codex", "active@", "--global"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -620,7 +617,7 @@ esac
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["account", "route", "--default", "--json"])
+        .args(["account", "next", "--default", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -629,16 +626,17 @@ esac
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let routes: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let codex = routes
+    let launches: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let codex = launches
         .as_array()
         .unwrap()
         .iter()
         .find(|r| r["provider"] == "codex")
         .unwrap();
     assert_eq!(codex["scope"], "default");
-    assert_eq!(codex["candidates"][0]["account_id"], "active");
-    assert_eq!(codex["candidates"][0]["login"], "active@example.com");
+    assert_eq!(codex["outcome"], "ready");
+    assert_eq!(codex["account_id"], "active");
+    assert_eq!(codex["login"], "active@example.com");
     assert_eq!(
         runtime
             .block_on(store.list_provider_accounts(None))
@@ -665,6 +663,7 @@ fn cached_auth_leaves_no_process_or_account_state() {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(temp.path())
         .env_clear()
+        .env("HOME", temp.path())
         .env("LF_HOME", &lf_home)
         .env("PATH", "/nonexistent")
         .args(["account", "--cached", "--json"])
@@ -814,8 +813,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "set",
-            "codex",
-            "engineering@",
+            "codex=engineering@",
             "--login-email",
             "wrong@example.com",
         ])
@@ -835,8 +833,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "connect",
-            "codex",
-            "engineering@example.com",
+            "codex=engineering@example.com",
             "--import",
         ])
         .output()
@@ -860,8 +857,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         .args([
             "account",
             "connect",
-            "codex",
-            "engineering@example.com",
+            "codex=engineering@example.com",
             "--import",
         ])
         .output()
@@ -960,7 +956,7 @@ fn managed_connect_requires_email_before_starting_browser() {
         .block_on(store.upsert_provider_account(&unlabeled))
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["account", "connect", "codex", "legacy"])
+        .args(["account", "connect", "codex=legacy"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -1048,8 +1044,7 @@ done
     let args = [
         "account",
         "redeem-reset",
-        "codex",
-        "active@",
+        "codex=active@",
         "--idempotency-key",
         "fixture-attempt",
         "--json",
@@ -1287,8 +1282,7 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     run(&[
         "account",
         "redeem-reset",
-        "codex",
-        "active@",
+        "codex=active@",
         "--idempotency-key",
         "one-spend",
         "--json",
@@ -1307,9 +1301,9 @@ fn codex_same_login_recovery_status_launch_and_reset() {
     run(&["set", "account.codex", "excluded@", "--global"]);
     run(&["set", "account.codex", "active@"]);
     let routes = || {
-        let output = run(&["account", "route", "--json"]);
+        let output = run(&["account", "next", "--json"]);
         let scoped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        let output = run(&["account", "route", "--default", "--json"]);
+        let output = run(&["account", "next", "--default", "--json"]);
         let default: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         (scoped, default)
     };
@@ -1323,14 +1317,8 @@ fn codex_same_login_recovery_status_launch_and_reset() {
             .unwrap()
             .clone()
     };
-    assert_eq!(
-        codex_route(&prior_routes.0)["candidates"][0]["account_id"],
-        "active"
-    );
-    assert_eq!(
-        codex_route(&prior_routes.1)["candidates"][0]["account_id"],
-        "excluded"
-    );
+    assert_eq!(codex_route(&prior_routes.0)["account_id"], "active");
+    assert_eq!(codex_route(&prior_routes.1)["account_id"], "excluded");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let stored_routes = || {
         [

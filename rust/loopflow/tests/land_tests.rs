@@ -617,14 +617,12 @@ fi
             pr_body: body_override.map(str::to_string),
             agent: Some("codex".to_string()),
         };
-        let previous = std::env::current_dir().unwrap();
-        std::env::set_current_dir(repo.path()).unwrap();
+        let _directory = support::InDirectory::enter(repo.path());
         let result = if manual_merge {
             submit(repo.path(), &options, &NullProgress)
         } else {
             land(repo.path(), &options, &NullProgress)
         };
-        std::env::set_current_dir(previous).unwrap();
         result.unwrap();
         assert_eq!(
             fs::read_to_string(title_path).unwrap(),
@@ -1614,8 +1612,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    let previous = std::env::current_dir().unwrap();
-    std::env::set_current_dir(repo.path()).unwrap();
+    let _directory = support::InDirectory::enter(repo.path());
     let result = land(
         repo.path(),
         &LandOptions {
@@ -1630,7 +1627,6 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         },
         &NullProgress,
     );
-    std::env::set_current_dir(previous).unwrap();
     result.expect("land with stale cached copy should regenerate");
 }
 

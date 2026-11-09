@@ -29,8 +29,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> 
     Ok(project)
 }
 
-/// Explicitly seed a Wave's shared selection with an existing Project UUID.
-/// Switching an established binding belongs to Project rotation.
+/// Select an existing non-terminal Project as the Wave's shared current plan.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -259,17 +258,21 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-/// The graph a scope's new Tasks take up, resolved through your `lf set graph`,
+/// The graph a scope's new Tasks take up, resolved through your `lf set wave.graph`,
 /// the Wave's and the repository's `graph:`, then `code`.
 /// The repository scope has no Wave.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct WaveGraph {
     pub wave_id: Option<crate::id::WaveId>,
     pub wave: Option<String>,
     pub default: GraphDefault,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct GraphDefault {
     pub name: String,
     pub source: crate::config::ConfigSource,

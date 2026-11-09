@@ -181,7 +181,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
@@ -390,7 +390,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:03Z",
@@ -672,9 +672,9 @@
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -871,7 +871,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
             "changes": [
@@ -1000,7 +1000,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
@@ -1178,7 +1178,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
@@ -1387,7 +1387,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:03Z",
@@ -1638,9 +1638,9 @@
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -1822,7 +1822,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
             "changes": [
@@ -1951,7 +1951,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
@@ -2133,7 +2133,7 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
         "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "unstarted",
         "sync": {
           "changes": [
@@ -2310,7 +2310,7 @@
         "project": "provider-destination",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "shipping",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:00Z",
@@ -2561,9 +2561,9 @@
         },
         "superseded_by": null
       },
-      "planning_error": null,
-      "planning_stale": false,
-      "planning_state": "available",
+      "plan_error": null,
+      "plan_stale": false,
+      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
@@ -2749,7 +2749,7 @@
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
           "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "unstarted",
           "sync": {
             "changes": [
@@ -2828,7 +2828,7 @@
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+        "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 5,
         "state": "unstarted",
         "title": "Deliver the command",

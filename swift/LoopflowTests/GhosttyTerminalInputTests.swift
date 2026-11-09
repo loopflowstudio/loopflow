@@ -367,7 +367,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }
@@ -639,6 +639,51 @@ struct GhosttyTerminalInputTests {
             manager.tick()
             await Task.yield()
         }
+    }
+
+    @Test("typing from restored Kitty scrollback returns to the live viewport", arguments: [5, 7])
+    @MainActor
+    func typingAfterKeyboardRestore(flags: Int) async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let view = GhosttyMetalView(terminal: .shell("keyboard-restore", machineId: fixtureMachineId))
+        window.contentView = view
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = buildGhosttyShellCommand(argv: ["/bin/sh", "-c",
+            "for n in $(seq 1 80); do echo history-$n; done; printf '\\033[<65535u\\033[=\(flags);1uready\\n'; exec /bin/cat"], env: [:])
+        view.createSurface(manager: manager)
+        defer { view.destroySurface(); window.contentView = nil }
+        let surface = try #require(view.surface)
+        func viewport() -> String {
+            guard case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return "" }
+            return text
+        }
+        let readyDeadline = ContinuousClock.now + .seconds(3)
+        while !viewport().contains("ready"), ContinuousClock.now < readyDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(viewport().contains("ready"))
+        let scroll = "scroll_to_top"
+        #expect(scroll.withCString { ghostty_surface_binding_action(surface, $0, UInt(scroll.utf8.count)) })
+        try #require(viewport().contains("history-1"))
+        try #require(!viewport().contains("ready"))
+        #expect(window.makeFirstResponder(view))
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "x",
+            charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
+        if !view.performKeyEquivalent(with: event) { view.keyDown(with: event) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        // With key.text absent in key-equivalent dispatch, Ghostty emits the
+        // valid Kitty press CSI 120u. The echoing TTY displays ESC as ^[.
+        while !viewport().contains("^[[120u"), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewport().contains("ready"))
+        #expect(viewport().contains("^[[120u"))
     }
 
     @Test("paste shortcuts reach only the focused terminal in a split")

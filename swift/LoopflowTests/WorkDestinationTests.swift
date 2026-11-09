@@ -26,6 +26,32 @@ struct WorkDestinationTests {
         return model.sessions.value?.first { $0.id == id }
     }
 
+    @Test("A taskless exact link selects its conversation without enumerating history", arguments: [false, true])
+    func tasklessSessionLink(waveScoped: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let record = try renameFixtureRecord("exact-taskless", title: "Retained research",
+                                            work: waveScoped ? .wave(id: wave.wave.id) : nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--reveal-existing") { return encoded }
+            throw RegistryQueryError("Only the exact conversation may be prepared")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let address = "loopflow://loopflow?session=exact-taskless"
+        let resolved = WorkLink(label: record.title ?? "Conversation", url: address, markdown: "", fallbackArgv: [],
+                                target: .init(kind: waveScoped ? .wave : .repository, repositoryPath: wave.wave.repo,
+                                              repositoryId: "repo", task: nil, taskId: nil,
+                                              wave: waveScoped ? wave.wave.id : nil, session: record.id, diff: false,
+                                              executionMachine: nil),
+                                conversation: .otherConversation, conversationReason: nil,
+                                route: .init(hosts: [.desktop], reason: "Selected Desktop"))
+        await model.receiveWorkLink(try #require(LinkedWork(resolved)))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.selection == (waveScoped ? .wave(id: wave.wave.id) : nil))
+    }
+
     @Test(arguments: [false, true])
     func taskEntryOpensConversationThenRetainsWorkspace(standalone: Bool) async throws {
         var data = try fixture()
@@ -49,7 +75,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.prefix(2) == ["session", "resume"] { return encoded }
-            if args.starts(with: ["desktop", "plan"]) { return planning }
+            if args.starts(with: ["plan", "list"]) { return planning }
             throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -83,7 +109,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "resume"]), args.contains("--start-if-free") { return encoded }
-            if args.starts(with: ["desktop", "plan"]) { return data }
+            if args.starts(with: ["plan", "list"]) { return data }
             throw RegistryQueryError("Navigation must use non-replacing startup")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -115,7 +141,7 @@ struct WorkDestinationTests {
                 await barrier.wait("prepare")
                 return encoded
             }
-            if args.starts(with: ["desktop", "plan"]) { return data }
+            if args.starts(with: ["plan", "list"]) { return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -174,7 +200,7 @@ struct WorkDestinationTests {
                 return receipt
             }
             if args.prefix(2) == ["session", "resume"] { return encoded }
-            if args.starts(with: ["desktop", "plan"]) { return planning }
+            if args.starts(with: ["plan", "list"]) { return planning }
             throw RegistryQueryError("New Task runs no separate start or connect sequence")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -203,7 +229,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["task", "create"]) { return receipt }
             if args.prefix(2) == ["session", "resume"] { return encoded }
-            if args.starts(with: ["desktop", "plan"]) {
+            if args.starts(with: ["plan", "list"]) {
                 if held.withLock({ $0 }) { await barrier.wait("planning") }
                 return planning
             }
@@ -233,7 +259,7 @@ struct WorkDestinationTests {
             if args.starts(with: ["task", "create"]) {
                 throw RegistryQueryError("lf task run failed", stdout: receipt)
             }
-            if args.starts(with: ["desktop", "plan"]) { return planning }
+            if args.starts(with: ["plan", "list"]) { return planning }
             throw RegistryQueryError("A failed run opens no conversation")
         }
         let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
@@ -300,8 +326,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "plan"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["plan", "list"]) { return planning }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 // The first opening fails; the person's Retry succeeds.
                 if await launches.next() > 1 { return encoded }
@@ -341,8 +367,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "plan"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["plan", "list"]) { return planning }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 if await launches.next() > 1 { return encoded }
                 throw RegistryQueryError("Conversation launcher unavailable")
@@ -382,8 +408,8 @@ struct WorkDestinationTests {
         let record = try tileRecord(task, at: location)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "plan"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["plan", "list"]) { return planning }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"], args.contains("--explain") { return taskConversationStartOfferFixture() }
             if args.prefix(2) == ["session", "resume"], args.contains("--start-if-free") { return encoded }
             if args.prefix(2) == ["session", "resume"] { throw RegistryQueryError("No existing conversation; start one explicitly") }
@@ -422,8 +448,8 @@ struct WorkDestinationTests {
         // Every preparation reports the external client as still active.
         let active = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "plan"]) { return data }
-            if args.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(active)],"next":null}"# }
+            if args.starts(with: ["plan", "list"]) { return data }
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
             if args.prefix(2) == ["session", "resume"] { return active }
             throw RegistryQueryError("Unexpected Task conversation operation")
         }
@@ -478,7 +504,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             // A Task with no runtime is not yet working, so opening it only reveals history.
             if (args.starts(with: ["session", "resume"]) && args.contains("--task") && args.contains(unprepared ? "--reveal-existing" : "--start-if-free")) { await barrier.wait("prepare"); return encoded }
-            if args.starts(with: ["desktop", "plan"]) { await barrier.wait("planning"); return data }
+            if args.starts(with: ["plan", "list"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -536,7 +562,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             // The load also prepares the repository primary; only this Task's preparations count.
             if args.contains("resume"), args.contains("--task") { _ = await prepares.next(); return encoded }
-            if args.starts(with: ["desktop", "plan"]) { return data }
+            if args.starts(with: ["plan", "list"]) { return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -588,12 +614,12 @@ struct WorkDestinationTests {
         let reads = DestinationReadCounter()
         let barrier = LinkedDestinationBarrier()
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "sessions"]) {
+            if args.starts(with: ["session", "list"]) {
                 if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
                 if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
             }
             if args.prefix(2) == ["session", "resume"] { return encoded }
-            if args.starts(with: ["desktop", "plan"]) {
+            if args.starts(with: ["plan", "list"]) {
                 if outcome == "updated-inventory" { await barrier.wait("planning") }
                 if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
                 return outcome == "missing-task" ? missing : data
@@ -693,10 +719,10 @@ struct WorkDestinationTests {
         let taskID = task.runtime?.workId ?? task.id
         let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["config", "repository"]) {
+            if args.starts(with: ["config", "repo"]) {
                 return #"{"id":"repository","locators":["repository"]}"#
             }
-            if args.starts(with: ["--machine", "peer", "--repository", "repository", "task", "location"]) {
+            if args.starts(with: ["--machine", "peer", "--repo-id", "repository", "task", "location"]) {
                 let index = try #require(args.firstIndex(of: "--request"))
                 return String(decoding: try JSONSerialization.data(withJSONObject: [[
                     "request": args[index + 1], "repository_id": "repository", "task_id": taskID,
@@ -777,8 +803,8 @@ struct WorkDestinationTests {
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
-            if args.starts(with: ["config", "repository"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
-            guard args.starts(with: ["--machine", "peer", "--repository", "repository"]), cwd == nil else {
+            if args.starts(with: ["config", "repo"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
+            guard args.starts(with: ["--machine", "peer", "--repo-id", "repository"]), cwd == nil else {
                 throw RegistryQueryError("Remote paths must never become local working directories")
             }
             let command = Array(args.dropFirst(4))
@@ -793,7 +819,7 @@ struct WorkDestinationTests {
                     "machine_id": "peer", "observed_at": 1, "location": location
                 ]]), as: UTF8.self)
             }
-            if command.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
             if command.prefix(2) == ["session", "resume"] { return encoded }
             throw RegistryQueryError("No checkout, provider launch or transfer permitted")
         }
@@ -851,7 +877,7 @@ struct WorkDestinationTests {
             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
             let tab = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell)
             let command = try remote.shellAttachment(tab)
-            #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
+            #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repo-id", "repository",
                 "desktop", "shell", remoteID, "--checkout", remoteIdentity.worktree, "--id", tab.id, "--create", "--bootstrap", try desktopShellBootstrap()])
             let splitID = try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
             #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
@@ -957,7 +983,7 @@ struct WorkDestinationTests {
         #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
     }
 
-    @Test func taskLinkRetainsLaterPagesAndReusesTheConversation() async throws {
+    @Test func taskLinkReusesConversationAfterInventoryLoadsLaterPages() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -967,7 +993,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let otherEncoded = String(decoding: try JSONEncoder().encode(other), as: UTF8.self)
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.prefix(2) == ["desktop", "sessions"] else {
+            guard args.prefix(2) == ["session", "list"] else {
                 throw RegistryQueryError("Planning is already available")
             }
             if args.contains("--after") { return #"{"entries":[\#(otherEncoded)],"next":null}"# }
@@ -980,7 +1006,8 @@ struct WorkDestinationTests {
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.taskLinkReading.errorMessage == nil)
-        // Reopening from retained evidence must preserve the conversation too.
+        // Inventory still reads every page; opening needs only its addressed record.
+        await model.refreshSessions()
         await model.openTaskLink(url)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
@@ -998,7 +1025,7 @@ struct WorkDestinationTests {
         ]))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            guard args.starts(with: ["desktop", "sessions"]) else { throw RegistryQueryError("No launch or planning mutation permitted") }
+            guard args.starts(with: ["session", "list"]) else { throw RegistryQueryError("No launch or planning mutation permitted") }
             return #"{"entries":[\#(encoded)],"next":null}"#
         }
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
@@ -1146,13 +1173,13 @@ struct WorkDestinationTests {
         let root = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as! [String: Any]
         let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
             // A primary's preparation names neither this Session nor its Task.
             if args.prefix(2) == ["session", "resume"], args.contains(sessionID) || args.contains("--task") {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
-            if args.starts(with: ["task", "diff"]) {
+            if args.starts(with: ["task", "changes"]) {
                 if let comparisonBarrier { await comparisonBarrier.wait("comparison") }
                 if outcome == "comparison" { throw RegistryQueryError("Comparison unavailable") }
                 return changes
@@ -1198,7 +1225,7 @@ struct WorkDestinationTests {
             let record = try renameFixtureRecord("binding-session", title: "Conversation", work: work)
             let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
             let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-                if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":\#(sessions),"next":null}"# }
+                if args.prefix(2) == ["session", "list"] { return #"{"entries":\#(sessions),"next":null}"# }
                 throw RegistryQueryError("No other read or mutation permitted")
             }, repoPath: "/src/loopflow")
             await model.refreshSessions()
@@ -1222,7 +1249,7 @@ struct WorkDestinationTests {
         let otherEncoded = String(decoding: try JSONEncoder().encode(unrelated), as: UTF8.self)
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, cwd in
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["desktop", "sessions"], cwd == wave.wave.repo {
+            if args.prefix(2) == ["session", "list"], cwd == wave.wave.repo {
                 if args.contains("--after") { return #"{"entries":[\#(encoded),\#(otherEncoded)],"next":null}"# }
                 return #"{"entries":[],"next":"page-two"}"#
             }
@@ -1243,6 +1270,62 @@ struct WorkDestinationTests {
         }
     }
 
+    @Test func exactSessionOpeningDoesNotWaitForUnrelatedHistory() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("linked", title: "Requested conversation",
+            work: .task(id: #require(task.runtime?.workId)))
+        let retained = try renameFixtureRecord("retained", title: "Draft elsewhere", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let other = String(decoding: try JSONEncoder().encode(retained), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) {
+                if args.contains("--after") { throw RegistryQueryError("Unrelated history unavailable") }
+                if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
+                return #"{"entries":[\#(encoded)],"next":"unrelated-history"}"#
+            }
+            throw RegistryQueryError("No mutation permitted")
+        }, repoPath: task.task.repo)
+        await model.refreshSessions()
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.sessions.value?.contains { $0.id == retained.id } == true)
+        #expect(!model.showsTaskLink)
+    }
+
+    @Test func exactSessionOpensWhilePlanningIsStillSaved() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        var record = try renameFixtureRecord("linked", title: "Requested conversation",
+            work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(data)
+        cache.flush()
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["session", "resume"]) { return encoded }
+            throw RegistryQueryError("No mutation permitted")
+        }
+        let model = WorkModel(query: query, repoPath: task.task.repo, cache: cache)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+        #expect(model.showsSavedWork)
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.taskOpening?.reason == nil)
+    }
+
     @Test func historicalTaskSurvivesCurrentPlanRefresh() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -1252,8 +1335,8 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["desktop", "plan"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["plan", "list"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
@@ -1304,8 +1387,8 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
             if args.prefix(2) == ["session", "resume"] { return encoded }
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["desktop", "plan"] { return current }
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.prefix(2) == ["plan", "list"] { return current }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":[\#(encoded)],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }, repoPath: wave.wave.repo)
@@ -1338,8 +1421,8 @@ struct WorkDestinationTests {
                     if response == "failure" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.prefix(2) == ["desktop", "plan"] { return current }
-                if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
+                if args.prefix(2) == ["plan", "list"] { return current }
+                if args.prefix(2) == ["session", "list"] { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: wave.wave.repo)
@@ -1368,8 +1451,8 @@ struct WorkDestinationTests {
         let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            if args.prefix(2) == ["desktop", "plan"] { return data }
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":\#(sessions),"next":null}"# }
+            if args.prefix(2) == ["plan", "list"] { return data }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":\#(sessions),"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
         }, repoPath: "/src/loopflow")
@@ -1407,8 +1490,8 @@ struct WorkDestinationTests {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
-                if args.prefix(2) == ["desktop", "plan"] { return data }
-                if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
+                if args.prefix(2) == ["plan", "list"] { return data }
+                if args.prefix(2) == ["session", "list"] { return #"{"entries":[],"next":null}"# }
                 if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: "/src/loopflow")
@@ -1512,7 +1595,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let reads = DestinationReadCounter()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.prefix(2) == ["desktop", "sessions"] else { throw RegistryQueryError("No other reads permitted") }
+            guard args.prefix(2) == ["session", "list"] else { throw RegistryQueryError("No other reads permitted") }
             if await reads.next() > 1 { throw RegistryQueryError("Session source disconnected") }
             return #"{"entries":[\#(encoded)],"next":null}"#
         }, repoPath: "/src/loopflow")
@@ -1540,7 +1623,7 @@ struct WorkDestinationTests {
         let reads = DestinationReadCounter()
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.prefix(2) == ["desktop", "sessions"] else { throw RegistryQueryError("No other reads permitted") }
+            guard args.prefix(2) == ["session", "list"] else { throw RegistryQueryError("No other reads permitted") }
             if args.contains("--after") {
                 await barrier.wait("last-page")
                 return #"{"entries":[],"next":null}"#
@@ -1998,7 +2081,7 @@ struct WorkDestinationTests {
         git.waitUntilExit()
         #expect(git.terminationStatus == 0)
         let query = RegistryQuery { args, cwd in
-            if args.contains("--path") { return after.path }
+            if args.suffix(2) == ["repo", "path"] { return after.path }
             if cwd == before.path.normalizedFilePath && FileManager.default.fileExists(atPath: after.path) {
                 return #"{"id":"unrelated","locators":["unrelated"]}"#
             }
@@ -2230,8 +2313,8 @@ struct WorkDestinationTests {
                 await barrier.wait(issue)
                 return responses[issue]!
             }
-            if args.prefix(2) == ["desktop", "plan"] { return data }
-            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["plan", "list"] { return data }
+            if args.prefix(2) == ["session", "list"] { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }

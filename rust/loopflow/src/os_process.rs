@@ -235,6 +235,29 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
+/// `lf __context-block --moment <moment>` in its own OS session, so it outlives
+/// the provider hook that starts it and that hook's timeout.
+pub(crate) fn detached_context_block(moment: &str) -> Result<Command> {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(resolve_lf_binary()?);
+    command
+        .args(["__context-block", "--moment", moment])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: only an async-signal-safe syscall runs between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(command)
+}
+
 /// Resolve a stable installed entry, the Desktop helper running this process,
 /// or an explicit private-Home executable.
 /// Keep symlinks intact so later launches pick up installation changes.
@@ -431,7 +454,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
 /// Credentials and account choices a new Session must receive explicitly.
 const SESSION_AUTH_ENV: &[&str] = &[
     crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-    crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
     DISCORD_TOKEN_ENV,
     "GH_TOKEN",
     "OPENCODE_API_KEY",
@@ -521,7 +543,7 @@ mod tests {
             lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
@@ -557,7 +579,7 @@ mod tests {
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
 
@@ -593,7 +615,7 @@ mod tests {
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}${LF_ACCOUNT_ISOLATION-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}\"".into(),
             ],
             &[],
         );
@@ -603,7 +625,6 @@ mod tests {
             .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
             .env("LF_ACCOUNT_SELECTION", "parent-selection")
-            .env("LF_ACCOUNT_ISOLATION", "isolated")
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -630,7 +651,7 @@ mod tests {
         );
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));

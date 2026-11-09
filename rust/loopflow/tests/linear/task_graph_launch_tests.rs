@@ -165,7 +165,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         assert_eq!(recorded[0].1.len(), 1);
         assert_eq!(
             recorded[0].1[0]["argv"],
-            serde_json::json!(["ops", "sync", "--plan"])
+            serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // At its end the Task has nothing left to run; completion retries
@@ -614,9 +614,10 @@ fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
 fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &str) {
     let account_home = home.join("accounts/claude").join(name);
     fs::create_dir_all(&account_home).unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    let credential = format!(
+        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
+    );
+    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(store.upsert_provider_account(&ProviderAccount {
@@ -647,17 +648,25 @@ fn connect_claude_account(home: &Path, store: &loopflow::store::Store, name: &st
         .unwrap();
 }
 
-/// A Claude stand-in that records each launch's arguments and account home.
+/// A Claude stand-in that records each launch's arguments, home and the login
+/// that home carries: the stand-in Keychain on macOS, else its file.
 const CLAUDE_RECORDER: &str = r#"#!/usr/bin/python3
+import glob
 import json
 import os
+import shutil
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
+stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
+login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+if '--input-format' not in sys.argv:
+    sys.exit(0)
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -714,34 +723,48 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         ][..],
         &["-b", "task", "run", "INF-123", "proof"],
     ] {
-        // Isolated launches run in the routed account's own home; a shared one
-        // would sign in the native home, which is the Keychain on macOS.
-        let output = command(repo.path(), home.path(), args)
-            .env("LF_ACCOUNT_ISOLATION", "isolated")
-            .output()
-            .unwrap();
+        let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    wait_for("the Task conversation and Graph launches", || {
+        fs::read_to_string(home.path().join("launches.jsonl"))
+            .is_ok_and(|launches| launches.lines().count() == 2)
+    });
     let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
-    let launch: serde_json::Value = serde_json::from_str(launches.lines().next().unwrap()).unwrap();
-    let args = launch["args"].as_array().unwrap();
-    assert!(
-        args.windows(2).any(|pair| pair == ["--model", "opus"]),
-        "{launch}"
-    );
+    let launches: Vec<serde_json::Value> = launches
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect();
     assert_eq!(
-        Path::new(launch["claude_home"].as_str().unwrap())
-            .canonicalize()
-            .unwrap(),
-        home.path()
-            .join("accounts/claude/work")
-            .canonicalize()
-            .unwrap()
+        launches.len(),
+        2,
+        "the Task conversation and Graph both launch"
     );
+    for launch in launches {
+        let args = launch["args"].as_array().unwrap();
+        assert!(
+            args.windows(2).any(|pair| pair == ["--model", "opus"]),
+            "{launch}"
+        );
+        // The shared home ran signed in as the Wave's account.
+        assert_eq!(
+            launch["claude_home"].as_str().map(Path::new),
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .as_deref()
+                .map(Path::new)
+        );
+        assert!(
+            launch["claude_login"]
+                .as_str()
+                .unwrap()
+                .contains("fixture-work"),
+            "{launch}"
+        );
+    }
 }
 
 /// A registered Task whose repository defines the Graphs below.
@@ -800,6 +823,16 @@ impl GraphTask {
             (
                 ".lf/graphs/gated.yaml",
                 "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
+            ),
+            // A step that is done, then one that a limit can hold.
+            (
+                ".lf/graphs/held.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n",
+            ),
+            // The same, with a stop for a person: running it approves no Auto-Ship.
+            (
+                ".lf/graphs/held-review.yaml",
+                "- cmd: task sync --plan\n- cmd: graph show late\n- interactive: {name: demo, id: review}\n",
             ),
             // The Wave's default, `feature`, as this repository defines it.
             (
@@ -1225,7 +1258,7 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
         .unwrap();
     assert_eq!(primary, session);
 
-    // `-b` runs to the end headless and admits no conversation.
+    // `-b` runs to the end headless and returns no conversation to open.
     let output = task.run(&[
         "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
     ]);
@@ -1336,6 +1369,13 @@ fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
     assert!(waits.text.contains("waits at review"), "{}", waits.text);
     assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    // With `--json` it prints what `task.run` returns to a client.
+    let waits = task.run(&["task", "run", "INF-123", "--from", "review", "--json"]);
+    assert!(waits.status.success(), "{}", refusal(waits.clone()));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&waits.stdout).unwrap(),
+        serde_json::json!({"state": "waiting", "issue": "INF-123", "step": "review"})
+    );
     // From a step that runs, the run starts there: proof again, to review.
     task.task_run_ok(&["task", "run", "INF-123", "--from", "proof"]);
     assert_eq!(task.graph()["position"], at("review"));
@@ -1382,6 +1422,140 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
     outcomes
+}
+
+#[test]
+fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replaying_the_done_ones() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held"]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let steps_of_latest_graph = || -> Vec<String> {
+        db.prepare(
+            "SELECT p.command FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    };
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 2, "{steps:?}");
+    // The step's Process ended waiting on a limit; the wait is over.
+    let waiting: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,1)",
+        [&waiting],
+    )
+    .unwrap();
+    assert!(task
+        .text_status()
+        .contains("ended while waiting for claude capacity"));
+
+    let again = task.task_run(&["task", "run", "INF-123"]);
+    assert!(!again.success(), "{}", again.text);
+    let steps = steps_of_latest_graph();
+    assert_eq!(steps.len(), 1, "{steps:?}");
+    assert!(steps[0].contains("late"), "{steps:?}");
+}
+
+/// What a read of the Task starts for a run of `graph` that ended waiting on a
+/// limit with `recorded` as its explicit agent, when that reader exported its
+/// own choice: the restart's arguments and the agent settings it saw.
+fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", graph]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let waiting: String = db
+        .query_row(
+            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+             ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
+         VALUES(?1,'claude','rejected: five_hour',1,?2,1)",
+        rusqlite::params![waiting, recorded],
+    )
+    .unwrap();
+    // A failed ship waits before restarting; that wait has passed too.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+
+    let bin = tempfile::tempdir().unwrap();
+    let restarts = bin.path().join("restarts");
+    let lf = bin.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'task run INF-123'|*'--task INF-123 ship')\n  echo \"$*|$LF_AGENT_OVERRIDE|$LF_SETTINGS\" >> '{}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+            restarts.display(),
+            loopflow_test_support::lf_binary()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let read = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .env("LF_BIN", &lf)
+    .env("LF_AGENT_OVERRIDE", "codex:reader")
+    .env("LF_SETTINGS", "agent: codex:reader")
+    .output()
+    .unwrap();
+    assert!(
+        read.status.success(),
+        "{}",
+        String::from_utf8_lossy(&read.stderr)
+    );
+    wait_for("the restart", || restarts.exists());
+    fs::read_to_string(restarts).unwrap().trim().to_string()
+}
+
+#[test]
+fn a_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", Some("claude:opus")),
+        "--agent claude:opus task run INF-123||{}"
+    );
+}
+
+#[test]
+fn a_restarted_wait_with_no_explicit_agent_ignores_the_readers() {
+    assert_eq!(
+        restart_of_a_finished_wait("held-review", None),
+        "task run INF-123||{}"
+    );
+}
+
+/// With no stop for a person the run ships, so ship's own restart resumes it.
+#[test]
+fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
+    assert_eq!(
+        restart_of_a_finished_wait("held", Some("claude:opus")),
+        "--agent claude:opus --task INF-123 ship||{}"
+    );
 }
 
 #[test]
@@ -2149,6 +2323,11 @@ fn task_ship_defers_to_a_live_ship() {
         "{}",
         String::from_utf8_lossy(&second.stdout)
     );
+    // The spelling `task.ship` runs, here and over SSH: its typed result.
+    let answered = task.run(&["--task", "INF-123", "ship", "--json"]);
+    assert!(answered.status.success(), "{answered:?}");
+    let answer: serde_json::Value = serde_json::from_slice(&answered.stdout).unwrap();
+    assert_eq!(answer["state"], "already_shipping");
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
     assert_eq!(task.graph()["position"], at("end"));

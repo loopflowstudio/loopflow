@@ -118,6 +118,8 @@ struct TaskGraphTests {
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
+        let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
+        #expect(held.state == .waiting)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
@@ -209,16 +211,16 @@ struct TaskGraphTests {
                                     work: work, runs: [run])
         let calls = CallLog()
         let roadmapJSON = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(subscribeWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
             case ("session", "resume") where args.contains("--task"):
                 return try await reader.ensure(issue: args[3])
             case ("session", "resume"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
-            case ("desktop", "sessions"): return try await reader.inventory()
-            case ("desktop", "plan"): return roadmapJSON
-            case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
+            case ("session", "list"): return try await reader.inventory()
+            case ("plan", "list"): return roadmapJSON
+            case ("machine", "self"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }
@@ -316,7 +318,7 @@ private actor CallLog {
     func add(_ args: [String]) { calls.append(args) }
 }
 
-/// Scripted watches: every request is answered with the plan, Sessions and
+/// Scripted subscriptions: every request is answered with the plan, Sessions and
 /// Task status as they stand.
 @MainActor
 private final class ScriptedReader {
@@ -695,11 +697,11 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("desktop", "plan"):
+        case ("plan", "list"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"truncated":false,"items":[]}"#
-        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
+        case ("session", "history"): return #"{"truncated":false,"items":[]}"#
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)

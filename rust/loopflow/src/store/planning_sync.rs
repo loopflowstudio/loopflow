@@ -24,13 +24,13 @@ pub struct TaskDeletion {
 }
 
 /// Read-only delivery evidence. These rows never confer execution authority.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanningSyncStatus {
     pub connected: bool,
     pub changes: Vec<PlanningSyncChange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanningSyncChange {
     pub id: String,
     pub field: String,
@@ -40,7 +40,7 @@ pub struct PlanningSyncChange {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PlanningSyncState {

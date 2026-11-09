@@ -317,6 +317,7 @@ pub(crate) enum Approval {
 pub(crate) struct ShipStop {
     pub at: i64,
     pub by: Option<LfProcessId>,
+    pub person: Option<String>,
 }
 
 pub(super) fn ship_stop_in(
@@ -326,13 +327,14 @@ pub(super) fn ship_stop_in(
     use rusqlite::OptionalExtension;
     Ok(conn
         .query_row(
-            "SELECT ship_stopped_at,ship_stopped_lf_process_id FROM tasks
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks
              WHERE id=?1 AND ship_stopped_at IS NOT NULL",
             [task.as_str()],
             |row| {
                 Ok(ShipStop {
                     at: row.get(0)?,
                     by: row.get(1)?,
+                    person: row.get(2)?,
                 })
             },
         )
@@ -412,7 +414,7 @@ fn ship_in(
         Approval::Route => {}
         Approval::Explicit => {
             tx.execute(
-                "UPDATE tasks SET ship_stopped_at=NULL,ship_stopped_lf_process_id=NULL WHERE id=?1",
+                "UPDATE tasks SET ship_stopped_at=NULL,ship_stopped_lf_process_id=NULL,ship_stopped_person=NULL WHERE id=?1",
                 [task.as_str()],
             )?;
         }
@@ -835,14 +837,14 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         note: &str,
-        stopped_by: Option<&LfProcessId>,
+        stopped_by: Option<ShipStop>,
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         if let Some(by) = stopped_by {
             tx.execute(
-                "UPDATE tasks SET ship_stopped_at=?2,ship_stopped_lf_process_id=?3 WHERE id=?1",
-                rusqlite::params![task.as_str(), crate::store::rows::now_unix(), by.as_str()],
+                "UPDATE tasks SET ship_stopped_at=?2,ship_stopped_lf_process_id=?3,ship_stopped_person=?4 WHERE id=?1",
+                rusqlite::params![task.as_str(), by.at, by.by, by.person],
             )?;
         }
         let Some(shipping) = unship_in(&tx, task)? else {
@@ -941,6 +943,42 @@ mod tests {
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn request_stop_retains_its_person_without_an_os_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: TaskId::new(),
+                repository_id: store.ensure_repository("/request-stop").unwrap(),
+                project_id: None,
+                title: "Stop".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let stop = super::ShipStop {
+            at: 25,
+            by: None,
+            person: Some("Casey".into()),
+        };
+        assert!(store
+            .stop_shipping(&task.id, "Casey", Some(stop.clone()))
+            .unwrap()
+            .is_none());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(store.task_ship_stop(&task.id).unwrap(), Some(stop));
+        let count: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[test]
     fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
@@ -1060,7 +1098,17 @@ mod tests {
         assert_eq!(shipping.approved_by, Some(by.clone()));
         let stopper = LfProcessId::new();
         assert_eq!(
-            store.stop_shipping(&task, "stop", Some(&stopper)).unwrap(),
+            store
+                .stop_shipping(
+                    &task,
+                    "stop",
+                    Some(super::ShipStop {
+                        at: crate::store::rows::now_unix(),
+                        by: Some(stopper.clone()),
+                        person: None
+                    })
+                )
+                .unwrap(),
             Some(shipping)
         );
         assert_eq!(state(), crate::durable::TaskState::Moving);

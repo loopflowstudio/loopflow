@@ -205,7 +205,7 @@ pub(super) async fn save(
         .await
         .map_err(task_error)?;
     if let Some(cwd) = destination {
-        eprintln!("Conversation directory set to {}. Already-running clients may keep their original directory. Files stay in their original checkout.", cwd.display());
+        crate::journal::request::diagnostic(format_args!("Conversation directory set to {}. Already-running clients may keep their original directory. Files stay in their original checkout.", cwd.display()));
     }
     drop(source._admission);
     Ok(task)

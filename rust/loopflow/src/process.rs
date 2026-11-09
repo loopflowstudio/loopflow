@@ -6,7 +6,7 @@ use crate::durable::TaskId;
 use crate::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LfProcess {
     pub id: LfProcessId,
     pub pid: Option<u32>,
@@ -29,7 +29,7 @@ pub struct LfProcess {
 
 /// One recorded provider OS process, launched under the lf process that
 /// reserved it. It never has a receipt or an agent caller of its own.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentProcess {
     pub id: AgentProcessId,
     pub pid: Option<u32>,
@@ -49,7 +49,7 @@ pub struct AgentProcess {
 }
 
 /// One row of the process inventory: both kinds share one history and paging order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProcessEntry {
     Lf(LfProcess),
@@ -151,7 +151,7 @@ impl ProcessEntry {
 
 /// Who started a Process, derived from its ancestry: the first Session an
 /// agent ran it from, else the person at the root of its chain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Starter {
@@ -296,6 +296,8 @@ pub(crate) enum Departure {
     /// Another terminal on this Machine, on the same login, named as people
     /// see it (`Desktop`, `tmux %3`, `ttys004`) when the mover knew.
     Terminal { to: Option<String> },
+    /// This Machine, relaunched on another login: a running Codex keeps the
+    /// login it started with, so naming another one restarts it.
     Account {
         account: crate::store::ProviderAccountId,
     },

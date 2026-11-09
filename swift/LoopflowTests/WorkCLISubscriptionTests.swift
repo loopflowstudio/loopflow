@@ -75,7 +75,7 @@ struct WorkCLISubscriptionTests {
         try await fixture.prepare()
         let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
         let seedID = try #require(seed["id"] as? String)
-        let status = try await fixture.json(["desktop", "task", seedID, "--json"])
+        let status = try await fixture.json(["task", "show", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
         _ = try await fixture.run(["--wave", waveName, "set", "graph", "proof"])
         let query = fixture.lf.query
@@ -84,7 +84,7 @@ struct WorkCLISubscriptionTests {
         defer { keeping.cancel() }
         try await eventually { model.roadmap.value?.waves.first?.tasks.items.count == 1 }
         let wave = try #require(model.visibleRoadmaps.first)
-        let machine = try await fixture.json(["machine", "id", "--json"])
+        let machine = try await fixture.json(["machine", "self", "--json"])
         let machineID = try #require(machine["id"] as? String)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineID)
         model.confirmMachine(machineID)
@@ -172,7 +172,7 @@ struct WorkCLISubscriptionTests {
         #endif
         // A closed Task left the plan; an edit made while it is not shown
         // reaches it when it is shown again, without restoring the old selection.
-        _ = try await fixture.run(["task", "edit", id, "--title", "Updated after navigation"])
+        _ = try await fixture.run(["task", "update", id, "--title", "Updated after navigation"])
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         #expect(registry.retained(workspace.key) === workspace)
@@ -210,7 +210,7 @@ struct WorkCLISubscriptionTests {
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
-        let machine = try await fixture.json(["machine", "id", "--json"])
+        let machine = try await fixture.json(["machine", "self", "--json"])
         let machineId = try #require(machine["id"] as? String)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
         model.confirmMachine(machineId)
@@ -225,7 +225,7 @@ struct WorkCLISubscriptionTests {
         // Moving must preserve the conversation the working Task already opened.
         try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
         let layout = workspace.multiplexer.layout
-        _ = try await fixture.run(["wave", "add", "product", "--json"])
+        _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
         await model.moveTask(before, toWave: "product")
         #expect(model.navigation.taskRunDrafts[id]?.error == nil,

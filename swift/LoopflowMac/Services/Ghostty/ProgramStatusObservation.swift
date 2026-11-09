@@ -44,7 +44,7 @@ final class ProgramStatusSurface {
         self.terminalId = terminalId
         self.provider = provider
         if firstAssociation {
-            // A restored screen can report before Desktop's Session watch names
+            // A restored screen can report before Desktop's Session subscription names
             // its owner. Preserve that first reading; later providers start empty.
             sessionReducer = reducer
             hasAssociatedSession = true

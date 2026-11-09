@@ -94,7 +94,9 @@ pub struct WorkLink {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkLinkTarget {
     pub kind: WorkWorkspaceKind,
+    #[serde(rename = "repo_path")]
     pub repository_path: String,
+    #[serde(rename = "repo_id")]
     pub repository_id: Option<String>,
     /// The Task's readable identifier, such as LOO-507.
     pub task: Option<String>,
@@ -491,11 +493,8 @@ fn describe(
     };
     let mut url = WorkUrl::new(short_name.clone(), target);
     url.qualifier = own.and_then(|own| qualifier_for(&registered, own, &short_name));
-    // An exact Session travels with a Task link; elsewhere the connect argv carries it.
-    if task.is_some() {
-        url.session = session.clone();
-        url.diff = diff;
-    }
+    url.session = session.clone();
+    url.diff = diff;
     let (primary, primary_machine) = match store {
         Some(store) => {
             let scope = match (&task, &context.wave) {
@@ -692,6 +691,8 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let records = runtime.block_on(crate::ops::human_session::list(
         &store,
         &crate::session::SessionFilter {
+            blocked: false,
+            on: None,
             orphan: false,
             repo: if scoped {
                 crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
@@ -1309,11 +1310,6 @@ fn open_desktop(
     if !cfg!(target_os = "macos") {
         return Err(RouteError::Definite(
             "Loopflow Desktop requires macOS; use --host terminal".into(),
-        ));
-    }
-    if target.session.is_some() && target.task.is_none() {
-        return Err(RouteError::Definite(
-            "Desktop opens exact Sessions through their Task".into(),
         ));
     }
     let url = target.url.to_string();

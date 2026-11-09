@@ -55,6 +55,9 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
         .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
+    // Signing the shared Claude home in goes through the Keychain on macOS.
+    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+    fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
     let skill = repo.path().join(".claude/skills/startup-proof");
     fs::create_dir_all(&skill).unwrap();
     fs::write(
@@ -115,12 +118,13 @@ sys.stdin.read()
         .env("LF_HOME", home.path())
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        // The Keychain item lf signs the shared home in with names its user.
+        .env("USER", "fixture")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("GIT_ALLOW_PROTOCOL", "file")
         .current_dir(repo.path())
         .args([
             "-b",
-            "--isolate",
             "-a",
             "claude",
             "-c",
@@ -524,12 +528,7 @@ fn public_commands_save_steers_without_launching_providers() {
         "steer",
         "WAVE_DIRECTION",
     ]);
-    run(&[
-        "comment",
-        task.task.id.as_str(),
-        "TASK_DIRECTION",
-        "--steer",
-    ]);
+    run(&["task", "steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)

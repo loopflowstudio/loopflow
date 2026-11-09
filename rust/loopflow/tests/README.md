@@ -55,6 +55,8 @@ Run this check when changing transport ownership or process journaling: every
 added CLI process pays connection and schema setup costs, including at exit.
 Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
+Transport cleanup checks wait for both the recorded exit and socket removal:
+the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
 failed placement, failed shipping and a Graph held at landing.
@@ -220,7 +222,7 @@ newest-first discovery order; same-second creation can hide an ordering mismatch
 Paused-clock tests that own real subprocesses must poll startup and advance time
 explicitly; child I/O can prevent Tokio's clock from auto-advancing.
 
-For shared repository discovery or CLI dispatch changes, include the PM and
+For shared repository discovery or CLI dispatch changes, include the planning and
 Wave consumers in the focused check:
 
 ```bash
@@ -234,7 +236,7 @@ Cover repository defaults and explicit Wave selection separately from ambient
 Wave resolution.
 
 Preserve fixtures for registered Wave directories without Git metadata. Adding
-Git would hide the cached-PM context regression; global-command tests alone do
+Git would hide the cached-planning context regression; global-command tests alone do
 not cover it.
 
 Work-command dispatch also needs the registration lifecycle and repository
@@ -292,19 +294,18 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
-in as one stored account at a time: switching, saved-back logins, isolation,
-and provider conversation IDs in `lf session`.
+in as one stored account at a time: switching, saved-back logins and provider
+conversation IDs in `lf session`.
 `tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
 target/debug/lf --output <dir>` proves the same for Claude with synthetic
 logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, a shared launch gets no account home or credential
-variable, and an isolated launch stays in its account's home. On macOS it
-writes and removes one Keychain item scoped to its temporary config directory.
-The fixture copies the candidate, uses private Machines and stops only its identified
-provider process children. Native execution uses synthetic Responses, not configured
-accounts or installed data. Ordinary retry, usage, binding and review behavior
-belong in `session_lifecycle_tests`; Chapter convergence belongs in
-`ops::chapter::tests`, including interrupted rotation and second-Machine sync.
+Loopflow installed, and a launch gets no account home or credential variable.
+On macOS it writes and removes one Keychain item scoped to its temporary config
+directory. The fixture copies the candidate, uses private Machines and stops
+only its identified provider process children. Native execution uses synthetic
+Responses, not configured accounts or installed data. Ordinary retry, usage,
+binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
+`ops::linear::adoption_tests`.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
@@ -346,8 +347,8 @@ Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
 `LF_BIN`, even when they never execute the declared hook. When changing executable
 selection, run these fixtures with installed `lf` directories removed from PATH.
 
-After Project ownership or uniqueness changes, run the Task-planning consumers.
-Planning sync already creates the local Project;
+After Wave planning ownership or uniqueness changes, run the Task-planning consumers.
+Planning sync already creates the local planning row;
 registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
@@ -500,7 +501,7 @@ Keep prose contracts in builtin tests; launch tests should prove that the
 canonical document is included.
 For migration regressions, inspect historical fields at their migration boundary
 (`apply_before_migration`), then finish the upgrade and verify the current schema.
-When chapter triggers change, include Task consumers: durable work reservation
+When planning triggers change, include Task consumers: durable work reservation
 retains its ownership claim after failure. A private Home that applied an edited
 unmerged migration fails its checksum: use a fresh one. Preserve populated
 historical fixtures for merged migration coverage. A Task's migration is edited
@@ -531,8 +532,8 @@ suite does not check those additions.
 `docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
 appends the command tree from `lf help --all --json`, so a command or help-text
 change needs no reference update.
-Keep README and docs/index openings identical and regenerate docs/architecture.html
-when its source changes. Retired Project surfaces also affect CLI fallback,
+Keep README and docs/index openings identical and regenerate docs/dev/index.html
+when its source changes. Retired planning surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
 
 For landing changes, prove same-head recovery and authoritative merge separately
@@ -637,7 +638,7 @@ continuity in an explicit experimental Machine.
 The separate planning CLI proof (`cargo test -p loopflow --lib planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
 That CLI case exercises cached planning; `ops::linear::planning_lookup_tests` covers
-acquisition with simulated Linear responses, including missing Projects, partial
+acquisition with simulated Linear responses, including missing Linear Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
 The mechanical Graph proof uses that disposable account without an installation
@@ -665,8 +666,8 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf history list --json`, `lf usage --json`, and
-`lf doctor --json` against a disposable Machine with inherited `LF_*` and
+After Session-history or schema changes, run `lf session history list --json`,
+`lf session usage --json` and `lf machine doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove an unmerged migration.
 
@@ -694,7 +695,7 @@ cargo test -p loopflow --lib ownership_cutover_keeps_current_task_review_without
 cargo test -p loopflow --lib project_status_adoption_preserves_current_identity_and_custom_graph
 ```
 
-They check retained review identity/capture and the current Project's custom Graph
+They check retained review identity/capture and the Wave planning's custom Graph
 default. Synthetic migration success does not authorize conversion of an installed
 Machine or prove configured-provider resumption.
 
@@ -717,7 +718,7 @@ steering publishes to Linear and belongs with the mocked Linear boundary tests.
 cargo nextest run -p loopflow --test integration task_github_cache_tests:: --no-fail-fast
 ```
 
-When changing Linear response shapes, run the client tests and PM-operation
+When changing Linear response shapes, run the client tests and planning-operation
 consumers together, including `planning_reconnect_tests` on Linux (a disposable
 container works on macOS). That suite is explicitly ignored on macOS, so a local Rust
 pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
@@ -818,7 +819,7 @@ guide must retain the current invocation, laptop account selection, and target-r
 The prepared `LOOPFLOW_TEST_LF` candidate survives the network boundary; provider
 fixtures pin `LF_BIN` inside it. On macOS, set `TMPDIR=/private/tmp`: Wave/Task fixtures that
 register raw `/var/folders` paths otherwise disagree with canonical repository
-readers. This affects cron lookup, authored-goal context and exact-Task roadmap
+readers. This affects cron lookup, authored-goal context and exact-Task planning
 checks, not just orphan Session proofs. The provider harness prepends the selected CLI's parent
 to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
@@ -867,17 +868,17 @@ When a subprocess fixture signals readiness with file contents, write a sibling
 temporary file and rename it into place after closing it. File existence alone
 can expose an empty file between creation and the first write.
 
-### Project readiness fixtures
+### Planning readiness fixtures
 
-Task fixtures must create their Wave and Project and select the Project in SQLite
+Task fixtures must create their Wave and its planning row and select it in SQLite
 before creating work. YAML binding imports belong to
 explicit activation tests; passive status reads do not import them. Keep readiness
 fields in inline Swift responses as well as shared DTO fixtures.
 
-Changes to Project selection or planning admission require the full
+Changes to planning selection or admission require the full
 Rust suite and headless Swift tests, including Task consumers and status readers.
 Run the installation harness for migration changes; its released-source proof
-must retain Wave identity before projecting accepted Projects.
+must retain Wave identity before projecting accepted plans.
 
 ### Shared identity fixtures
 
@@ -888,7 +889,7 @@ the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
 
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.
-`wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different
+`wave_id` uses WaveId's UUID encoding; prefixed Task and planning Work IDs are different
 types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
 
@@ -925,3 +926,62 @@ fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
+
+## Client API server
+
+The [server boundary](../../../docs/dev/server.md) assigns socket behavior
+to client access; OS registration/replacement belongs to installation. Their
+composed test must continue to prove both with existing execution owners live.
+Draft-preservation fixtures observe terminal echo or provider acknowledgement
+before disconnecting a viewer. A socket write alone does not establish delivery;
+reconnection must never replay uncertain input to make such a test pass.
+
+```bash
+cargo test -p loopflow --lib server::
+cargo test -p loopflow --test served_reads
+cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
+cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
+cargo test -p loopflow --test transport_tests server_watches_refresh_work_and_resolve_primary_session
+cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
+cargo test -p loopflow --test transport_tests server_reconnect_
+cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
+cargo test -p loopflow --test transport_tests server_move_here_
+cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
+```
+
+The development registration proof uses two isolated launchd labels: disabled
+legacy setup refuses; enabling it lets concurrent readiness requests retire the
+old job and obtain one server while preserving a live owner. The installed socket
+address/lock remain stable so old relays can reconnect while an obsolete server
+executable cannot open a competing listener.
+The bundled registrar harness separately proves SMAppService label migration.
+
+`served_reads` covers CLI/server effect parity and concurrent request traces
+without request Process rows. The transport watch proof covers live Task
+changes and authoritative primary-Session selection.
+Separate lifecycle proofs keep the real relay connected through server restart,
+installed replacement and explicit takeover with an editable draft and live Graph.
+Recovery tests cover byte-position continuation, fresh terminal screens, newer
+viewers retaining input/geometry, expired output and owner exit without relaunch.
+Failed-start recovery consumes readiness once, preserves its diagnostic across
+Retry, and observes independent installation repair without replacing newer claims.
+`ServerClientTests` covers the same registration boundary for Work read refresh
+and reopened watches, including failed subprocess and unready status responses.
+Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+acknowledgement before a newer claim, reject stale actions and cancel a queued
+action on pane closure. Native mailbox tests cover presentation until acknowledgement;
+rendered copy/Find/scroll and the visible action remain interactive demo evidence.
+The opt-in macOS variant creates an isolated signed app bundle, starts the owner
+and Graph from its installed helper, replaces that executable inode with identically
+signed bytes, verifies the bundle seal and invokes the production SMAppService
+replacement registrar while
+the draft remains held. A fresh relay acknowledgement must precede submission;
+the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+unique job and LaunchServices registration. The updater runs as the signed app
+through LaunchServices; no UI or App Management permission changes are needed.
+Run outside the network sandbox. The underlying registrar harness is
+`scripts/test_server_registration.py`; its default mode separately checks
+idempotent registration without Work. Native rendered continuity remains demo.
+Linux supervisor replacement remains a Linux installation check; this service
+starts no Session owners itself, and its unit uses `KillMode=process` so restarting
+it leaves the owners its detached launches started, as `AbandonProcessGroup` does on macOS.

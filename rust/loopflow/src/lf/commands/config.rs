@@ -44,10 +44,14 @@ pub fn show(
     step: Option<&str>,
     options: &ShowOptions,
 ) -> anyhow::Result<()> {
-    let output = crate::config::api::inspect(repo, wave, skill, graph, step)?;
+    let output = crate::engine::config::inspect(repo, wave, skill, graph, step)?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
+        let output: Vec<Value> = output
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()?;
         print!("{}", render(&output, repo, options, &Colors::new()));
     }
     Ok(())
@@ -294,9 +298,15 @@ pub fn catalog(json: bool) -> anyhow::Result<()> {
                 println!("\n{}\n", definition.category.title());
                 previous_category = Some(definition.category);
             }
+            let shorthands = definition.shorthands();
             println!(
-                "{}: {}{}",
-                definition.key,
+                "{}{}: {}{}",
+                definition.canonical_key(),
+                if shorthands.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", shorthands.join(", "))
+                },
                 definition.description,
                 if definition.lifecycle == crate::config::catalog::Lifecycle::Inactive {
                     " (inactive)"

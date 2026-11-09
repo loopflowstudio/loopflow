@@ -95,11 +95,8 @@ pub(crate) fn resume_session_with_env(
         config.agent()?,
         config.agent()?,
     );
-    if let Some(provider) = provider_session {
-        if session.provider.as_deref() != Some("codex") {
-            config.task_prompt.clear();
-        }
-        config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
+    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+        config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
     config.env.insert(
@@ -282,6 +279,17 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
         payload: serde_json::json!({"type":"interactive_opened", "opened_at_ms": now.unix_timestamp_nanos() / 1_000_000}),
     })?;
     Ok(())
+}
+
+/// The model a native launch names (`--model opus`), when it does.
+fn native_model_argument(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == "--model" || arg == "-m")
+        .and_then(|index| args.get(index + 1).cloned())
+        .or_else(|| {
+            args.iter()
+                .find_map(|arg| arg.strip_prefix("--model=").map(str::to_owned))
+        })
 }
 
 fn native_provider_attachment(
@@ -514,7 +522,8 @@ fn run_native_session(
                 agent_session.cloned(),
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
-                command.isolate,
+                native_model_argument(&command.args),
+                Some(command.cwd.clone()),
             )
         })
         .transpose()
@@ -595,7 +604,6 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned(), account.clone());
         }
         let exit = crate::harness::native_exit::NativeExit {
-            isolate: command.isolate,
             session: attachment.1.clone(),
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
@@ -724,7 +732,7 @@ fn observe_client(
             endpoint: endpoint.clone(),
             thread: thread.clone(),
             account: account.clone(),
-            isolate: command.isolate,
+            cwd: command.cwd.clone(),
             client: (client, born),
             input: command.input.clone(),
         },
@@ -961,14 +969,13 @@ fn run_codex_native(
             .join()
             .map_err(|_| anyhow!("Codex startup worker panicked"))?
     })?;
-    let mut client = crate::agent::native_connection_command(
+    let client = crate::agent::native_connection_command(
         command.cwd.clone(),
         &opened.thread,
         opened.endpoint,
         opened.input,
         command.attachment.clone(),
     );
-    client.isolate = command.isolate;
     run_native_session(
         &client,
         environment,
@@ -1215,7 +1222,6 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1428,7 +1434,6 @@ mod tests {
             }
         });
         let command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1451,7 +1456,6 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
-            isolate: None,
             launch: None,
             input: None,
             program: "/bin/sh".into(),
@@ -1558,7 +1562,6 @@ mod tests {
             )]);
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
-                isolate: None,
                 launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
@@ -1640,7 +1643,6 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
-                isolate: None,
                 launch: None,
                 input: None,
                 context: None,

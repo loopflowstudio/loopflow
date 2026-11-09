@@ -137,7 +137,7 @@ func renameFixtureRecord(
     {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
      "actions":\(sessionActionFixtureJSON(state: "active")),
-     "ready_summary":null,"title_source":"\(source)","task_primary":false, "graph_membership":{"kind":"independent"},
+     "ready_summary":null,"blocked": false, "title_source":"\(source)","task_primary":false, "graph_membership":{"kind":"independent"},
      "task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
     """.utf8))
 }
@@ -177,10 +177,10 @@ private actor RenameSource {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args == ["desktop", "plan", "--all", "--json"] {
+        if args == ["plan", "list", "--all", "--json"] {
             return try roadmapJSON()
         }
-        let verb = args.prefix(2) == ["desktop", "sessions"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
+        let verb = args.prefix(2) == ["session", "list"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
         guard let verb else { return "[]" }
         let snapshot = records
         if holds.remove(verb) != nil {

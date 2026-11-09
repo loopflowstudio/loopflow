@@ -2,13 +2,9 @@
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
-Shipping docs: `docs/server.md` and `rust/loopflow/src/server/README.md`.
-The exchange names the transport's control and ticket WebSocket paths.
 
 The listener, mobile settings and bulk protocol are outside this Task.
-The server README owns the shared attach rules; its remote section adds the
-exchange, identity binding and sleep-aware expiry. Keep that section marked
-planned until implemented, so local UID binding cannot imply remote support.
+Keep the contract marked planned until implemented.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -29,31 +25,22 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-The 22:08 UTC realign check found the same PR #1812 head still OPEN without auto-merge and with
-`mergedAt: null` (`gh pr view`).
-`git fetch origin main` returned `86bc0692e4f593e747bbacc8ed0bf710f5e06af0`;
-`git ls-tree` found neither `mobile.rs` nor `ticket.rs` there.
-These inspected changes are not a landed implementation. This checkout still
-uses the UID-only `service.rs` store and `Instant` expiry; its foreign attempts
-already consume the ticket.
 The 22:04 UTC `lf task status LOO-718 --json` placed `feature` at `demo`, with
-PR #1812 open and settlement not armed. The current Task status reads did not
-respond and were terminated; that earlier Graph position is not a fresh reading.
+PR #1812 open and settlement not armed. Subsequent status reads did not respond
+and were terminated; this is the last successful Graph reading.
 
 At 22:43 UTC, `gh pr view 1812` still returned `OPEN` and `mergedAt: null`,
 now at head `73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. That new head's code
 has not been reviewed here; the implementation observations above describe the
 21:30 revision only. `git fetch origin main` still resolved to
 `86bc0692e4f593e747bbacc8ed0bf710f5e06af0`, with neither `mobile.rs` nor
-`ticket.rs` in its tree. The required transport remains unlanded.
+`ticket.rs` in its tree.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
-The authenticated endpoint needed for implementation and remote acceptance is
-absent from main; the planned contract alone does not deliver remote attachment.
 
 Earlier dependency observations are in
-`7fb30bb8c6810107352558868c33bbf177f83a5c:scratch/design.md`.
+`839c3609e663efe781e67e3f6ed7fab598ab038b:scratch/design.md`.
 
 ## Delete — do not maintain
 
@@ -70,7 +57,7 @@ wire fixtures for the surviving protocol.
 Recheck the landed revision before integrating. Restore terminal consume-on-attempt
 in the shared store without changing bulk redemption policy. Replace ticket timing
 with `SystemTime` so the 60-second deadline includes host sleep; leave unrelated
-throttles on `Instant`. The deletion section owns the store and test cutover.
+throttles on `Instant`.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.

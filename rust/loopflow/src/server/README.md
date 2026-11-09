@@ -410,17 +410,17 @@ Planned for the authenticated endpoint in [Phone access](../../../../docs/server
 this build supports local attachment only. Owner selection, terminal control,
 ticket consumption and rejection follow `session.attach` above.
 
-After `welcome`, request `session.attach` on the authenticated client connection.
-Use a Session ID from `session.list`; `owner_lf_process_id: null` selects its
-current running terminal owner:
+Connect to the host's authenticated `/v1/machine` WebSocket, complete
+`hello`/`welcome`, and request `session.attach` with a Session ID from
+`session.list`. A null `owner_lf_process_id` selects its current terminal owner:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-Open a separate bridge connection, authenticate it through the remote endpoint,
-and send `attach` as its first message, without a `hello` exchange:
+Open a separate WebSocket to the same host's `/v1/ticket` endpoint, authenticate
+it, and send `attach` as its first message, without a `hello` exchange:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
@@ -431,6 +431,4 @@ Both connections must authenticate with the same Tailscale node stable ID and
 user ID; the same account on another device does not match. A ticket, `hello`
 name, `client_id`, login text or proxy's Unix UID cannot replace that authentication.
 Local and remote tickets are not interchangeable. The 60-second deadline includes
-host sleep; expiry does not close an open bridge.
-
-Request a fresh ticket before reconnecting.
+host sleep; expiry does not close an open bridge. Reconnecting requires a fresh ticket.

@@ -11,6 +11,8 @@ Keep the shared attach rules in one place; the remote section adds only its
 exchange example, authentication and expiry requirements.
 The remote contract references the shared rules once to avoid maintaining
 duplicate descriptions of owner selection and ticket rejection.
+Keep local UID binding in the shared protocol text and planned remote identity
+binding in the remote contract, so planned support cannot read as implemented.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -31,33 +33,34 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-The 20:49 UTC implementation check found PR #1812 still OPEN without auto-merge and with
+The 21:26 UTC implementation check found PR #1812 still OPEN without auto-merge and with
 `mergedAt: null` (`gh pr view`).
 `git fetch origin main` returned `4848816f73ccbacd5f1eb26bff7f54814d7c0c8b`;
 `git ls-tree` found neither `mobile.rs` nor `ticket.rs` there.
 These inspected changes are not a landed implementation.
-The PR head remains the inspected `f0c77e31fa569f13748ad29506af56670bcde3b1`.
-`lf task status LOO-718 --json` confirms `feature` at `demo`, with PR #1812
-open. The LOO-809 status read returned no output before interruption; its
-current Graph position was not reverified.
+The PR head is now `baf3989a02a5fa6be666ae94d11448c664be2380`; its code has
+not been inspected in this pass, so the earlier code findings apply only to
+`f0c77e31fa569f13748ad29506af56670bcde3b1`.
+`lf task status LOO-718 --json` still places `feature` at `demo`, with PR #1812
+open and settlement not armed.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
-Graph decision: stop for the external dependency; implementation and publication
-remain incomplete until the authenticated transport lands. The existing checkout
-and documentation edits remain available for continuation.
+Implementation and publication remain incomplete. The existing checkout and
+documentation edits remain available for continuation when the transport lands.
 
 Earlier dependency observations are in
 `cda7cf5c96f5896800c12d34f8c71126308fbb87:scratch/design.md`.
 
 ## Delete — do not maintain
 
-Replace any remaining `server/service.rs::Ticket` and `Tickets` UID-only store
-with the landed transport's shared `server/ticket.rs` authority. Do not extend
-the predecessor while waiting. Move its exclusive
-`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` test to that shared
-store, retaining identity, single-use, expiry and sweep coverage. Keep
-service-level bridge tests and wire fixtures for the surviving protocol.
+Integrating the inspected transport removes `server/service.rs::Ticket` and
+`Tickets`, the current UID-only store. Use its shared `server/ticket.rs`
+authority without retaining a second store. Carry forward the behavior covered
+by `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`: identity,
+consume-on-attempt, single use, expiry and sweeping. Add missing terminal cases
+to the shared-store tests; retain its bulk cases, service-level bridge tests and
+wire fixtures for the surviving protocol.
 
 ## Remaining implementation
 

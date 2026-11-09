@@ -1,0 +1,239 @@
+# T3 Code: session experience compared with Loopflow
+
+Research: 2026-11-09. Official `pingdotgg/t3code` main at
+[`077fd62222a94b2264ad4525aa4e25bdb29d5029`](https://github.com/pingdotgg/t3code/commit/077fd62222a94b2264ad4525aa4e25bdb29d5029)
+(Nov 9, 19:26 UTC); 200 commits plus path history and repair diffs.
+Latest published release when checked: [v0.1.7](https://github.com/pingdotgg/t3code/releases/tag/v0.1.7),
+Nov 4, commit `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`. Nov 5–9 fixes below are
+main-branch findings, not claims about that release. Tests were read, not run;
+no T3 app was installed. Loopflow comparison uses draft `6394e4e900` and its local
+transport/Desktop code. “Gap” means observed missing coverage or presentation,
+not proof that Loopflow lacks every equivalent implementation.
+
+## Most useful differences
+
+### 1. Returning from suspension tests actual socket life
+
+T3's shared connection supervisor handles foregrounding, network changes and
+long suspension. It preserves a socket that still delivers frames, probes a
+silent one, and can replace it despite an inaccurate OS offline report. Remote
+routes get a short silence allowance; local/LAN routes can recover sooner.
+The Oct 27 repair replaced indiscriminate reconnect-on-resume; the Nov 6 repair
+further reduced delay after long suspension. Tests cover a frame arriving during
+a slow host check, stale offline state, and restarting the retry ladder.
+[Oct 27 repair and tests](https://github.com/pingdotgg/t3code/commit/e5f2e5dbbc5c7864aefdeccaca18284d023edc37),
+[Nov 6 follow-up](https://github.com/pingdotgg/t3code/commit/2917f28465588b5f6afc43191f7beac953e109c0).
+
+**Loopflow:** the owner/viewer heartbeat and bounded reconnect exist. The
+Desktop tests reviewed do not exercise OS suspension plus a socket that remains
+open but stops delivering. Add live-socket-preserved and silent-socket-replaced
+scenarios before tuning timers. Copy the distinction, not T3's timeout constants.
+
+### 2. A loaded screen and a synchronized conversation are separate
+
+T3 retains cached thread content while reconnecting and resumes using an applied
+sequence cursor. Its tests prevent cancellation from advancing the cursor beyond
+applied data, old scopes overwriting successor caches, and delayed disk reads
+replacing live state. Replayed events stay in a synchronizing state until a
+completion marker arrives; request-resolution notifications wait for that marker.
+[Thread synchronization tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/state/threads-sync.test.ts#L595).
+
+**Loopflow:** retained terminal screens, byte-counted replay and attachment
+acknowledgement already exist. The gap is an end-to-end presentation contract:
+cached pixels, native readiness and input claims currently arrive through
+different paths. Test old-ready callbacks after replacement, not merely correct
+values in a connection-state enum. Do not import a chat-projection lifecycle
+into the terminal protocol just to match T3's types.
+
+### 3. Replacement subscriptions preserve visible output and selection
+
+T3's drawer test starts with visible selected text, creates an empty replacement
+subscription, and verifies that it neither resets the terminal nor clears the
+selection. The replacement snapshot is the point that updates content. Separate
+surface tests preserve selection through unchanged redraws and keep a drag
+anchored while output scrolls. This followed an Oct 30 selection repair.
+[Drawer regression](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/web/src/components/ThreadTerminalDrawer.test.ts#L42),
+[selection repair](https://github.com/pingdotgg/t3code/commit/97dbfd72d4444317f976d9d60b56eca0aec38530).
+
+**Loopflow:** the current patch stabilizes geometry and paints the first snapshot
+at the new size. It does not establish selection/scroll preservation through a
+connection replacement. Add a mounted Ghostty scenario: select text, reconnect
+slowly, keep copying it while paused, then verify live handoff without a blank
+screen. This maps directly to the requested experience.
+
+### 4. Geometry is restored per attachment, without replaying startup input
+
+T3 tests re-sending the measured grid on each attachment generation, ignoring
+identical measurements, and sending initial launch input only once after the
+first snapshot. Resize precedes launch input. One retained driver per mode
+prevents a brief unmount/remount from resetting its successor's state.
+[Terminal session tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/state/terminal.test.ts#L132),
+[driver simplification](https://github.com/pingdotgg/t3code/commit/3ca62a5644572aab1cf7a058944aa44df516734c).
+
+**Loopflow:** mostly parity: geometry ownership, stale claims and no-replay are
+already tested. Add rapid hide/show plus a changed size during reconnect at the
+actual surface; assert final geometry and exactly-once initial command input.
+Do not add another manager: ownership outside transient views is the lesson.
+
+### 5. Recovery errors identify the failing part and the right next action
+
+T3 distinguishes this device, relay, host tunnel and host server, and attaches
+diagnostic detail to that route. A Nov 2 fix stopped blaming the host while the
+local device's sign-in was still loading. Tests also avoid declaring unspecified
+hops healthy and distinguish a relay error from a device network failure.
+[Diagnosis tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/connection/diagnosis.test.ts#L56),
+[repair](https://github.com/pingdotgg/t3code/commit/a821f039c159174b08aab8d1f39b5c8e588d416e).
+
+**Loopflow:** failure messages preserve causes, but the relay's unavailable copy
+can broadly recommend installation/Background Items even when another failure
+is responsible. Test actionable categories: owner ended, bridge unavailable,
+local setup failure, remote transport loss, input held elsewhere. Preserve the
+underlying diagnosis without displaying a wall of internal transport detail.
+
+### 6. Cold and warm opens avoid redundant work
+
+T3 keeps thread-cache lifetime separate from live-subscription lifetime. The
+Nov 9 change uses a bounded socket snapshot for cold opening, with one HTTP
+fallback on failure or session loss; warm cached opens use an event cursor.
+Tests cover both normal opening and the socket dying before first data.
+[Nov 9 opening repair](https://github.com/pingdotgg/t3code/commit/dc3fdc6a3eb6e7fd4db28585ac5f2c8632bdfcf9).
+
+**Loopflow:** warm surfaces and saved terminal previews already provide part of
+this. Measure click-to-first-screen and click-to-input across cold, warm and
+recovery paths. Avoid adding an HTTP-style fallback to a terminal path that
+does not need one. The transferable win is removing duplicate preparation or
+round trips without broadening what Retry may execute.
+
+### 7. Structured drafts and delivery survive more than screen restoration
+
+T3's mobile composer owns persisted drafts, carets, attachment bytes and queued
+messages. Outbox tests preserve edits racing with delivery; after acknowledged
+delivery, failed local removal retries cleanup rather than resending. Other
+tests prevent delivered messages reappearing in reopened long threads, a bug
+repaired twice in October/November.
+[Outbox tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/mobile/src/state/threadOutboxDelivery.test.ts#L343),
+[Nov 5 repair](https://github.com/pingdotgg/t3code/commit/8b570d282b5f50709185fbd26f8e36872ddafdeb),
+[draft/caret tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/mobile/src/state/use-composer-drafts.test.ts#L949).
+
+**Loopflow:** native providers own their editor drafts; a saved terminal screen
+cannot restore those drafts after provider death. This is a real product-model
+difference, not a missing buffer to add to raw terminal input. For future mobile
+structured input, adopt explicit draft/delivery IDs and cleanup-only retry tests.
+For current terminals, prove drafts survive viewer loss while the same provider
+lives, and never promise restoration after that process is gone.
+
+### 8. Heavy output recovery has bounded work
+
+T3 tests bounded output windows, UTF-8 byte accounting, cancellation during
+recovery, and listener cleanup during acquisition. The mobile writer appends
+across history rollover without re-sending retained history; a failed append
+recovers from the latest queued snapshot. These followed an October repair for
+unbounded output queued behind slow clients.
+[Output protocol tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/server/src/terminal/OutputProtocol.test.ts),
+[mobile writer tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/mobile/src/features/terminal/terminalOutputWriter.test.ts),
+[slow-client repair](https://github.com/pingdotgg/t3code/commit/3284143b454f2353ab3e0101c894986fe429123d).
+
+**Loopflow:** bounded queues, replay spool and slow-observer isolation already
+exist. Add surface-level long-output/reconnect checks for repaint count, retained
+scroll position and input latency. This is added UX coverage, not a justification
+to replace the existing owner transport.
+
+## Beyond recovery: launch, attention and moving between devices
+
+### 9. New-thread setup survives asynchronous arrival order
+
+An Oct 26 repair prevented early detail reads from caching a not-yet-created
+thread as deleted. Tests retain setup and the original prompt until both the
+message and its first run arrive; a prompt echo alone does not dismiss setup.
+Rejected creation remains recoverable, and selecting another thread drops the
+old setup presentation. [Repair and tests](https://github.com/pingdotgg/t3code/commit/59a3f52ad332bc93f3fe20e3c634da474d203cab).
+
+**Transfer:** test Loopflow's first Session creation with inventory, surface and
+native-ready arriving in every order. Preserve original context through failure;
+never show an existing conversation's startup UI merely because a delayed event
+arrives. This is a useful extension of the current presentation work, not a
+claim that Loopflow currently caches missing Sessions as deleted.
+
+### 10. Progress belongs to the current work, not the newest row
+
+T3 tests keep running activity attached to its executing run when a newer run is
+queued, preserve a subscription-limit explanation while messages queue, and
+avoid showing queued-only work as interruptible. Status from an old provider
+session cannot leak into its replacement; a child's failure is not inherited as
+the root's current failure. [Execution presentation tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/state/threadExecution.test.ts).
+
+**Transfer:** Loopflow already has Program Status and Graph projections. Verify
+the visible combination when provider replacement, queued work and a stale
+completion race. Check that Stop targets running work and that quota failure
+stays visible; do not mistake a quiet native terminal for idle. This is mostly
+a cross-layer testing opportunity, especially alongside LOO-813.
+
+### 11. Attention survives navigation and sends people to the right thread
+
+T3 records opening after delayed shell hydration, immediately marks newly seen
+completion, throttles streaming visits, and keeps a deliberate unread mark until
+new activity. A Nov 3 fix made unread stick when rapidly reopening a thread.
+[Repair](https://github.com/pingdotgg/t3code/commit/480eb8d219a5103b84c029cd32ee31819e028e2b).
+Mobile notification tests retain a failed navigation for retry, deduplicate
+initial-response/listener delivery, and route with environment plus thread IDs.
+[Notification tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/apps/mobile/src/features/agent-awareness/notificationNavigation.test.ts).
+
+**Transfer:** test opening a progress notification before Session inventory is
+loaded, then receiving the same event again. Reach the exact conversation once,
+without restarting it or consuming an unread marker before it is visible.
+These mobile attention behaviors are not demonstrated by Loopflow's current
+terminal attachment tests.
+
+### 12. Device continuity is route continuity, not moving the process
+
+T3 documents pairing a phone/browser/desktop to the same host, learning its LAN
+routes, and falling back to a relay away from home. The host must remain running.
+[Remote access](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/docs/user/remote-access.md).
+Tests exercise cellular transition away from a dead LAN socket, returning to LAN,
+sharing one head start across several slow routes, and renewing HTTP credentials
+without replacing a healthy conversation socket.
+[Supervisor tests](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/connection/supervisor.test.ts#L1471).
+
+**Transfer:** Loopflow's remote transport already keeps execution on its Machine.
+The additional product polish is a discoverable device/route handoff with
+continuous selection, readable state and no accidental local successor. Test
+same-named conversations on two Machines, delayed route resolution, and changing
+networks while viewing. No evidence here establishes live process migration
+between T3 hosts; that would be a different product promise.
+
+## Counterexamples: T3 is not a flawless reference
+
+An October reconnect bug resurrected closed or exited terminals through retained
+subscriptions. The repair tests close-before-seen, eviction, exit, explicit
+reopening and first-response vs resubscription semantics. Loopflow already has
+stronger explicit no-provider-restart rules on Retry; preserve those.
+[Repair and regression tests](https://github.com/pingdotgg/t3code/commit/f3e5a165e043f4c1ae51568363409f94d916a811).
+
+T3's connection presentation test labels attempt 2 with a previous transport
+failure as reconnecting; it does not prove a previous successful attachment.
+It therefore is not a model for Loopflow's newly selected stricter Opening
+semantics. [Presentation test](https://github.com/pingdotgg/t3code/blob/077fd62222a94b2264ad4525aa4e25bdb29d5029/packages/client-runtime/src/connection/presentation.test.ts#L117).
+
+Open reports at research time include [chat lurch on terminal drawer opening
+#32778](https://github.com/pingdotgg/t3code/issues/32778), [stale terminal width
+#31013](https://github.com/pingdotgg/t3code/issues/31013), and [missing native
+conversation on resume #31689](https://github.com/pingdotgg/t3code/issues/31689).
+These are reports, not reproduced findings. They limit any claim of universal
+polish even with extensive tests.
+
+## Tests to bring over first
+
+1. **P0:** replace a connection while text is selected; preserve screen, selection
+   and viewport until authoritative replacement, with input visibly paused.
+2. **P0:** old-ready callbacks, failed status writes and failed attachment cannot
+   enable input or erase the current screen; only current claims enable typing.
+3. **P0:** close/exit, then reconnect from stale UI; no new provider or shell.
+4. **P1:** suspend/resume with a live socket, silent socket, inaccurate offline
+   signal, and a frame arriving during probe; avoid needless reconnects and
+   indefinite frozen views.
+5. **P1:** rapid pane remount at a new size; one current owner, measured grid
+   restored, launch input once, no duplicate resize on status changes.
+6. **P1:** heavy output while reconnecting a slow viewer; bounded memory and
+   repaint work, other viewers remain responsive, final cursor correct.
+7. **Later structured mobile input:** acknowledged delivery plus cleanup failure
+   retries only cleanup; newer draft text and attachments survive the race.

@@ -1,0 +1,22 @@
+Opening an existing Session could change terminal dimensions, flash competing connection labels, or let presentation failures stop its relay. This change keeps a readable screen in a stable pane, pauses input until the current attachment and native client are ready, and restores input in place.
+
+The execution model is simpler: `LfProcessRuntime` holds live invocation resources across provider attempts, while `SessionRecorder` records history and receipts. The intermediate `AgentExecution` concept is removed. Cleanup still runs if receipt recording fails, and stale attachments cannot settle a replacement.
+
+The opening and recovery path now:
+
+- Uses one Opening/Reconnecting presentation, with resize applied before the initial snapshot and cursor-preserving terminal cleanup.
+- Clears stale input modes before repainting a reused viewer. A regression reproduced inherited bracketed paste, application keys, focus and mouse reporting; restoration now clears them while keeping prior scrollback intact.
+- Replaces status/action files and their watcher with one private per-surface stream. Reporting failures leave the relay running; stream loss revokes Desktop input; Retry/Move actions are never replayed.
+- Detects a writable bridge that stops answering using the existing 30-second heartbeat bound. Server-backed viewers recover the same owner without restarting a provider or repeating input; quiet providers stay attached.
+
+Validation: 15 focused transport checks passed after syncing with main, including stalled return traffic, healthy silence, status-channel failure, lost takeover acknowledgement, retained output and newer viewer claims. Earlier ownership checks covered receipt failure, cleanup, replacement fencing and provider/account continuity. After the repaint repair, all 62 transport unit tests and seven real repaint/attachment tests passed. Desktop rebuilt, and the connection/cache/layout/workspace suites plus mounted Session recovery passed. Formatting, Clippy with warnings denied, architecture, test inventory and Swift boundary checks passed.
+
+The mounted Ghostty check uses native key events, the real source-built relay/server and an isolated provider stand-in. It verifies the same surface/provider, stable geometry, working input before/after server replacement and discarded paused typing. It does not establish physical-keyboard or installed-app recovery. Ordinary `lf --version`, `lf help` and `lf process list --json` PTY probes emitted no screen/cursor controls; the reported ordinary-command jump remains unreproduced.
+
+Land after required checks pass. LOO-813 owns the live-session incident. LOO-810 owns creation recovery; LOO-774 owns bridge-end reasons; LOO-796 and LOO-718/799 retain the broader reading, draft and mobile journeys. No installation or release is part of this change.
+
+Expanded native acceptance is not fully green: 69 tests ran; five tests in `GhosttyTerminalInputTests` reported 11 assertions. `shellSessionAttachment` reaches a missing bundled helper in the test runner; `releaseSurfaceIsWindowLocal` and `pasteShortcutFollowsFirstResponder` use synthetic Session `/bin/cat` fixtures without attachment/readiness; `commandBlockClickAndCopy` and `typingAfterKeyboardRestore` need selection/viewport reproduction. No baseline runtime comparison was made, so these remain unresolved acceptance failures rather than attributed regressions. The real isolated Session transport check passed on this final code. LOO-779 owns native fixture repair and the restoration matrix; LOO-796 owns resulting selection/reading/focus defects. These limits are retained for follow-up; source checks do not establish installed-app validation.
+
+The dated [session-experience comparison](https://github.com/loopflowstudio/loopflow/blob/7232e533e14be764951b8eb35bfef8262086e5a5/docs/dev/research/session-experience.html) retains the three upstream commit/test reviews and current Task handoffs. Acceptance instructions are recorded in LOO-796/810/718/799/795/798/753/774/779/719/402. Cross-device draft sync is excluded; opening the Task is the read event. LOO-814 stages remote attachments through SCP into host temporary storage. LOO-815 retains the open CLI/Graph receipt-failure design. No follow-up Graph was launched.
+
+Required CI passed on f4275a36e. The subsequent commit only retains the dated research report and its index link; HTML anchors and architecture coverage passed. Native optional failures remain assigned as above.

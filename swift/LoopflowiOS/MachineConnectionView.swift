@@ -1,5 +1,26 @@
+import Foundation
 import Loopflow
 import SwiftUI
+
+func machineConnectionMessage(_ error: any Error) -> String {
+    if let error = error as? RegistryQueryError { return error.message }
+    if let error = error as? ServerError { return error.localizedDescription }
+    if let error = error as? URLError {
+        switch error.code {
+        case .cannotFindHost, .dnsLookupFailed:
+            return "Couldn’t find this Machine. Connect Tailscale on both devices and check the address in Desktop’s Mobile settings."
+        case .cannotConnectToHost, .networkConnectionLost, .timedOut:
+            return "Couldn’t reach this Machine. Check that it is awake, Tailscale is connected, and mobile access is enabled in Loopflow."
+        case .notConnectedToInternet:
+            return "This device is offline. Connect to Wi-Fi or cellular, then reconnect Tailscale and try again."
+        case .secureConnectionFailed, .serverCertificateHasBadDate,
+             .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid:
+            return "Couldn’t verify this Machine’s HTTPS certificate. Check its date and time, then set up mobile access again with Tailscale HTTPS enabled."
+        default: break
+        }
+    }
+    return "Couldn’t connect. Check that both devices use the same Tailscale account and mobile access is enabled on the Machine."
+}
 
 struct MachineConnectionView: View {
     @State private var savedMachine: SavedMachine?
@@ -219,7 +240,6 @@ struct MachineAddressView: View {
             let connected = try await RemoteMobileClient.connect(endpoint: endpoint, replacing: replacing)
             onConnected(connected)
         } catch is CancellationError { }
-        catch let error as RegistryQueryError { self.error = error.message }
-        catch { self.error = "Couldn’t connect. Check that both devices use the same Tailscale account and mobile access is enabled on the Machine." }
+        catch { self.error = machineConnectionMessage(error) }
     }
 }

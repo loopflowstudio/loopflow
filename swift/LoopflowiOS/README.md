@@ -63,6 +63,12 @@ Desktop detects and configures signed-in host Tailscale automatically. Camera
 access is optional: **Enter address** accepts the same HTTPS address, typed or
 pasted, including a hostname without the `https://` prefix.
 
+Connection errors distinguish an offline phone, an unknown address, an unreachable
+Machine and a certificate problem. Server errors retain their recovery instructions,
+including when the installed server needs updating. Use a separate physical device
+for a live connection: a Simulator on the server's Mac shares its Tailscale identity
+and is refused.
+
 The QR contains only the address. Tailscale supplies caller identity; the Machine
 admits its owner. The phone saves the verified endpoint and Machine identity in
 Keychain, with no device token. Future launches reuse that connection. Opening
@@ -165,6 +171,9 @@ Long-lived Task updates and terminal streams check that the Machine still answer
 while the app is in use. A lost connection becomes a reconnectable error even if
 no new output arrives. The checks stop when that stream closes or backgrounds;
 they never replay a command or keystroke.
+Terminal attachments also send the owner's `controlled` heartbeat every ten
+seconds. Its reply reports whether anyone holds control; it never grants input
+or geometry to the phone. An unanswered heartbeat closes the attachment.
 The deterministic peer owns its draft and consumes actual terminal bytes.
 Its small line editor is test/demo code, not another server or Session runtime.
 

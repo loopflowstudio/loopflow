@@ -16,10 +16,19 @@ struct OwnerStream {
     private(set) var geometryControl = false
     private(set) var ended = false
     private var awaiting: UInt64?
+    private var awaitingHeartbeat: UInt64?
     var awaitingAttachment: Bool { awaiting != nil }
 
     mutating func expectAttachment(_ request: UInt64) {
         awaiting = request
+    }
+
+    mutating func heartbeatRequest(id: UInt64) throws -> Data {
+        guard awaitingHeartbeat == nil else {
+            throw RegistryQueryError("The Session did not answer; reconnect for a fresh screen")
+        }
+        awaitingHeartbeat = id
+        return try Self.frame(tag: 0x11, body: JSONEncoder().encode(HeartbeatRequest(id: id, kind: "controlled")))
     }
 
     mutating func receive(_ bytes: Data) throws -> [MobileTerminalEvent] {
@@ -69,6 +78,13 @@ struct OwnerStream {
 
     private mutating func reply(_ bytes: Data, events: inout [MobileTerminalEvent]) throws {
         let reply = try JSONDecoder().decode(OwnerReply.self, from: bytes)
+        if reply.answers == awaitingHeartbeat {
+            guard case .controlled = reply.value else {
+                throw RegistryQueryError("Unexpected Session heartbeat response")
+            }
+            awaitingHeartbeat = nil
+            return
+        }
         guard reply.answers == awaiting else { throw RegistryQueryError("Unexpected Session reply") }
         awaiting = nil
         switch reply.value {
@@ -142,6 +158,11 @@ struct OwnerStream {
         result.append(body)
         return result
     }
+}
+
+private struct HeartbeatRequest: Encodable {
+    let id: UInt64
+    let kind: String
 }
 
 private struct OwnerAttachment: Decodable {

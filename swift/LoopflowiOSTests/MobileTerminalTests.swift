@@ -124,7 +124,10 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.attachments.last, other)
         workspace.suspend()
         await workspace.restoreForegroundSession()
-        await settle()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while workspace.state == .loading, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
         XCTAssertEqual(client.attachments.last, other)
         XCTAssertEqual(workspace.state, .viewing)
         client.ownerNotRunning = true
@@ -575,7 +578,7 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(ServerMessage.self,
             from: Data(#"{"type":"response","id":"x","result":{"kind":"read"}}"#.utf8)))
 
-        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .roadmap(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try machineFixture("subscribe"))
 

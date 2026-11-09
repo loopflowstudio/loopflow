@@ -8,6 +8,26 @@ import XCTest
 
 @MainActor
 final class MachinePairingTests: XCTestCase {
+    func testSetupKeepsTheServersRecoveryInstructions() {
+        let message = "Update Loopflow on the Machine: this app needs a newer server protocol."
+        let error = ServerError(code: "incompatible", message: message, data: .null)
+        XCTAssertEqual(machineConnectionMessage(error), message)
+        XCTAssertEqual(machineConnectionMessage(RegistryQueryError("This address belongs to another Machine")),
+                       "This address belongs to another Machine")
+    }
+
+    func testSetupDistinguishesOfflineDiscoveryReachabilityAndCertificateFailures() {
+        let offline = machineConnectionMessage(URLError(.notConnectedToInternet))
+        let discovery = machineConnectionMessage(URLError(.cannotFindHost))
+        let unreachable = machineConnectionMessage(URLError(.cannotConnectToHost))
+        let certificate = machineConnectionMessage(URLError(.serverCertificateUntrusted))
+        XCTAssertTrue(offline.contains("Wi-Fi or cellular"))
+        XCTAssertTrue(discovery.contains("check the address"))
+        XCTAssertTrue(unreachable.contains("awake"))
+        XCTAssertTrue(certificate.contains("HTTPS certificate"))
+        XCTAssertEqual(Set([offline, discovery, unreachable, certificate]).count, 4)
+    }
+
     func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
         let bundle = Bundle(for: Self.self)
         let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))

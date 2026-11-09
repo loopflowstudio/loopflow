@@ -84,7 +84,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
         try verifySubmission(submission)
-        let plan = try await decode(WorkViewPlan.self, read(.viewPlan(directory: submission.directory, expression: "task:\(taskID)")))
+        let plan = try await decode(WorkViewPlan.self, read(.desktopViewGet(directory: submission.directory, expression: "task:\(taskID)")))
         guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
@@ -153,6 +153,7 @@ final class RemoteAttachment: MobileAttachment {
     private var pendingEvents: ArraySlice<MobileTerminalEvent> = []
     private var failure: String?
     private var writer: Task<Void, Never>?
+    private var heartbeat: Task<Void, Never>?
     private let writes: AsyncStream<Data>
     private let outgoing: AsyncStream<Data>.Continuation
     private var pendingBytes = 0
@@ -178,6 +179,7 @@ final class RemoteAttachment: MobileAttachment {
         }
         connection.keepAlive()
         link.startWriter()
+        link.startHeartbeat()
         return link
     }
 
@@ -206,6 +208,7 @@ final class RemoteAttachment: MobileAttachment {
         closed = true
         connection.close()
         writer?.cancel()
+        heartbeat?.cancel()
         controlDeadline?.cancel()
         pendingEvents = []
         outgoing.finish()
@@ -245,6 +248,22 @@ final class RemoteAttachment: MobileAttachment {
                     pendingBytes -= bytes.count
                 }
             } catch { fail("Input delivery is uncertain. Reconnect and inspect the prompt before resubmitting.") }
+        }
+    }
+
+    private func startHeartbeat() {
+        heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard let self, !closed else { return }
+                do {
+                    nextRequest += 1
+                    try enqueue(decoder.heartbeatRequest(id: nextRequest))
+                } catch {
+                    fail("Session connection closed. Reconnect for a fresh screen; input was not retried.")
+                    return
+                }
+            }
         }
     }
 

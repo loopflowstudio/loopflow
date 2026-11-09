@@ -4,6 +4,30 @@ import XCTest
 @testable import LoopflowiOS
 
 final class OwnerStreamTests: XCTestCase {
+    func testHeartbeatUsesOwnerProtocolWithoutTakingControlOrConsumingAttachmentReply() throws {
+        var stream = try observed()
+        let request = try stream.heartbeatRequest(id: 2)
+        XCTAssertEqual(request.first, 0x11)
+        XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: Data(request.dropFirst(5))),
+                       .object(["id": .integer(2), "kind": .string("controlled")]))
+        stream.expectAttachment(3)
+        let reply = Data(#"{"answers":2,"seq":2,"kind":"controlled","held":true}"#.utf8)
+        XCTAssertTrue(try stream.receive(OwnerStream.frame(tag: 1, body: reply)).isEmpty)
+        XCTAssertTrue(stream.awaitingAttachment)
+        XCTAssertTrue(stream.ready)
+        XCTAssertFalse(stream.inputControl, "Controlled reports whether anyone holds control, not this viewer")
+        XCTAssertFalse(stream.geometryControl)
+        XCTAssertNoThrow(try stream.heartbeatRequest(id: 4))
+    }
+
+    func testUnansweredHeartbeatRequiresReconnect() throws {
+        var stream = try observed()
+        _ = try stream.heartbeatRequest(id: 2)
+        XCTAssertThrowsError(try stream.heartbeatRequest(id: 3))
+        let unexpected = Data(#"{"answers":2,"seq":2,"kind":"accepted"}"#.utf8)
+        XCTAssertThrowsError(try stream.receive(OwnerStream.frame(tag: 1, body: unexpected)))
+    }
+
     func testRustOwnerSnapshotRendersOnceAfterGeometryAcrossEveryReadBoundary() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "observer", withExtension: "bin", subdirectory: "owner"))
         let wire = try Data(contentsOf: url)

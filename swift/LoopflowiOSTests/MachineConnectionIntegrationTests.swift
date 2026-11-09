@@ -449,6 +449,11 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         }
         XCTAssertEqual(workspace.programStatus?.summary?.kind, .question)
         XCTAssertEqual(workspace.state, .viewing)
+        // The real owner drops viewers after 30 seconds without its heartbeat.
+        // WebSocket pings alone cannot keep this idle observer attached.
+        try await Task.sleep(for: .seconds(35))
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertTrue(screen().contains("desktop draft"))
         workspace.send(Data("must not queue".utf8))
         workspace.requestControl()
         try await wait("Phone did not receive keyboard control") { workspace.state == .controlling }

@@ -262,7 +262,8 @@ menus use the same actions for the clicked Task. Command-T adds a shell tab. The
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
 process; a conversation open elsewhere still offers **Take back**. The control
-stays visible when the Session is the only pane.
+stays visible when the Session is the only pane. The same action is available
+through `lf desktop do refresh-session -p session`.
 **Reset session** starts a fresh provider thread in the same Session, seeded with
 its saved conversation. Reset and provider switching first read that history,
 then replace the current provider process. If the

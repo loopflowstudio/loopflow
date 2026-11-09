@@ -113,7 +113,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
             }
-            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
+            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
         case .taskGet(_, let issue):
             return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base, let head):

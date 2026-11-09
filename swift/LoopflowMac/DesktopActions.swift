@@ -567,6 +567,14 @@ struct DesktopAction {
             try page(context).reload()
             return nil
         },
+        DesktopAction("refresh-session", "Refresh Session", scope: .pane) { context in
+            let (_, pane) = try context.addressed
+            guard let id = pane.sessionId else {
+                throw DesktopTargetError("Address a Session pane to refresh its conversation; nothing changed.")
+            }
+            Task { @MainActor in await context.workspaces.refreshSession(id) }
+            return DesktopActionOutcome(pane: pane.id, tab: nil)
+        },
         DesktopAction("switch", "Switch Conversation", scope: .pane,
             arguments: [.init(name: "session", kind: .string, required: true)]) { context in
             let (workspace, _) = try context.addressed

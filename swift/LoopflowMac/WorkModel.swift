@@ -426,13 +426,15 @@ final class WorkModel {
         let workspace = opensConversation && isLocalRepository
             ? workspaceRegistry?.workspace(for: key, title: task.task.name, location: nil) : nil
         let request = UUID()
-        workspace?.conversationRequest = request
         workspace?.conversationIntent = intent
         workspace?.conversationError = nil
         if opensConversation, isLocalRepository {
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
             navigation.content = .terminals
         }
+        // Saved planning temporarily detaches the workspace during navigation.
+        // The explicit opening owns its request after that presentation change.
+        workspace?.conversationRequest = request
         defer { if workspace?.conversationRequest == request { workspace?.conversationRequest = nil } }
         do {
             try await prepareLinkedTask(wave: wave, task: task, link: link, generation: generation, workspace: workspace, request: request, intent: intent)
@@ -531,15 +533,15 @@ final class WorkModel {
         } else if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
             records = retainedRecords
         } else {
-            // An explicit Session link not held by this window still needs
-            // lookup evidence; publish its inventory only after the last page.
+            // Find the addressed conversation without waiting for unrelated history.
+            // This lookup contributes only that record to the current inventory.
             var after: String?
             repeat {
                 let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: task.task.repo)
                 guard !Task.isCancelled, destinationGeneration == generation else { return }
                 records += page.entries
                 after = page.next
-            } while after != nil
+            } while after != nil && !records.contains(where: { $0.id == sessionID })
         }
         guard let record = records.first(where: { $0.id == sessionID }), record.names(task: executionTask) else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
@@ -565,12 +567,12 @@ final class WorkModel {
         if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
-        if location != nil || preparation != nil {
+        if location != nil || preparation != nil || link.session != nil {
             // One explicitly opened Session updates its own reading. Merge the
             // latest inventory: it may have refreshed during preparation.
             records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
         }
-        if preparation != nil, let reason = sessions.errorMessage {
+        if let reason = sessions.errorMessage {
             // One successful acquisition does not repair an unrelated inventory failure.
             sessions = .unavailable(lastGood: records, reason: reason)
         } else {

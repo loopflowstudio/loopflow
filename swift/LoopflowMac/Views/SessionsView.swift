@@ -482,6 +482,10 @@ final class SessionsWorkspaceRegistry {
         if let sessions { openWarmConversations(store: sessions) }
     }
 
+    func refreshSession(_ id: String) async {
+        await sessions?.refresh(id)
+    }
+
     func evict(_ key: WorkWorkspaceKey) {
         recentTasks.removeAll { $0 == key }
         releasedTasks.insert(key)

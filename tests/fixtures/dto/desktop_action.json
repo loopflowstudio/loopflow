@@ -381,6 +381,13 @@
       ]
     },
     {
+      "name": "refresh-session",
+      "title": "Refresh Session",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
       "name": "switch",
       "title": "Switch Conversation",
       "scope": "pane",

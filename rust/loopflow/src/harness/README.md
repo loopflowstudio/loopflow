@@ -4,27 +4,34 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
-`AgentExecution` is the invocation's shared lifecycle handle. Native launch and
-headless respawn use the same attachment and settlement state; dispatch and
-history retain their own immutable attachment snapshots. Final settlement belongs
-to the shared state itself, including after a recording panic. Provider identity in
-memory advances before best-effort history writes, so a recording failure cannot
-change which account or thread a retry continues. A later observation retries an
-unrecorded identity; successful repeated observations add no duplicate facts.
+A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
+Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)
+holds the current attachment, provider, account, thread and outcome, with no
+separate execution ID. Native launch and headless respawn use that private state;
+harness input, shutdown and pending operations retain the exact store and
+attachment selected at launch. Claude respawn gets a new attachment through the
+runtime without changing those earlier snapshots.
 
-The shared state lives in `session_record/runtime.rs`: it owns the current
-provider, account, thread and attachment. Its `SessionRecorder` keeps manifests,
-receipts and history in `session_record.rs`, with no attachment or process-control
-operations. Both remain under the same lock so launch, retry and settlement stay
-serialized. The execution retains the store that admitted its attachment; launch,
-retry and exit use that owner directly instead of reopening through the recording
-directory. Completion runs attachment cleanup before recording its receipt.
-A failed receipt write remains a caller error; retrying can record the same
-outcome but cannot reopen the execution or change its result.
+The runtime holds a `SessionRecorder` under the same lock. The recorder publishes
+input in [`session_record/capture.rs`](../session_record/capture.rs) and writes
+history and receipts in [`session_record.rs`](../session_record.rs); it cannot
+launch or stop a provider. Provider identity in memory advances before best-effort
+history writes, so a recording failure cannot change which account or thread a
+retry continues. Later observations retry unrecorded identity without duplicating
+successful writes.
 
-Harness input and shutdown retain the store and attachment selected at launch.
-Claude gets a new attachment through `AgentExecution` when it respawns; readers
-and pending operations keep their previous snapshots.
+The runtime retains the store that admitted its attachment for launch, retry and
+cleanup. Completion settles the attachment before writing the receipt; final
+destruction also settles unfinished runtime state, including after a recording
+panic. A failed receipt write remains a headless caller error. Retrying that
+write can record the same outcome but cannot reopen the runtime or change its
+result.
+
+Native exit handles attachment cleanup separately and adopts a plain
+`SessionRecorder` from `CaptureHandoff` to finish recording. It does not reconstruct
+live runtime state. Recording failures there are logged; the provider's exit
+result stands. See [execution](../../../../docs/dev/execution.md#runtime-and-recording)
+for the ownership model.
 
 ## lf never breaks the conversation
 

@@ -35,10 +35,12 @@ reported OPEN, no merge or auto-merge, at the published head above.
 `server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
 above are from the earlier inspection, not a landed implementation.
 
-Graph decision: stop for LOO-718's authenticated transport, then reconcile
-against its merged revision. Implementation and publication cannot advance on
-the local-only predecessor. Landing the separate mobile PR is outside this
-Task's scope; no product decision is missing.
+At 15:47 UTC, GitHub still reported the same open PR head without auto-merge;
+fetching main returned the same commit with neither transport file present.
+The authenticated endpoint needed for implementation and remote acceptance
+remains unavailable on main. Integration depends on LOO-718's merged revision;
+landing that separate PR is outside this Task's scope. No product decision is
+missing.
 
 ## Delete — do not maintain
 

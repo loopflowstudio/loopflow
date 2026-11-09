@@ -32,30 +32,32 @@ LOO-813/#1863 is complete opening/reconnect work. Account switching alone cannot
 establish continuation. Keep native history, selected model, drafts and approvals;
 rejected-before-work, uncertain delivery and completed effects need distinct handling.
 
-Codex's `resume --account` ends its native client. A disposable Codex 0.167.0
-probe retained the client/editor across private app-server replacement, then
-submitted the edited draft and completed a synthetic turn. It proves no
-managed-login handoff, approval survival or input/shutdown race. Automatic recovery
-and Desktop progress remain unimplemented. Native input bypasses the observer:
-an idle snapshot cannot authorize shutdown. Provider replacement must transfer
-exit ownership as well as the attachment. Claude's native inbox has no consumption
-acknowledgement; a successful write stays uncertain and must not be replayed.
+Codex 0.167.0's disposable replacement probe kept an editable draft and completed
+a synthetic turn. The later SIGHUP drain probe disproved safe replacement:
+concurrent typed input got `serverShuttingDown` on `turn/steer`, exited the client
+1 and never reached the model. Separately, a pending approval stayed answerable;
+its client survived replacement and completed subsequent input. Both probes used
+a credential-free local endpoint and reaped every child. They establish no
+managed-account handoff or multiple-Session recovery.
 
-November 8 native checks exposed service-only lookup selecting USER twice;
-writer tests also missed same-login activation's early return. Scoped synthetic
-checks now cover both items following switches, seeded stale-item repair and an
-marker permission failure/retry. Native Keychain rejection, installed
-repair and unsuffixed-service acceptance remain unobserved. USER plus one distinct
-eligible item is the scope; lexical choice is an assumption, third items untouched.
+Automatic continuation and Desktop recovery remain unimplemented. An idle observer
+read cannot prevent racing input; drain admission alone cannot retain the client.
+`resume --account` also ends it. Replacement needs native input retention and
+transferred exit ownership; managed-account reload without replacement is unproved.
+Claude's inbox write has no consumption acknowledgement; retain uncertainty, never
+replay it. Retry needs native-turn correlation.
+
+November 8 checks exposed lookup selecting USER twice and same-login activation
+skipping repair. Scoped checks cover both items following switches, seeded repair
+and marker failure/retry. Native Keychain rejection, installed repair and
+unsuffixed-service acceptance remain unobserved. Scope: USER plus one eligible
+item, lexical choice assumed, third items untouched.
 
 Also unobserved: running-client account changes, Codex refresh overwriting another
 login, Claude's no-model spent line clearing its cooldown when all windows read
-below 100%, and refresh invalidating rentals' earlier access tokens. Keep these
-limits separate from fixture results. Release's entry-point lesson applies here:
-exercise continued input through the native Session, not only its account writer.
-Task plans and receipts: `scratch/interactive-limit-recovery.md` and
-`scratch/live-recovery.md` in `14ce07e30`; earlier detail and prompt-cache/LOO-435
-questions: `d4941f045600750beffbbfc73934bd4bbf9abfbb` under this heading.
+below 100%, and refresh invalidating rentals' earlier access tokens. Release's
+entry-point lesson applies: exercise continued native input, not only the account writer.
+Plans/probe/receipts: `f5b353964:scratch/`; earlier: `d4941f0456`, this heading.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

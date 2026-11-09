@@ -7,8 +7,13 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
 scope, replacement design, native Codex findings and preservation cases. Automatic
 continuation and Desktop recovery remain unimplemented. November 9's drain probe
-invalidates generation replacement with Codex 0.167.0 when input races shutdown;
-publication waits for a path that retains the native client and input.
+invalidates generation replacement with Codex 0.167.0 when input races shutdown.
+Pass 3 also observed managed `account/read` refresh retaining the old account
+after a cross-account file switch, despite successfully reloading same-account
+rotation. Claude 2.1.321 inbox UUID → transcript prompt ID → successful Stop
+correlation and draft/subsequent-input retention passed with local responses.
+Those probes and their limits are in the design. Codex's mechanism remains
+unresolved; dependent integration and publication cannot proceed as designed.
 
 The intended experience is in `docs/sessions.md`, linked from subscriptions and
 Desktop docs. November 9's `lf open --host desktop --file docs/sessions.md --file
@@ -111,9 +116,8 @@ test-only `sh` and `sleep` subprocesses. The scanner now excludes visible
 No runtime code changed during publication review. The Rust launch comment and
 concept review now describe same-login reconciliation and the later native QA.
 Existing native receipts remain applicable; installed and real-login acceptance
-remain open. The Wave memory's statement that all native runs predate retry is
-superseded by the scoped QA observations above; native Keychain rejection remains
-unobserved.
+remain open. Scoped QA includes same-command retry after a real marker failure;
+native Keychain rejection remains unobserved.
 
 ## Native observations — November 8
 

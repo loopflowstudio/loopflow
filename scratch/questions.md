@@ -19,10 +19,14 @@ checks; seeded partial state does not establish a rejected native write or live
 login acceptance. Keep the installed pair and production conversations untouched.
 
 2026-11-09 open technical questions are in interactive-limit-recovery.md:
-Codex drain rejection must retain the client and input, or managed-auth reload
-must avoid replacement; Claude retry needs native-turn correlation. The earlier
-replacement assumption was disproved by the racing-input probe. No narrower
-outcome, credential-ownership change or installed-provider modification is assumed.
+Codex drain rejection must retain the client and input, or a different demonstrated
+managed-auth mechanism must avoid replacement. Pass 3's native account reads
+retained the old login after a cross-account file change; same-account rotation
+reloaded successfully. Both tested Codex paths fail the design. Claude inbox UUID
+joins through transcript `promptId` to Stop `prompt_id`; the two IDs are distinct.
+No narrower outcome, credential-ownership change or installed-provider
+modification is assumed. The dependent implementation needs a revised Codex
+mechanism; repeated probes of drain or `account/read` cannot settle that choice.
 
 Security follow-up: the preceding assessment reported Session capture keys exposed
 in process-list output. They need rotation; their values were not repeated or

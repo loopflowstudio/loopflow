@@ -3,10 +3,6 @@
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
 
-Shipping docs: `docs/server.md` links to the exchange in
-`rust/loopflow/src/server/README.md`, including identity mismatch, consumption
-and retry behavior. Read both before implementation.
-
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the contract marked planned until implemented.
 
@@ -29,23 +25,18 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-The 22:04 UTC `lf task status LOO-718 --json` placed `feature` at `demo`, with
-PR #1812 open and settlement not armed. Subsequent status reads did not respond
-and were terminated; this is the last successful Graph reading.
-
-At 23:19 UTC, `gh pr view 1812` returned `OPEN`, `mergedAt: null` and
-`autoMergeRequest: null` at that same head. Compared with the previously inspected
-`baf3989a02a5fa6be666ae94d11448c664be2380`, `mobile.rs` and `ticket.rs`
-are unchanged; `service.rs` incorporates watch resumption. Retain that work
-when integrating. `git fetch origin main` resolved to
-`28b0af568d120b56113c0dfb0eff9439d0c014d5`, with neither `mobile.rs` nor
-`ticket.rs` in its tree.
+At 23:20 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
+returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at that same head.
+The last successful Task status read (22:04 UTC) placed LOO-718's `feature`
+Graph at `demo`; later reads did not respond. The 23:19 UTC fetch of main
+(`28b0af568d120b56113c0dfb0eff9439d0c014d5`) contained neither `mobile.rs` nor
+`ticket.rs`. The inspected transport includes watch resumption; retain it.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
 
-Earlier dependency observations are in
-`839c3609e663efe781e67e3f6ed7fab598ab038b:scratch/design.md`.
+Earlier dependency observations and revision comparisons are in
+`475a0a485477161a02f05d4ed35d9dd798b5f012:scratch/design.md`.
 
 ## Delete — do not maintain
 

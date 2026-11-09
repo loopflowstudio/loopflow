@@ -3,16 +3,10 @@
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
 linked from `docs/server.md`. This checkout contains the planned contract only.
 
-Shipping docs: `docs/server.md` and `rust/loopflow/src/server/README.md`.
-Read both before implementation; the latter owns the exchange and ticket rules.
-
 The listener, mobile settings and bulk protocol are outside this Task.
-Keep the shared attach rules in one place; the remote section adds only its
-exchange example, authentication and expiry requirements.
-The remote contract references the shared rules once to avoid maintaining
-duplicate descriptions of owner selection and ticket rejection.
-Keep local UID binding in the shared protocol text and planned remote identity
-binding in the remote contract, so planned support cannot read as implemented.
+The server README owns the shared attach rules; its remote section adds the
+exchange, identity binding and sleep-aware expiry. Keep that section marked
+planned until implemented, so local UID binding cannot imply remote support.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -45,10 +39,8 @@ open and settlement not armed.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
-Implementation and publication remain incomplete. The existing checkout and
-documentation edits remain available for continuation when the transport lands.
-The next authored Graph decision must stop for this external dependency;
-another implementation pass cannot advance against the unchanged transport.
+The next authored Graph decision must stop for this external dependency; retain
+the checkout for implementation and publication when the transport lands.
 
 Earlier dependency observations are in
 `7fb30bb8c6810107352558868c33bbf177f83a5c:scratch/design.md`.
@@ -83,6 +75,9 @@ and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
+
+Compression removes repeated plan guidance; the contract and deletion targets
+are unchanged.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

@@ -380,6 +380,8 @@ impl Read {
                 if let Some(limit) = limit {
                     argv.extend(words(&["--page", "--limit", &limit.to_string()]));
                     argv.extend(optional("--after", after.as_ref()));
+                } else {
+                    argv.extend(words(&["--limit", "0"]));
                 }
                 argv.extend(optional("--task", task.as_ref()));
                 argv
@@ -968,7 +970,9 @@ mod tests {
                 "list",
                 "--interactive",
                 "all",
-                "--json"
+                "--json",
+                "--limit",
+                "0"
             ]
         );
         assert_eq!(
@@ -989,6 +993,30 @@ mod tests {
                 "--json"
             ]
         );
+    }
+
+    #[test]
+    fn session_subscription_keeps_conversations_beyond_the_first_hundred() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        for index in 0..101 {
+            store.test_session(
+                &format!("session-{index:03}"),
+                &crate::session_record::new_artifact_key(),
+            );
+        }
+        let read = Read::SessionList {
+            directory: home.path().into(),
+            headless: false,
+            after: None,
+            limit: None,
+        };
+        let filter = read.session_filter(home.path()).unwrap();
+        let sessions = store.session_summaries(&filter, 0).unwrap();
+        assert_eq!(sessions.len(), 101);
+        assert!(sessions.iter().any(|session| session.id == "session-100"));
     }
 
     #[test]

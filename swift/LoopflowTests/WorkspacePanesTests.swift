@@ -36,6 +36,16 @@ struct WorkspacePanesTests {
         return (workspace, view)
     }
 
+    @Test("A single visible Session keeps Refresh available")
+    func singleSessionOffersRefresh() throws {
+        let (workspace, view) = taskPanes()
+        let record = try session("main")
+        view.sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        #expect(workspace.multiplexer.visibleLayout?.allPanes.count == 1)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session").button()
+    }
+
     @Test("Toggling both tools away keeps conversation entry in the session pane")
     func collapsedToolsKeepEntry() throws {
         let (workspace, view) = taskPanes()

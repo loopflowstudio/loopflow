@@ -1,5 +1,9 @@
 # LOO-809
 
+The November 9 write-docs attempt at 18:15 UTC to open the same files returned:
+`Error: The pane content was replaced; inspect Desktop again.`
+The shipping docs remain at the paths below. No product question is open.
+
 `lf open --host desktop --file docs/server.md --file rust/loopflow/src/server/README.md`
 reported on November 9 at 17:37 UTC that both files opened in Loopflow Desktop.
 No visual inspection was performed; review remains for demo or QA. No product

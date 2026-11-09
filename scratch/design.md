@@ -12,6 +12,8 @@ first, without `hello`.
 The listener, mobile settings and bulk protocol are outside this Task.
 The remote contract reuses the local owner-selection, binary protocol and control description;
 only the exchange example and remote ticket rules need their own section.
+Keep consume-on-attempt and rejection rules in the shared attach description,
+with the remote contract referring to them.
 
 ## Transport dependency — November 9, 2026 UTC
 
@@ -32,7 +34,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 implementation check at 17:39 UTC found PR #1812 OPEN at the
+The November 9 implementation check at 18:16 UTC found PR #1812 OPEN at the
 published head above, without auto-merge (`gh pr view`). `git fetch origin main`
 returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
 transport file. `lf task status LOO-718 --json` still reports its interactive

@@ -317,7 +317,8 @@ part of what a phone or bot client is offered.
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
   [binary owner protocol](../transport/README.md) in `transport/wire.rs`. A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
-  60 seconds and works only for the Unix peer UID that requested it. An unknown,
+  60 seconds and works only for the Unix peer UID that requested it. Presenting
+  a ticket consumes it even when the identity does not match. An unknown,
   spent, expired or foreign ticket is `not_found` with a null `id` and closes
   the connection. Bridges last only as long as their Session owners and do not
   count against the 64 client slots.
@@ -396,7 +397,6 @@ Local and remote tickets are not interchangeable. Each ticket opens one bridge
 within 60 seconds of issuance, including host sleep; expiry does not close an
 open bridge.
 
-Presenting a ticket consumes it even when the identity does not match. Unknown,
-spent, expired and foreign tickets return `not_found` with a null `id` and close
-the bridge connection. Request a fresh ticket before reconnecting; never replay
-a ticket or terminal input.
+Redemption uses the same consume-on-attempt and rejection rules as local
+attachment above. Request a fresh ticket before reconnecting; never replay a
+ticket or terminal input.

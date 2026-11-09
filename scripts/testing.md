@@ -60,6 +60,9 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
+Dependency and bundled-resource changes also require the
+[third-party inventory refresh and Python check](README.md#third-party-inventory),
+even when no Python paths changed.
 On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
 native archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in

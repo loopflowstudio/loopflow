@@ -263,7 +263,9 @@ menus use the same actions for the clicked Task. Command-T adds a shell tab. The
 failed launch or stale connection. It keeps the provider's history and running
 process; a conversation open elsewhere still offers **Take back**. The control
 stays visible when the Session is the only pane. The same action is available
-through `lf desktop do refresh-session -p session`.
+through `lf desktop do refresh-session -p session`. **Take back** transfers input
+from another terminal; `lf desktop do take-back-session -p session` uses the same
+action.
 **Reset session** starts a fresh provider thread in the same Session, seeded with
 its saved conversation. Reset and provider switching first read that history,
 then replace the current provider process. If the

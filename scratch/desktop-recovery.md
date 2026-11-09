@@ -396,3 +396,33 @@ Installation preview found the shared store already at `server_request_stops`
 and all 21 executable references resolvable, with no migration to apply. A
 CLI-only preview refused because the installed app and CLI must update
 together. No CLI-only installation was attempted.
+
+### Production checks after promotion, 19:23–19:34 local
+
+Promoted the matching signed app and CLI to `/Applications/Loopflow.app` and
+`~/.local/bin/lf`; no schema migration. The service reports revision
+`64cffb3cc`. The installer retained the prior artifacts. Added the existing
+Take back operation to the Desktop action registry for the same addressed-pane
+control as Refresh; CUA still returned `cgWindowNotFound`.
+
+- LOO-696 remained in the current inventory after subscription updates. Its
+  current native client was at Codex sign-in, unlike the earlier draft
+  observation. Reopened its saved thread with the freshly verified engineering
+  login; it reached the composer and reported 21% weekly capacity. The old token
+  error is in saved output. No model turn was submitted. Production Take back
+  acquired its terminal; captured `x`, deleted it, and captured the empty
+  composer again. Refresh and navigation retained the conversation.
+- Production LOO-434 and LOO-718 acquired their native terminals. Each captured
+  `x`, then an empty composer after Backspace. LOO-434 survived Refresh. LOO-718
+  still displayed `Goal hit usage limits (/goal resume)`; no goal resumed.
+- A fresh passive inventory found no Codex sign-in screen among reachable
+  clients. MTG-245 already displayed a prompt and 21% weekly capacity; this
+  continuation did not change it. The original twenty missing-socket clients
+  still failed the passive connection check; no replacement was attempted.
+
+Checks: Swift SessionsStore/DesktopPaneControl suites: 62 passed after adding
+the Take back action and its DTO fixture; `git diff --check` passed. Earlier
+151-test Swift, Rust focused tests and clippy results apply to unchanged code.
+Current observations: `/tmp/loo813-current/`; production captures:
+`/tmp/loo813-696-after-refresh.txt`. Automatic interactive account/provider
+fallback remains unimplemented; this is not an all-Sessions recovery claim.

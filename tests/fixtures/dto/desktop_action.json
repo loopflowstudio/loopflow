@@ -388,6 +388,13 @@
       "keys": []
     },
     {
+      "name": "take-back-session",
+      "title": "Take Back Session",
+      "scope": "pane",
+      "arguments": [],
+      "keys": []
+    },
+    {
       "name": "switch",
       "title": "Switch Conversation",
       "scope": "pane",

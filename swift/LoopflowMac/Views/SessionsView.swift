@@ -486,6 +486,10 @@ final class SessionsWorkspaceRegistry {
         await sessions?.refresh(id)
     }
 
+    func takeBackSession(_ id: String) async {
+        await sessions?.moveHere(id)
+    }
+
     func evict(_ key: WorkWorkspaceKey) {
         recentTasks.removeAll { $0 == key }
         releasedTasks.insert(key)

@@ -337,3 +337,9 @@ For exhaustive lookup, open the [checked architecture reference](reference.md).
 Its bounded checker compares CLI families, process boundaries, SQLite tables,
 HTTP routes, providers, subprocess edges, projections, and historical vocabulary.
 A successful check covers that inventory, not configured runtime behavior.
+
+## Research
+
+[Session experience comparison](research/session-experience.html) reviews T3 Code,
+Paradev and Paseo commit history and tests, with Loopflow findings and Task handoffs.
+It records source observations from November 2026, not a live product benchmark.

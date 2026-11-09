@@ -26,7 +26,7 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 rechecks at 00:47, 01:21, 01:24 and 01:58 UTC agreed:
+The November 9 rechecks from 00:47 through 02:36 UTC agreed:
 `lf task status LOO-718 --json` showed the interactive
 `feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 reported OPEN, no merge or auto-merge, at the published head above.
@@ -37,6 +37,10 @@ above are from the earlier inspection, not a landed implementation.
 
 Implementation and remote acceptance await LOO-718's authenticated transport.
 Landing the separate mobile PR is outside this Task's scope.
+
+Graph decision: stop for the external transport dependency; implementation and
+publication cannot advance on the local-only predecessor. Continue when LOO-718
+lands, reconciling against its merged revision. No product decision is missing.
 
 ## Delete — do not maintain
 
@@ -72,7 +76,7 @@ store, including the unchanged ticket response and bridge wire fixtures.
 Visual review remains for demo or QA; Desktop opening results are in
 `questions.md`.
 
-Compress consolidated repeated dependency findings and dropped the recoverable
-local implementation summary; the deletion targets still await the transport.
+Compress keeps the latest Desktop opening result here and references earlier
+attempts in git. No code reduction applies before the transport lands.
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

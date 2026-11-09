@@ -26,6 +26,32 @@ struct WorkDestinationTests {
         return model.sessions.value?.first { $0.id == id }
     }
 
+    @Test("A taskless exact link selects its conversation without enumerating history", arguments: [false, true])
+    func tasklessSessionLink(waveScoped: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let record = try renameFixtureRecord("exact-taskless", title: "Retained research",
+                                            work: waveScoped ? .wave(id: wave.wave.id) : nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--reveal-existing") { return encoded }
+            throw RegistryQueryError("Only the exact conversation may be prepared")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let address = "loopflow://loopflow?session=exact-taskless"
+        let resolved = WorkLink(label: record.title ?? "Conversation", url: address, markdown: "", fallbackArgv: [],
+                                target: .init(kind: waveScoped ? .wave : .repository, repositoryPath: wave.wave.repo,
+                                              repositoryId: "repo", task: nil, taskId: nil,
+                                              wave: waveScoped ? wave.wave.id : nil, session: record.id, diff: false,
+                                              executionMachine: nil),
+                                conversation: .otherConversation, conversationReason: nil,
+                                route: .init(hosts: [.desktop], reason: "Selected Desktop"))
+        await model.receiveWorkLink(try #require(LinkedWork(resolved)))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.selection == (waveScoped ? .wave(id: wave.wave.id) : nil))
+    }
+
     @Test(arguments: [false, true])
     func taskEntryOpensConversationThenRetainsWorkspace(standalone: Bool) async throws {
         var data = try fixture()
@@ -301,7 +327,7 @@ struct WorkDestinationTests {
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 // The first opening fails; the person's Retry succeeds.
                 if await launches.next() > 1 { return encoded }
@@ -342,7 +368,7 @@ struct WorkDestinationTests {
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 if await launches.next() > 1 { return encoded }
                 throw RegistryQueryError("Conversation launcher unavailable")
@@ -383,7 +409,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["task", "location"]) { return try tileLocation(args, task: task, location: location) }
+            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"], args.contains("--explain") { return taskConversationStartOfferFixture() }
             if args.prefix(2) == ["session", "resume"], args.contains("--start-if-free") { return encoded }
             if args.prefix(2) == ["session", "resume"] { throw RegistryQueryError("No existing conversation; start one explicitly") }
@@ -957,7 +983,7 @@ struct WorkDestinationTests {
         #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
     }
 
-    @Test func taskLinkRetainsLaterPagesAndReusesTheConversation() async throws {
+    @Test func taskLinkReusesConversationAfterInventoryLoadsLaterPages() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -980,7 +1006,8 @@ struct WorkDestinationTests {
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.taskLinkReading.errorMessage == nil)
-        // Reopening from retained evidence must preserve the conversation too.
+        // Inventory still reads every page; opening needs only its addressed record.
+        await model.refreshSessions()
         await model.openTaskLink(url)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
@@ -1241,6 +1268,62 @@ struct WorkDestinationTests {
             #expect(model.taskLinkReading.errorMessage?.contains(session) == true)
             #expect(model.showsTaskLink)
         }
+    }
+
+    @Test func exactSessionOpeningDoesNotWaitForUnrelatedHistory() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("linked", title: "Requested conversation",
+            work: .task(id: #require(task.runtime?.workId)))
+        let retained = try renameFixtureRecord("retained", title: "Draft elsewhere", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let other = String(decoding: try JSONEncoder().encode(retained), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) {
+                if args.contains("--after") { throw RegistryQueryError("Unrelated history unavailable") }
+                if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
+                return #"{"entries":[\#(encoded)],"next":"unrelated-history"}"#
+            }
+            throw RegistryQueryError("No mutation permitted")
+        }, repoPath: task.task.repo)
+        await model.refreshSessions()
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.sessions.value?.contains { $0.id == retained.id } == true)
+        #expect(!model.showsTaskLink)
+    }
+
+    @Test func exactSessionOpensWhilePlanningIsStillSaved() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        var record = try renameFixtureRecord("linked", title: "Requested conversation",
+            work: .task(id: #require(task.runtime?.workId)))
+        let identity = try #require(task.reference.workspace?.identity)
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(data)
+        cache.flush()
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.starts(with: ["session", "resume"]) { return encoded }
+            throw RegistryQueryError("No mutation permitted")
+        }
+        let model = WorkModel(query: query, repoPath: task.task.repo, cache: cache)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+        #expect(model.showsSavedWork)
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+        #expect(model.taskOpening?.reason == nil)
     }
 
     @Test func historicalTaskSurvivesCurrentPlanRefresh() async throws {

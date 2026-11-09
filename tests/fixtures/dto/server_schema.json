@@ -17831,6 +17831,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 2,
-  "x-revision": 2
+  "x-min-revision": 3,
+  "x-revision": 3
 }

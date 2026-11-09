@@ -203,9 +203,8 @@ reattaches by Session without starting a provider or replaying input. A lost
 Create & start reply recovers the same creation request. `session.resume`
 prepares a command; it cannot replace `session.start` merely because both return
 a Session record. Both branch protocols advertised revision 2 despite different
-operation sets and limits; matching that integer alone does not establish an
-older installation's support for Mobile. Settle the shared revision before
-distribution, rather than adding a second capability allowlist.
+operation sets and limits. The November 9 compatibility pass below moves this
+branch's shared clients and server to revision 3, without a capability allowlist.
 
 Counterexample to exercise: a visible Task whose provider runs on another
 Machine. Mobile attaches through its connected server; a missing local owner
@@ -238,7 +237,7 @@ The Simulator proofs over real HTTPS/WSS with a second-node identity fixture and
 stand-in, Claude and Codex providers passed through November 4 (see the history).
 Still open, in priority order:
 
-1. Rerun the host-Tailscale native acceptance on revision 2 (terminal by ticket,
+1. Rerun the host-Tailscale native acceptance on revision 3 (terminal by ticket,
    32 MiB paced output, service interruption, creation recovery). Earlier
    sustained-output runs twice missed deadlines with misleading socket attribution
    and passed on rerun; the cause is unresolved and no batching change remains.
@@ -290,9 +289,8 @@ desktop-shell-task-brief, mobile-task-brief) and `4070315ab3:scratch/reports/`,
 The current branch reaches the new iOS target, shared DTOs, Desktop's server
 adapter, recoverable creation and remote transport. The changed-aware runner
 now selects native iOS tests for client/shared-protocol changes; CI runs them
-in the macOS app job. Remaining gate work includes protocol revision
-compatibility before distribution and the live acceptance already listed
-above. This is not a completed release gate.
+in the macOS app job. The live acceptance already listed above remains open.
+This is not a completed release gate.
 
 - iOS `LoopflowiOSTests` excluding the three suites already run on this tree: 30 executed, 28 passed, 2 skipped (host-Tailscale setup and physical-device file protection). `LoopflowiOSUITests`: 8 passed, including native editing, foreground recovery, Session switching, landscape and onboarding. Command: `xcodebuild test -project swift/LoopflowMobile.xcodeproj -scheme LoopflowiOS -destination 'platform=iOS Simulator,id=04874CED-476E-4BB0-9B20-55C01F8F17B2' -derivedDataPath swift/.build/ios -skipPackagePluginValidation -parallel-testing-enabled NO -skip-testing:LoopflowiOSTests/MachinePairingTests -skip-testing:LoopflowiOSTests/OwnerStreamTests -skip-testing:LoopflowiOSTests/MobileTerminalTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`.
 - `swift test --package-path swift --filter ServerClientTests`: 9 passed. Coalescing ticket admission and payload reproduced invalid JSON before the reader fix; the same test passes afterward. The control response limit is also checked when the newline arrives in the final read.
@@ -309,3 +307,17 @@ test Simulator is separate from the open demo and contains no personal input.
 - Rust inventory, formatting and fixture CLI build passed. Filtered nextest ran 207 tests: 206 passed; `dto_fixtures::task_create_outcome_preserves_recovery_states` failed because its nested Task still used `repository_id` and removed fields. The corrected fixture passes its Rust round-trip and new Swift recovery-outcome test. No production Rust change was needed. Filter: `test(server::) | test(transport::wire::) | test(lf::commands::write::) | test(lf::commands::read::) | test(lf::commands::task_create::) | binary(served_reads) | test(dto_fixtures::) | binary(global_commands) | test(task_create_tests::) | binary(lf) | (binary(transport_tests) & (test(server_) | test(start_only_) | test(simultaneous_session_openers_) | test(an_attach_ticket_) | test(native_program_status_)))`. The run used the prepared `target/debug/lf`, `scripts/test_network.py` runner, four build/test workers and a resolved `TMPDIR`.
 - `uv run pytest python/tests/test_ios_runner.py python/tests/test_macos_inputs.py python/tests/test_gate_bounded.py -q`: 85 passed; runner tests passed again after keeping subprocess diagnostics on stderr. Ruff passed for the changed Python files.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/OwnerStreamTests`: 7 passed; the runner created and removed only Simulator `CCF55B51-1169-42CF-82CF-1D9927C4409E`. The current local gate plan selects `ios`. Workflow YAML parses; hosted CI has not run this new step yet.
+
+### Revision 3 compatibility
+
+The shared Rust server, Desktop and phone now speak revision 3 only. Revision 2
+cannot decode bulk/admission messages or promise the mobile operations. An older
+installation is rejected during negotiation with an instruction to update it;
+the phone retains that explanation. Install matching Desktop/CLI/server and
+phone builds together. The dated revision-2 notes above describe earlier work.
+
+- `cargo build -p loopflow --bin lf --jobs 4`: passed; generated `lf server describe --json` differs only in the two revision fields. `cargo fmt`, `git diff --check` and `cargo clippy --all-targets -- -D warnings`: passed.
+- Filtered nextest `test(server::) | (binary(transport_tests) & (test(server_mobile_) | test(an_attach_ticket_) | test(start_only_)))`: 40 passed, including revision refusal and the isolated HTTPS mobile path. Same fixture CLI/network isolation as the earlier backend run.
+- `swift test --package-path swift --filter 'ServerProtocolTests|ServerClientTests'`: 27 passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MachinePairingTests -only-testing:LoopflowiOSTests/MobileTerminalTests`: 50 passed, including the older-server explanation. The runner removed its own test Simulator.
+- Signed generic iOS device build: passed; copied app and signature verified at the revision-3 path in `mobile-demo.md`. No phone installation or live connection.

@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 2: one connection per client,
+//! Carrier-independent server protocol, revision 3: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,9 +11,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 2;
+pub const REVISION: u32 = 3;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 2;
+pub const MIN_REVISION: u32 = 3;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;

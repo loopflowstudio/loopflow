@@ -152,7 +152,7 @@ Missing or mismatched Sessions retain their explanation without a retry.
 
 The app uses the shared Loopflow fonts, Light/Dark themes and WorkViewPlan types.
 `MobileClient` is an injectable UI boundary, not a serialized protocol.
-`ServerProtocol.swift` and `tests/fixtures/dto/server/` are the shared revision-2
+`ServerProtocol.swift` and `tests/fixtures/dto/server/` are the shared revision-3
 contract; client-authored Task data passes through that codec and is not a
 recorded Machine reading. The live adapter keeps one control WebSocket to the
 Machine’s server while the app is in use (requests, the Task subscription,

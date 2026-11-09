@@ -6826,7 +6826,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let remote_watch = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| {
         reader
             .send(Message::Text(
-                json!({"type":"hello","revision":2,"min_revision":2,"client":{
+                json!({"type":"hello","revision":loopflow::server::wire::REVISION,"min_revision":loopflow::server::wire::MIN_REVISION,"client":{
                     "kind":"test","platform":"test","name":"proof","version":"0"}})
                 .to_string()
                 .into(),

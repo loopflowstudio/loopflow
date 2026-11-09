@@ -16,6 +16,17 @@ final class MachinePairingTests: XCTestCase {
                        "This address belongs to another Machine")
     }
 
+    func testOlderServerNamesTheInstallationToUpdate() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "error", withExtension: "json", subdirectory: "server"))
+        guard case .error(nil, let code, let message, let data) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: url)) else {
+            return XCTFail("Expected the older server's handshake refusal")
+        }
+        XCTAssertEqual(data["update"], .string("server"))
+        let error = ServerError(code: code, message: message, data: data)
+        XCTAssertEqual(error.code, .incompatible)
+        XCTAssertTrue(machineConnectionMessage(error).contains("update the selected installation"))
+    }
+
     func testSetupDistinguishesOfflineDiscoveryReachabilityAndCertificateFailures() {
         let offline = machineConnectionMessage(URLError(.notConnectedToInternet))
         let discovery = machineConnectionMessage(URLError(.cannotFindHost))

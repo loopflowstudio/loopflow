@@ -77,3 +77,10 @@ Next: get the mobile server and its migration into an installable build, then
 install it through the ordinary installation path. Pair the phone with the host's
 real address and verify real Task and Session access. No server replacement,
 main-database migration, live credentials or connection were simulated.
+
+Revision-3 device build, November 9: the same signed build command passed after
+the shared protocol update. Whole app copied to
+`/Users/jack/.lf-machine/demos/mobile-718-live-rev3-20261109/LoopflowiOS.app`;
+`codesign --verify --deep --strict` passed. Use this matching build for the next
+phone installation. It is not installed or launched. The real Machine's
+installation prerequisites and the pending phone choice remain unchanged.

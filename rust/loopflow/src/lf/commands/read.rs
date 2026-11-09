@@ -1012,6 +1012,7 @@ mod tests {
             headless: false,
             after: None,
             limit: None,
+            task: None,
         };
         let filter = read.session_filter(home.path()).unwrap();
         let sessions = store.session_summaries(&filter, 0).unwrap();

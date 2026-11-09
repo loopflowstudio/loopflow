@@ -321,3 +321,17 @@ phone builds together. The dated revision-2 notes above describe earlier work.
 - `swift test --package-path swift --filter 'ServerProtocolTests|ServerClientTests'`: 27 passed.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MachinePairingTests -only-testing:LoopflowiOSTests/MobileTerminalTests`: 50 passed, including the older-server explanation. The runner removed its own test Simulator.
 - Signed generic iOS device build: passed; copied app and signature verified at the revision-3 path in `mobile-demo.md`. No phone installation or live connection.
+
+### Sync with main at `4848816f7`
+
+The November 9 sync combined the phone's Task-scoped Session queries with main's
+unbounded subscription reads (`--limit 0`); without both, Session lists can lose
+older conversations. Added the optional Task field to main's new Rust fixture.
+
+- `swift test --package-path swift --filter RegistryQueryTests`: 21 passed.
+- `cargo test -p loopflow --lib lf::commands::read:: --jobs 4`: 3 passed. The linker warned about the existing large unwind table; the test binary ran successfully.
+- `cargo fmt`, `git diff --check`, `cargo clippy --all-targets -- -D warnings`: passed after the merge repair.
+
+The branch remains local after `lf sync --manual`. Real Machine installation
+still needs the migration on main and a published build; no release, landing or
+database change happened during this sync.

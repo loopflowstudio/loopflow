@@ -226,7 +226,7 @@ final class MachineConnection {
         let subscription = MachineSubscription(connection: self)
         subscriptions[subscription.id] = subscription
         do {
-            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query, select: nil)))
+            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query, select: nil, resume: nil)))
         } catch {
             subscriptions.removeValue(forKey: subscription.id)
             throw error
@@ -304,7 +304,7 @@ final class MachineConnection {
                 waiting.continuation.resume(returning: result)
             }
             // A null result confirms a registered subscription; anything else is a late answer.
-        case .reading(let id, let frame):
+        case .reading(let id, _, let frame):
             subscriptions[id]?.receive(frame)
         case .bulk(let id, let ticket, _):
             fetch(id, ticket: ticket)

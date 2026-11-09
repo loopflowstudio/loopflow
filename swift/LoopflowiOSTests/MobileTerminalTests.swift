@@ -571,14 +571,14 @@ final class MobileTerminalTests: XCTestCase {
 
     func testBackendOwnedFixturesDecodeWithoutDefaults() throws {
         let response: ServerMessage = try machineFixture("reading")
-        guard case .reading("tasks-1", let frame) = response else { return XCTFail("Expected reading") }
+        guard case .reading("tasks-1", _, let frame) = response else { return XCTFail("Expected reading") }
         guard case .object(let fields) = frame else { return XCTFail("Expected watch frame") }
         XCTAssertEqual(fields["unavailable"], .string("repository is unavailable"))
         XCTAssertEqual(fields["body"], .null)
         XCTAssertThrowsError(try JSONDecoder().decode(ServerMessage.self,
             from: Data(#"{"type":"response","id":"x","result":{"kind":"read"}}"#.utf8)))
 
-        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+        let request = ServerClientMessage.subscribe(id: "tasks-1", operation: .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request)),
                        try machineFixture("subscribe"))
 

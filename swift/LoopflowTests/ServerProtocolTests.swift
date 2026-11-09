@@ -91,10 +91,11 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let checkpoint, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
+        #expect(checkpoint == "fixture-checkpoint")
         guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
@@ -147,7 +148,7 @@ struct ServerProtocolTests {
         let session = try value("session_start")
         guard case .string(let id) = session["id"], case .string(let sessionID) = session["operation"]["id"] else { Issue.record("Missing session.start fixture"); return }
         #expect(try encoded(.request(id: id, operation: .command(.sessionStart(id: sessionID)), select: nil)) == session)
-        #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil)) == value("view_select"))
+        #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil, resume: nil)) == value("view_select"))
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
@@ -330,7 +331,7 @@ struct ServerProtocolTests {
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil)
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil, resume: nil)
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")
@@ -408,7 +409,7 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":3}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

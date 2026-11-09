@@ -1,1 +1,1 @@
-{"type":"subscribe","id":"wait-1","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
+{"type":"subscribe","id":"wait-1","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}

@@ -121,6 +121,98 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
     }
 
+    @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else {
+                // Lose the socket with a burst of confirmations still unanswered.
+                return message["checkpoint"] as? Int != 100
+            }
+            #expect(message["resume"] is NSNull)
+            let id = message["id"]!
+            respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
+            respond(["type": "reading", "id": id, "checkpoint": "received-baseline",
+                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+            return true
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        var frames = subscription.lines.makeAsyncIterator()
+        defer { Task { await subscription.cancel() } }
+        let baseline = try #require(try await frames.next())
+        #expect(String(decoding: baseline, as: UTF8.self).contains("baseline"))
+        let resumed = Mutex(false)
+        peer.serve { message, respond in
+            switch message["type"] as? String {
+            case "subscribe":
+                #expect(message["resume"] as? String == "received-baseline")
+                resumed.set(true)
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+                // An unchanged reading sends no payload.
+            case "checkpoint":
+                #expect(resumed.get())
+                #expect(message["checkpoint"] as? Int == 100)
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "confirmed-baseline",
+                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "confirmed"]])
+            case "cancel": return false
+            default: break
+            }
+            return true
+        }
+        // Only the newest confirmation needs replay; it answers every earlier request.
+        for id in 1...100 { subscription.send(Data("{\"id\":\(id)}".utf8)) }
+        let confirmed = try #require(try await frames.next())
+        let value = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        #expect(value["body"] as? String == "confirmed")
+        #expect(value["answers"] as? Int == 100)
+        await subscription.cancel()
+    }
+
+    @Test func disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            let id = message["id"]!
+            respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
+            respond(["type": "reading", "id": id, "checkpoint": "queued-baseline",
+                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+            return false
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        defer { Task { await subscription.cancel() } }
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
+        let resumed = Mutex(false)
+        peer.serve { message, respond in
+            switch message["type"] as? String {
+            case "subscribe":
+                #expect(message["resume"] as? String == "queued-baseline")
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+                resumed.set(true) // The unchanged baseline is omitted on this connection.
+            case "checkpoint":
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "queued-baseline",
+                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "baseline"]])
+            case "cancel": return false
+            default: break
+            }
+            return true
+        }
+        // Do not consume the original stream until the replacement watch is live.
+        let deadline = Date().addingTimeInterval(10)
+        while !resumed.get(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(resumed.get())
+        var frames = subscription.lines.makeAsyncIterator()
+        let baseline = try #require(try await frames.next())
+        let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
+        #expect(value["body"] as? String == "baseline")
+        #expect(value["answers"] is NSNull)
+        subscription.send(Data(#"{"id":1}"#.utf8))
+        let confirmed = try #require(try await frames.next())
+        let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        #expect(confirmation["body"] as? String == "baseline")
+        #expect(confirmation["answers"] as? Int == 1)
+        await subscription.cancel()
+        #expect(try await frames.next() == nil)
+    }
+
     @Test func stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() async throws {
         let peer = try ServerPeer()
         peer.stall()
@@ -191,11 +283,11 @@ struct ServerClientTests {
                 let id = message["id"] as! String
                 subscriptionID.set(id)
                 respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
-                respond(["type": "reading", "id": id, "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 1, "unavailable": NSNull(), "body": NSNull()]])
             case ("checkpoint", _):
                 #expect(message["checkpoint"] as? Int == 4)
                 let id = subscriptionID.get()!
-                respond(["type": "reading", "id": id, "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
+                respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint", "frame": ["answers": 4, "unavailable": "gone", "body": NSNull()]])
                 respond(["type": "error", "id": id, "code": "unavailable", "message": "gone", "data": NSNull()])
             case ("request", _):
                 respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "still here"])

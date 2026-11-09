@@ -446,7 +446,7 @@ struct Inflight {
 /// What a request or subscription asks the session to start.
 enum Start {
     Request(Operation, Option<Vec<String>>),
-    Subscribe(Read, Option<Vec<String>>),
+    Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
 /// Requests until the client closes. Terminal bytes and messages over the
@@ -537,7 +537,8 @@ pub(super) async fn session<C: Carrier>(
                 id,
                 operation,
                 select,
-            } => (id, Start::Subscribe(operation, select)),
+                resume,
+            } => (id, Start::Subscribe(operation, select, resume)),
             ClientMessage::Checkpoint { id, checkpoint } => {
                 match inflight
                     .get(&id)
@@ -685,12 +686,14 @@ pub(super) async fn session<C: Carrier>(
                 send(lines, &ticket_response(id, ticket)).await?;
                 continue;
             }
-            Start::Subscribe(query, select) => {
+            Start::Subscribe(query, select, resume) => {
                 let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
                 let task = tasks.spawn(subscribing(
                     id.clone(),
                     query,
                     select,
+                    resume,
+                    instance.clone(),
                     outgoing.clone(),
                     inbox,
                 ));
@@ -1198,10 +1201,22 @@ async fn subscribing(
     id: String,
     query: Read,
     select: Option<Vec<String>>,
+    resume: Option<String>,
+    instance: Arc<str>,
     outgoing: Outgoing,
     checkpoints: mpsc::Receiver<u64>,
 ) {
-    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
+    if let Err(failure) = subscribe(
+        &id,
+        query,
+        select,
+        resume,
+        &instance,
+        &outgoing,
+        checkpoints,
+    )
+    .await
+    {
         // The error ends the subscription for the client; a subscription that
         // started sent its failure as its last reading.
         let _ = deliver(
@@ -1237,12 +1252,15 @@ async fn subscribe(
     id: &str,
     query: Read,
     select: Option<Vec<String>>,
+    mut resume: Option<String>,
+    instance: &str,
     outgoing: &Outgoing,
     mut checkpoints: mpsc::Receiver<u64>,
 ) -> Result<()> {
     let notify = Arc::new(Notify::new());
     let wake = notify.clone();
     let ends = query.clone();
+    let scope = serde_json::to_vec(&(instance, &query, &select))?;
     let subscription = Held(Some(Arc::new(
         tokio::task::spawn_blocking(move || {
             crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
@@ -1272,7 +1290,12 @@ async fn subscribe(
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
                     let last = ends.ends_after(&frame["body"]);
-                    deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
+                    let checkpoint = reading_checkpoint(&scope, &frame)?;
+                    let unchanged = resume.take().as_ref() == Some(&checkpoint)
+                        && frame["answers"].is_null() && reason.is_none();
+                    if !unchanged {
+                        deliver(outgoing, ServerMessage::Reading { id: id.into(), checkpoint, frame }).await?;
+                    }
                     if last {
                         return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
                     }
@@ -1283,6 +1306,18 @@ async fn subscribe(
             }
         }
     }
+}
+
+/// A checkpoint identifies the selected reading in this server incarnation.
+/// Recomputing it needs no retained payloads or disconnected subscriptions.
+fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let reading =
+        crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
+    let mut hash = Sha256::new();
+    hash.update(scope);
+    hash.update(reading);
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
@@ -1331,6 +1366,7 @@ async fn drain(socket: &mut UnixStream) {
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, LazyLock, Mutex};
+    use std::time::Duration;
 
     use super::{connection, deliver_or_spill, Clients};
     use crate::engine::ErrorCode;
@@ -1825,6 +1861,150 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_resumes_an_unchanged_watch_without_a_complete_reading() {
+        with_empty_home(async {
+            let mut first = Client::connect();
+            first.hello(REVISION, REVISION).await;
+            first
+                .send(&ClientMessage::Subscribe {
+                    id: "first".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                    resume: None,
+                })
+                .await;
+            assert!(matches!(
+                first.receive().await.unwrap(),
+                ServerMessage::Response { .. }
+            ));
+            let ServerMessage::Reading {
+                checkpoint, frame, ..
+            } = first.receive().await.unwrap()
+            else {
+                panic!("expected the baseline");
+            };
+            assert!(frame["unavailable"].is_null());
+            // Lose the actual socket while its watch is live.
+            drop(first.writer);
+            drop(first.reader);
+            first.server.await.unwrap().unwrap();
+
+            let mut next = Client::connect();
+            next.hello(REVISION, REVISION).await;
+            next.send(&ClientMessage::Subscribe {
+                id: "new-id".into(),
+                operation: Read::ProcessList,
+                select: None,
+                resume: Some(checkpoint.clone()),
+            })
+            .await;
+            assert!(matches!(
+                next.receive().await.unwrap(),
+                ServerMessage::Response { .. }
+            ));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), next.receive())
+                    .await
+                    .is_err(),
+                "an unchanged watch must not resend its baseline"
+            );
+            // It is still live and answers an explicit confirmation, unchanged or not.
+            next.send(&ClientMessage::Checkpoint {
+                id: "new-id".into(),
+                checkpoint: 7,
+            })
+            .await;
+            let ServerMessage::Reading {
+                checkpoint: confirmed,
+                frame,
+                ..
+            } = next.receive().await.unwrap()
+            else {
+                panic!("expected the confirmation");
+            };
+            assert_eq!(frame["answers"], 7);
+            assert_eq!(confirmed, checkpoint);
+
+            for (id, resume, select) in [
+                ("unknown", Some("unknown".to_owned()), None),
+                ("fresh", None, None),
+                (
+                    "changed-selection",
+                    Some(checkpoint),
+                    Some(vec!["absent".into()]),
+                ),
+            ] {
+                next.send(&ClientMessage::Subscribe {
+                    id: id.into(),
+                    operation: Read::ProcessList,
+                    select,
+                    resume,
+                })
+                .await;
+                assert!(matches!(
+                    next.receive().await.unwrap(),
+                    ServerMessage::Response { .. }
+                ));
+                assert!(
+                    matches!(next.receive().await.unwrap(), ServerMessage::Reading { id: of, .. } if of == id)
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn resume_checkpoint_tracks_the_read_selection_and_server_incarnation() {
+        let query = Read::SessionList {
+            directory: "/repo".into(),
+            headless: false,
+            after: None,
+            limit: None,
+            task: None,
+        };
+        let scope = |instance, query: &Read, select: Option<Vec<&str>>| {
+            serde_json::to_vec(&(instance, query, select)).unwrap()
+        };
+        let original = scope("first-server", &query, None);
+        let frame = |title, at, answers| {
+            serde_json::json!({
+                "body": [{"title": title, "condition": {"observed_at": at}}],
+                "unavailable": null, "answers": answers,
+            })
+        };
+        let baseline =
+            super::reading_checkpoint(&original, &frame("first", 1, None::<u64>)).unwrap();
+        assert_eq!(
+            baseline,
+            super::reading_checkpoint(&original, &frame("first", 2, Some(7))).unwrap()
+        );
+        assert_ne!(
+            baseline,
+            super::reading_checkpoint(&original, &frame("changed", 1, None)).unwrap()
+        );
+        for changed in [
+            scope("restarted-server", &query, None),
+            scope("first-server", &Read::ProcessList, None),
+            scope(
+                "first-server",
+                &Read::SessionList {
+                    directory: "/another".into(),
+                    headless: false,
+                    after: None,
+                    limit: None,
+                    task: None,
+                },
+                None,
+            ),
+            scope("first-server", &query, Some(vec!["title"])),
+        ] {
+            assert_ne!(
+                baseline,
+                super::reading_checkpoint(&changed, &frame("first", 1, None)).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn cancel_ends_a_subscription_while_a_sibling_request_answers() {
         with_empty_home(async {
             let mut client = Client::connect();
@@ -1837,6 +2017,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::ProcessList,
+                    resume: None,
                     select: None,
                 })
                 .await;
@@ -1844,7 +2025,7 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, result: serde_json::Value::Null, .. } if id == "ps"
             ));
-            let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
+            let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap() else {
                 panic!("expected the first reading")
             };
             assert_eq!(id, "ps");
@@ -1991,6 +2172,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
                     operation: Read::ProcessList,
+                    resume: None,
                     select: Some(vec!["absent".into()]),
                 })
                 .await;

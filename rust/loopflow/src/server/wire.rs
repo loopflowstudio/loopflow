@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 3: one connection per client,
+//! Carrier-independent server protocol, revision 4: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,9 +11,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 3;
+pub const REVISION: u32 = 4;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 3;
+pub const MIN_REVISION: u32 = 4;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
@@ -52,6 +52,8 @@ pub enum ClientMessage {
         id: String,
         operation: Read,
         select: Option<Vec<String>>,
+        /// The last applied reading's opaque checkpoint; null starts fresh.
+        resume: Option<String>,
     },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
@@ -159,6 +161,8 @@ pub enum ServerMessage {
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
         id: String,
+        /// Resume this reading on another connection to the same server.
+        checkpoint: String,
         #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
@@ -365,7 +369,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":2,"min_revision":2}"#
+            r#"{"type":"hello","revision":4,"min_revision":4}"#
         )
         .is_err());
         assert!(

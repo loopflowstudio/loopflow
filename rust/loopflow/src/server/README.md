@@ -31,7 +31,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 3
+## Local protocol, revision 4
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -77,20 +77,20 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":3,"min_revision":3,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":3,"server_revision":3,"min_revision":3,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
+→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":4,"server_revision":4,"min_revision":4,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null}}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":null,"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
-← {"type":"reading","id":"b","frame":{"answers":null,"unavailable":null,"body":{…}}}
+← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
-← {"type":"reading","id":"b","frame":{"answers":3,…}}
+← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
-→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null}
-← {"type":"reading","id":"d","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
+← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
 ```
 
@@ -102,7 +102,7 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 3 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 4 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -110,7 +110,7 @@ and closes. That sniff is the whole compatibility layer and goes with revision 1
 Revision 3 adds bulk/upload tickets and mobile operations, with 1 MiB control
 messages and 64 MiB ticketed transfers. Revision-2 clients cannot decode `bulk` or `admitted`; they must
 update before connecting. Install the matching Desktop/CLI/server together and
-update the phone app. A revision-3 phone reaching a revision-2 server receives
+update the phone app. A revision-4 phone reaching a revision-2 server receives
 the instruction to update the selected installation before any Work request runs.
 
 `status` before `hello` is the readiness probe: `status {revision, min_revision,
@@ -260,18 +260,31 @@ the phone's `view.select` Task list and its creation destinations all read it.
   paths in local reads are destination paths. `view.get` returns the existing
   WorkViewPlan, including the recorded primary Session; roadmap membership alone
   cannot select one. A missing primary stays absent. Attach by that Session ID; the server resolves its current owner.
-- `subscribe {id, operation}` takes a read with a watch: `desktop.view.list`, `view.select`,
-  `session.list` without `limit`, `task.get`, `history.list`, `plan.get`,
-  `repository.planning` and `process.list`. It answers
-  `subscribed`, then `reading {id,frame}` messages wrapping
-  the existing complete `answers/unavailable/body` watch frame. `checkpoint
+- `select` on a `request` or `subscribe` keeps only those dotted paths of a
+  read's answer: `["task.identifier","pr.url"]` keeps each path's ancestors as
+  objects, applies a path through an array to each element, and leaves a path
+  the answer lacks absent. `null` keeps the whole answer; a write with a
+  `select` is `invalid`. A subscription compares selected readings, so a
+  change outside the selection sends nothing; `task.wait` always keeps
+  `reached`, which ends it. `lf <read> --json --select task.identifier,pr.url`
+  prints the same projection; only the reads that take `--subscribe` accept
+  the flag. `select` serves untyped clients (agents, scripts, the CLI). A
+  typed client such as the Swift app decodes every DTO strictly with no
+  defaults, so a selected answer would not decode: it sends `null`, and gets
+  a smaller payload only through a read with its own DTO.
+- `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
+  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `plan.list`, `repo.plan` and `process.list`. It answers
+  a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
+  the existing complete `answers/unavailable/body` subscription frame. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that number, changed or not. A subscription's arguments are fixed: new
   arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
-  `invalid`. Reconnect opens a fresh subscription
-  and receives a complete reading; no replay cursor exists. `task.wait {issue,
+  `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
+  same read without receiving an unchanged complete reading; see
+  [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
   changes; after the reading whose `reached` is true the server sends `ended
   {id}` and nothing more for it. Requested once, it is that reading now, as
@@ -343,14 +356,51 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `error {id: null, invalid}` whose data names `max_message`, and the connection
   closes. Nothing is paged.
 
-Desktop holds one connection per server location for the app's lifetime,
-opened on first use and reopened on the next request after a loss with bounded
-backoff (100 ms doubling to 3.2 s). A connection not welcomed within 10 s fails
-and the next request reopens. Its watches share that connection; losing it
-fails every pending request as outcome unknown and every watch, which the
-window reopens for a complete reading. Bulk fetches and oversize uploads use
-ticketed connections of their own. The phone (`swift/LoopflowiOS/MachineConnection.swift`)
-keeps one control connection per foreground session and the same ticket flow.
+## Reconnect a watch
+
+After reconnecting and completing `hello`/`welcome`, resume the `session.list`
+watch above with the checkpoint from its last applied reading:
+
+```text
+→ {"type":"subscribe","id":"b2","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":"opaque-reading-token"}
+← {"type":"response","id":"b2","trace_id":"…","result":null}
+```
+
+If the selected list is unchanged, no `reading` follows until a change or a
+confirmation request. Keep the reading and its opaque `reading.checkpoint`
+together; resume with the same operation, arguments and `select`. A new request
+ID is fine. Use the token the server returned, not the example's placeholder.
+
+Changed or unknown checkpoints, including those from a restarted server, get a
+complete current reading as the new baseline. Start with `resume: null` if the
+client discarded its reading or changed its query. Resume covers current state;
+intermediate changes are not replayed and readings are never patches. Read
+timestamps alone do not count as changes. Tokens fingerprint the operation,
+arguments, selection and reading within one server incarnation, requiring no
+retained payload or disconnected watch.
+
+The numeric `checkpoint` request and `frame.answers` confirm a live read; they
+are separate from the opaque resume token. Confirmations always get a reading,
+even when unchanged. Unavailable readings are always sent, and a terminal
+`task.wait` still sends `ended`, even when its unchanged final reading is omitted.
+
+Desktop holds one connection per server location for the app's lifetime, opened
+on first use and reopened on the next request after a loss with bounded backoff
+(100 ms doubling to 3.2 s). Its subscriptions share that connection. Losing it
+fails every pending request as outcome unknown. A watch with a received reading
+keeps its stream and queued frames, reconnects, and resumes from that reading's
+token. A complete reading replaces it when the token is unknown. The newest
+unanswered confirmation retries and covers earlier requests; writes never retry.
+Cancelling the watch cancels recovery. A watch without a baseline, a server refusal, or a slow
+consumer that overflows its frame queue ends the stream; the window then opens a
+fresh watch. If reopening the connection fails, the stream also ends with that
+error so the window reports unavailability and retries.
+
+
+Bulk fetches and oversize uploads use ticketed connections of their own. The phone
+(`swift/LoopflowiOS/MachineConnection.swift`) keeps one control connection per
+foreground session and the same ticket flow. It starts a fresh subscription with
+`resume: null`, then replaces its cached Task rows with the current reading.
 
 Every client gives the server ten seconds to answer `status`, `hello`,
 `session.attach` or `attach`; a server that accepts and stalls fails the open

@@ -1745,6 +1745,13 @@
             "operation": {
               "$ref": "#/$defs/Read"
             },
+            "resume": {
+              "description": "The last applied reading's opaque checkpoint; null starts fresh.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "select": {
               "items": {
                 "type": "string"
@@ -1763,7 +1770,8 @@
             "type",
             "id",
             "operation",
-            "select"
+            "select",
+            "resume"
           ],
           "type": "object"
         },
@@ -9505,6 +9513,10 @@
           "additionalProperties": false,
           "description": "One subscription line; its `body` has the shape of the read's `x-result`.",
           "properties": {
+            "checkpoint": {
+              "description": "Resume this reading on another connection to the same server.",
+              "type": "string"
+            },
             "frame": {
               "$ref": "#/$defs/SubscriptionFrame"
             },
@@ -9519,6 +9531,7 @@
           "required": [
             "type",
             "id",
+            "checkpoint",
             "frame"
           ],
           "type": "object"
@@ -17831,6 +17844,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 3,
-  "x-revision": 3
+  "x-min-revision": 4,
+  "x-revision": 4
 }

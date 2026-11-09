@@ -380,10 +380,9 @@ After `welcome`, request `session.attach` on the authenticated client connection
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-The Session must already have a running terminal owner; attaching never starts
-one. `owner_lf_process_id: null` selects its current owner. To reconnect only to
-the owner you had, send that owner's ID instead; a changed owner returns
-`not_found` rather than attaching to its replacement.
+`owner_lf_process_id: null` selects the Session's running terminal owner; attaching
+never starts one. Send a specific owner ID to reconnect only to that owner;
+a changed owner returns `not_found`.
 
 Open a separate authenticated bridge connection and send the ticket first:
 
@@ -397,12 +396,12 @@ terminal data and input/geometry control. Attaching does not take another viewer
 control.
 
 Both connections must authenticate with the same Tailscale node stable ID and
-user ID. The same account on a different device does not match. A `hello` name,
+user ID; the same account on another device does not match. A `hello` name,
 `client_id`, login text or proxy's Unix UID cannot supply that identity. Local
-and remote connections cannot redeem each other's tickets. Each ticket opens
-one bridge and expires after 60 seconds, including host sleep.
+and remote tickets are not interchangeable. Each ticket opens one bridge within
+60 seconds of issuance, including host sleep; expiry does not close an open bridge.
 
-An unknown, spent, expired or foreign ticket returns `not_found` with a null
-`id` and closes the bridge connection. Presenting a ticket consumes it even
-when the identity does not match. Before reconnecting, request a fresh ticket
-on the authenticated client connection; never replay a ticket or terminal input.
+Presenting a ticket consumes it even when the identity does not match. Unknown,
+spent, expired and foreign tickets return `not_found` with a null `id` and close
+the bridge connection. Request a fresh ticket before reconnecting; never replay
+a ticket or terminal input.

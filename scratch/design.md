@@ -26,21 +26,15 @@ node and user, leave foreign attempts unconsumed and expire with `Instant`.
 The mobile checkout tests redemption after foreign attempts, contrary to this
 Task's consume-on-attempt contract.
 
-The November 9 rechecks from 00:47 through 03:13 UTC agreed:
-`lf task status LOO-718 --json` showed the interactive
-`feature` demo step; `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
-reported OPEN, no merge or auto-merge, at the published head above.
-`git fetch origin main` found origin/main at
-`237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
-`server/mobile.rs` nor `server/ticket.rs`. The separate mobile checkout findings
-above are from the earlier inspection, not a landed implementation.
+November 9 checks at 00:47–03:13 UTC and 16:25 UTC found PR #1812 OPEN at the
+published head above, without auto-merge (`gh pr view`). `git fetch origin main`
+returned `237a107261572d08e4ffa3c8baf72b1c164c110e`; `git ls-tree` found neither
+transport file. The earlier checks also found LOO-718 at its interactive
+`feature` demo step (`lf task status LOO-718 --json`). The separate mobile checkout
+findings above are not a landed implementation.
 
-At 15:47 UTC, GitHub still reported the same open PR head without auto-merge;
-fetching main returned the same commit with neither transport file present.
-The authenticated endpoint needed for implementation and remote acceptance
-remains unavailable on main. Integration depends on LOO-718's merged revision;
-landing that separate PR is outside this Task's scope. No product decision is
-missing.
+Implementation and remote acceptance depend on LOO-718's merged transport.
+Landing that PR is outside this Task's scope. No product decision is missing.
 
 ## Delete — do not maintain
 
@@ -73,7 +67,9 @@ satisfy these checks.
 Retain local attachment and its consume-on-attempt behavior through the shared
 store, including the unchanged ticket response and bridge wire fixtures.
 
-Desktop review and opening results are in `questions.md`.
+Desktop review and opening results are in `questions.md`. The contract keeps the
+wire examples and identity rules together; compression removes repeated prose,
+leaving the UID-only store untouched until its replacement lands.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

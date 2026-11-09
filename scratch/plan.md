@@ -15,8 +15,10 @@ writes never do. Cancellation ends recovery; refusal and overflow end the stream
 ## Delete — do not maintain
 
 No remaining predecessors. Revision 2 fixtures and disconnect-always-ends-watch
-behavior are replaced. Keep one reading identity, including timestamp elision;
-borrow the body until normalization needs a copy. Desktop keeps only the newest
+behavior are replaced. Keep one reading identity, including timestamp elision.
+Its normalization copy avoids a second custom serializer. Desktop's initial
+connection and recovery share `start()` so opening, cancellation checks and
+pending-confirmation replay have one path. Desktop keeps only the newest
 unanswered confirmation, matching the server's coalescing semantics, rather than
 a replay queue with its own overflow failure.
 
@@ -27,9 +29,15 @@ a replay queue with its own overflow failure.
   `transport_tests`' server watch/restart cases, and Swift's server/Work observation
   consumers. Protocol revision changes also reach installation readiness.
 
-Shipping docs: `rust/loopflow/src/server/README.md` (“Reconnect a watch”).
+Shipping docs: `rust/loopflow/src/server/README.md` (“Reconnect a watch”, including
+the resumed wire exchange) and `docs/server.md` (“Keep editing through a
+connection loss”, including Work updates). Implementation and review should read
+both from this checkout; `docs/dev/server.md` retains the revision-3 reference.
 Docs-step check (2026-11-08): Desktop open failed: “has no workspace in this
 Desktop window; nothing changed.”
+Docs-step check (2026-11-09): `lf open --host desktop --file rust/loopflow/src/server/README.md --file docs/server.md` opened both docs; `git diff --check` passed. Prose-only edits; no build needed.
+Implementation check (2026-11-09, inherited `LF_*` unset, stdin closed): `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'ServerClientTests/disconnectedWatch'` built CLI/Desktop and passed both recovery tests, including recovery with the baseline still queued; no production change needed.
+Compress check (2026-11-09, inherited `LF_*` unset, stdin closed): `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter ServerClientTests` built CLI/Desktop; 9 tests passed. `git diff --check` passed. Gate owns broader suites.
 
 Checks (2026-11-08; inherited `LF_*` unset, stdin closed):
 - `cargo test -p loopflow --lib server::`: compress 28 passed. Initial implement run: 27 passed, stale checked-in schema failed, then regenerated from the built CLI.

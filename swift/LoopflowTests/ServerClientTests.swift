@@ -167,6 +167,52 @@ struct ServerClientTests {
         await subscription.cancel()
     }
 
+    @Test func disconnectedWatchKeepsItsQueuedBaselineUntilTheConsumerReadsIt() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            let id = message["id"]!
+            respond(["type": "response", "id": id, "trace_id": "trace", "result": NSNull()])
+            respond(["type": "reading", "id": id, "checkpoint": "queued-baseline",
+                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": "baseline"]])
+            return false
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        defer { Task { await subscription.cancel() } }
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
+        let resumed = Mutex(false)
+        peer.serve { message, respond in
+            switch message["type"] as? String {
+            case "subscribe":
+                #expect(message["resume"] as? String == "queued-baseline")
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": NSNull()])
+                resumed.set(true) // The unchanged baseline is omitted on this connection.
+            case "checkpoint":
+                respond(["type": "reading", "id": message["id"]!, "checkpoint": "queued-baseline",
+                         "frame": ["answers": message["checkpoint"]!, "unavailable": NSNull(), "body": "baseline"]])
+            case "cancel": return false
+            default: break
+            }
+            return true
+        }
+        // Do not consume the original stream until the replacement watch is live.
+        let deadline = Date().addingTimeInterval(10)
+        while !resumed.get(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(resumed.get())
+        var frames = subscription.lines.makeAsyncIterator()
+        let baseline = try #require(try await frames.next())
+        let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
+        #expect(value["body"] as? String == "baseline")
+        #expect(value["answers"] is NSNull)
+        subscription.send(Data(#"{"id":1}"#.utf8))
+        let confirmed = try #require(try await frames.next())
+        let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
+        #expect(confirmation["body"] as? String == "baseline")
+        #expect(confirmation["answers"] as? Int == 1)
+        await subscription.cancel()
+        #expect(try await frames.next() == nil)
+    }
+
     @Test func stalledHandshakeFailsWithinTheBoundAndTheNextRequestReopens() async throws {
         let peer = try ServerPeer()
         peer.stall()

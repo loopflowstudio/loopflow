@@ -257,7 +257,7 @@ part of what a phone or bot client is offered.
   arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
-  `invalid`. On reconnect, supply the last received checkpoint to resume the
+  `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
   same read without receiving an unchanged complete reading; see
   [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
@@ -331,11 +331,18 @@ part of what a phone or bot client is offered.
 
 ## Reconnect a watch
 
-Keep the reading and its opaque `reading.checkpoint` together. After reconnecting
-and completing `hello`/`welcome`, subscribe to the same operation, arguments and
-`select`, setting `resume` to that checkpoint. A new request ID is fine. For
-example, an unchanged `session.list` resumes without sending the complete list
-again: the server answers a null `response` and waits for a change or confirmation.
+After reconnecting and completing `hello`/`welcome`, resume the `session.list`
+watch above with the checkpoint from its last applied reading:
+
+```text
+→ {"type":"subscribe","id":"b2","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"],"resume":"opaque-reading-token"}
+← {"type":"response","id":"b2","trace_id":"…","result":null}
+```
+
+If the selected list is unchanged, no `reading` follows until a change or a
+confirmation request. Keep the reading and its opaque `reading.checkpoint`
+together; resume with the same operation, arguments and `select`. A new request
+ID is fine. Use the token the server returned, not the example's placeholder.
 
 Changed or unknown checkpoints, including those from a restarted server, get a
 complete current reading as the new baseline. Start with `resume: null` if the
@@ -348,7 +355,7 @@ retained payload or disconnected watch.
 The numeric `checkpoint` request and `frame.answers` confirm a live read; they
 are separate from the opaque resume token. Confirmations always get a reading,
 even when unchanged. Unavailable readings are always sent, and a terminal
-`task.wait` still sends `ended`.
+`task.wait` still sends `ended`, even when its unchanged final reading is omitted.
 
 Desktop holds one connection per server location for the app's lifetime, opened
 on first use and reopened on the next request after a loss with bounded backoff

@@ -44,11 +44,8 @@ enum ServerClient {
             try await links.link(for: location)
         }
         Task {
-            do {
-                try Task.checkCancellation()
-                let link = try await links.link(for: location)
-                try subscription.start(on: link)
-            } catch { subscription.finish(throwing: error) }
+            do { try await subscription.start() }
+            catch { subscription.finish(throwing: error) }
         }
         return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
     }
@@ -442,7 +439,10 @@ private final class ServerSubscription: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    func start(on link: ServerLink) throws {
+    func start() async throws {
+        try Task.checkCancellation()
+        let link = try await connect()
+        try Task.checkCancellation()
         try lock.withLock {
             guard !stopped else { return }
             try link.subscribe(self, query: query, resume: checkpoint)
@@ -464,9 +464,7 @@ private final class ServerSubscription: @unchecked Sendable {
             recovery = Task { [self] in
                 do {
                     try await Task.sleep(for: .milliseconds(100))
-                    let replacement = try await connect()
-                    try Task.checkCancellation()
-                    try start(on: replacement)
+                    try await start()
                 } catch is CancellationError { }
                 catch { finish(throwing: error) }
             }

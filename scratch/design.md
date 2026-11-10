@@ -23,10 +23,10 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 17:08 UTC, GitHub reports PR #1812 open and unmerged at the same
+At November 10 17:45 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The 17:08 UTC `lf task status LOO-718 --json` recheck still places the
+The implementation `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
@@ -48,9 +48,9 @@ UID-only implementation in this checkout remains unchanged until transport lands
 
 ## Implementation and acceptance
 
-Read the in-place docs in `docs/server.md` (Phone access) and
-`rust/loopflow/src/server/README.md` (Remote attach contract) before implementing.
-They include the request/redemption example, identity binding, expiry and retry
+The in-place docs in `docs/server.md` (Phone access) and
+`rust/loopflow/src/server/README.md` (Remote attach contract)
+include the request/redemption example, identity binding, expiry and retry
 behavior; the general attach section distinguishes the local socket's UID rule.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
@@ -70,7 +70,8 @@ planned/local-only wording and replace the general attach section's UID-only
 description with the local/remote admission binding. Keep same-device ticket
 use, exact-owner recovery and attachment without provider launch.
 
-Desktop visual inspection remains for QA; opening results are in `questions.md`.
+Desktop visual inspection remains deferred to display-capable QA; opening
+results are in `questions.md`. It does not block headless implementation.
 
 Keep recovery behavior in the shared recovery section; the remote contract
 and general attach section link there so local and remote clients follow one

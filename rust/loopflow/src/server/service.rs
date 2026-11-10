@@ -11,11 +11,12 @@ use fs2::FileExt;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Notify, Semaphore};
+use tokio::sync::{mpsc, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
+use super::subscriptions::{Member, Subscriptions};
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
     ServerOperation, SessionAttached, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
@@ -29,8 +30,6 @@ use crate::lf::commands::read::Read;
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
 /// How long a client has to take a message before its connection ends.
 const SEND: Duration = Duration::from_secs(5);
-/// Checkpoints one subscription may have waiting.
-const CHECKPOINTS: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
@@ -143,7 +142,7 @@ impl Drop for Admitted {
     }
 }
 
-fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(super) fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     shared.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -190,6 +189,7 @@ pub(super) async fn run() -> Result<()> {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
+    let subscriptions = Arc::new(Subscriptions::default());
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on
@@ -214,6 +214,7 @@ pub(super) async fn run() -> Result<()> {
         let clients = clients.clone();
         let slots = slots.clone();
         let tickets = tickets.clone();
+        let subscriptions = subscriptions.clone();
         tokio::spawn(async move {
             let connection = Connection {
                 instance: &instance,
@@ -221,6 +222,7 @@ pub(super) async fn run() -> Result<()> {
                 clients: &clients,
                 slots: &slots,
                 tickets: &tickets,
+                subscriptions: &subscriptions,
                 uid,
             };
             if let Err(error) = connection.serve(socket).await {
@@ -271,6 +273,7 @@ struct Connection<'a> {
     clients: &'a Clients,
     slots: &'a Arc<Semaphore>,
     tickets: &'a Tickets,
+    subscriptions: &'a Arc<Subscriptions>,
     uid: u32,
 }
 
@@ -428,6 +431,7 @@ impl Connection<'_> {
             &admitted,
             self.tickets,
             self.uid,
+            self.subscriptions,
             outgoing,
             queue,
             open,
@@ -468,7 +472,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
 /// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
-    checkpoints: Option<mpsc::Sender<u64>>,
+    checkpoints: Option<Member>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -478,6 +482,7 @@ async fn session(
     admitted: &Admitted,
     tickets: &Tickets,
     uid: u32,
+    subscriptions: &Arc<Subscriptions>,
     outgoing: Outbox,
     mut queue: mpsc::Receiver<super::outbox::Frame>,
     open: Arc<Semaphore>,
@@ -515,12 +520,10 @@ async fn session(
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
-                                if checkpoints.try_send(checkpoint).is_err() {
-                                    // Ending the subscription tells the client to reopen it
-                                    // for a complete reading rather than drop a checkpoint.
-                                    if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
-                                }
+                                // A closed producer may still have its final reading and
+                                // Ended queued. Let delivery drain without acknowledging
+                                // a checkpoint that arrived after the final read.
+                                checkpoints.checkpoint(checkpoint);
                             }
                             None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
                         }
@@ -586,9 +589,20 @@ async fn session(
                         continue;
                     }
                     Admission::Subscribe(query, select, resume) => {
-                        let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscribing(id.clone(), query, select, resume, instance.clone(), outgoing.clone(), inbox, slot));
-                        Inflight { task, checkpoints: Some(checkpoints) }
+                        let (member, delivery) = match subscriptions.join(&id, query.clone(), select.clone()) {
+                            Ok(joined) => joined,
+                            Err(failure) => {
+                                send(&mut lines, &ServerMessage::error(Some(id), unavailable(failure))).await?;
+                                continue;
+                            }
+                        };
+                        let scope = serde_json::to_vec(&(&*instance, &query, &select))?;
+                        let (delivery_id, output) = (id.clone(), outgoing.clone());
+                        let task = tasks.spawn(async move {
+                            let _slot = slot;
+                            delivery.run(delivery_id, output, scope, resume).await;
+                        });
+                        Inflight { task, checkpoints: Some(member) }
                     }
                     Admission::Request(operation, select) => {
                         let write = if matches!(operation, Operation::Write(_)) {
@@ -743,7 +757,7 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
 }
 
 /// A read that failed without naming a code depends on something unavailable.
-fn unavailable(error: impl Into<anyhow::Error>) -> Error {
+pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
@@ -874,124 +888,6 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn subscribing(
-    id: String,
-    query: Read,
-    select: Option<Vec<String>>,
-    resume: Option<String>,
-    instance: Arc<str>,
-    outgoing: Outbox,
-    checkpoints: mpsc::Receiver<u64>,
-    slot: tokio::sync::OwnedSemaphorePermit,
-) {
-    let slot = Arc::new(slot);
-    if let Err(failure) = subscribe(
-        &id,
-        query,
-        select,
-        resume,
-        &instance,
-        &outgoing,
-        checkpoints,
-        slot.clone(),
-    )
-    .await
-    {
-        // The error ends the subscription for the client; a subscription that
-        // started sent its failure as its last reading.
-        let _ = deliver(
-            &outgoing,
-            ServerMessage::error(Some(id.clone()), unavailable(failure)),
-        )
-        .await;
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn subscribe(
-    id: &str,
-    query: Read,
-    select: Option<Vec<String>>,
-    mut resume: Option<String>,
-    instance: &str,
-    outgoing: &Outbox,
-    mut checkpoints: mpsc::Receiver<u64>,
-    slot: Arc<tokio::sync::OwnedSemaphorePermit>,
-) -> Result<()> {
-    let notify = Arc::new(Notify::new());
-    let wake = notify.clone();
-    let ends = query.clone();
-    let scope = serde_json::to_vec(&(instance, &query, &select))?;
-    let reservation = outgoing.wait().await?;
-    let held = (reservation.clone(), slot.clone());
-    let subscription = tokio::task::spawn_blocking(move || {
-        let _held = held;
-        crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
-            .map(Arc::new)
-    })
-    .await??;
-    outgoing
-        .deliver(
-            ServerMessage::Response {
-                id: id.into(),
-                trace_id: crate::id::TraceId::default(),
-                result: serde_json::Value::Null,
-            },
-            reservation,
-        )
-        .await?;
-    loop {
-        tokio::select! {
-            checkpoint = checkpoints.recv() => {
-                let Some(checkpoint) = checkpoint else { return Ok(()) };
-                subscription.checkpoint(checkpoint);
-            }
-            () = notify.notified() => {
-                let reservation = outgoing.wait().await?;
-                let held = (reservation.clone(), slot.clone());
-                let pull = Arc::clone(&subscription);
-                let update = tokio::task::spawn_blocking(move || {
-                    let _held = held;
-                    crate::journal::request::isolate(|| -> Result<_> {
-                        let update = pull.pull();
-                        let mut bytes = update.frame.as_ref().map_or(0, Vec::len) + 1024;
-                        for event in &update.events {
-                            bytes += serde_json::to_vec(event)?.len() + 1024;
-                            anyhow::ensure!(bytes <= MAX_MESSAGE, "subscription event batch exceeds retained bytes; subscribe again for current state");
-                        }
-                        Ok(update)
-                    })
-                }).await??;
-                if !update.events.is_empty() { reservation.batch(); }
-                let mut reason = None;
-                let mut last = false;
-                if let Some(frame) = update.frame {
-                    let frame: serde_json::Value = serde_json::from_slice(&frame)?;
-                    reason = frame["unavailable"].as_str().map(str::to_owned);
-                    last = ends.ends_after(&frame["body"]);
-                    let checkpoint = reading_checkpoint(&scope, &frame)?;
-                    let unchanged = resume.take().as_ref() == Some(&checkpoint)
-                        && frame["answers"].is_null() && reason.is_none();
-                    if !unchanged {
-                        outgoing.deliver(ServerMessage::Reading { id: id.into(), checkpoint, frame }, reservation.clone()).await?;
-                    }
-                }
-                for event in update.events {
-                    outgoing.deliver(ServerMessage::Event { id: id.into(), seq: 0, event }, reservation.clone()).await?;
-                }
-                drop(reservation);
-                if last {
-                    return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
-                }
-                if subscription.ended() {
-                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
-                }
-            }
-        }
-    }
-}
-
 fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
     ServerMessage::error(
         Some(id.into()),
@@ -1002,7 +898,7 @@ fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
 
 /// A checkpoint identifies the selected reading in this server incarnation.
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
-fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
+pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
     let reading =
         crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
@@ -1021,7 +917,7 @@ fn line(message: &ServerMessage) -> String {
     serde_json::to_string(message).expect("server messages serialize")
 }
 
-async fn deliver(outgoing: &Outbox, message: ServerMessage) -> Result<()> {
+pub(super) async fn deliver(outgoing: &Outbox, message: ServerMessage) -> Result<()> {
     outgoing.deliver(message, outgoing.wait().await?).await
 }
 
@@ -1047,6 +943,7 @@ mod tests {
     use crate::engine::ErrorCode;
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
+    use crate::server::subscriptions::Subscriptions;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, MAX_MESSAGE, REVISION,
     };
@@ -1077,8 +974,13 @@ mod tests {
         }
 
         fn connect_to(clients: &Clients) -> Self {
+            Self::connect_with(clients, &Arc::new(Subscriptions::default()))
+        }
+
+        fn connect_with(clients: &Clients, subscriptions: &Arc<Subscriptions>) -> Self {
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
+            let subscriptions = subscriptions.clone();
             let server = tokio::spawn(async move {
                 let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
                 Connection {
@@ -1087,6 +989,7 @@ mod tests {
                     clients: &clients,
                     slots: &slots,
                     tickets: &Tickets::default(),
+                    subscriptions: &subscriptions,
                     uid: 501,
                 }
                 .serve(server)
@@ -1518,6 +1421,7 @@ mod tests {
                 clients: &Clients::default(),
                 slots: &slots,
                 tickets: &Tickets::default(),
+                subscriptions: &Arc::new(Subscriptions::default()),
                 uid: 501,
             }
             .serve(server)
@@ -2008,6 +1912,347 @@ mod tests {
         client.ended().await;
     }
 
+    #[test]
+    fn late_checkpoint_preserves_terminal_reading_and_end() {
+        with_empty_home(async {
+            let path =
+                std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            let repo = loopflow_test_support::TestRepo::new();
+            let task = crate::durable::TaskId::new();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: store
+                        .ensure_repository(repo.path().to_str().unwrap())
+                        .unwrap(),
+                    id: task.clone(),
+                    project_id: None,
+                    title: "Completed wait".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    [task.as_str()],
+                )
+                .unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let pause = super::subscription_measurement::pause("terminal", "terminal-delivery");
+            client
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "terminal".into(),
+                    operation: Read::TaskWait {
+                        issue: task.to_string(),
+                        until: crate::ops::task::TaskWaitUntil::Terminal,
+                    },
+                    select: None,
+                })
+                .await;
+            pause.entered.await.unwrap();
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 9,
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "barrier".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            let barrier = client.receive().await.unwrap();
+            pause.release.send(()).unwrap();
+            assert!(
+                matches!(barrier, ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "barrier")
+            );
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "terminal")
+            );
+            let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap() else {
+                panic!("final reading was lost")
+            };
+            assert_eq!(id, "terminal");
+            assert_eq!(frame["body"]["reached"], true);
+            assert!(frame["answers"].is_null());
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Ended { id } if id == "terminal")
+            );
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 10,
+                })
+                .await;
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "terminal")
+            );
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn cancellation_during_setup_and_pull_preserves_sibling_and_reused_id() {
+        for stage in ["setup", "pull"] {
+            with_empty_home(async {
+                let mut client = Client::connect();
+                client.hello(REVISION, REVISION).await;
+                let pause = super::subscription_measurement::pause("slow", stage);
+                client
+                    .send(&ClientMessage::Subscribe {
+                        resume: None,
+                        id: "slow".into(),
+                        operation: Read::ProcessList,
+                        select: None,
+                    })
+                    .await;
+                pause.queued.await.unwrap();
+                pause.entered.await.unwrap();
+                if stage == "pull" {
+                    assert!(
+                        matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "slow")
+                    );
+                }
+                client
+                    .send(&ClientMessage::Subscribe {
+                        resume: None,
+                        id: "peer".into(),
+                        operation: Read::ProcessList,
+                        select: Some(vec!["id".into()]),
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "peer")
+                );
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Reading { id, .. } if id == "peer")
+                );
+                client
+                    .send(&ClientMessage::Cancel { id: "slow".into() })
+                    .await;
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 7,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap()
+                else {
+                    panic!("sibling did not answer")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 7);
+                client
+                    .send(&ClientMessage::Request {
+                        id: "slow".into(),
+                        operation: catalog(),
+                        select: None,
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "slow")
+                );
+                pause.release.send(()).unwrap();
+                pause.finished.await.unwrap();
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 8,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap()
+                else {
+                    panic!("old work escaped cancellation")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 8);
+                drop(client.writer);
+                drop(client.reader);
+                client.server.await.unwrap().unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn identical_subscriptions_share_one_reader_across_connections() {
+        use crate::performance::subscription_measurement as meter;
+        with_empty_home(async {
+            let registry = Arc::new(Subscriptions::default());
+            let clients = Clients::default();
+            let mut first = Client::connect_with(&clients, &registry);
+            let mut second = Client::connect_with(&clients, &registry);
+            first.hello(REVISION, REVISION).await;
+            second.hello(REVISION, REVISION).await;
+            meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+            let before = meter::snapshot();
+            let setup = super::subscription_measurement::pause("shared", "setup");
+            first
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            setup.entered.await.unwrap();
+            first
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "same-socket".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            second
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            for client in [&mut first, &mut second] {
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "admission-barrier".into(),
+                        checkpoint: 0,
+                    })
+                    .await;
+                assert!(matches!(
+                    client.receive().await.unwrap(),
+                    ServerMessage::Error {
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+            }
+            setup.release.send(()).unwrap();
+            let mut bodies = Vec::new();
+            for (client, count) in [(&mut first, 4), (&mut second, 2)] {
+                for _ in 0..count {
+                    match client.receive().await.unwrap() {
+                        ServerMessage::Response { .. } => {}
+                        ServerMessage::Reading { frame, .. } => bodies.push(frame),
+                        message => panic!("unexpected {message:?}"),
+                    }
+                }
+            }
+            assert_eq!(bodies.len(), 3);
+            assert!(bodies.iter().all(|body| *body == bodies[0]));
+            let work = meter::snapshot().since(before);
+            meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+            assert_eq!(work.stages["runtime_build"].count, 1);
+            assert_eq!(work.stages["projection"].count, 1);
+            drop(first.writer);
+            first.server.await.unwrap().unwrap();
+            second
+                .send(&ClientMessage::Checkpoint {
+                    id: "shared".into(),
+                    checkpoint: 3,
+                })
+                .await;
+            let ServerMessage::Reading { frame, .. } = second.receive().await.unwrap() else {
+                panic!("sibling lost its reader")
+            };
+            assert_eq!(frame["answers"], 3);
+            drop(second.writer);
+            second.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn queued_subscription_cancellation_skips_construction() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        use crate::performance::subscription_measurement as meter;
+        meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let before = meter::snapshot();
+        runtime.block_on(async {
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let mut workers = Vec::new();
+            let mut releases = Vec::new();
+            for _ in 0..2 {
+                let (entered, began) = tokio::sync::oneshot::channel();
+                let (release, wait) = std::sync::mpsc::channel();
+                releases.push(release);
+                workers.push(tokio::task::spawn_blocking(move || {
+                    entered.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(30)).unwrap();
+                }));
+                began.await.unwrap();
+            }
+            let pause = super::subscription_measurement::pause("queued", "setup");
+            client
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "queued".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            pause.queued.await.unwrap();
+            client
+                .send(&ClientMessage::Cancel {
+                    id: "queued".into(),
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "queued".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            ));
+            // Wake the canceled job if it runs, then drain everything before the assertion.
+            let _ = pause.release.send(());
+            for release in releases {
+                release.send(()).unwrap();
+            }
+            for worker in workers {
+                worker.await.unwrap();
+            }
+            let _entered = pause.entered.await;
+            pause.finished.await.unwrap();
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
+        drop(runtime);
+        let work = meter::snapshot().since(before);
+        meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            work.stages
+                .get("runtime_build")
+                .map_or(0, |count| count.count),
+            0,
+            "canceled queued subscription constructed a runtime"
+        );
+    }
+
     #[tokio::test]
     async fn an_overlong_line_ends_the_connection() {
         let mut client = Client::connect();
@@ -2031,3 +2276,7 @@ mod tests {
         assert!(client.server.await.unwrap().is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "subscription_measurement.rs"]
+pub(super) mod subscription_measurement;

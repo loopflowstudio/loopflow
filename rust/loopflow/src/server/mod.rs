@@ -4,6 +4,7 @@ pub(crate) mod events;
 mod outbox;
 pub mod schema;
 mod service;
+mod subscriptions;
 pub mod wire;
 
 use std::path::PathBuf;

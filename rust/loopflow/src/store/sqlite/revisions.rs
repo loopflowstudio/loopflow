@@ -40,6 +40,15 @@ pub struct StoreRevisions {
 }
 
 impl SqliteStore {
+    /// Workflow observation excludes transcript, usage and ordinary tool traffic.
+    pub(crate) fn task_update_revision(&self) -> StoreResult<i64> {
+        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT revision FROM store_revisions WHERE domain='task_updates'",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn read_snapshot(&self) -> StoreResult<ReadSnapshot<'_>> {
         self.conn
             .lock()

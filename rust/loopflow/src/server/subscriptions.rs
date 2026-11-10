@@ -220,10 +220,11 @@ impl Delivery {
             let pending = *lock(&self.pending);
             if let Some(reading) = latest.reading {
                 let fresh = reading.generation >= pending.generation;
-                let failed = latest.ended.as_ref().is_some_and(Result::is_err)
-                    && reading.frame["unavailable"].is_string();
+                let unseen_failure = latest.ended.as_ref().is_some_and(Result::is_err)
+                    && reading.frame["unavailable"].is_string()
+                    && sent != Some(reading.identity);
                 if (fresh && (answered < pending.generation || sent != Some(reading.identity)))
-                    || failed
+                    || unseen_failure
                 {
                     let mut frame = reading.frame.clone();
                     frame["answers"] = if fresh {
@@ -645,6 +646,63 @@ mod tests {
         drop(latest);
     }
 
+    #[tokio::test]
+    async fn a_published_failure_is_not_repeated_when_the_stream_ends() {
+        use super::{Latest, Pending, Reading};
+        use std::sync::Mutex;
+
+        let reason = Some("snapshot failed".to_owned());
+        let identity = crate::lf::commands::subscribe::identity(&reason, &None).unwrap();
+        let (latest, receiver) = tokio::sync::watch::channel(Latest {
+            ready: true,
+            reading: Some(Arc::new(Reading {
+                generation: 1,
+                frame: serde_json::json!({
+                    "answers": null, "unavailable": reason, "body": null
+                }),
+                identity,
+            })),
+            ended: None,
+        });
+        let pending = Arc::new(Mutex::new(Pending {
+            generation: 1,
+            checkpoint: None,
+        }));
+        let (outgoing, mut messages) = mpsc::channel(4);
+        let task = tokio::spawn(
+            Delivery {
+                latest: receiver,
+                pending: pending.clone(),
+            }
+            .run("failed".into(), outgoing),
+        );
+        assert!(matches!(
+            messages.recv().await.unwrap().1,
+            ServerMessage::Response { .. }
+        ));
+        assert!(matches!(
+            messages.recv().await.unwrap().1,
+            ServerMessage::Reading { .. }
+        ));
+
+        // The failure was already delivered when a later checkpoint arrived.
+        *pending.lock().unwrap() = Pending {
+            generation: 2,
+            checkpoint: Some(9),
+        };
+        latest.send_modify(|value| {
+            value.ended = Some(Err(Arc::new(crate::engine::Error::new(
+                crate::engine::ErrorCode::Unavailable,
+                "snapshot failed",
+            ))));
+        });
+        assert!(matches!(
+            messages.recv().await.unwrap().1,
+            ServerMessage::Error { .. }
+        ));
+        task.await.unwrap();
+    }
+
     #[test]
     fn identical_demand_shares_setup_and_coalesces_independent_checkpoints() {
         with_store(|_store| {
@@ -676,8 +734,7 @@ mod tests {
                 assert_eq!(first.reading().await["answers"], 0);
                 assert_eq!(second.reading().await["answers"], 0);
                 assert_eq!(stage(&meter::snapshot().since(before), "projection"), 2);
-                // ProcessList contains generated_at. A sibling's checkpoint must not
-                // broadcast a timestamp-only change to this unchanged consumer.
+                // A sibling's checkpoint must not send an unchanged reading here.
                 assert!(
                     tokio::time::timeout(Duration::from_millis(100), quiet.messages.recv())
                         .await

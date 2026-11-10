@@ -1,0 +1,2694 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Observer baseline — 4d7de3695c</title>
+<style>
+:root{color-scheme:light;--ink:#172a32;--muted:#526772;--line:#d7e2e5;--accent:#17655d}
+*{box-sizing:border-box}body{margin:0;background:#f3f6f5;color:var(--ink);font:16px/1.55 system-ui,sans-serif}
+main{max-width:1220px;margin:auto;padding:48px 28px 80px}h1{font-size:clamp(30px,4vw,48px);line-height:1.1;max-width:900px;letter-spacing:-.035em}
+h2{font-size:23px;margin-top:38px}p{max-width:1000px}.kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:12px;font-weight:700}
+.verdict{background:#e3eee9;border-left:5px solid var(--accent);padding:18px 22px}.cards{display:flex;flex-wrap:wrap;gap:18px}.card{background:white;padding:22px;flex:1;min-width:270px;border:1px solid var(--line)}.card strong{font-size:26px;display:block}.muted,small{color:var(--muted)}
+.scroll{overflow:auto}table{width:100%;border-collapse:collapse;background:white;font-size:14px}th,td{padding:11px 13px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}thead th{background:#e8efed;font-size:12px}.number{font-variant-numeric:tabular-nums;white-space:nowrap}code,pre{font:13px/1.5 ui-monospace,monospace}pre{background:#e8eeec;padding:16px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--accent)}details{margin:20px 0}summary{cursor:pointer;font-weight:650}li{margin:.55em 0}@media print{body{background:white}main{padding:0}details{display:block}}
+</style><main>
+<p class="kicker">Optimize · baseline · 2026-11-09</p>
+<h1>Authority checks dominate the remaining observer SQL.</h1>
+<p class="verdict"><strong>Inconclusive on a speedup: this establishes the kept baseline.</strong>
+No production behavior changed and no candidate was compared. All 40 samples passed.
+Unrelated Session writes caused <strong>no observed Task-history rebuild</strong>; 39/40 windows match the settled per-poll budget exactly, and one includes a partial-poll-sized surplus.
+The native wrapper accounts for 115 of 123 VM steps; Codex’s wrapper accounts for 58 of 66.</p>
+<div class="cards"><div class="card">16 native observers · quiet<strong>23.93 (19.73–27.49) ms</strong>
+CPU per ~4.2 s window, median (range), n=5.</div><div class="card">16 Codex observers · quiet<strong>11.62 (9.55–12.37) ms</strong>
+CPU per ~4.2 s window, median (range), n=5.</div></div>
+<p class="muted">These are instrumented release-build fixture CPU costs. Active workloads include the CPU of four unrelated event writes in the same process. They are not measurements of installed workers or the live server.</p>
+
+<p class="verdict"><strong>Latest measurement · 2026-11-09: inconclusive on a speedup; no candidate pair.</strong> At normal defaults, sixteen identical Session readers used 6,551.27 CPU ms per ten-second unrelated-activity window (3,909.75–7,841.11), n=5, for 160 projections and no changed frames. The reproduced post-close tail is SQLite schema destruction after the close counter fires. Next hypothesis: share one complete reader per identical demand. <a href="subscription-followup.html">Default baseline, bounded Task/Process pilots and cleanup profile</a>. The original observer results below are unchanged.</p>
+<h2>Kept checkpoint</h2><div class="scroll"><table><thead><tr><th>Commit</th><th>Value</th><th>Verdict</th><th>Hypothesis</th><th>Limiter</th></tr></thead><tbody>
+<tr><td><code>4d7de3695c9791fcc24164557c41f461703f29a4</code></td><td>Native 123; Codex 66 VM steps/poll</td><td>Keep baseline; no A/B verdict</td><td>The enclosing loops cost more than TaskUpdates::pending alone; unrelated activity does not amplify observer reads.</td><td>Per-observer authority/liveness work on a one-second clock. CPU includes instrumentation; active-mode writer cost is not isolated.</td></tr>
+<tr><td><code>17c304389</code> · focus-v1</td><td>16 Session readers: 6,551.27 CPU ms / 10 s (3,909.75–7,841.11), n=5</td><td>Baseline retained; speedup inconclusive without candidate</td><td>Share complete readers for identical server demand; <a href="subscription-followup.html">new report</a></td><td>160 unchanged projections; concurrent schema opening/destruction and SQLite allocation contention. Task/Process timing pilots remain n=1.</td></tr>
+</tbody></table></div>
+<h2>Frozen samples</h2>
+<p>Five fresh processes per workload. Workload order reverses on alternate rounds. One binary, one host, the same warmed fixture shape, 32 completed Graphs, and 1 or 16 distinct Sessions observing the same Task. Schema creation, observer startup and initial catch-up happen before timing. Each window includes 4.2 seconds of requested sleeps plus any fixture writes; actual duration (4,216–4,260 ms) and completed polls are recorded. Timers are not accelerated.</p>
+<div class="scroll"><table><thead><tr><th>Path</th><th>Observers</th><th>Workload</th><th>CPU ms/window<br>median (range)</th><th>CPU ms/poll<br>median (range)</th><th>Median CPU<br>% of one core</th><th>Polls/window<br>range</th><th>SQL/poll<br>statements / rows / VM steps</th></tr></thead><tbody><tr><th>Native</th><td>1</td><td>quiet</td><td class="number">1.71 (1.13–1.76)</td><td class="number">0.428 (0.283–0.440)</td><td>0.041%</td><td>4–4</td><td>7 / 4 / 123</td></tr><tr><th>Native</th><td>1</td><td>4 event writes</td><td class="number">20.50 (19.93–20.74)</td><td class="number">5.124 (4.983–5.184)</td><td>0.483%</td><td>4–4</td><td>7 / 4 / 123</td></tr><tr><th>Native</th><td>16</td><td>quiet</td><td class="number">23.93 (19.73–27.49)</td><td class="number">0.358 (0.308–0.423)</td><td>0.568%</td><td>64–68</td><td>7 / 4 / 123</td></tr><tr><th>Native</th><td>16</td><td>4 event writes</td><td class="number">43.64 (39.91–74.13)</td><td class="number">0.671 (0.614–1.158)</td><td>1.029%</td><td>64–66</td><td>7 [7–7.047] / 4 [4–4.031] / 123 [123–123.781]</td></tr><tr><th>Codex</th><td>1</td><td>quiet</td><td class="number">0.79 (0.70–0.91)</td><td class="number">0.198 (0.174–0.227)</td><td>0.019%</td><td>4–4</td><td>4 / 4 / 66</td></tr><tr><th>Codex</th><td>1</td><td>4 event writes</td><td class="number">19.59 (19.15–27.27)</td><td class="number">4.897 (4.788–6.816)</td><td>0.461%</td><td>4–4</td><td>4 / 4 / 66</td></tr><tr><th>Codex</th><td>16</td><td>quiet</td><td class="number">11.62 (9.55–12.37)</td><td class="number">0.174 (0.145–0.184)</td><td>0.274%</td><td>64–80</td><td>4 / 4 / 66</td></tr><tr><th>Codex</th><td>16</td><td>4 event writes</td><td class="number">31.04 (29.23–34.27)</td><td class="number">0.457 (0.388–0.507)</td><td>0.731%</td><td>64–80</td><td>4 / 4 / 66</td></tr></tbody></table></div>
+<p><strong>CPU interpretation:</strong> the quiet 1-versus-16 workloads distinguish the easier workload. SQLite work matches 7 statements / 4 rows / 123 VM steps per native poll and 4 / 4 / 66 per Codex poll in 39 of 40 windows. Trial 5-native-16-1 has 451 statements / 258 rows / 7,922 VM steps for 64 completed polls: a surplus of 3 / 2 / 50, exactly the native poll prefix (AgentProcess read, fence lookup, BEGIN). This is consistent with a poll crossing the counter-snapshot boundary; per-statement timestamps were not collected, so that attribution is an inference. The table retains the surplus and the 74.13 ms CPU sample. Active-mode CPU includes the fixture writer’s four commits; the SQL counters cover only observer-owned connections. A CPU difference between quiet and active is therefore not an observer-only speed comparison. Run-to-run ranges, not point estimates, are the comparison bar for a future candidate.</p>
+<h2>What the separate profiles show</h2>
+<p>Four additional runs—native/Codex, quiet/active, 16 observers—were profiled and excluded from the table. SQLite statement profiles attribute VM work; macOS <code>sample PID 2 1</code> supplies stacks. Most stack samples are parked. Sparse active samples establish the paths below, not reliable CPU percentages.</p>
+<div class="scroll"><table><thead><tr><th>Path</th><th>Measured operation</th><th>VM steps/poll</th><th>Source</th></tr></thead><tbody>
+<tr><td>Native</td><td>Read AgentProcess for OS liveness</td><td>33</td><td><code>journal::agent_evidence → SqliteStore::agent_process</code></td></tr>
+<tr><td>Native</td><td>Fence lookup, BEGIN IMMEDIATE, provider-context join, activated_at UPDATE, COMMIT</td><td>82</td><td><code>task_updates.rs:322 → steers.rs:42–135</code></td></tr>
+<tr><td>Native</td><td>Task-update revision</td><td>8</td><td><code>TaskUpdates::pending</code></td></tr>
+<tr><td>Codex</td><td>Attachment lookup twice</td><td>46</td><td><code>attachment_moved + pending_update → with_session_attachment</code></td></tr>
+<tr><td>Codex</td><td>Fence locator + Task-update revision</td><td>12 + 8</td><td><code>processes.rs:955; revisions.rs:44</code></td></tr>
+</tbody></table></div>
+<p>The native stacks include SQLite preparation and busy-handler waits under <code>with_provider_context</code>; Codex stacks include attachment-query preparation and fence-file work. The unchanged native tick still enters an immediate transaction and executes <code>UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch())</code>. The active profiles catch the fixture writer under <code>Connection::prepare_with_flags → sqlite3Prepare → sqlite3Insert → sqlite3CodeRowTrigger</code>: 7 native-profile and 8 Codex-profile samples on that path. These are sparse stack samples, not CPU percentages. Source: the fixture INSERT at <code>observer_measurement.rs:335</code>; production also prepares INSERTs through <code>sessions::retain_history_in</code> (<code>sessions.rs:1858</code>) and native event insertion (<code>session_events.rs:776</code>). The schema includes the large <code>canonical_session_events_insert</code> trigger (<code>0.14.8.001_release.sql:2743</code>), but these stacks do not identify one trigger’s share. Statement preparation is not counted by SQLite VM-step totals. The 74.13 ms reported sample was not itself profiled; its extra CPU variability remains unattributed.</p>
+<p><strong>Arithmetic:</strong> removing the revision read entirely would remove only 8/123 (6.5%) of native VM work or 8/66 (12.1%) of Codex VM work: at most 7.0% or 13.8% more VM-work throughput. Native BEGIN/UPDATE/COMMIT account for 31/123 (25.2%). VM steps have unequal CPU cost, so these are work bounds, not CPU or latency forecasts. The enclosing checks, not another revision-cache tweak, are the measured SQL limiter.</p>
+<h2>Behavior and lifetime</h2>
+<p>All 340 marker updates reached their intended fixture conversations and recorded acceptance. The 20 native trials each rejected one fixture delivery, then retried successfully (190 attempts for 170 native deliveries); Codex accepted 170/170. No unexpected warning/error or output assertion failed in the reported runs. No update was delivered during an unrelated-only window. All normalized delivered texts have SHA-256 <code>7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b</code>.</p>
+<p>Measured windows opened <strong>zero additional SQLite connections</strong>. Each worker’s initial connection closed at teardown. After joining every worker, another 1.1 seconds produced zero SQL statements and zero polls. Threads returned to their initial count. Native watchers ended after the fixture client exited without a database completion write. SQLite retained duplicate descriptors while the fixture writer remained open; closing that final store returned descriptors to baseline. Native process baseline: 4 FDs; warmed Codex baseline: 6 FDs (4 cold, plus Tokio’s process-wide signal pipe). This is complete fixture teardown, not proof of cancellation during an admitted read or of indefinite subscription churn.</p>
+<p><strong>What someone waits on:</strong> marker delivery was timed separately, from comment insertion through acceptance by every conversation. Native latency includes the injected retry. These background CPU results do not predict model response time or remove the one-second polling/coalescing clocks.</p>
+<div class="scroll"><table><thead><tr><th>Workload</th><th>Delivery latency · median (range), n=5</th></tr></thead><tbody><tr><td>Native · 1 · quiet</td><td>2639 (2638–2648) ms</td></tr><tr><td>Native · 1 · active</td><td>2622 (2609–2632) ms</td></tr><tr><td>Native · 16 · quiet</td><td>1349 (1225–1416) ms</td></tr><tr><td>Native · 16 · active</td><td>1135 (1077–1318) ms</td></tr><tr><td>Codex · 1 · quiet</td><td>575 (564–594) ms</td></tr><tr><td>Codex · 1 · active</td><td>549 (532–584) ms</td></tr><tr><td>Codex · 16 · quiet</td><td>1545 (892–2109) ms</td></tr><tr><td>Codex · 16 · active</td><td>1687 (1362–2198) ms</td></tr></tbody></table></div>
+<h2>Next experiment</h2>
+<p><strong>Best next measurement:</strong> isolate the real Session event-recording API on its retained connection, with the same event rate and output/receipt checks, and profile preparation separately from execution. Compare ordinary preparation with reuse of the same prepared INSERT before considering schema changes. The active profile points to repeated trigger compilation; the present fixture writes directly, so it cannot establish a production-writer speedup. That new workload needs its own frozen baseline and alternating A/B runs.<br><br>Use this exact observer harness for a smaller alternating A/B experiment that makes an already-selected native <code>Turn</code> context read-only while retaining provider fencing and selection writes. The target is the unconditional write transaction, not TaskUpdates’ 8-step revision check. Keep a change only if its CPU improvement clears these ranges and delivery/retry/lifetime outputs hold. Do not use the 25.2% VM reduction as a promised CPU win.</p>
+<p>For a radical reduction in installed CPU, the next separate baseline should exercise the server’s actual status/activity subscriptions with unrelated active Sessions, plus duplicate observer admission and cancellation/churn. The current settled-loop costs do not attribute the installed server’s reported 258% snapshot. Startup/catch-up CPU in the raw receipts includes late Task binding and initial delivery, so it is not a production startup benchmark. No shared-observer architecture is justified by this baseline alone.</p>
+<h2>Reproduce and limits</h2><p>The frozen baseline binary is also retained at <code>/tmp/loopflow-observer-baseline-4d7de3695c</code>, with the same SHA-256 below, so a later build cannot overwrite this baseline artifact.</p>
+<pre>env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test --release -p loopflow --lib observer_baseline --no-run &lt; /dev/null
+uv run python scripts/benchmarks/observer_baseline.py target/release/deps/loopflow-ef39d37f77a3438d --profile --rounds 1 --output /tmp/observer-profile-final-20261109
+uv run python scripts/benchmarks/observer_baseline.py target/release/deps/loopflow-ef39d37f77a3438d --rounds 5 --output /tmp/observer-baseline-20261109
+uv run python /tmp/observer_profile_active.py</pre>
+<p>The runner removes inherited LF_* variables, creates a fresh HOME/cwd per trial, and the test creates an isolated LF_HOME/database. Per-case variables: <code>OBSERVER_KIND=native|codex</code>, <code>OBSERVER_COUNT=1|16</code>, <code>OBSERVER_ACTIVE=0|1</code>; separate profile runs set <code>OBSERVER_PROFILE=1</code>. The active profile driver runs the same frozen binary with active=1, count=16 and <code>sample PID 2 1 -file …</code> after its READY line.</p>
+<ul>
+<li>Host: Mac16,5, arm64, 16 CPUs; macOS 26.0.1 (25A362); rustc 1.98.1 (48a229cea), Cargo 1.98.1. Cargo’s default release optimization matches local install builds; this is a cfg(test) library binary with test-only tracing, not an installed lf executable.</li>
+<li>Observers share one OS process/database and one sleeping fixture client. Codex workers each use the production two-worker Tokio runtime shape, with a local WebSocket fake provider. Native calls the production watch loop with mocked delivery. Per-process SQLite locking and shared caches may differ from separate production workers.</li>
+<li>CPU is getrusage(RUSAGE_SELF), user plus system. It includes counters, the idle fixture driver, and active-mode writes. No background load was manufactured; existing Rust/Python/agent workloads were left running. The test workers received no taskpolicy changes.</li>
+<li>Poll counts and context switches are recorded; kernel wakeups are not measured. SQLite opens/closes are traced. Runtime construction is fixture-owned; there is no independent runtime-open or child-exec tracer. Do not infer zero Git launches or zero kernel wakeups from missing counters.</li>
+<li>VM counters use SQLite’s cumulative statement status. The measured observer queries prepare fresh statements. A future prepared-statement-reuse experiment must reset or difference those counters and establish a new baseline rather than summing cumulative values.</li>
+<li>This covers settled history, not busy/live Graphs, read-error recovery, provider reconnect, cancellation during setup/read, duplicate hooks, server subscriber sharing, or repeated in-process subscription churn. Prior component regressions remain separate results.</li>
+<li>All pre-freeze pilots are excluded: a missing comment timestamp, an invalid fixture trace identity that prevented liveness resolution, and overly strict FD accounting were repaired before this frozen run. Their missing values were not treated as zeros.</li>
+<li>Validation: release fixture profiles and 40 samples passed; cargo fmt --check, cargo clippy --all-targets -- -D warnings, Ruff and git diff --check passed. Production source behavior, installed binaries, scheduling policy, active Sessions, and research/parent HTML were unchanged.</li>
+</ul>
+<details><summary>Frozen build and harness hashes</summary><pre>{
+  &quot;revision&quot;: &quot;4d7de3695c9791fcc24164557c41f461703f29a4&quot;,
+  &quot;binary&quot;: &quot;/Users/jack/src/loopflow.agent/target/release/deps/loopflow-ef39d37f77a3438d&quot;,
+  &quot;binary_sha256&quot;: &quot;1c9b3607347de3378420429b8db1844d1ab4a78dd46aec767f0aaf4eba0453ec&quot;,
+  &quot;harness_sha256&quot;: {
+    &quot;rust/loopflow/src/performance.rs&quot;: &quot;4814f39a87241b97d30e5b5393a0a1893f7efd975d7f31135efc63df101b79f9&quot;,
+    &quot;rust/loopflow/src/performance/observer_measurement.rs&quot;: &quot;890d0a6c7f17a695b24abb194a4722b8fb0c17a93a52480d3778e2c533b314bc&quot;,
+    &quot;rust/loopflow/src/harness/codex_connection.rs&quot;: &quot;d1c2c784c0495dab32b3636d4ca72dddb3e2a17cc81aeebbb70331f8f58d7d11&quot;,
+    &quot;rust/loopflow/src/harness/observer_measurement.rs&quot;: &quot;c983a6c8befc0fd12b64acdef5012b5b03095fad60baad0579c198b7afd52017&quot;,
+    &quot;/Users/jack/src/loopflow.agent/scripts/benchmarks/observer_baseline.py&quot;: &quot;3b5419f65f5060d55b671e3722a47515f1d3026a0a55363e63add8ddc582274e&quot;
+  },
+  &quot;profile&quot;: false,
+  &quot;rounds&quot;: 5
+}</pre></details>
+<details><summary>All 40 receipts (including setup and teardown counts)</summary><pre>[
+  {
+    &quot;label&quot;: &quot;1-native-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4229.089541,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 1.1310000000000855,
+      &quot;involuntary_switches&quot;: 9,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 33.820000000000164,
+      &quot;involuntary_switches&quot;: 95,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2639.246958,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.0060000000000854925,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-native-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4257.732875000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 19.932999999999993,
+      &quot;involuntary_switches&quot;: 11,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 31.891999999999825,
+      &quot;involuntary_switches&quot;: 93,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2621.983959,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007000000000061846,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-native-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4236.913875,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 19.733000000000175,
+      &quot;involuntary_switches&quot;: 87,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 448,
+      &quot;vm_steps&quot;: 7872,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 3344.536,
+      &quot;involuntary_switches&quot;: 144912,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 21105,
+      &quot;statements&quot;: 4186,
+      &quot;vm_steps&quot;: 2354006,
+      &quot;voluntary_switches&quot;: 83,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1415.994,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009000000000014552,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-native-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4259.550458,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 39.91199999999935,
+      &quot;involuntary_switches&quot;: 94,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 65,
+      &quot;rows&quot;: 260,
+      &quot;statements&quot;: 455,
+      &quot;vm_steps&quot;: 7995,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4120.99,
+      &quot;involuntary_switches&quot;: 184272,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 20059,
+      &quot;statements&quot;: 4030,
+      &quot;vm_steps&quot;: 2326588,
+      &quot;voluntary_switches&quot;: 83,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1088.6463339999998,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007999999999810825,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-codex-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4238.834833,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.7929999999998927,
+      &quot;involuntary_switches&quot;: 14,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 37.94300000000021,
+      &quot;involuntary_switches&quot;: 167,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 563.788375,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009000000000014552,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-codex-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4257.5565,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 19.15000000000009,
+      &quot;involuntary_switches&quot;: 14,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 38.309999999999945,
+      &quot;involuntary_switches&quot;: 166,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 539.6514169999999,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007000000000061846,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-codex-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4234.563125000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 11.622000000000298,
+      &quot;involuntary_switches&quot;: 166,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 80,
+      &quot;rows&quot;: 320,
+      &quot;statements&quot;: 320,
+      &quot;vm_steps&quot;: 5280,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4886.334999999999,
+      &quot;involuntary_switches&quot;: 207552,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 22057,
+      &quot;statements&quot;: 4683,
+      &quot;vm_steps&quot;: 2505199,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1789.64625,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.011000000000422006,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;1-codex-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4248.734458999999,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 31.039999999999964,
+      &quot;involuntary_switches&quot;: 169,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 80,
+      &quot;rows&quot;: 320,
+      &quot;statements&quot;: 320,
+      &quot;vm_steps&quot;: 5280,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4725.437,
+      &quot;involuntary_switches&quot;: 177865,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 22057,
+      &quot;statements&quot;: 4683,
+      &quot;vm_steps&quot;: 2505177,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1686.6781250000001,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007999999999810825,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-codex-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4257.865292,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 29.23400000000038,
+      &quot;involuntary_switches&quot;: 149,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 6221.716,
+      &quot;involuntary_switches&quot;: 168173,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 20185,
+      &quot;statements&quot;: 3979,
+      &quot;vm_steps&quot;: 2318513,
+      &quot;voluntary_switches&quot;: 115,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1361.519333,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      69,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.006999999999607098,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-codex-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4228.615624999999,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 9.547999999999774,
+      &quot;involuntary_switches&quot;: 149,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4698.016,
+      &quot;involuntary_switches&quot;: 248255,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 22063,
+      &quot;statements&quot;: 4708,
+      &quot;vm_steps&quot;: 2602263,
+      &quot;voluntary_switches&quot;: 116,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 892.383542,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      66,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.006999999999607098,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-codex-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4247.397833,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 19.58699999999999,
+      &quot;involuntary_switches&quot;: 15,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 38.7349999999999,
+      &quot;involuntary_switches&quot;: 166,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 549.393875,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.014000000000123691,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-codex-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4219.1825,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.6970000000001164,
+      &quot;involuntary_switches&quot;: 14,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 37.276000000000295,
+      &quot;involuntary_switches&quot;: 168,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 587.2971660000001,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009999999999990905,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-native-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4249.207542,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 42.25500000000011,
+      &quot;involuntary_switches&quot;: 76,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 448,
+      &quot;vm_steps&quot;: 7872,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4218.419,
+      &quot;involuntary_switches&quot;: 198531,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 21105,
+      &quot;statements&quot;: 4186,
+      &quot;vm_steps&quot;: 2354006,
+      &quot;voluntary_switches&quot;: 83,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1202.845625,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.012999999999919964,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-native-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4237.241333,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 22.037000000000262,
+      &quot;involuntary_switches&quot;: 112,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 68,
+      &quot;rows&quot;: 272,
+      &quot;statements&quot;: 476,
+      &quot;vm_steps&quot;: 8364,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4483.717000000001,
+      &quot;involuntary_switches&quot;: 175858,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 92,
+      &quot;rows&quot;: 20566,
+      &quot;statements&quot;: 4080,
+      &quot;vm_steps&quot;: 2339805,
+      &quot;voluntary_switches&quot;: 84,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1348.522833,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009000000000014552,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-native-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4250.313542,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 20.114000000000033,
+      &quot;involuntary_switches&quot;: 12,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 32.89300000000003,
+      &quot;involuntary_switches&quot;: 94,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2608.6875840000002,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009999999999990905,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;2-native-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4217.454167,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 1.7590000000000146,
+      &quot;involuntary_switches&quot;: 9,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 33.78800000000001,
+      &quot;involuntary_switches&quot;: 110,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2644.3515829999997,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007000000000061846,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-native-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4217.954125,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 1.71100000000024,
+      &quot;involuntary_switches&quot;: 12,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 33.67399999999998,
+      &quot;involuntary_switches&quot;: 110,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2647.988458,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.008000000000038199,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-native-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4242.530125,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 20.49500000000012,
+      &quot;involuntary_switches&quot;: 13,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 34.10500000000002,
+      &quot;involuntary_switches&quot;: 115,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2622.136291,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.016000000000076398,
+      &quot;involuntary_switches&quot;: 2,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-native-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4215.990333,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 23.93000000000029,
+      &quot;involuntary_switches&quot;: 103,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 65,
+      &quot;rows&quot;: 260,
+      &quot;statements&quot;: 455,
+      &quot;vm_steps&quot;: 7995,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 5332.611,
+      &quot;involuntary_switches&quot;: 245812,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 22151,
+      &quot;statements&quot;: 4342,
+      &quot;vm_steps&quot;: 2381424,
+      &quot;voluntary_switches&quot;: 85,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1224.866333,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007000000000516593,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-native-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4240.89425,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 43.64499999999953,
+      &quot;involuntary_switches&quot;: 105,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 65,
+      &quot;rows&quot;: 260,
+      &quot;statements&quot;: 455,
+      &quot;vm_steps&quot;: 7995,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 5248.179,
+      &quot;involuntary_switches&quot;: 199383,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 20059,
+      &quot;statements&quot;: 4030,
+      &quot;vm_steps&quot;: 2326588,
+      &quot;voluntary_switches&quot;: 85,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1318.3653749999999,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.006999999999607098,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-codex-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4219.558625000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.8289999999999509,
+      &quot;involuntary_switches&quot;: 14,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 39.2650000000001,
+      &quot;involuntary_switches&quot;: 198,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 571.0621249999999,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      7,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009999999999990905,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-codex-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4233.646458,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 19.451999999999998,
+      &quot;involuntary_switches&quot;: 18,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 39.08200000000011,
+      &quot;involuntary_switches&quot;: 190,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 576.058041,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.008000000000265572,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-codex-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4222.534583,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 11.119000000000597,
+      &quot;involuntary_switches&quot;: 162,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 6443.648999999999,
+      &quot;involuntary_switches&quot;: 197996,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 127,
+      &quot;rows&quot;: 21943,
+      &quot;statements&quot;: 4661,
+      &quot;vm_steps&quot;: 2566573,
+      &quot;voluntary_switches&quot;: 116,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1544.587875,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.008000000001629815,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;3-codex-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4240.139708,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 32.4350000000004,
+      &quot;involuntary_switches&quot;: 166,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 5269.313,
+      &quot;involuntary_switches&quot;: 202941,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 22057,
+      &quot;statements&quot;: 4683,
+      &quot;vm_steps&quot;: 2505353,
+      &quot;voluntary_switches&quot;: 115,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1704.717875,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.010000000002037268,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-codex-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4229.407417,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 34.27099999999882,
+      &quot;involuntary_switches&quot;: 339,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 79,
+      &quot;rows&quot;: 316,
+      &quot;statements&quot;: 316,
+      &quot;vm_steps&quot;: 5214,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 6092.638999999999,
+      &quot;involuntary_switches&quot;: 230253,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 129,
+      &quot;rows&quot;: 22061,
+      &quot;statements&quot;: 4687,
+      &quot;vm_steps&quot;: 2505265,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 2197.6485000000002,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      66,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.00999999999839929,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-codex-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4222.288542,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 12.373999999999796,
+      &quot;involuntary_switches&quot;: 169,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 68,
+      &quot;rows&quot;: 272,
+      &quot;statements&quot;: 272,
+      &quot;vm_steps&quot;: 4488,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 8648.056999999999,
+      &quot;involuntary_switches&quot;: 201928,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 120,
+      &quot;rows&quot;: 20980,
+      &quot;statements&quot;: 4263,
+      &quot;vm_steps&quot;: 2399950,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 2109.074459,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      69,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.014999999999417923,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-codex-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4233.9808330000005,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 20.748999999999796,
+      &quot;involuntary_switches&quot;: 31,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 55.146999999999935,
+      &quot;involuntary_switches&quot;: 191,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 583.984375,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.008000000000265572,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-codex-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4220.623291,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.9079999999999018,
+      &quot;involuntary_switches&quot;: 14,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 49.440000000000055,
+      &quot;involuntary_switches&quot;: 156,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 7,
+      &quot;rows&quot;: 1701,
+      &quot;statements&quot;: 315,
+      &quot;vm_steps&quot;: 155702,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 575.4304169999999,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.010000000000218279,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-native-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4235.519208999999,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 47.96299999999974,
+      &quot;involuntary_switches&quot;: 111,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 66,
+      &quot;rows&quot;: 264,
+      &quot;statements&quot;: 462,
+      &quot;vm_steps&quot;: 8118,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 3362.687,
+      &quot;involuntary_switches&quot;: 85730,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 105,
+      &quot;rows&quot;: 21141,
+      &quot;statements&quot;: 4249,
+      &quot;vm_steps&quot;: 2355113,
+      &quot;voluntary_switches&quot;: 89,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1077.303167,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.011000000000422006,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-native-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4220.008083,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 24.01800000000003,
+      &quot;involuntary_switches&quot;: 84,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 67,
+      &quot;rows&quot;: 268,
+      &quot;statements&quot;: 469,
+      &quot;vm_steps&quot;: 8241,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 7367.678,
+      &quot;involuntary_switches&quot;: 216276,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 95,
+      &quot;rows&quot;: 21624,
+      &quot;statements&quot;: 4257,
+      &quot;vm_steps&quot;: 2367592,
+      &quot;voluntary_switches&quot;: 86,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1286.155167,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.010999999998603016,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-native-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4235.321416,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 20.736000000000104,
+      &quot;involuntary_switches&quot;: 25,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 33.6569999999997,
+      &quot;involuntary_switches&quot;: 104,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2631.846833,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009000000000014552,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;4-native-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4217.446208,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 1.5359999999998308,
+      &quot;involuntary_switches&quot;: 9,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 33.585000000000036,
+      &quot;involuntary_switches&quot;: 116,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2638.907666,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.008000000000265572,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-native-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4216.3117919999995,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 1.7139999999999418,
+      &quot;involuntary_switches&quot;: 10,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 35.95000000000027,
+      &quot;involuntary_switches&quot;: 120,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2638.0885,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009999999999990905,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-native-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4233.910916,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 20.576000000000022,
+      &quot;involuntary_switches&quot;: 12,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 28,
+      &quot;vm_steps&quot;: 492,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 34.38099999999986,
+      &quot;involuntary_switches&quot;: 114,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 6,
+      &quot;rows&quot;: 1699,
+      &quot;statements&quot;: 325,
+      &quot;vm_steps&quot;: 156418,
+      &quot;voluntary_switches&quot;: 5,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 2,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 2615.5869159999997,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      10,
+      8
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      3,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009999999999990905,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-native-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4217.4775420000005,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 27.48999999999978,
+      &quot;involuntary_switches&quot;: 120,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 65,
+      &quot;rows&quot;: 260,
+      &quot;statements&quot;: 455,
+      &quot;vm_steps&quot;: 7995,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 5244.586,
+      &quot;involuntary_switches&quot;: 229710,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 98,
+      &quot;rows&quot;: 20067,
+      &quot;statements&quot;: 4044,
+      &quot;vm_steps&quot;: 2326834,
+      &quot;voluntary_switches&quot;: 83,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1385.374042,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007999999999810825,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-native-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4254.196666000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 74.13299999999981,
+      &quot;involuntary_switches&quot;: 270,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 258,
+      &quot;statements&quot;: 451,
+      &quot;vm_steps&quot;: 7922,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 4447.474,
+      &quot;involuntary_switches&quot;: 204688,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 96,
+      &quot;rows&quot;: 24766,
+      &quot;statements&quot;: 4732,
+      &quot;vm_steps&quot;: 2449969,
+      &quot;voluntary_switches&quot;: 88,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 17,
+    &quot;injected_delivery_errors&quot;: 1,
+    &quot;delivery_ms&quot;: 1135.3271249999998,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      7,
+      55,
+      23
+    ],
+    &quot;fds_without_store&quot;: [
+      4,
+      4
+    ],
+    &quot;threads&quot;: [
+      2,
+      18,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.015000000000327418,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-codex-1-0&quot;,
+    &quot;elapsed_ms&quot;: 4222.084166000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.7739999999998872,
+      &quot;involuntary_switches&quot;: 16,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 43.91800000000012,
+      &quot;involuntary_switches&quot;: 204,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 593.763667,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.016999999999825377,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-codex-1-1&quot;,
+    &quot;elapsed_ms&quot;: 4246.1025,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 27.26599999999962,
+      &quot;involuntary_switches&quot;: 49,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 4,
+      &quot;rows&quot;: 16,
+      &quot;statements&quot;: 16,
+      &quot;vm_steps&quot;: 264,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 61.33799999999974,
+      &quot;involuntary_switches&quot;: 354,
+      &quot;opens&quot;: 1,
+      &quot;polls&quot;: 8,
+      &quot;rows&quot;: 1807,
+      &quot;statements&quot;: 363,
+      &quot;vm_steps&quot;: 166814,
+      &quot;voluntary_switches&quot;: 7,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 1,
+    &quot;delivery_attempts&quot;: 1,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 532.3290830000001,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      18,
+      10
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      6,
+      2
+    ],
+    &quot;total_opens&quot;: 1,
+    &quot;total_closes&quot;: 1,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.009000000000014552,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-codex-16-0&quot;,
+    &quot;elapsed_ms&quot;: 4217.707209,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 11.789999999999964,
+      &quot;involuntary_switches&quot;: 157,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 5193.1269999999995,
+      &quot;involuntary_switches&quot;: 267527,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 22057,
+      &quot;statements&quot;: 4683,
+      &quot;vm_steps&quot;: 2505331,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 0,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1258.121458,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.007999999999810825,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  },
+  {
+    &quot;label&quot;: &quot;5-codex-16-1&quot;,
+    &quot;elapsed_ms&quot;: 4234.759042000001,
+    &quot;work&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 30.933000000000902,
+      &quot;involuntary_switches&quot;: 168,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 64,
+      &quot;rows&quot;: 256,
+      &quot;statements&quot;: 256,
+      &quot;vm_steps&quot;: 4224,
+      &quot;voluntary_switches&quot;: 4,
+      &quot;warnings&quot;: 0
+    },
+    &quot;setup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 6720.622,
+      &quot;involuntary_switches&quot;: 185009,
+      &quot;opens&quot;: 16,
+      &quot;polls&quot;: 128,
+      &quot;rows&quot;: 20536,
+      &quot;statements&quot;: 4111,
+      &quot;vm_steps&quot;: 2353540,
+      &quot;voluntary_switches&quot;: 114,
+      &quot;warnings&quot;: 0
+    },
+    &quot;unrelated_writes&quot;: 4,
+    &quot;delivered&quot;: 16,
+    &quot;delivery_attempts&quot;: 16,
+    &quot;injected_delivery_errors&quot;: 0,
+    &quot;delivery_ms&quot;: 1613.5475000000001,
+    &quot;output_sha256&quot;: &quot;7265f86e763202ed8150d686e5e95e75a4c7e7c7dba6ac63d33d34a21a2f247b&quot;,
+    &quot;cold_fds&quot;: 4,
+    &quot;fds&quot;: [
+      9,
+      153,
+      25
+    ],
+    &quot;fds_without_store&quot;: [
+      6,
+      6
+    ],
+    &quot;threads&quot;: [
+      2,
+      67,
+      2
+    ],
+    &quot;total_opens&quot;: 16,
+    &quot;total_closes&quot;: 16,
+    &quot;post_cleanup&quot;: {
+      &quot;closes&quot;: 0,
+      &quot;cpu_ms&quot;: 0.006999999999607098,
+      &quot;involuntary_switches&quot;: 1,
+      &quot;opens&quot;: 0,
+      &quot;polls&quot;: 0,
+      &quot;rows&quot;: 0,
+      &quot;statements&quot;: 0,
+      &quot;vm_steps&quot;: 0,
+      &quot;voluntary_switches&quot;: 0,
+      &quot;warnings&quot;: 0
+    }
+  }
+]</pre></details>
+<details><summary>Separate SQL profiles</summary><pre>{
+  &quot;native quiet&quot;: {
+    &quot;BEGIN IMMEDIATE&quot;: [
+      72,
+      360
+    ],
+    &quot;COMMIT&quot;: [
+      72,
+      216
+    ],
+    &quot;SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e WHERE e.id=?1 AND e.kind=&#x27;agent&#x27;&quot;: [
+      72,
+      2376
+    ],
+    &quot;SELECT fence_locator FROM agent_sessions WHERE id=?1&quot;: [
+      72,
+      864
+    ],
+    &quot;SELECT revision FROM store_revisions WHERE domain=&#x27;task_updates&#x27;&quot;: [
+      72,
+      576
+    ],
+    &quot;SELECT s.provider_thread FROM steer_adapters a\n                 JOIN processes p ON p.id=a.agent_process_id\n                 JOIN agent_sessions s ON s.agent_process_id=p.id\n                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL&quot;: [
+      72,
+      2808
+    ],
+    &quot;UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1&quot;: [
+      72,
+      1656
+    ]
+  },
+  &quot;codex quiet&quot;: {
+    &quot;SELECT fence_locator FROM agent_sessions WHERE id=?1&quot;: [
+      64,
+      768
+    ],
+    &quot;SELECT p.attached_lf_process_id,p.attachment_token,p.parent_lf_process_id,p.id\n         FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1&quot;: [
+      128,
+      2944
+    ],
+    &quot;SELECT revision FROM store_revisions WHERE domain=&#x27;task_updates&#x27;&quot;: [
+      64,
+      512
+    ]
+  },
+  &quot;native active&quot;: {
+    &quot;BEGIN IMMEDIATE&quot;: [
+      64,
+      320
+    ],
+    &quot;COMMIT&quot;: [
+      64,
+      192
+    ],
+    &quot;SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e WHERE e.id=?1 AND e.kind=&#x27;agent&#x27;&quot;: [
+      64,
+      2112
+    ],
+    &quot;SELECT fence_locator FROM agent_sessions WHERE id=?1&quot;: [
+      64,
+      768
+    ],
+    &quot;SELECT revision FROM store_revisions WHERE domain=&#x27;task_updates&#x27;&quot;: [
+      64,
+      512
+    ],
+    &quot;SELECT s.provider_thread FROM steer_adapters a\n                 JOIN processes p ON p.id=a.agent_process_id\n                 JOIN agent_sessions s ON s.agent_process_id=p.id\n                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL&quot;: [
+      64,
+      2496
+    ],
+    &quot;UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1&quot;: [
+      64,
+      1472
+    ]
+  },
+  &quot;codex active&quot;: {
+    &quot;SELECT fence_locator FROM agent_sessions WHERE id=?1&quot;: [
+      64,
+      768
+    ],
+    &quot;SELECT p.attached_lf_process_id,p.attachment_token,p.parent_lf_process_id,p.id\n         FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1&quot;: [
+      128,
+      2944
+    ],
+    &quot;SELECT revision FROM store_revisions WHERE domain=&#x27;task_updates&#x27;&quot;: [
+      64,
+      512
+    ]
+  }
+}</pre></details>
+<p class="muted">Raw logs and profiles: /tmp/observer-baseline-20261109, /tmp/observer-profile-final-20261109, /tmp/observer-active-profile-20261109. This page embeds the reported data and needs no external assets.</p>
+</main></html>

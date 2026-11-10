@@ -762,7 +762,10 @@ fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity(unavailable: &Option<String>, body: &Option<serde_json::Value>) -> Result<[u8; 32]> {
+pub(crate) fn identity(
+    unavailable: &Option<String>,
+    body: &Option<serde_json::Value>,
+) -> Result<[u8; 32]> {
     let mut value = body.clone().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
     // Streamed: a large reading is never held a third time as bytes.

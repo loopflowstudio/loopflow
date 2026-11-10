@@ -11,10 +11,11 @@ use fs2::FileExt;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Notify, Semaphore};
+use tokio::sync::{mpsc, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec};
 
+use super::subscriptions::{Member, Subscriptions};
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
     ServerOperation, SessionAttached, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
@@ -22,7 +23,7 @@ use super::wire::{
 };
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
-use crate::lf::commands::{read::Read, subscribe::Subscription};
+use crate::lf::commands::read::Read;
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -30,13 +31,11 @@ const FIRST_MESSAGE: Duration = Duration::from_secs(5);
 const SEND: Duration = Duration::from_secs(5);
 /// Answers waiting for one connection's socket.
 const QUEUE: usize = 64;
-/// Checkpoints one subscription may have waiting.
-const CHECKPOINTS: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 type Lines = Framed<UnixStream, LinesCodec>;
-type Outgoing = mpsc::Sender<(tokio::task::Id, ServerMessage)>;
+pub(super) type Outgoing = mpsc::Sender<(tokio::task::Id, ServerMessage)>;
 
 /// Welcomed connections by client ID, as `lf server status` lists them.
 type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
@@ -128,7 +127,7 @@ impl Drop for Admitted {
     }
 }
 
-fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(super) fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     shared.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -166,6 +165,7 @@ pub(super) async fn run() -> Result<()> {
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
+    let subscriptions = Arc::new(Subscriptions::default());
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on
@@ -190,6 +190,7 @@ pub(super) async fn run() -> Result<()> {
         let clients = clients.clone();
         let slots = slots.clone();
         let tickets = tickets.clone();
+        let subscriptions = subscriptions.clone();
         tokio::spawn(async move {
             let connection = Connection {
                 instance: &instance,
@@ -197,6 +198,7 @@ pub(super) async fn run() -> Result<()> {
                 clients: &clients,
                 slots: &slots,
                 tickets: &tickets,
+                subscriptions: &subscriptions,
                 uid,
             };
             if let Err(error) = connection.serve(socket).await {
@@ -247,6 +249,7 @@ struct Connection<'a> {
     clients: &'a Clients,
     slots: &'a Arc<Semaphore>,
     tickets: &'a Tickets,
+    subscriptions: &'a Arc<Subscriptions>,
     uid: u32,
 }
 
@@ -394,7 +397,15 @@ impl Connection<'_> {
             }),
         )
         .await?;
-        session(lines, instance.into(), &admitted, self.tickets, self.uid).await
+        session(
+            lines,
+            instance.into(),
+            &admitted,
+            self.tickets,
+            self.uid,
+            self.subscriptions,
+        )
+        .await
     }
 }
 
@@ -430,7 +441,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
 /// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
-    checkpoints: Option<mpsc::Sender<u64>>,
+    checkpoints: Option<Member>,
 }
 
 async fn session(
@@ -439,6 +450,7 @@ async fn session(
     admitted: &Admitted,
     tickets: &Tickets,
     uid: u32,
+    subscriptions: &Arc<Subscriptions>,
 ) -> Result<()> {
     let (outgoing, mut queue) = mpsc::channel(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
@@ -472,11 +484,8 @@ async fn session(
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
-                                if checkpoints.try_send(checkpoint).is_err() {
-                                    // Ending the subscription tells the client to reopen it
-                                    // for a complete reading rather than drop a checkpoint.
-                                    if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::Busy, "subscription fell behind its checkpoints; subscribe again")).await?;
+                                if !checkpoints.checkpoint(checkpoint) {
+                                    send(&mut lines, &error(Some(id), ErrorCode::NotFound, "subscription has ended")).await?;
                                 }
                             }
                             None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
@@ -535,9 +544,15 @@ async fn session(
                         continue;
                     }
                     Admission::Subscribe(query, select) => {
-                        let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                        let task = tasks.spawn(subscribing(id.clone(), query, select, outgoing.clone(), inbox));
-                        Inflight { task, checkpoints: Some(checkpoints) }
+                        let (member, delivery) = match subscriptions.join(&id, query, select) {
+                            Ok(joined) => joined,
+                            Err(failure) => {
+                                send(&mut lines, &ServerMessage::error(Some(id), unavailable(failure))).await?;
+                                continue;
+                            }
+                        };
+                        let task = tasks.spawn(delivery.run(id.clone(), outgoing.clone()));
+                        Inflight { task, checkpoints: Some(member) }
                     }
                     Admission::Request(operation, select) => {
                         let task = tasks.spawn(request(id.clone(), operation, select, instance.clone(), outgoing.clone()));
@@ -691,7 +706,7 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
 }
 
 /// A read that failed without naming a code depends on something unavailable.
-fn unavailable(error: impl Into<anyhow::Error>) -> Error {
+pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
@@ -796,109 +811,6 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-async fn subscribing(
-    id: String,
-    query: Read,
-    select: Option<Vec<String>>,
-    outgoing: Outgoing,
-    checkpoints: mpsc::Receiver<u64>,
-) {
-    if let Err(failure) = subscribe(&id, query, select, &outgoing, checkpoints).await {
-        // The error ends the subscription for the client; a subscription that
-        // started sent its failure as its last reading.
-        let _ = deliver(
-            &outgoing,
-            ServerMessage::error(Some(id), unavailable(failure)),
-        )
-        .await;
-    }
-}
-
-/// The shared subscription owns a blocking runtime, which cannot be dropped on an
-/// async worker. However its task ends, the subscription leaves through a blocking one.
-struct Held(Option<Arc<Subscription>>);
-
-impl std::ops::Deref for Held {
-    type Target = Arc<Subscription>;
-
-    fn deref(&self) -> &Arc<Subscription> {
-        self.0
-            .as_ref()
-            .expect("the subscription is held until drop")
-    }
-}
-
-impl Drop for Held {
-    fn drop(&mut self) {
-        let subscription = self.0.take();
-        tokio::task::spawn_blocking(move || drop(subscription));
-    }
-}
-
-async fn subscribe(
-    id: &str,
-    query: Read,
-    select: Option<Vec<String>>,
-    outgoing: &Outgoing,
-    mut checkpoints: mpsc::Receiver<u64>,
-) -> Result<()> {
-    let notify = Arc::new(Notify::new());
-    let wake = notify.clone();
-    let ends = query.clone();
-    #[cfg(test)]
-    let mut pause = subscription_measurement::take_pause(id, "setup");
-    let subscription = Held(Some(Arc::new(
-        tokio::task::spawn_blocking(move || {
-            #[cfg(test)]
-            if let Some(pause) = &mut pause {
-                pause.wait();
-            }
-            crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
-        })
-        .await??,
-    )));
-    deliver(
-        outgoing,
-        ServerMessage::Response {
-            id: id.into(),
-            trace_id: crate::id::TraceId::default(),
-            result: serde_json::Value::Null,
-        },
-    )
-    .await?;
-    loop {
-        tokio::select! {
-            checkpoint = checkpoints.recv() => {
-                let Some(checkpoint) = checkpoint else { return Ok(()) };
-                subscription.checkpoint(checkpoint);
-            }
-            () = notify.notified() => {
-                let pull = Arc::clone(&subscription);
-                #[cfg(test)]
-                let mut pause = subscription_measurement::take_pause(id, "pull");
-                let frame = tokio::task::spawn_blocking(move || {
-                    #[cfg(test)]
-                    if let Some(pause) = &mut pause { pause.wait(); }
-                    crate::journal::request::isolate(|| pull.pull())
-                }).await?;
-                let mut reason = None;
-                if let Some(frame) = frame {
-                    let frame: serde_json::Value = serde_json::from_slice(&frame)?;
-                    reason = frame["unavailable"].as_str().map(str::to_owned);
-                    let last = ends.ends_after(&frame["body"]);
-                    deliver(outgoing, ServerMessage::Reading { id: id.into(), frame }).await?;
-                    if last {
-                        return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
-                    }
-                }
-                if subscription.ended() {
-                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
-                }
-            }
-        }
-    }
-}
-
 fn error(id: Option<String>, code: ErrorCode, message: impl Into<String>) -> ServerMessage {
     ServerMessage::error(id, Error::new(code, message))
 }
@@ -908,7 +820,7 @@ fn line(message: &ServerMessage) -> String {
     serde_json::to_string(message).expect("server messages serialize")
 }
 
-async fn deliver(outgoing: &Outgoing, message: ServerMessage) -> Result<()> {
+pub(super) async fn deliver(outgoing: &Outgoing, message: ServerMessage) -> Result<()> {
     outgoing
         .send((tokio::task::id(), message))
         .await
@@ -937,6 +849,7 @@ mod tests {
     use crate::engine::ErrorCode;
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
+    use crate::server::subscriptions::Subscriptions;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, MAX_MESSAGE, REVISION,
     };
@@ -967,8 +880,13 @@ mod tests {
         }
 
         fn connect_to(clients: &Clients) -> Self {
+            Self::connect_with(clients, &Arc::new(Subscriptions::default()))
+        }
+
+        fn connect_with(clients: &Clients, subscriptions: &Arc<Subscriptions>) -> Self {
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
+            let subscriptions = subscriptions.clone();
             let server = tokio::spawn(async move {
                 let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
                 Connection {
@@ -977,6 +895,7 @@ mod tests {
                     clients: &clients,
                     slots: &slots,
                     tickets: &Tickets::default(),
+                    subscriptions: &subscriptions,
                     uid: 501,
                 }
                 .serve(server)
@@ -1165,6 +1084,7 @@ mod tests {
                 clients: &Clients::default(),
                 slots: &slots,
                 tickets: &Tickets::default(),
+                subscriptions: &Arc::new(Subscriptions::default()),
                 uid: 501,
             }
             .serve(server)
@@ -1536,7 +1456,7 @@ mod tests {
                     .send(&ClientMessage::Subscribe {
                         id: "peer".into(),
                         operation: Read::ProcessList,
-                        select: None,
+                        select: Some(vec!["id".into()]),
                     })
                     .await;
                 assert!(
@@ -1590,7 +1510,90 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known baseline failure: canceled queued setup still runs; tracked in subscription experiment"]
+    fn identical_subscriptions_share_one_reader_across_connections() {
+        use crate::performance::subscription_measurement as meter;
+        with_empty_home(async {
+            let registry = Arc::new(Subscriptions::default());
+            let clients = Clients::default();
+            let mut first = Client::connect_with(&clients, &registry);
+            let mut second = Client::connect_with(&clients, &registry);
+            first.hello(REVISION, REVISION).await;
+            second.hello(REVISION, REVISION).await;
+            meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+            let before = meter::snapshot();
+            let setup = super::subscription_measurement::pause("shared", "setup");
+            first
+                .send(&ClientMessage::Subscribe {
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            setup.entered.await.unwrap();
+            first
+                .send(&ClientMessage::Subscribe {
+                    id: "same-socket".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            second
+                .send(&ClientMessage::Subscribe {
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            for client in [&mut first, &mut second] {
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "admission-barrier".into(),
+                        checkpoint: 0,
+                    })
+                    .await;
+                assert!(matches!(
+                    client.receive().await.unwrap(),
+                    ServerMessage::Error {
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+            }
+            setup.release.send(()).unwrap();
+            let mut bodies = Vec::new();
+            for (client, count) in [(&mut first, 4), (&mut second, 2)] {
+                for _ in 0..count {
+                    match client.receive().await.unwrap() {
+                        ServerMessage::Response { .. } => {}
+                        ServerMessage::Reading { frame, .. } => bodies.push(frame),
+                        message => panic!("unexpected {message:?}"),
+                    }
+                }
+            }
+            assert_eq!(bodies.len(), 3);
+            assert!(bodies.iter().all(|body| *body == bodies[0]));
+            let work = meter::snapshot().since(before);
+            meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+            assert_eq!(work.stages["runtime_build"].count, 1);
+            assert_eq!(work.stages["projection"].count, 1);
+            drop(first.writer);
+            first.server.await.unwrap().unwrap();
+            second
+                .send(&ClientMessage::Checkpoint {
+                    id: "shared".into(),
+                    checkpoint: 3,
+                })
+                .await;
+            let ServerMessage::Reading { frame, .. } = second.receive().await.unwrap() else {
+                panic!("sibling lost its reader")
+            };
+            assert_eq!(frame["answers"], 3);
+            drop(second.writer);
+            second.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
     fn queued_subscription_cancellation_skips_construction() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -1648,7 +1651,7 @@ mod tests {
                 }
             ));
             // Wake the canceled job if it runs, then drain everything before the assertion.
-            pause.release.send(()).unwrap();
+            let _ = pause.release.send(());
             for release in releases {
                 release.send(()).unwrap();
             }
@@ -1699,4 +1702,4 @@ mod tests {
 
 #[cfg(test)]
 #[path = "subscription_measurement.rs"]
-mod subscription_measurement;
+pub(super) mod subscription_measurement;

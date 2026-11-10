@@ -1,0 +1,3904 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Default subscription follow-up</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:1180px;margin:40px auto;padding:0 24px;background:#f6f8f5;color:#16312d}h1{font-size:36px;line-height:1.1}h2{margin-top:36px}table{border-collapse:collapse;width:100%;font-size:14px;background:white;font-variant-numeric:tabular-nums}td,th{text-align:left;vertical-align:top;border-bottom:1px solid #cbd7d1;padding:10px}th{background:#e3ece6}.verdict{border-left:4px solid #276e59;background:#e4f0e8;padding:16px 22px}pre{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;background:#e4ece7;padding:16px}a{color:#1a6659}details{margin:18px 0}small{color:#526a63}</style>
+<h1>Identical readers repeat the expensive work.</h1><p>Optimize step 4 · 2026-11-09 · unchanged source <code>17c304389</code> · normal runtime defaults</p>
+<p class="verdict"><b>Inconclusive on a speedup; the repeated baseline supports sharing one complete reader per identical demand.</b> Sixteen Session readers used 6,551.27 CPU ms per ten-second active window (3,909.75–7,841.11), n=5, for 160 projections and no changed frames. One reader used 103.07 ms (87.10–117.75), for ten projections. No production candidate was built.</p>
+<p>This new focused workload omits the old 32/128-cycle and five-cohort churn phases. It retains cold warm-up, a separate runtime probe, admission/first reading/checkpoint, ten-second quiet and unrelated-activity windows, title/exit delivery, cancellation, and two 2.2-second tail windows. Five fresh processes per population alternate shape and window order. Do not pool these values with the original full-churn workload.</p>
+<h2>Default Session baseline</h2><p>Server CPU milliseconds, median (range), five runs per row. Setup, writer, driver and child CPU are separate. Cycle CPU includes admission/checkpoint, cancellation and both tails; it is not a latency.</p>
+<table><thead><tr><th>Readers</th><th>Cycle CPU ms</th><th>Admission/checkpoint CPU ms</th><th>Quiet CPU ms / 10 s</th><th>Active CPU ms / 10 s</th><th>Post-close CPU ms / 2.2 s</th></tr></thead><tbody><tr><td>1</td><td>33.21 (29.22–51.87)</td><td>30.33 (26.94–48.66)</td><td>7.42 (5.02–7.69)</td><td>103.07 (87.10–117.75)</td><td>0.26 (0.06–0.57)</td></tr><tr><td>16</td><td>2,971.22 (2,135.32–5,095.92)</td><td>2,784.45 (1,687.52–4,642.09)</td><td>54.14 (52.54–58.16)</td><td>6,551.27 (3,909.75–7,841.11)</td><td>377.85 (150.07–455.36)</td></tr></tbody></table>
+<p>Every active window recorded ten capture receipts and attachment-valid activity writes. Admission/checkpoint made 2/32 projections, opened 1/16 reader stores and 2/32 SQLite connections. Active windows opened zero connections. Quiet windows made zero projections; active windows made 10/160. No changed frames appeared in either window. All normalized initial Session readings matched; expected title changes and unrecorded process exits reached all clients. All ten samples passed.</p>
+<p>Last initial-reading latency: 42.4 ms (33.1–63.7) at one reader, 515.1 ms (469.9–542.7) at sixteen. Last checkpoint: 10.6 ms (9.5–87.9) and 122.1 ms (114.9–135.3). Lower background CPU does not automatically remove the coalescing/liveness clocks.</p>
+<h2>The cleanup tail has a cause</h2>
+<p>The first 2.2 seconds after the old “drained” predicate cost sixteen readers 377.85 CPU ms (150.07–455.36), n=5. The next 2.2 seconds cost only 0.026 ms (0.024–0.036). Both windows performed zero SQL/projections. Final reader runtimes, runtime threads, wake threads and connections balanced, and FDs returned to 17.</p>
+<p>A separate profile captured <code>Held::drop → Reader/Store/Connection drop → sqlite3Close → sqlite3SchemaClear → trigger/expression destruction</code>, including allocator mutex waits. Its first 54 ms after the gate consumed 402 CPU ms, with no new SQL or close callbacks. SQLite invokes <code>SQLITE_TRACE_CLOSE</code> before schema destruction. The existing counter gate therefore measures close initiation, not completed destruction. Keep CPU accounting through the tail; an actual-drop completion counter would require a newly frozen baseline.</p>
+<p>The first profile attached too late and supplied no teardown stack. Both profile runs are excluded from the timing ranges. The new trace explains the reproduced tail; the original unprofiled 371 ms sample has no retrospective stack attribution. Sampling includes parked threads and supplies no reliable CPU percentages.</p>
+<h2>Bounded TaskGet and ProcessList pilots</h2><p>One successful unprofiled run per row; these are pilots with no trustworthy timing range and no A/B significance claim. Task data has sixteen real isolated Git checkouts, two completed Graph processes per Task, a captured Task Graph and a primary Session. Identical and distinct Task demand use the same database size. ProcessList contains live fixture AgentProcesses and verifies their removal after an unrecorded exit.</p>
+<table><thead><tr><th>Path</th><th>Readers</th><th>Admission/checkpoint CPU ms</th><th>Quiet CPU ms / 10 s</th><th>Active CPU ms / 10 s</th><th>Quiet / active projections</th><th>SQLite opens at admission</th><th>Active child CPU ms</th></tr></thead><tbody><tr><td>ProcessList</td><td>1</td><td>12.48</td><td>2.73</td><td>9.65</td><td>4 / 11</td><td>3</td><td>0.00</td></tr><tr><td>ProcessList</td><td>16</td><td>3,562.27</td><td>46.20</td><td>90.16</td><td>74 / 166</td><td>48</td><td>0.00</td></tr><tr><td>TaskGet · one</td><td>1</td><td>65.81</td><td>72.57</td><td>143.64</td><td>5 / 10</td><td>4</td><td>273.14</td></tr><tr><td>TaskGet · identical</td><td>16</td><td>8,781.86</td><td>4,057.53</td><td>3,498.82</td><td>80 / 160</td><td>64</td><td>4,220.28</td></tr><tr><td>TaskGet · distinct</td><td>16</td><td>5,239.93</td><td>2,444.02</td><td>4,323.43</td><td>68 / 172</td><td>64</td><td>4,241.77</td></tr></tbody></table>
+<p>At sixteen Task readers, active-window child CPU adds 4,220 ms for identical demand and 4,242 ms for distinct demand, separate from the server CPU above. These are reaped-child CPU totals, not identified Git-launch counts; inventory ps runs outside phases. The distinct pilot also completed twelve projections during cancellation; all are counted in the raw receipts. After cleanup all pilots were SQL/projection quiet.</p><p>Task pilots validate initial Task identity, checkout, two returned Graph details, captured Graph and nonempty Desktop row, then verify a relevant title update. The first Task calibration failed in the Python driver because a comprehension variable shadowed the operation kind. It has no timing result. The repaired one-reader calibration passed and is retained above as a pilot. Queued setup cancellation remains the separate failing acceptance check from step 3.</p>
+<h2>Next hypothesis and limits</h2><p>Share one complete reader and in-flight computation for identical server demand, with separate consumer delivery/checkpoint state. This addresses repeated store/schema opening, projection and destruction. Preserve post-checkpoint freshness, independent cancellation, error recovery, and provider ownership. Do not borrow the outer server blocking pool: the existing saturation test disproves that design.</p>
+<p>Removing fifteen of sixteen identical computations eliminates 93.75% of projection count, not necessarily CPU. The pure sequential runtime probe at sixteen readers was 1.12 ms/cycle (0.81–1.34); sixteen copies total about 18 ms, only 0.6% of the 2,971 ms whole-cycle CPU median. Concurrent runtime/store interactions remain unisolated. No runtime-only speedup is established. Distinct demand and operation-specific invalidation need separate treatment; these pilots do not select a concurrency limit.</p>
+<p>These are instrumented release-test fixtures on one busy Machine, not installed-server recovery measurements. Existing workloads were left alone. Task pilots have completed Graph history, not live Graph transitions or the full production history size. The identical Task pilot’s higher quiet CPU despite half the active projection count remains unexplained at n=1; it is not a speed comparison. No OS wakeup or child-launch counts were collected. Server child CPU counts reaped children; inventory ps is outside phases. Setup SQL is uncounted. Normalized Session digests cover id/title/state; full initial bodies and all raw receipts are retained. Stronger full-output normalization or final-drop instrumentation starts a new baseline.</p>
+<p>Commands, source mappings and limits: <a href="subscription-followup.md">measurement note</a>. Earlier results remain valid in <a href="subscription-measure.html">25 capped subscription samples</a> and <a href="measure.html">40 observer samples</a>.</p>
+<h2>Separated CPU accounting</h2>
+<table><thead><tr><th>Path / readers</th><th>Server setup CPU ms</th><th>Writer API CPU ms / ten writes</th><th>Driver active CPU ms</th><th>Server child admission CPU ms</th></tr></thead><tbody><tr><td>SessionList / 1</td><td>22954.1, 20887.5, 18126.3, 19900.3, 21685.1</td><td>117.03 (100.34–129.51)</td><td>14.50 (13.04–17.04)</td><td>11.74 (10.14–16.53)</td></tr><tr><td>SessionList / 16</td><td>21693.8, 19614.5, 19955.7, 19992.6, 17402.2</td><td>109.12 (103.57–135.59)</td><td>14.08 (13.09–16.78)</td><td>255.70 (219.52–286.26)</td></tr><tr><td>ProcessList / 1</td><td>17878.4</td><td>92.45</td><td>12.23</td><td>0.00</td></tr><tr><td>ProcessList / 16</td><td>17192.4</td><td>110.54</td><td>14.76</td><td>0.00</td></tr><tr><td>TaskGet · one / 1</td><td>17390.5</td><td>118.82</td><td>14.86</td><td>81.75</td></tr><tr><td>TaskGet · identical / 16</td><td>15601.2</td><td>115.91</td><td>14.57</td><td>1,230.67</td></tr><tr><td>TaskGet · distinct / 16</td><td>17674.5</td><td>109.04</td><td>14.52</td><td>1,205.59</td></tr></tbody></table>
+<details><summary>Frozen binary and driver hashes</summary><pre>{
+  &quot;source&quot;: &quot;17c304389&quot;,
+  &quot;server&quot;: &quot;/tmp/subscription-experiment-20261109/default-server&quot;,
+  &quot;server_sha256&quot;: &quot;a8531bca7c88678b666ad1d793276f08c14bbb6230b44d8a30916fb6bf071413&quot;,
+  &quot;files&quot;: {
+    &quot;focus-v1.py&quot;: &quot;5047a602a463f44d4e3b9cedd2f338b71c8f8dcd352c0361d90bfe8c561e2d70&quot;,
+    &quot;paths-v1.py&quot;: &quot;e26ca715fe6820a614461564333bc34af8672aad4bcc24f19616559ee3fdb48b&quot;,
+    &quot;path_support.py&quot;: &quot;b18d172e6519a1fcb282a19af3cf2f7ad4bd94857d94c37a1697ee9e74b3c014&quot;,
+    &quot;profile-driver-v1.py&quot;: &quot;65f9441598462f1bf64e8bf5050d549133a381f2f6788764170fac4f01abafee&quot;,
+    &quot;profile-driver-tail.py&quot;: &quot;03e42053da9fd6cdc3cb4c3d49d7482a7e0741c06162a50a70be57e513d48d98&quot;
+  }
+}
+</pre></details>
+<details><summary>All phase, work-count and resource summaries</summary><pre>[
+  {
+    &quot;workload&quot;: &quot;session-baseline&quot;,
+    &quot;count&quot;: 1,
+    &quot;n&quot;: 5,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/session-baseline/1-1-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/2-1-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/3-1-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/4-1-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/5-1-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 35.44700000000046,
+          &quot;min&quot;: 30.432000000003057,
+          &quot;max&quot;: 46.63499999999817
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 13.391,
+          &quot;min&quot;: 12.096,
+          &quot;max&quot;: 14.894
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 57.88162490352988,
+          &quot;min&quot;: 48.71049989014864,
+          &quot;max&quot;: 122.38712492398918
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 3.8240000000000496,
+          &quot;min&quot;: 3.082999999999947,
+          &quot;max&quot;: 5.736999999999992
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 58,
+          &quot;min&quot;: 58,
+          &quot;max&quot;: 58
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 406004,
+          &quot;min&quot;: 406002,
+          &quot;max&quot;: 406004
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2.968000000000984,
+          &quot;min&quot;: 2.5989999999992506,
+          &quot;max&quot;: 6.022999999999854
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2.263834001496434,
+          &quot;min&quot;: 1.528542023152113,
+          &quot;max&quot;: 4.827666096389294
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.6939999999999724,
+          &quot;min&quot;: 0.5489999999999107,
+          &quot;max&quot;: 1.054999999999806
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 32.93200000000138,
+          &quot;min&quot;: 24.76300000000242,
+          &quot;max&quot;: 47.947000000001935
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 14.162917155772448,
+          &quot;min&quot;: 12.137416051700711,
+          &quot;max&quot;: 33.291625091806054
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.22500000000003073,
+          &quot;min&quot;: 0.21099999999996122,
+          &quot;max&quot;: 0.33100000000008123
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 30.333000000000737,
+          &quot;min&quot;: 26.942000000000007,
+          &quot;max&quot;: 48.66200000000185
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 11.738999999999997,
+          &quot;min&quot;: 10.137,
+          &quot;max&quot;: 16.528
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 55.32054207287729,
+          &quot;min&quot;: 42.882957961410284,
+          &quot;max&quot;: 153.76170817762613
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2.0610000000000905,
+          &quot;min&quot;: 1.974999999999949,
+          &quot;max&quot;: 3.928999999999988
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 58,
+          &quot;min&quot;: 58,
+          &quot;max&quot;: 58
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 406004,
+          &quot;min&quot;: 406002,
+          &quot;max&quot;: 406004
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 7.418000000000063,
+          &quot;min&quot;: 5.024000000000058,
+          &quot;max&quot;: 7.687000000001149
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 10013.358083087951,
+          &quot;min&quot;: 10010.467334184796,
+          &quot;max&quot;: 10017.959707882255
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 13.758000000000159,
+          &quot;min&quot;: 11.568000000000023,
+          &quot;max&quot;: 17.21699999999998
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 31,
+          &quot;min&quot;: 30,
+          &quot;max&quot;: 31
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2660,
+          &quot;min&quot;: 2645,
+          &quot;max&quot;: 2660
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 103.0730000000018,
+          &quot;min&quot;: 87.10300000000262,
+          &quot;max&quot;: 117.74500000000103
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 10009.247374953702,
+          &quot;min&quot;: 10004.097041906789,
+          &quot;max&quot;: 10013.012165902182
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 14.49900000000004,
+          &quot;min&quot;: 13.039000000000023,
+          &quot;max&quot;: 17.04
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 10,
+          &quot;min&quot;: 10,
+          &quot;max&quot;: 10
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 224,
+          &quot;min&quot;: 220,
+          &quot;max&quot;: 230
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2012310,
+          &quot;min&quot;: 2012190,
+          &quot;max&quot;: 2012480
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2.6080000000002883,
+          &quot;min&quot;: 2.187999999997487,
+          &quot;max&quot;: 3.9969999999969446
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 1.323792152106762,
+          &quot;min&quot;: 0.9894999675452709,
+          &quot;max&quot;: 4.5682089403271675
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.6850000000000467,
+          &quot;min&quot;: 0.5159999999999609,
+          &quot;max&quot;: 0.7880000000000109
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.26099999999956935,
+          &quot;min&quot;: 0.062000000002058187,
+          &quot;max&quot;: 0.5679999999988468
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2205.056875012815,
+          &quot;min&quot;: 2205.0128341652453,
+          &quot;max&quot;: 2209.6207910217345
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.21199999999998997,
+          &quot;min&quot;: 0.20100000000011775,
+          &quot;max&quot;: 0.3160000000000107
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.025999999998816747,
+          &quot;min&quot;: 0.019000000001994977,
+          &quot;max&quot;: 0.029000000002042725
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2201.337957987562,
+          &quot;min&quot;: 2200.526917120442,
+          &quot;max&quot;: 2210.329790832475
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.2790000000000292,
+          &quot;min&quot;: 0.220000000000109,
+          &quot;max&quot;: 0.32599999999982643
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 33.21300000000184,
+      &quot;min&quot;: 29.221000000001595,
+      &quot;max&quot;: 51.86500000000319
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 32.87500000000105,
+      &quot;min&quot;: 29.129999999997494,
+      &quot;max&quot;: 51.27000000000214
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 42.40216710604727,
+      &quot;min&quot;: 33.075832994654775,
+      &quot;max&quot;: 63.726082909852266
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 10.621875058859587,
+      &quot;min&quot;: 9.50737507082522,
+      &quot;max&quot;: 87.88237511180341
+    },
+    &quot;active_frames&quot;: [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 117.03100000000002,
+      &quot;min&quot;: 100.34400000000001,
+      &quot;max&quot;: 129.51399999999998
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 1.0291250000000431,
+      &quot;min&quot;: 0.7738437500000757,
+      &quot;max&quot;: 1.4983437500000605
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.8490000000000002,
+          &quot;inventory_child_user_ms&quot;: 0.9849999999999994,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.761999999999997,
+          &quot;inventory_child_user_ms&quot;: 0.9980000000000011,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.2759999999999962,
+          &quot;inventory_child_user_ms&quot;: 0.7839999999999989,
+          &quot;threads&quot;: 20
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.1239999999999988,
+          &quot;inventory_child_user_ms&quot;: 0.6770000000000014,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.2600000000000016,
+          &quot;inventory_child_user_ms&quot;: 0.727999999999998,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.1119999999999983,
+          &quot;inventory_child_user_ms&quot;: 0.6479999999999997,
+          &quot;threads&quot;: 20
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.2560000000000002,
+          &quot;inventory_child_user_ms&quot;: 0.7490000000000006,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.147000000000002,
+          &quot;inventory_child_user_ms&quot;: 0.7059999999999995,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.3880000000000017,
+          &quot;inventory_child_user_ms&quot;: 0.8290000000000006,
+          &quot;threads&quot;: 20
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.158999999999999,
+          &quot;inventory_child_user_ms&quot;: 0.7250000000000014,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.315999999999999,
+          &quot;inventory_child_user_ms&quot;: 0.782,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.5839999999999996,
+          &quot;inventory_child_user_ms&quot;: 0.9110000000000014,
+          &quot;threads&quot;: 20
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.5760000000000005,
+          &quot;inventory_child_user_ms&quot;: 0.7829999999999995,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.4770000000000003,
+          &quot;inventory_child_user_ms&quot;: 0.8150000000000013,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 0.8499999999999943,
+          &quot;inventory_child_user_ms&quot;: 0.6010000000000026,
+          &quot;threads&quot;: 20
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;session-baseline&quot;,
+    &quot;count&quot;: 16,
+    &quot;n&quot;: 5,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/session-baseline/1-16-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/2-16-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/3-16-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/4-16-multiplexed.json&quot;,
+      &quot;/tmp/subscription-measure-20261109/session-baseline/5-16-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 32.96300000000082,
+          &quot;min&quot;: 29.742000000001724,
+          &quot;max&quot;: 35.20500000000027
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 12.606000000000002,
+          &quot;min&quot;: 11.367,
+          &quot;max&quot;: 14.691000000000003
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 50.0705000013113,
+          &quot;min&quot;: 48.13745804131031,
+          &quot;max&quot;: 114.7328750230372
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 3.2759999999999456,
+          &quot;min&quot;: 3.2200000000000006,
+          &quot;max&quot;: 4.073999999999966
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 58,
+          &quot;min&quot;: 58,
+          &quot;max&quot;: 59
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 406004,
+          &quot;min&quot;: 406004,
+          &quot;max&quot;: 406034
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2.770000000001204,
+          &quot;min&quot;: 2.292000000000826,
+          &quot;max&quot;: 3.254000000002293
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 1.7376670148223639,
+          &quot;min&quot;: 1.4010828454047441,
+          &quot;max&quot;: 3.0224169604480267
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.6599999999999939,
+          &quot;min&quot;: 0.4210000000000047,
+          &quot;max&quot;: 0.8430000000000382
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 35.892000000000905,
+          &quot;min&quot;: 25.821999999997047,
+          &quot;max&quot;: 42.91800000000188
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 13.458916917443275,
+          &quot;min&quot;: 11.629458051174879,
+          &quot;max&quot;: 19.84583307057619
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.30200000000002447,
+          &quot;min&quot;: 0.25799999999998047,
+          &quot;max&quot;: 0.31199999999997896
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2784.447000000001,
+          &quot;min&quot;: 1687.5189999999989,
+          &quot;max&quot;: 4642.086000000001
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 255.704,
+          &quot;min&quot;: 219.51799999999997,
+          &quot;max&quot;: 286.263
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 633.197708055377,
+          &quot;min&quot;: 585.4287091642618,
+          &quot;max&quot;: 674.7052920982242
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 38.56300000000012,
+          &quot;min&quot;: 30.517000000000017,
+          &quot;max&quot;: 41.777999999999984
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 32,
+          &quot;min&quot;: 32,
+          &quot;max&quot;: 32
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 32,
+          &quot;min&quot;: 32,
+          &quot;max&quot;: 32
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 930,
+          &quot;min&quot;: 929,
+          &quot;max&quot;: 935
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 6496124,
+          &quot;min&quot;: 6496094,
+          &quot;max&quot;: 6496274
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 54.13500000000295,
+          &quot;min&quot;: 52.542999999997846,
+          &quot;max&quot;: 58.156000000001086
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 10019.725374877453,
+          &quot;min&quot;: 10006.181749980897,
+          &quot;max&quot;: 10025.807708036155
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 13.0269999999999,
+          &quot;min&quot;: 12.789999999999967,
+          &quot;max&quot;: 15.62399999999997
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 495,
+          &quot;min&quot;: 492,
+          &quot;max&quot;: 496
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 42560,
+          &quot;min&quot;: 42530,
+          &quot;max&quot;: 42740
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 6551.2660000000005,
+          &quot;min&quot;: 3909.745999999999,
+          &quot;max&quot;: 7841.109
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 10007.328417152166,
+          &quot;min&quot;: 10001.37983285822,
+          &quot;max&quot;: 10023.127707885578
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 14.084000000000096,
+          &quot;min&quot;: 13.093000000000021,
+          &quot;max&quot;: 16.77799999999996
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 160,
+          &quot;min&quot;: 160,
+          &quot;max&quot;: 160
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 3438,
+          &quot;min&quot;: 3410,
+          &quot;max&quot;: 3470
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 32192580,
+          &quot;min&quot;: 32191740,
+          &quot;max&quot;: 32193540
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 30.976000000002387,
+          &quot;min&quot;: 18.398999999999432,
+          &quot;max&quot;: 69.9179999999983
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 12.143125059083104,
+          &quot;min&quot;: 3.8282081950455904,
+          &quot;max&quot;: 19.25262506119907
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.8409999999999807,
+          &quot;min&quot;: 0.6310000000000482,
+          &quot;max&quot;: 1.0809999999999986
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 377.84799999999996,
+          &quot;min&quot;: 150.0739999999969,
+          &quot;max&quot;: 455.3560000000016
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2208.6878751870245,
+          &quot;min&quot;: 2200.634250184521,
+          &quot;max&quot;: 2210.422584088519
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.31399999999998096,
+          &quot;min&quot;: 0.30600000000002847,
+          &quot;max&quot;: 0.33500000000008523
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.025999999998930434,
+          &quot;min&quot;: 0.024000000003070454,
+          &quot;max&quot;: 0.03600000000005821
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 2207.2229580953717,
+          &quot;min&quot;: 2203.5415421705693,
+          &quot;max&quot;: 2208.7743328884244
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0.28000000000000247,
+          &quot;min&quot;: 0.21799999999994046,
+          &quot;max&quot;: 0.3389999999999782
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 5,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 2971.215000000002,
+      &quot;min&quot;: 2135.320999999997,
+      &quot;max&quot;: 5095.916000000005
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 2810.7170000000015,
+      &quot;min&quot;: 1757.4369999999972,
+      &quot;max&quot;: 4660.485000000001
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 515.0561660993844,
+      &quot;min&quot;: 469.93754198774695,
+      &quot;max&quot;: 542.7106251008809
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 122.12891597300768,
+      &quot;min&quot;: 114.859624998644,
+      &quot;max&quot;: 135.34387503750622
+    },
+    &quot;active_frames&quot;: [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 109.11899999999997,
+      &quot;min&quot;: 103.57100000000001,
+      &quot;max&quot;: 135.594
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 5,
+      &quot;median&quot;: 1.1216250000000283,
+      &quot;min&quot;: 0.8069374999999077,
+      &quot;max&quot;: 1.3411875000000588
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.3170000000000002,
+          &quot;inventory_child_user_ms&quot;: 0.7909999999999986,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 132,
+          &quot;inventory_child_system_ms&quot;: 2.146000000000015,
+          &quot;inventory_child_user_ms&quot;: 1.2420000000000044,
+          &quot;threads&quot;: 324
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.4819999999999993,
+          &quot;inventory_child_user_ms&quot;: 0.7930000000000064,
+          &quot;threads&quot;: 35
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.7219999999999978,
+          &quot;inventory_child_user_ms&quot;: 0.9290000000000003,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 131,
+          &quot;inventory_child_system_ms&quot;: 2.240000000000009,
+          &quot;inventory_child_user_ms&quot;: 1.4669999999999987,
+          &quot;threads&quot;: 323
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.6129999999999995,
+          &quot;inventory_child_user_ms&quot;: 0.7800000000000011,
+          &quot;threads&quot;: 35
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.0519999999999996,
+          &quot;inventory_child_user_ms&quot;: 0.6420000000000012,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 131,
+          &quot;inventory_child_system_ms&quot;: 1.6270000000000095,
+          &quot;inventory_child_user_ms&quot;: 1.0409999999999968,
+          &quot;threads&quot;: 323
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.4449999999999932,
+          &quot;inventory_child_user_ms&quot;: 0.882000000000005,
+          &quot;threads&quot;: 38
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.0359999999999978,
+          &quot;inventory_child_user_ms&quot;: 0.641,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 132,
+          &quot;inventory_child_system_ms&quot;: 1.3610000000000184,
+          &quot;inventory_child_user_ms&quot;: 0.914999999999992,
+          &quot;threads&quot;: 323
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.100999999999999,
+          &quot;inventory_child_user_ms&quot;: 0.7099999999999937,
+          &quot;threads&quot;: 36
+        }
+      },
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.4130000000000003,
+          &quot;inventory_child_user_ms&quot;: 0.7939999999999987,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 130,
+          &quot;inventory_child_system_ms&quot;: 2.076000000000022,
+          &quot;inventory_child_user_ms&quot;: 1.1269999999999953,
+          &quot;threads&quot;: 325
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.0130000000000052,
+          &quot;inventory_child_user_ms&quot;: 0.5930000000000035,
+          &quot;threads&quot;: 35
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;process-pilot&quot;,
+    &quot;count&quot;: 1,
+    &quot;n&quot;: 1,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/process-pilot/1-1-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 13.272999999997694,
+          &quot;min&quot;: 13.272999999997694,
+          &quot;max&quot;: 13.272999999997694
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.237,
+          &quot;min&quot;: 1.237,
+          &quot;max&quot;: 1.237
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 15.756208915263414,
+          &quot;min&quot;: 15.756208915263414,
+          &quot;max&quot;: 15.756208915263414
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.676999999999997,
+          &quot;min&quot;: 0.676999999999997,
+          &quot;max&quot;: 0.676999999999997
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3,
+          &quot;min&quot;: 3,
+          &quot;max&quot;: 3
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 37,
+          &quot;min&quot;: 37,
+          &quot;max&quot;: 37
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4109,
+          &quot;min&quot;: 4109,
+          &quot;max&quot;: 4109
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3.51499999999956,
+          &quot;min&quot;: 3.51499999999956,
+          &quot;max&quot;: 3.51499999999956
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 9.066832950338721,
+          &quot;min&quot;: 9.066832950338721,
+          &quot;max&quot;: 9.066832950338721
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.8520000000000194,
+          &quot;min&quot;: 0.8520000000000194,
+          &quot;max&quot;: 0.8520000000000194
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 34.8380000000019,
+          &quot;min&quot;: 34.8380000000019,
+          &quot;max&quot;: 34.8380000000019
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.414249919354916,
+          &quot;min&quot;: 14.414249919354916,
+          &quot;max&quot;: 14.414249919354916
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.3049999999999997,
+          &quot;min&quot;: 0.3049999999999997,
+          &quot;max&quot;: 0.3049999999999997
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 12.482000000002614,
+          &quot;min&quot;: 12.482000000002614,
+          &quot;max&quot;: 12.482000000002614
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 12.343459064140916,
+          &quot;min&quot;: 12.343459064140916,
+          &quot;max&quot;: 12.343459064140916
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.46700000000002295,
+          &quot;min&quot;: 0.46700000000002295,
+          &quot;max&quot;: 0.46700000000002295
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3,
+          &quot;min&quot;: 3,
+          &quot;max&quot;: 3
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 37,
+          &quot;min&quot;: 37,
+          &quot;max&quot;: 37
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4109,
+          &quot;min&quot;: 4109,
+          &quot;max&quot;: 4109
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.732999999998043,
+          &quot;min&quot;: 2.732999999998043,
+          &quot;max&quot;: 2.732999999998043
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10001.042957883328,
+          &quot;min&quot;: 10001.042957883328,
+          &quot;max&quot;: 10001.042957883328
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 11.587000000000014,
+          &quot;min&quot;: 11.587000000000014,
+          &quot;max&quot;: 11.587000000000014
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4,
+          &quot;min&quot;: 4,
+          &quot;max&quot;: 4
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 33,
+          &quot;min&quot;: 33,
+          &quot;max&quot;: 33
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 774,
+          &quot;min&quot;: 774,
+          &quot;max&quot;: 774
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 9.652999999999196,
+          &quot;min&quot;: 9.652999999999196,
+          &quot;max&quot;: 9.652999999999196
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10028.691875049844,
+          &quot;min&quot;: 10028.691875049844,
+          &quot;max&quot;: 10028.691875049844
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 12.234999999999996,
+          &quot;min&quot;: 12.234999999999996,
+          &quot;max&quot;: 12.234999999999996
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 11,
+          &quot;min&quot;: 11,
+          &quot;max&quot;: 11
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 87,
+          &quot;min&quot;: 87,
+          &quot;max&quot;: 87
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2016,
+          &quot;min&quot;: 2016,
+          &quot;max&quot;: 2016
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4.5929999999984545,
+          &quot;min&quot;: 4.5929999999984545,
+          &quot;max&quot;: 4.5929999999984545
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.328332979232073,
+          &quot;min&quot;: 2.328332979232073,
+          &quot;max&quot;: 2.328332979232073
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.5020000000000024,
+          &quot;min&quot;: 0.5020000000000024,
+          &quot;max&quot;: 0.5020000000000024
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.33900000000028285,
+          &quot;min&quot;: 0.33900000000028285,
+          &quot;max&quot;: 0.33900000000028285
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2203.8004170171916,
+          &quot;min&quot;: 2203.8004170171916,
+          &quot;max&quot;: 2203.8004170171916
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.19300000000002648,
+          &quot;min&quot;: 0.19300000000002648,
+          &quot;max&quot;: 0.19300000000002648
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.018000000002018623,
+          &quot;min&quot;: 0.018000000002018623,
+          &quot;max&quot;: 0.018000000002018623
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2210.244416957721,
+          &quot;min&quot;: 2210.244416957721,
+          &quot;max&quot;: 2210.244416957721
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.21100000000001673,
+          &quot;min&quot;: 0.21100000000001673,
+          &quot;max&quot;: 0.21100000000001673
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 17.43200000000337,
+      &quot;min&quot;: 17.43200000000337,
+      &quot;max&quot;: 17.43200000000337
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 17.07500000000107,
+      &quot;min&quot;: 17.07500000000107,
+      &quot;max&quot;: 17.07500000000107
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 11.860708938911557,
+      &quot;min&quot;: 11.860708938911557,
+      &quot;max&quot;: 11.860708938911557
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 0.23145810700953007,
+      &quot;min&quot;: 0.23145810700953007,
+      &quot;max&quot;: 0.23145810700953007
+    },
+    &quot;active_frames&quot;: [
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 92.452,
+      &quot;min&quot;: 92.452,
+      &quot;max&quot;: 92.452
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1.0886875000000593,
+      &quot;min&quot;: 1.0886875000000593,
+      &quot;max&quot;: 1.0886875000000593
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 0.9849999999999994,
+          &quot;inventory_child_user_ms&quot;: 0.5629999999999997,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 28,
+          &quot;inventory_child_system_ms&quot;: 1.0660000000000007,
+          &quot;inventory_child_user_ms&quot;: 0.6600000000000001,
+          &quot;threads&quot;: 38
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 0.8590000000000018,
+          &quot;inventory_child_user_ms&quot;: 0.577,
+          &quot;threads&quot;: 20
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;process-pilot&quot;,
+    &quot;count&quot;: 16,
+    &quot;n&quot;: 1,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/process-pilot/1-16-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.585000000000207,
+          &quot;min&quot;: 14.585000000000207,
+          &quot;max&quot;: 14.585000000000207
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.631000000000001,
+          &quot;min&quot;: 2.631000000000001,
+          &quot;max&quot;: 2.631000000000001
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 22.325332975015044,
+          &quot;min&quot;: 22.325332975015044,
+          &quot;max&quot;: 22.325332975015044
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.7880000000000109,
+          &quot;min&quot;: 0.7880000000000109,
+          &quot;max&quot;: 0.7880000000000109
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3,
+          &quot;min&quot;: 3,
+          &quot;max&quot;: 3
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 37,
+          &quot;min&quot;: 37,
+          &quot;max&quot;: 37
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4109,
+          &quot;min&quot;: 4109,
+          &quot;max&quot;: 4109
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3.9499999999997044,
+          &quot;min&quot;: 3.9499999999997044,
+          &quot;max&quot;: 3.9499999999997044
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 9.60424984805286,
+          &quot;min&quot;: 9.60424984805286,
+          &quot;max&quot;: 9.60424984805286
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.0429999999999884,
+          &quot;min&quot;: 1.0429999999999884,
+          &quot;max&quot;: 1.0429999999999884
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 41.58899999999983,
+          &quot;min&quot;: 41.58899999999983,
+          &quot;max&quot;: 41.58899999999983
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.779333956539631,
+          &quot;min&quot;: 14.779333956539631,
+          &quot;max&quot;: 14.779333956539631
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.2909999999999857,
+          &quot;min&quot;: 0.2909999999999857,
+          &quot;max&quot;: 0.2909999999999857
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3562.266000000001,
+          &quot;min&quot;: 3562.266000000001,
+          &quot;max&quot;: 3562.266000000001
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 579.8317920416594,
+          &quot;min&quot;: 579.8317920416594,
+          &quot;max&quot;: 579.8317920416594
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3.058000000000005,
+          &quot;min&quot;: 3.058000000000005,
+          &quot;max&quot;: 3.058000000000005
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 32,
+          &quot;min&quot;: 32,
+          &quot;max&quot;: 32
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 48,
+          &quot;min&quot;: 48,
+          &quot;max&quot;: 48
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 595,
+          &quot;min&quot;: 595,
+          &quot;max&quot;: 595
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 65834,
+          &quot;min&quot;: 65834,
+          &quot;max&quot;: 65834
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 46.20299999999679,
+          &quot;min&quot;: 46.20299999999679,
+          &quot;max&quot;: 46.20299999999679
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10029.38116597943,
+          &quot;min&quot;: 10029.38116597943,
+          &quot;max&quot;: 10029.38116597943
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 13.295000000000002,
+          &quot;min&quot;: 13.295000000000002,
+          &quot;max&quot;: 13.295000000000002
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 74,
+          &quot;min&quot;: 74,
+          &quot;max&quot;: 74
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 603,
+          &quot;min&quot;: 603,
+          &quot;max&quot;: 603
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14094,
+          &quot;min&quot;: 14094,
+          &quot;max&quot;: 14094
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 90.15799999999899,
+          &quot;min&quot;: 90.15799999999899,
+          &quot;max&quot;: 90.15799999999899
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10017.768084071577,
+          &quot;min&quot;: 10017.768084071577,
+          &quot;max&quot;: 10017.768084071577
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.755000000000019,
+          &quot;min&quot;: 14.755000000000019,
+          &quot;max&quot;: 14.755000000000019
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 166,
+          &quot;min&quot;: 166,
+          &quot;max&quot;: 166
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1090,
+          &quot;min&quot;: 1090,
+          &quot;max&quot;: 1090
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 23736,
+          &quot;min&quot;: 23736,
+          &quot;max&quot;: 23736
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 478.69600000000037,
+          &quot;min&quot;: 478.69600000000037,
+          &quot;max&quot;: 478.69600000000037
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 78.75049998983741,
+          &quot;min&quot;: 78.75049998983741,
+          &quot;max&quot;: 78.75049998983741
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.022999999999997,
+          &quot;min&quot;: 2.022999999999997,
+          &quot;max&quot;: 2.022999999999997
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 60,
+          &quot;min&quot;: 60,
+          &quot;max&quot;: 60
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 367.15300000000207,
+          &quot;min&quot;: 367.15300000000207,
+          &quot;max&quot;: 367.15300000000207
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2210.246874950826,
+          &quot;min&quot;: 2210.246874950826,
+          &quot;max&quot;: 2210.246874950826
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.20999999999998797,
+          &quot;min&quot;: 0.20999999999998797,
+          &quot;max&quot;: 0.20999999999998797
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.03699999999935244,
+          &quot;min&quot;: 0.03699999999935244,
+          &quot;max&quot;: 0.03699999999935244
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2206.851749913767,
+          &quot;min&quot;: 2206.851749913767,
+          &quot;max&quot;: 2206.851749913767
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.21799999999999597,
+          &quot;min&quot;: 0.21799999999999597,
+          &quot;max&quot;: 0.21799999999999597
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 4408.152000000003,
+      &quot;min&quot;: 4408.152000000003,
+      &quot;max&quot;: 4408.152000000003
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 4040.9620000000014,
+      &quot;min&quot;: 4040.9620000000014,
+      &quot;max&quot;: 4040.9620000000014
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 578.6128749605268,
+      &quot;min&quot;: 578.6128749605268,
+      &quot;max&quot;: 578.6128749605268
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1.0095841716974974,
+      &quot;min&quot;: 1.0095841716974974,
+      &quot;max&quot;: 1.0095841716974974
+    },
+    &quot;active_frames&quot;: [
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 110.54299999999996,
+      &quot;min&quot;: 110.54299999999996,
+      &quot;max&quot;: 110.54299999999996
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1.2996562499999946,
+      &quot;min&quot;: 1.2996562499999946,
+      &quot;max&quot;: 1.2996562499999946
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.145999999999999,
+          &quot;inventory_child_user_ms&quot;: 0.7200000000000006,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 164,
+          &quot;inventory_child_system_ms&quot;: 1.5630000000000006,
+          &quot;inventory_child_user_ms&quot;: 1.024,
+          &quot;threads&quot;: 309
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.9059999999999988,
+          &quot;inventory_child_user_ms&quot;: 0.8840000000000003,
+          &quot;threads&quot;: 36
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;task-calibration2&quot;,
+    &quot;count&quot;: 1,
+    &quot;n&quot;: 1,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/task-calibration2/1-1-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 64.68699999999828,
+          &quot;min&quot;: 64.68699999999828,
+          &quot;max&quot;: 64.68699999999828
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 74.375,
+          &quot;min&quot;: 74.375,
+          &quot;max&quot;: 74.375
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 197.4447499960661,
+          &quot;min&quot;: 197.4447499960661,
+          &quot;max&quot;: 197.4447499960661
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.4390000000000236,
+          &quot;min&quot;: 1.4390000000000236,
+          &quot;max&quot;: 1.4390000000000236
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4,
+          &quot;min&quot;: 4,
+          &quot;max&quot;: 4
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 386,
+          &quot;min&quot;: 386,
+          &quot;max&quot;: 386
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 167713,
+          &quot;min&quot;: 167713,
+          &quot;max&quot;: 167713
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.471999999998019,
+          &quot;min&quot;: 2.471999999998019,
+          &quot;max&quot;: 2.471999999998019
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.777959056198597,
+          &quot;min&quot;: 1.777959056198597,
+          &quot;max&quot;: 1.777959056198597
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.9820000000000106,
+          &quot;min&quot;: 0.9820000000000106,
+          &quot;max&quot;: 0.9820000000000106
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 23.022999999997836,
+          &quot;min&quot;: 23.022999999997836,
+          &quot;max&quot;: 23.022999999997836
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 21.343041909858584,
+          &quot;min&quot;: 21.343041909858584,
+          &quot;max&quot;: 21.343041909858584
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.37999999999999146,
+          &quot;min&quot;: 0.37999999999999146,
+          &quot;max&quot;: 0.37999999999999146
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 65.81399999999826,
+          &quot;min&quot;: 65.81399999999826,
+          &quot;max&quot;: 65.81399999999826
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 81.75200000000001,
+          &quot;min&quot;: 81.75200000000001,
+          &quot;max&quot;: 81.75200000000001
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 216.6432908270508,
+          &quot;min&quot;: 216.6432908270508,
+          &quot;max&quot;: 216.6432908270508
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.0949999999999849,
+          &quot;min&quot;: 1.0949999999999849,
+          &quot;max&quot;: 1.0949999999999849
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4,
+          &quot;min&quot;: 4,
+          &quot;max&quot;: 4
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 386,
+          &quot;min&quot;: 386,
+          &quot;max&quot;: 386
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 167713,
+          &quot;min&quot;: 167713,
+          &quot;max&quot;: 167713
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 72.57400000000166,
+          &quot;min&quot;: 72.57400000000166,
+          &quot;max&quot;: 72.57400000000166
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 128.154,
+          &quot;min&quot;: 128.154,
+          &quot;max&quot;: 128.154
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10017.807957949117,
+          &quot;min&quot;: 10017.807957949117,
+          &quot;max&quot;: 10017.807957949117
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 15.224000000000014,
+          &quot;min&quot;: 15.224000000000014,
+          &quot;max&quot;: 15.224000000000014
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 5,
+          &quot;min&quot;: 5,
+          &quot;max&quot;: 5
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 645,
+          &quot;min&quot;: 645,
+          &quot;max&quot;: 645
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 278205,
+          &quot;min&quot;: 278205,
+          &quot;max&quot;: 278205
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 143.64299999999974,
+          &quot;min&quot;: 143.64299999999974,
+          &quot;max&quot;: 143.64299999999974
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 273.145,
+          &quot;min&quot;: 273.145,
+          &quot;max&quot;: 273.145
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10008.971832925454,
+          &quot;min&quot;: 10008.971832925454,
+          &quot;max&quot;: 10008.971832925454
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.864000000000017,
+          &quot;min&quot;: 14.864000000000017,
+          &quot;max&quot;: 14.864000000000017
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10,
+          &quot;min&quot;: 10,
+          &quot;max&quot;: 10
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1275,
+          &quot;min&quot;: 1275,
+          &quot;max&quot;: 1275
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 555960,
+          &quot;min&quot;: 555960,
+          &quot;max&quot;: 555960
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.874999999999659,
+          &quot;min&quot;: 2.874999999999659,
+          &quot;max&quot;: 2.874999999999659
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.8131660763174295,
+          &quot;min&quot;: 1.8131660763174295,
+          &quot;max&quot;: 1.8131660763174295
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.7489999999999997,
+          &quot;min&quot;: 0.7489999999999997,
+          &quot;max&quot;: 0.7489999999999997
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.09099999999983766,
+          &quot;min&quot;: 0.09099999999983766,
+          &quot;max&quot;: 0.09099999999983766
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2203.1328747980297,
+          &quot;min&quot;: 2203.1328747980297,
+          &quot;max&quot;: 2203.1328747980297
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.14600000000000724,
+          &quot;min&quot;: 0.14600000000000724,
+          &quot;max&quot;: 0.14600000000000724
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.035999999999035026,
+          &quot;min&quot;: 0.035999999999035026,
+          &quot;max&quot;: 0.035999999999035026
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2208.9708340354264,
+          &quot;min&quot;: 2208.9708340354264,
+          &quot;max&quot;: 2208.9708340354264
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.17600000000000948,
+          &quot;min&quot;: 0.17600000000000948,
+          &quot;max&quot;: 0.17600000000000948
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 68.81599999999679,
+      &quot;min&quot;: 68.81599999999679,
+      &quot;max&quot;: 68.81599999999679
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 68.68899999999792,
+      &quot;min&quot;: 68.68899999999792,
+      &quot;max&quot;: 68.68899999999792
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 146.62295789457858,
+      &quot;min&quot;: 146.62295789457858,
+      &quot;max&quot;: 146.62295789457858
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 69.37629100866616,
+      &quot;min&quot;: 69.37629100866616,
+      &quot;max&quot;: 69.37629100866616
+    },
+    &quot;active_frames&quot;: [
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 118.81800000000001,
+      &quot;min&quot;: 118.81800000000001,
+      &quot;max&quot;: 118.81800000000001
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 0.7194687499999324,
+      &quot;min&quot;: 0.7194687499999324,
+      &quot;max&quot;: 0.7194687499999324
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.125,
+          &quot;inventory_child_user_ms&quot;: 0.7280000000000015,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 26,
+          &quot;inventory_child_system_ms&quot;: 1.3810000000000002,
+          &quot;inventory_child_user_ms&quot;: 0.7800000000000011,
+          &quot;threads&quot;: 39
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.01400000000001,
+          &quot;inventory_child_user_ms&quot;: 0.6779999999999973,
+          &quot;threads&quot;: 20
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;task-same-pilot&quot;,
+    &quot;count&quot;: 16,
+    &quot;n&quot;: 1,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/task-same-pilot/1-16-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 52.29800000000097,
+          &quot;min&quot;: 52.29800000000097,
+          &quot;max&quot;: 52.29800000000097
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 69.14099999999999,
+          &quot;min&quot;: 69.14099999999999,
+          &quot;max&quot;: 69.14099999999999
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 140.96399978734553,
+          &quot;min&quot;: 140.96399978734553,
+          &quot;max&quot;: 140.96399978734553
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.014000000000015,
+          &quot;min&quot;: 1.014000000000015,
+          &quot;max&quot;: 1.014000000000015
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4,
+          &quot;min&quot;: 4,
+          &quot;max&quot;: 4
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 386,
+          &quot;min&quot;: 386,
+          &quot;max&quot;: 386
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 167713,
+          &quot;min&quot;: 167713,
+          &quot;max&quot;: 167713
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3.1379999999986694,
+          &quot;min&quot;: 3.1379999999986694,
+          &quot;max&quot;: 3.1379999999986694
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.2868328485637903,
+          &quot;min&quot;: 1.2868328485637903,
+          &quot;max&quot;: 1.2868328485637903
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.5300000000000027,
+          &quot;min&quot;: 0.5300000000000027,
+          &quot;max&quot;: 0.5300000000000027
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 38.34800000000007,
+          &quot;min&quot;: 38.34800000000007,
+          &quot;max&quot;: 38.34800000000007
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 12.48475001193583,
+          &quot;min&quot;: 12.48475001193583,
+          &quot;max&quot;: 12.48475001193583
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.24600000000002398,
+          &quot;min&quot;: 0.24600000000002398,
+          &quot;max&quot;: 0.24600000000002398
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 8781.863000000001,
+          &quot;min&quot;: 8781.863000000001,
+          &quot;max&quot;: 8781.863000000001
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1230.674,
+          &quot;min&quot;: 1230.674,
+          &quot;max&quot;: 1230.674
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1340.7934999559075,
+          &quot;min&quot;: 1340.7934999559075,
+          &quot;max&quot;: 1340.7934999559075
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 8.465,
+          &quot;min&quot;: 8.465,
+          &quot;max&quot;: 8.465
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 32,
+          &quot;min&quot;: 32,
+          &quot;max&quot;: 32
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 64,
+          &quot;min&quot;: 64,
+          &quot;max&quot;: 64
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 6176,
+          &quot;min&quot;: 6176,
+          &quot;max&quot;: 6176
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2683408,
+          &quot;min&quot;: 2683408,
+          &quot;max&quot;: 2683408
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4057.525999999999,
+          &quot;min&quot;: 4057.525999999999,
+          &quot;max&quot;: 4057.525999999999
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2135.4129999999996,
+          &quot;min&quot;: 2135.4129999999996,
+          &quot;max&quot;: 2135.4129999999996
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10029.477749951184,
+          &quot;min&quot;: 10029.477749951184,
+          &quot;max&quot;: 10029.477749951184
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 13.342999999999993,
+          &quot;min&quot;: 13.342999999999993,
+          &quot;max&quot;: 13.342999999999993
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 80,
+          &quot;min&quot;: 80,
+          &quot;max&quot;: 80
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10320,
+          &quot;min&quot;: 10320,
+          &quot;max&quot;: 10320
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4451280,
+          &quot;min&quot;: 4451280,
+          &quot;max&quot;: 4451280
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3498.824999999997,
+          &quot;min&quot;: 3498.824999999997,
+          &quot;max&quot;: 3498.824999999997
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4220.281,
+          &quot;min&quot;: 4220.281,
+          &quot;max&quot;: 4220.281
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10030.566290952265,
+          &quot;min&quot;: 10030.566290952265,
+          &quot;max&quot;: 10030.566290952265
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.567999999999998,
+          &quot;min&quot;: 14.567999999999998,
+          &quot;max&quot;: 14.567999999999998
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 160,
+          &quot;min&quot;: 160,
+          &quot;max&quot;: 160
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 20462,
+          &quot;min&quot;: 20462,
+          &quot;max&quot;: 20462
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 8897220,
+          &quot;min&quot;: 8897220,
+          &quot;max&quot;: 8897220
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 28.357999999998356,
+          &quot;min&quot;: 28.357999999998356,
+          &quot;max&quot;: 28.357999999998356
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 37.88983402773738,
+          &quot;min&quot;: 37.88983402773738,
+          &quot;max&quot;: 37.88983402773738
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.8370000000000044,
+          &quot;min&quot;: 0.8370000000000044,
+          &quot;max&quot;: 0.8370000000000044
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 20.817000000000917,
+          &quot;min&quot;: 20.817000000000917,
+          &quot;max&quot;: 20.817000000000917
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2211.1124580260366,
+          &quot;min&quot;: 2211.1124580260366,
+          &quot;max&quot;: 2211.1124580260366
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.14100000000000223,
+          &quot;min&quot;: 0.14100000000000223,
+          &quot;max&quot;: 0.14100000000000223
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.04399999999986903,
+          &quot;min&quot;: 0.04399999999986903,
+          &quot;max&quot;: 0.04399999999986903
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2209.2552909161896,
+          &quot;min&quot;: 2209.2552909161896,
+          &quot;max&quot;: 2209.2552909161896
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.16499999999999848,
+          &quot;min&quot;: 0.16499999999999848,
+          &quot;max&quot;: 0.16499999999999848
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 8831.082,
+      &quot;min&quot;: 8831.082,
+      &quot;max&quot;: 8831.082
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 8810.221,
+      &quot;min&quot;: 8810.221,
+      &quot;max&quot;: 8810.221
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1120.4413750674576,
+      &quot;min&quot;: 1120.4413750674576,
+      &quot;max&quot;: 1120.4413750674576
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 220.00504191964865,
+      &quot;min&quot;: 220.00504191964865,
+      &quot;max&quot;: 220.00504191964865
+    },
+    &quot;active_frames&quot;: [
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 115.91100000000002,
+      &quot;min&quot;: 115.91100000000002,
+      &quot;max&quot;: 115.91100000000002
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1.1983750000000022,
+      &quot;min&quot;: 1.1983750000000022,
+      &quot;max&quot;: 1.1983750000000022
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.0859999999999985,
+          &quot;inventory_child_user_ms&quot;: 0.669000000000004,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 131,
+          &quot;inventory_child_system_ms&quot;: 1.6480000000000246,
+          &quot;inventory_child_user_ms&quot;: 0.9260000000000446,
+          &quot;threads&quot;: 323
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 2.110000000000582,
+          &quot;inventory_child_user_ms&quot;: 1.0160000000000764,
+          &quot;threads&quot;: 35
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  },
+  {
+    &quot;workload&quot;: &quot;task-distinct-pilot&quot;,
+    &quot;count&quot;: 16,
+    &quot;n&quot;: 1,
+    &quot;files&quot;: [
+      &quot;/tmp/subscription-measure-20261109/task-distinct-pilot/1-16-multiplexed.json&quot;
+    ],
+    &quot;phases&quot;: {
+      &quot;cold_admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 58.539000000000044,
+          &quot;min&quot;: 58.539000000000044,
+          &quot;max&quot;: 58.539000000000044
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 73.13199999999999,
+          &quot;min&quot;: 73.13199999999999,
+          &quot;max&quot;: 73.13199999999999
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 157.79312490485609,
+          &quot;min&quot;: 157.79312490485609,
+          &quot;max&quot;: 157.79312490485609
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1.4729999999999743,
+          &quot;min&quot;: 1.4729999999999743,
+          &quot;max&quot;: 1.4729999999999743
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2,
+          &quot;min&quot;: 2,
+          &quot;max&quot;: 2
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4,
+          &quot;min&quot;: 4,
+          &quot;max&quot;: 4
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 386,
+          &quot;min&quot;: 386,
+          &quot;max&quot;: 386
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 167713,
+          &quot;min&quot;: 167713,
+          &quot;max&quot;: 167713
+        }
+      },
+      &quot;cold_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 3.089999999998753,
+          &quot;min&quot;: 3.089999999998753,
+          &quot;max&quot;: 3.089999999998753
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2.654791111126542,
+          &quot;min&quot;: 2.654791111126542,
+          &quot;max&quot;: 2.654791111126542
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.9210000000000051,
+          &quot;min&quot;: 0.9210000000000051,
+          &quot;max&quot;: 0.9210000000000051
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;runtime_only32&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 29.585999999999785,
+          &quot;min&quot;: 29.585999999999785,
+          &quot;max&quot;: 29.585999999999785
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 22.443917114287615,
+          &quot;min&quot;: 22.443917114287615,
+          &quot;max&quot;: 22.443917114287615
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.38199999999999346,
+          &quot;min&quot;: 0.38199999999999346,
+          &quot;max&quot;: 0.38199999999999346
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;admission_checkpoint&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 5239.933,
+          &quot;min&quot;: 5239.933,
+          &quot;max&quot;: 5239.933
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1205.5919999999999,
+          &quot;min&quot;: 1205.5919999999999,
+          &quot;max&quot;: 1205.5919999999999
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1404.6286249067634,
+          &quot;min&quot;: 1404.6286249067634,
+          &quot;max&quot;: 1404.6286249067634
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 8.84399999999999,
+          &quot;min&quot;: 8.84399999999999,
+          &quot;max&quot;: 8.84399999999999
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 32,
+          &quot;min&quot;: 32,
+          &quot;max&quot;: 32
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 64,
+          &quot;min&quot;: 64,
+          &quot;max&quot;: 64
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 6192,
+          &quot;min&quot;: 6192,
+          &quot;max&quot;: 6192
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2676525,
+          &quot;min&quot;: 2676525,
+          &quot;max&quot;: 2676525
+        }
+      },
+      &quot;quiet&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2444.017999999998,
+          &quot;min&quot;: 2444.017999999998,
+          &quot;max&quot;: 2444.017999999998
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1977.071,
+          &quot;min&quot;: 1977.071,
+          &quot;max&quot;: 1977.071
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10021.95949992165,
+          &quot;min&quot;: 10021.95949992165,
+          &quot;max&quot;: 10021.95949992165
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.947000000000015,
+          &quot;min&quot;: 14.947000000000015,
+          &quot;max&quot;: 14.947000000000015
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 68,
+          &quot;min&quot;: 68,
+          &quot;max&quot;: 68
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 9983,
+          &quot;min&quot;: 9983,
+          &quot;max&quot;: 9983
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4361928,
+          &quot;min&quot;: 4361928,
+          &quot;max&quot;: 4361928
+        }
+      },
+      &quot;active&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4323.434999999999,
+          &quot;min&quot;: 4323.434999999999,
+          &quot;max&quot;: 4323.434999999999
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 4241.769,
+          &quot;min&quot;: 4241.769,
+          &quot;max&quot;: 4241.769
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 10018.57529208064,
+          &quot;min&quot;: 10018.57529208064,
+          &quot;max&quot;: 10018.57529208064
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 14.518999999999977,
+          &quot;min&quot;: 14.518999999999977,
+          &quot;max&quot;: 14.518999999999977
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 172,
+          &quot;min&quot;: 172,
+          &quot;max&quot;: 172
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 20747,
+          &quot;min&quot;: 20747,
+          &quot;max&quot;: 20747
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 8946769,
+          &quot;min&quot;: 8946769,
+          &quot;max&quot;: 8946769
+        }
+      },
+      &quot;cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 223.8889999999974,
+          &quot;min&quot;: 223.8889999999974,
+          &quot;max&quot;: 223.8889999999974
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 310.1329999999998,
+          &quot;min&quot;: 310.1329999999998,
+          &quot;max&quot;: 310.1329999999998
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 216.0475410055369,
+          &quot;min&quot;: 216.0475410055369,
+          &quot;max&quot;: 216.0475410055369
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 5.535999999999985,
+          &quot;min&quot;: 5.535999999999985,
+          &quot;max&quot;: 5.535999999999985
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 12,
+          &quot;min&quot;: 12,
+          &quot;max&quot;: 12
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 1284,
+          &quot;min&quot;: 1284,
+          &quot;max&quot;: 1284
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 557870,
+          &quot;min&quot;: 557870,
+          &quot;max&quot;: 557870
+        }
+      },
+      &quot;after_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.07299999999850115,
+          &quot;min&quot;: 0.07299999999850115,
+          &quot;max&quot;: 0.07299999999850115
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2207.7521251048893,
+          &quot;min&quot;: 2207.7521251048893,
+          &quot;max&quot;: 2207.7521251048893
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.22499999999997522,
+          &quot;min&quot;: 0.22499999999997522,
+          &quot;max&quot;: 0.22499999999997522
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      },
+      &quot;late_cleanup&quot;: {
+        &quot;cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.03299999999853753,
+          &quot;min&quot;: 0.03299999999853753,
+          &quot;max&quot;: 0.03299999999853753
+        },
+        &quot;child_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.0,
+          &quot;min&quot;: 0.0,
+          &quot;max&quot;: 0.0
+        },
+        &quot;wall_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 2206.3713748939335,
+          &quot;min&quot;: 2206.3713748939335,
+          &quot;max&quot;: 2206.3713748939335
+        },
+        &quot;driver_cpu_ms&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0.21000000000001573,
+          &quot;min&quot;: 0.21000000000001573,
+          &quot;max&quot;: 0.21000000000001573
+        },
+        &quot;projections&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;opens&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;sql&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        },
+        &quot;vm&quot;: {
+          &quot;n&quot;: 1,
+          &quot;median&quot;: 0,
+          &quot;min&quot;: 0,
+          &quot;max&quot;: 0
+        }
+      }
+    },
+    &quot;cycle_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 5463.927999999994,
+      &quot;min&quot;: 5463.927999999994,
+      &quot;max&quot;: 5463.927999999994
+    },
+    &quot;cycle_without_tail_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 5463.821999999997,
+      &quot;min&quot;: 5463.821999999997,
+      &quot;max&quot;: 5463.821999999997
+    },
+    &quot;initial_last_reading_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 1200.349916005507,
+      &quot;min&quot;: 1200.349916005507,
+      &quot;max&quot;: 1200.349916005507
+    },
+    &quot;checkpoint_last_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 203.6666248459369,
+      &quot;min&quot;: 203.6666248459369,
+      &quot;max&quot;: 203.6666248459369
+    },
+    &quot;active_frames&quot;: [
+      0
+    ],
+    &quot;quiet_frames&quot;: [
+      0
+    ],
+    &quot;writer_cpu_ms&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 109.042,
+      &quot;min&quot;: 109.042,
+      &quot;max&quot;: 109.042
+    },
+    &quot;runtime_ms_each&quot;: {
+      &quot;n&quot;: 1,
+      &quot;median&quot;: 0.9245624999999933,
+      &quot;min&quot;: 0.9245624999999933,
+      &quot;max&quot;: 0.9245624999999933
+    },
+    &quot;resources&quot;: [
+      {
+        &quot;warm&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 1.2580000000000027,
+          &quot;inventory_child_user_ms&quot;: 0.7180000000000035,
+          &quot;threads&quot;: 20
+        },
+        &quot;cohort&quot;: {
+          &quot;fds&quot;: 131,
+          &quot;inventory_child_system_ms&quot;: 2.1970000000000027,
+          &quot;inventory_child_user_ms&quot;: 1.2220000000000937,
+          &quot;threads&quot;: 323
+        },
+        &quot;drained&quot;: {
+          &quot;fds&quot;: 17,
+          &quot;inventory_child_system_ms&quot;: 0.8770000000004075,
+          &quot;inventory_child_user_ms&quot;: 0.5740000000000691,
+          &quot;threads&quot;: 46
+        }
+      }
+    ],
+    &quot;balanced&quot;: true,
+    &quot;errors&quot;: 0
+  }
+]</pre></details>
+<p><small>Raw files: /tmp/subscription-measure-20261109/. No production code, installation, provider input or process policy changed.</small></p></html>

@@ -18,6 +18,7 @@ use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::performance::subscription_measurement as meter;
 use crate::process::SessionAttachment;
+use crate::server::subscriptions::Subscriptions;
 use crate::server::wire::MAX_CONNECTIONS;
 use crate::store::sqlite::SqliteStore;
 
@@ -250,6 +251,7 @@ fn subscription_server() {
         let clients = Clients::default();
         let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let tickets = Arc::new(Tickets::default());
+        let subscriptions = Arc::new(Subscriptions::default());
         let mut connections = JoinSet::new();
         tokio::pin!(stopped);
         loop {
@@ -259,9 +261,10 @@ fn subscription_server() {
                     let clients = clients.clone();
                     let slots = slots.clone();
                     let tickets = tickets.clone();
+                    let subscriptions = subscriptions.clone();
                     connections.spawn(async move {
                         Connection { instance: "subscription-fixture", executable_sha256: "frozen-by-runner",
-                            clients: &clients, slots: &slots, tickets: &tickets, uid: 501 }.serve(socket).await
+                            clients: &clients, slots: &slots, tickets: &tickets, subscriptions: &subscriptions, uid: 501 }.serve(socket).await
                     });
                 }
                 Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap().unwrap(); }
@@ -343,132 +346,18 @@ fn subscription_server() {
     .unwrap();
 }
 
-/// This reproduces the proposed borrowed Handle's wait cycle without leaving
-/// blocked threads behind. Both outer workers first enqueue real Store work;
-/// escape channels then release them so every queued job can be joined.
-#[test]
-fn borrowed_executor_saturation_requires_releasing_outer_pulls() {
-    let home = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .max_blocking_threads(2)
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let (queued, mut observed) = tokio::sync::mpsc::unbounded_channel();
-        let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let full = Arc::new(std::sync::Barrier::new(2));
-        let (finished, mut finishes) = tokio::sync::mpsc::unbounded_channel();
-        let mut releases = Vec::new();
-        let mut pulls = Vec::new();
-        for _ in 0..2 {
-            let (release, escaped) = tokio::sync::oneshot::channel();
-            releases.push(release);
-            let queued = queued.clone();
-            let store = store.clone();
-            let completed = completed.clone();
-            let handle = tokio::runtime::Handle::current();
-            let full = full.clone();
-            let finished = finished.clone();
-            pulls.push(tokio::task::spawn_blocking(move || {
-                full.wait();
-                handle.block_on(async {
-                tokio::select! {
-                    biased;
-                    result = crate::store::run_sqlite(&store, move |store| {
-                        let result = store.revisions();
-                        completed.fetch_add(1, Relaxed);
-                        finished.send(()).unwrap();
-                        result
-                    }) => { result.unwrap(); panic!("nested work ran while both outer slots were held") }
-                    _ = async { queued.send(()).unwrap(); escaped.await.unwrap(); } => {}
-                }
-            })}));
-        }
-        for _ in 0..2 { observed.recv().await.unwrap(); }
-        assert_eq!(completed.load(Relaxed), 0);
-        let sibling = tokio::task::spawn_blocking(|| 42);
-        assert!(!sibling.is_finished(), "both pool slots belong to the outer pulls");
-        for release in releases { release.send(()).unwrap(); }
-        for pull in pulls { pull.await.unwrap(); }
-        assert_eq!(tokio::time::timeout(Duration::from_secs(5), sibling).await.unwrap().unwrap(), 42);
-        for _ in 0..2 {
-            tokio::time::timeout(Duration::from_secs(5), finishes.recv()).await.unwrap().unwrap();
-        }
-        assert_eq!(completed.load(Relaxed), 2);
-    });
-}
-
-#[test]
-fn independent_current_thread_readers_progress_with_saturated_outer_pool() {
-    let home = tempfile::tempdir().unwrap();
-    let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .max_blocking_threads(2)
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let (ready, mut observed) = tokio::sync::mpsc::unbounded_channel();
-        let mut releases = Vec::new();
-        let mut pulls = Vec::new();
-        for _ in 0..2 {
-            let store = store.clone();
-            let ready = ready.clone();
-            let (release, escaped) = std::sync::mpsc::channel();
-            releases.push(release);
-            pulls.push(tokio::task::spawn_blocking(move || {
-                let reader = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .max_blocking_threads(1)
-                    .build()
-                    .unwrap();
-                let revisions = reader
-                    .block_on(crate::store::run_sqlite(&store, |store| store.revisions()))
-                    .unwrap();
-                ready.send(revisions).unwrap();
-                escaped.recv_timeout(Duration::from_secs(10)).unwrap();
-            }));
-        }
-        for _ in 0..2 {
-            tokio::time::timeout(Duration::from_secs(5), observed.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        let sibling = tokio::task::spawn_blocking(|| 42);
-        assert!(!sibling.is_finished());
-        for release in releases {
-            release.send(()).unwrap();
-        }
-        for pull in pulls {
-            pull.await.unwrap();
-        }
-        assert_eq!(
-            tokio::time::timeout(Duration::from_secs(5), sibling)
-                .await
-                .unwrap()
-                .unwrap(),
-            42
-        );
-    });
-}
-
 // Deterministic pauses are inactive in timing runs and ordinary tests.
 type Pauses = std::collections::HashMap<(String, &'static str), Pause>;
 static PAUSES: std::sync::LazyLock<std::sync::Mutex<Pauses>> =
     std::sync::LazyLock::new(Default::default);
-pub(super) struct Pause {
+pub(in crate::server) struct Pause {
     queued: Option<tokio::sync::oneshot::Sender<()>>,
     entered: Option<tokio::sync::oneshot::Sender<()>>,
     release: std::sync::mpsc::Receiver<()>,
     finished: Option<tokio::sync::oneshot::Sender<()>>,
 }
 impl Pause {
-    pub(super) fn wait(&mut self) {
+    pub(in crate::server) fn wait(&mut self) {
         let _ = self.entered.take().unwrap().send(());
         self.release.recv_timeout(Duration::from_secs(30)).unwrap();
     }
@@ -480,18 +369,18 @@ impl Drop for Pause {
         }
     }
 }
-pub(super) fn take_pause(id: &str, stage: &'static str) -> Option<Pause> {
+pub(in crate::server) fn take_pause(id: &str, stage: &'static str) -> Option<Pause> {
     let mut pause = PAUSES.lock().unwrap().remove(&(id.to_owned(), stage))?;
     let _ = pause.queued.take().unwrap().send(());
     Some(pause)
 }
-pub(super) struct Paused {
+pub(in crate::server) struct Paused {
     pub queued: tokio::sync::oneshot::Receiver<()>,
     pub entered: tokio::sync::oneshot::Receiver<()>,
     pub release: std::sync::mpsc::Sender<()>,
     pub finished: tokio::sync::oneshot::Receiver<()>,
 }
-pub(super) fn pause(id: &str, stage: &'static str) -> Paused {
+pub(in crate::server) fn pause(id: &str, stage: &'static str) -> Paused {
     let (queued, queue) = tokio::sync::oneshot::channel();
     let (entered, enter) = tokio::sync::oneshot::channel();
     let (release, wait) = std::sync::mpsc::channel();

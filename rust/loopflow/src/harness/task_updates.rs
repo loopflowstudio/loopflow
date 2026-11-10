@@ -1,6 +1,6 @@
 //! Native Session updates read existing Task/Graph facts. Receipts live in the
 //! Session history; they are delivery evidence, never another workflow cursor.
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -114,12 +114,15 @@ impl TaskUpdates {
         }
         // Failed reads remain retryable even when no writer moves the revision.
         self.revision = None;
+        let candidates = self.candidates.clone();
         let result = self.read(store, session_id);
         if let Ok(update) = &result {
             self.revision = Some(revision);
             self.read_at = Some(Instant::now());
             // A busy provider can defer delivery without another store write.
             self.poll_again |= update.is_some();
+        } else {
+            self.candidates = candidates;
         }
         result
     }
@@ -127,9 +130,11 @@ impl TaskUpdates {
     fn read(&mut self, store: &SqliteStore, session_id: &str) -> StoreResult<Option<TaskUpdate>> {
         self.poll_again = false;
         let Some(session) = store.session(session_id)? else {
+            self.candidates.clear();
             return Ok(None);
         };
         if !session.interactive || session.completed_at.is_some() {
+            self.candidates.clear();
             return Ok(None);
         }
         let previous = store.latest_task_update(session_id)?;
@@ -138,9 +143,11 @@ impl TaskUpdates {
             .map(serde_json::from_value)
             .transpose()?
             .unwrap_or_default();
+        let mut visited = HashSet::new();
         let mut facts = HashMap::new();
         let mut lines = Vec::new();
         for task in store.session_task_ids(session_id)? {
+            visited.insert(task.to_string());
             let (overview, graphs) = store.task_overview(&task)?;
             let old = previous.get(&task);
             let position = overview.graph.map(|graph| graph.position);
@@ -167,6 +174,7 @@ impl TaskUpdates {
                 self.poll_again |= graph.entry.ended_at.is_none();
                 let id = LfProcessId::parse(&graph.entry.summary.id)
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                visited.insert(id.to_string());
                 let prior = old.and_then(|observation| observation.runs.get(&id));
                 // Exit and next start are separate commits. Preserve this run's
                 // last reported facts until its next step or terminal result.
@@ -227,6 +235,7 @@ impl TaskUpdates {
             }
             facts.insert(task, observation);
         }
+        self.candidates.retain(|id, _| visited.contains(id));
         if !baseline && lines.is_empty() {
             return Ok(None);
         }
@@ -573,6 +582,185 @@ mod tests {
             .unwrap()
             .text
             .contains(": failed"));
+    }
+
+    #[test]
+    fn removed_membership_and_graphs_release_settling_candidates() {
+        for remove_membership in [false, true] {
+            let (_home, store, task) = task_session();
+            let retained = TaskId::new();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: store.ensure_repository("/task-updates").unwrap(),
+                    id: retained.clone(),
+                    project_id: None,
+                    title: "Retained".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            // Checkout membership can disappear while the explicit Task binding stays.
+            store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/retained',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [retained.as_str()]).unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET cwd='/retained' WHERE id='reader'",
+                    [],
+                )
+                .unwrap();
+            let mut updates = TaskUpdates::default();
+            assert!(updates.pending(&store, "reader").unwrap().is_none());
+            let graph = store.test_graph(
+                "new",
+                "/retained",
+                &[("gate", Some("succeeded"))],
+                Some("succeeded"),
+            );
+            assert!(updates.pending(&store, "reader").unwrap().is_none());
+            assert!(!updates.candidates.is_empty());
+            if remove_membership {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE agent_sessions SET cwd='/elsewhere' WHERE id='reader'",
+                        [],
+                    )
+                    .unwrap();
+                assert!(!store
+                    .session_task_ids("reader")
+                    .unwrap()
+                    .contains(&retained));
+            } else {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "DELETE FROM graph_process_steps WHERE graph_lf_process_id=?1",
+                        [graph.as_str()],
+                    )
+                    .unwrap();
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "DELETE FROM graph_processes WHERE lf_process_id=?1",
+                        [graph.as_str()],
+                    )
+                    .unwrap();
+            }
+            assert!(updates.pending(&store, "reader").unwrap().is_none());
+            observe(&store.conn.lock().unwrap());
+            let (_, work) = measure(|| {
+                for _ in 0..10 {
+                    tick(&mut updates);
+                    assert!(updates.pending(&store, "reader").unwrap().is_none());
+                }
+            });
+            assert_eq!(
+                work.statements, 10,
+                "removed demand must recover revision-only polling"
+            );
+            comment(
+                &store,
+                &task,
+                "still listening",
+                TaskCommentAuthor::Person { name: None },
+            );
+            assert!(updates
+                .pending(&store, "reader")
+                .unwrap()
+                .unwrap()
+                .text
+                .contains("still listening"));
+        }
+    }
+
+    #[test]
+    fn failed_partial_observation_preserves_candidates_until_retry() {
+        let (_home, store, _task) = task_session();
+        let mut updates = TaskUpdates::default();
+        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        let graph = store.test_graph(
+            "new",
+            "/task-updates",
+            &[("gate", Some("succeeded"))],
+            Some("succeeded"),
+        );
+        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        let candidates = updates.candidates.clone();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE processes SET outcome='failed' WHERE id=?1",
+                [graph.as_str()],
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("ALTER TABLE task_comments RENAME TO held_comments", [])
+            .unwrap();
+        assert!(updates.pending(&store, "reader").is_err());
+        assert_eq!(updates.candidates, candidates);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("ALTER TABLE held_comments RENAME TO task_comments", [])
+            .unwrap();
+        assert!(updates.pending(&store, "reader").unwrap().is_none());
+        settle(&mut updates);
+        assert!(updates
+            .pending(&store, "reader")
+            .unwrap()
+            .unwrap()
+            .text
+            .contains("failed"));
+    }
+
+    #[test]
+    fn ineligible_and_missing_sessions_release_candidates() {
+        for change in [
+            "UPDATE agent_sessions SET interactive=0 WHERE id='reader'",
+            "UPDATE agent_sessions SET completed_at=20 WHERE id='reader'",
+            "",
+        ] {
+            let (_home, store, _task) = task_session();
+            let mut updates = TaskUpdates::default();
+            assert!(updates.pending(&store, "reader").unwrap().is_none());
+            store.test_graph(
+                "new",
+                "/task-updates",
+                &[("gate", Some("succeeded"))],
+                Some("succeeded"),
+            );
+            assert!(updates.pending(&store, "reader").unwrap().is_none());
+            assert!(!updates.candidates.is_empty());
+            if !change.is_empty() {
+                store.conn.lock().unwrap().execute(change, []).unwrap();
+            }
+            let session = if change.is_empty() {
+                "missing"
+            } else {
+                "reader"
+            };
+            assert!(updates.pending(&store, session).unwrap().is_none());
+            observe(&store.conn.lock().unwrap());
+            let (_, work) = measure(|| {
+                tick(&mut updates);
+                assert!(updates.pending(&store, session).unwrap().is_none());
+            });
+            assert_eq!(work.statements, 1);
+        }
     }
 
     #[test]

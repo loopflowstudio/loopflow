@@ -5,10 +5,14 @@ xcodegen generate --spec swift/ios.yml
 open swift/LoopflowMobile.xcodeproj
 ```
 
-Run **LoopflowiOS** on an iPhone simulator. The development scheme explicitly
-passes `--fixture`: open a Task, choose **Use keyboard**, then type in its existing
-Session. Paste and **New line** preserve multiline input; Return submits. Try
-`permission`, then `y` or `n` and Return. Nothing executes outside the app.
+Run **LoopflowiOS** on your iPhone. The app opens the Machine connection screen;
+connect over Tailscale, open a Task, then choose **Use keyboard** to type into
+its running Session. Paste and **New line** preserve multiline input; Return submits.
+
+For offline UI testing only, add `--fixture` to the launch arguments. This uses
+the native terminal renderer with a simulated editor: no shell, provider or
+Loopflow Session runs, and no commands execute. UI tests opt into it individually.
+It cannot demonstrate working with a real Session.
 **Keys** shows arrows, Tab and Escape for provider menus and cursor movement.
 The keyboard icon returns to the typing controls. Switching keys preserves the
 keyboard, terminal size and draft. Keys require input control and send nothing
@@ -56,7 +60,7 @@ Machine and current program report. Rotating preserves the draft; observers keep
 the owner's grid. Long Find queries scroll inside their field and keep **Done**
 visible, including at accessibility text sizes.
 
-Disable `--fixture` to connect to a Machine. Sign into the same Tailscale account
+To connect to a Machine, sign into the same Tailscale account
 on both devices. In Desktop, open Settings → Mobile → **Enable mobile access**.
 On iPhone, choose **Scan QR code**, scan the Desktop code, then **Connect Machine**.
 Desktop detects and configures signed-in host Tailscale automatically. Camera

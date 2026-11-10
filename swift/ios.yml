@@ -66,8 +66,5 @@ schemes:
     build:
       targets:
         LoopflowiOS: all
-    run:
-      commandLineArguments:
-        "--fixture": true
     test:
       targets: [LoopflowiOSTests, LoopflowiOSUITests]

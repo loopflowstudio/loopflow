@@ -23,10 +23,10 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 18:21 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with `mergeable: false`. Freshly fetched main is
+At November 10 18:58 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The realign `lf task status LOO-718 --json` recheck still places the
+The implement `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
@@ -47,6 +47,11 @@ service-level bridge tests and wire fixtures. Do not extend the UID-only store
 while waiting for transport to land.
 
 ## Implementation and acceptance
+
+Shipping docs are written in `docs/server.md` (Phone access) and
+`rust/loopflow/src/server/README.md` (Remote attach contract and shared recovery).
+The write-docs pass retained their examples and contract; no product question
+is open. Desktop presentation results are in `questions.md`.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Through authenticated client and bridge connections, test that

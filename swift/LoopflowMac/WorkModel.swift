@@ -288,7 +288,7 @@ final class WorkModel {
         registry.prefetchPrimary(repositoryKey, title: workspaceTitle(repositoryKey), location: location)
         for roadmap in visibleRoadmaps {
             let key = workspaceKey(for: .wave(id: roadmap.wave.id), repository: repository)
-            registry.prefetchPrimary(key, title: roadmap.wave.name, wave: roadmap.wave.name, location: location)
+            registry.prefetchPrimary(key, title: roadmap.wave.name, location: location)
         }
         let savedOrder = Dictionary(registry.restoreCandidates.enumerated().map { ($0.element, $0.offset) },
                                     uniquingKeysWith: min)
@@ -801,9 +801,7 @@ final class WorkModel {
             switch key.kind {
             case .task:
                 if workspace.location == nil, let task = task(id: key.id)?.task { workspace.location = taskWorkspaceIdentity(task) }
-            case .wave:
-                if workspace.wave == nil { workspace.wave = wave(id: key.id)?.wave.name }
-            case .repository: break
+            case .wave, .repository: break
             }
             await registry.openConversation(in: workspace, store: store)
             return

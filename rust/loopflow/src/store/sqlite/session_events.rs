@@ -706,6 +706,9 @@ impl SqliteStore {
     }
 }
 
+const INSERT_NATIVE_EVENT: &str = "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+    VALUES(?1,?2,?3,?4,?5,?6,?7)";
+
 /// Insert only the observation. Work and capture require correlated origin evidence.
 fn record_event_in(
     tx: &rusqlite::Transaction<'_>,
@@ -773,10 +776,16 @@ fn record_event_in(
         return Ok(seq);
     }
     tx.execute(
-        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-         VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        params![session,thread,turn,kind.as_str(),receipt,
-            time::OffsetDateTime::now_utc().unix_timestamp(),payload],
+        INSERT_NATIVE_EVENT,
+        params![
+            session,
+            thread,
+            turn,
+            kind.as_str(),
+            receipt,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            payload
+        ],
     )?;
     Ok(tx.last_insert_rowid())
 }
@@ -787,6 +796,92 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use crate::store::RecordingGap;
     use serde_json::json;
+
+    #[test]
+    fn native_event_preparation_stays_bounded_and_keeps_identity_checks() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            // Count the real writer's compiled program, including all triggers.
+            // The incident expanded this to over 41,000 instructions per receipt
+            // while BEGIN IMMEDIATE held every other writer outside the store.
+            let mut explain = conn
+                .prepare(&format!("EXPLAIN {}", super::INSERT_NATIVE_EVENT))
+                .unwrap();
+            let instructions = explain
+                .query_map(
+                    rusqlite::params!["conversation", "thread", "turn", "started", "", 1, "{}"],
+                    |_| Ok(()),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(
+                instructions.len() < 2_000,
+                "native INSERT compiled {} instructions",
+                instructions.len()
+            );
+        }
+        for turn in 0..100 {
+            let turn = turn.to_string();
+            let payload = json!({"text": "native output", "opaque": "ABCDEF"});
+            let seq = store
+                .record_session_event(
+                    "conversation",
+                    &"Provider-Thread".into(),
+                    &turn,
+                    SessionEventKind::Output,
+                    &payload,
+                )
+                .unwrap();
+            assert_eq!(
+                seq,
+                store
+                    .record_session_event(
+                        "conversation",
+                        &"Provider-Thread".into(),
+                        &turn,
+                        SessionEventKind::Output,
+                        &payload
+                    )
+                    .unwrap()
+            );
+        }
+        let invalid =
+            json!({"type": "legacy_flow", "flow_id": "ABCDEFAB-1234-5678-ABCD-ABCDEFABCDEF"});
+        assert!(store
+            .record_session_event(
+                "conversation",
+                &"thread".into(),
+                "invalid",
+                SessionEventKind::Output,
+                &invalid
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("canonical identity"));
+        let valid =
+            json!({"type": "legacy_flow", "flow_id": "abcdefab-1234-5678-abcd-abcdefabcdef"});
+        store
+            .record_session_event(
+                "conversation",
+                &"thread".into(),
+                "valid",
+                SessionEventKind::Output,
+                &valid,
+            )
+            .unwrap();
+        let events = store.session_history("conversation", 0, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == SessionEventKind::Output)
+                .count(),
+            101
+        );
+    }
 
     #[test]
     fn a_recovered_gap_enters_the_sessions_history_once() {

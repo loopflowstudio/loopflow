@@ -267,8 +267,8 @@ where
 }
 
 /// A subscription served inside this process. It takes checkpoints, never argument
-/// changes: a client with new arguments subscriptions again. [`Subscription::pull`] reads on
-/// the caller's thread and returns the frame that command would print next.
+/// changes: a client with new arguments subscribes again. [`Subscription::pull`] reads on
+/// the caller's thread and returns the reading with its occurrences.
 /// Dropping it ends the subscription.
 pub struct Subscription {
     inbox: Arc<dyn Inbox>,
@@ -278,7 +278,7 @@ pub struct Subscription {
 
 /// A reading and its occurrences leave the pinned snapshot together.
 #[derive(Debug, Default)]
-pub(crate) struct SubscriptionUpdate {
+pub struct SubscriptionUpdate {
     pub frame: Option<Vec<u8>>,
     pub events: Vec<SubscriptionEvent>,
 }
@@ -296,14 +296,10 @@ impl Subscription {
         self.inbox.checkpoint(checkpoint);
     }
 
-    /// The newest changed frame, or `None` when nothing changed since the last
-    /// pull. Any read snapshot is released before this returns. A subscription that
+    /// The newest changed frame and observed occurrences; either can be empty.
+    /// Any read snapshot is released before this returns. A subscription that
     /// fails or panics returns its error as a last frame.
-    pub fn pull(&self) -> Option<Vec<u8>> {
-        self.pull_update().frame
-    }
-
-    pub(crate) fn pull_update(&self) -> SubscriptionUpdate {
+    pub fn pull(&self) -> SubscriptionUpdate {
         let mut pull = self
             .pull
             .lock()
@@ -957,7 +953,7 @@ mod tests {
             wakes
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if let Some(frame) = subscription.pull() {
+            if let Some(frame) = subscription.pull().frame {
                 return serde_json::from_slice(&frame).unwrap();
             }
         }
@@ -1121,7 +1117,7 @@ mod tests {
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
             wakes.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(subscription.pull().is_none());
+            assert!(subscription.pull().frame.is_none());
         }
         assert_eq!(reads.load(Ordering::Relaxed), before);
         assert!(!home.path().join("loopflow.db").exists());

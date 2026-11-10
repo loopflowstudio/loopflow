@@ -828,7 +828,7 @@ impl Read {
 
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
     /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
-    /// [`Subscription::pull`] may find a frame; dropping the subscription ends
+    /// [`Subscription::pull`] may find a reading or occurrences; dropping the subscription ends
     /// it. A read whose command takes no `--subscribe` is an error.
     pub fn subscribe(
         self,

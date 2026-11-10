@@ -356,7 +356,8 @@ part of what a phone or bot client is offered.
 
 ## Events alongside readings
 
-Watch a Task to keep its current state visible and react when something happens:
+Watch a Task to keep its current state visible and react when something happens.
+After the `hello`/`welcome` exchange above, subscribe with `resume: null`:
 
 ```text
 → {"type":"subscribe","id":"task","operation":{"kind":"task.get","directory":"/repo","issue":"LOO-1"},"select":null,"resume":null}
@@ -384,6 +385,10 @@ only.
 | `task.steer` | `task_id`, `steer {id,sequence,source,revision,author,text}`, `comment`: immutable direction and the original `TaskComment` when present (`null` for other direction) |
 | `graph.step_finished` | `task_id`, `graph_process_id`, `step`: the same `GraphStepProcess` as a Task reading, including its recorded outcome |
 
+`task.shipped` means a PR merge was recorded, not that Auto-Ship was enabled or
+the Task was completed. `graph.step_finished` includes failed and interrupted
+steps; inspect `step.outcome` before presenting a successful finish.
+
 ```json
 {"type":"event","id":"task","seq":1,"event":{"kind":"task.steer","task_id":"task_11111111111111111111111111111111","steer":{"id":"11111111-1111-1111-1111-111111111111","sequence":7,"source":"comment-7","revision":"1","author":{"kind":"user"},"text":"Keep the examples."},"comment":null}}
 ```
@@ -392,6 +397,9 @@ A changed reading precedes the occurrences observed with it. Use the PR, steer
 or step identity to avoid appending content already present in that reading.
 For a comment steer, append `comment` by its own ID; its body is the original
 thread text, while `steer.text` includes the context sent to providers.
+Overlapping subscriptions can deliver the same occurrence with different
+`seq` values. Deduplicate by occurrence identity if they feed the same view;
+the delivery sequence is not an occurrence ID.
 Events are never coalesced. A subscription that exceeds the bounded pending
 batch ends with an error; reopen it for a fresh reading.
 
@@ -405,8 +413,9 @@ not be consecutive because other subscriptions share the connection.
 
 Keep the last complete reading as the recovery baseline. If event delivery has
 a gap, stop applying incremental event updates and request a fresh reading for
-the affected subscriptions. After a disconnect, subscribe with `resume: null`
-to obtain a complete current reading before continuing event-driven updates.
+every event-consuming subscription on that connection. After a disconnect,
+subscribe with `resume: null` to obtain a complete current reading before
+continuing event-driven updates.
 Replace state from that reading without replaying animations or appending its
 entries again. There is no event replay cursor: events missed while disconnected
 are recovered as current state, not delivered as historical notifications.

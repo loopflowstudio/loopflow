@@ -15,10 +15,37 @@ log is needed. Reading-only consumers keep checkpoint resumption; Swift event
 consumers reconnect with a fresh reading. Sequence gaps end all event consumers
 on the connection, while unknown kinds end only the affected consumer.
 
-Remaining: review, publication, affected-suite gate, CI repair if needed,
-landing and merged-behavior verification before Task completion. No missing
+Delete — do not maintain: the separate event drain and shared event buffer
+are removed; `SubscriptionUpdate` carries each reading with its occurrences.
+`GraphProcess::step_detail` replaces the inline step conversion in `detail`.
+Keep complete readings, reading checkpoint resumption and CLI-only watches on
+their existing paths. No further predecessor or migration needs removal.
+
+Compression recheck: remove `pull_update` and the frame-only `pull` wrapper;
+`pull` returns `SubscriptionUpdate` directly, and reading-only callers select
+`.frame`. There is one snapshot result API with no implicit event discard.
+The store's event limit now means the maximum returned count; its extra-row
+overflow probe stays inside the query helper. No deletion targets remain.
+
+Remaining: review, sync before delivery, affected-suite gate, CI repair if
+needed, landing PR #1873 and merged-behavior verification before Task completion. No missing
 product decision was found in this pass. Board animations and thread UI changes
 are outside this Task; the event payloads and ordered client stream enable them.
+
+Shipping docs: `rust/loopflow/src/server/README.md` contains the subscription
+example, payloads, occurrence deduplication and recovery contract;
+`docs/dev/server.md` links that contract from the client architecture guide.
+The write-docs pass retained both and clarified merge/step meanings and the
+connection-wide scope of sequence-gap recovery. No open product question.
+The write-docs Desktop preview failed again: this Task has no workspace in the
+attached window. The docs remain at the paths above. `git diff --check` passed;
+this pass changes prose only.
+
+Implementation recheck (2026-11-09): the current docs match the Rust snapshot,
+delivery/cancellation and Swift recovery paths. No code repair was needed;
+the focused Rust/Swift and live QA results below still apply to unchanged code.
+Task status reported PR #1873 open and the current auto Graph at implement;
+the earlier Graph stopped at gate. Leave affected checks to the current gate.
 
 Concept review (2026-11-09): no design change or open product choice; advance.
 The important distinction remains current state versus a newly observed
@@ -46,7 +73,7 @@ Gate owns affected suites:
 plus Swift, website/architecture and clippy through the affected-suite runner.
 
 Checks:
-- `cargo test -p loopflow --lib -- server::events:: server::outbox:: server::service::tests::typed_events lf::commands::subscribe::`: 16 passed after compression; build emitted macOS `__eh_frame` size warning. Gate runs affected suites after sync.
+- `cargo test -p loopflow --lib -- server::events:: server::outbox:: server::service::tests::typed_events lf::commands::subscribe::`: 16 passed after the single-pull API cut; build emitted macOS `__eh_frame` size warning. Gate runs affected suites after sync.
 - `cargo test -p loopflow --lib server::`: 40 passed during compression, before the final payload buffer-drop adjustment.
 - `cargo test -p loopflow --lib server::events::`: 7 passed.
 - `cargo test -p loopflow --lib server::service::tests::typed_events_share_connection_order_survive_selection_and_stop_on_cancel`: passed.

@@ -45,7 +45,7 @@ impl Observer {
             if first {
                 cursor.event = store.latest_task_event(&task)?.map_or(0, |event| event.id);
             } else {
-                for event in store.subscription_task_events(&task, cursor.event, MAX_EVENTS + 1)? {
+                for event in store.subscription_task_events(&task, cursor.event, MAX_EVENTS)? {
                     cursor.event = event.id;
                     match event.kind {
                         TaskEventKind::PrMerged {

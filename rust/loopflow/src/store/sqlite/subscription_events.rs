@@ -18,11 +18,11 @@ impl SqliteStore {
         let mut query = conn.prepare("SELECT id,task_id,kind_json,created_at FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id LIMIT ?3")?;
         let events = query
             .query_map(
-                params![task.as_str(), after, limit as i64],
+                params![task.as_str(), after, limit as i64 + 1],
                 super::children::map_task_event_row,
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        if events.len() == limit {
+        if events.len() > limit {
             return Err(StoreError::InvalidData(
                 "subscription fell behind its events; subscribe again for current state".into(),
             ));

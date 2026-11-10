@@ -951,7 +951,7 @@ async fn subscribe(
                 let update = tokio::task::spawn_blocking(move || {
                     let _held = held;
                     crate::journal::request::isolate(|| -> Result<_> {
-                        let update = pull.pull_update();
+                        let update = pull.pull();
                         let mut bytes = update.frame.as_ref().map_or(0, Vec::len) + 1024;
                         for event in &update.events {
                             bytes += serde_json::to_vec(event)?.len() + 1024;

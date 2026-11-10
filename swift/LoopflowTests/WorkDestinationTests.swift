@@ -250,6 +250,82 @@ struct WorkDestinationTests {
         try await creating.value
     }
 
+    enum CreationDeparture: CaseIterable {
+        case newerTaskSheet, newerSheetSameDestination, newerRepositorySheet
+        case navigationAway, navigationRoundTrip, dismissed, repositoryRoundTrip
+    }
+
+    @Test("An earlier creation reply keeps later navigation and a newer New Task sheet",
+          arguments: [false, true], CreationDeparture.allCases)
+    func lateCreationReplyKeepsNewerNavigation(unknownOutcome: Bool, departure: CreationDeparture) async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let other = try #require(snapshot.waves.flatMap { $0.tasks.items }.first { $0.id != task.id })
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted"}
+        """
+        let barrier = LinkedDestinationBarrier()
+        let submitted = OSAllocatedUnfairLock(initialState: "")
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) {
+                submitted.withLock { $0 = args[3] }
+                await barrier.wait("creation")
+                if unknownOutcome {
+                    throw SubmittedCreationError(requestID: args[3], cause: RegistryQueryError("Outcome unknown"))
+                }
+                return receipt
+            }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
+            if args.starts(with: ["plan", "list"]) { return planning }
+            throw RegistryQueryError("Unexpected New Task operation")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let originalNavigation = model.navigation
+        model.navigation.palette = .newTask
+        let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
+        try #require(await barrier.contains("creation"))
+        switch departure {
+        case .newerTaskSheet:
+            model.navigation.palette = nil
+            model.select(.task(id: other.id))
+            model.navigation.palette = .newTask
+        case .newerSheetSameDestination:
+            model.navigation.palette = nil
+            model.navigation.palette = .newTask
+        case .newerRepositorySheet:
+            model.setRepoPath("/another-repository")
+            model.navigation.palette = .newTask
+        case .navigationAway:
+            model.select(.task(id: other.id))
+        case .navigationRoundTrip:
+            model.select(.task(id: other.id))
+            model.select(nil)
+        case .dismissed:
+            model.navigation.palette = nil
+        case .repositoryRoundTrip:
+            model.setRepoPath("/another-repository")
+            model.setRepoPath(task.task.repo)
+        }
+        let selection = model.selection
+        await barrier.release("creation")
+        try await creating.value
+        #expect(model.selection == selection)
+        let newerSheets: [CreationDeparture] = [.newerTaskSheet, .newerSheetSameDestination, .newerRepositorySheet]
+        #expect(model.navigation.palette == (newerSheets.contains(departure) ? .newTask : nil))
+        if departure == .newerRepositorySheet { #expect(originalNavigation.palette == nil) }
+        if !unknownOutcome {
+            #expect(CreationRecovery.shared.requests(for: .task(task.task.id)).contains(submitted.withLock { $0 }))
+            await CreationRecovery.shared.presented([submitted.withLock { $0 }])
+        }
+    }
+
     @Test("A submitted creation with an uncertain answer leaves the sheet for recovery")
     func submittedCreationHasNoSecondSubmitButton() async throws {
         let query = RegistryQuery { _, _ in

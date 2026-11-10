@@ -6,25 +6,12 @@ and bulk protocol are outside this Task.
 
 ## Transport dependency — November 10, 2026 UTC
 
-The inspected PR #1812 head is
-`e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`. It supplies
-`Admission::Remote { node: String, user: u64 }` through
-`server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
-`UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
-through `host.permits`: `/v1/machine` for control and `/v1/ticket` for redemption.
-Terminal redemption answers `bridged {owner_lf_process_id}`, matching this
-Task's planned wire contract; bulk redemption answers `admitted`.
+Inspected PR #1812 at `e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`: both
+WebSocket paths authenticate with the planned node/user identity, but the
+shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
+Terminal consume-on-attempt coverage is missing.
 
-That revision shares `server/ticket.rs` between terminal and bulk transfer,
-leaves foreign attempts unconsumed and expires tickets with `Instant`, contrary
-to this Task's consume-on-attempt and host-sleep requirements.
-`Admission::Local` follows a same-effective-UID check on
-every Unix socket connection. The shared-store tests cover bulk single use,
-foreign attempts remaining redeemable, expiry and sweeping; they do not cover
-the terminal consume-on-attempt requirement.
-
-At November 10 20:14 UTC, GitHub reports PR #1812 open and unmerged at that
-head, `mergeable: MERGEABLE`, with no auto-merge. At 20:49 UTC, PR #1812 remains
+At November 10 20:49 UTC, PR #1812 remains
 open and unmerged at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`, still mergeable
 with no auto-merge. Freshly fetched main is
 `454f768944fb4b4aa4ee572beb1ca5418b18df6d`; `server/mobile.rs` and
@@ -40,6 +27,8 @@ Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
 to older status reads; the conflicting PR status at 19:35 UTC is retained in
 `074561f725255dfe5c56d46fed3969eed725b75a:scratch/design.md`.
+The detailed transport inspection and 20:14 UTC status are in
+`7f2ffc44ddb84377d31bf05bb689d5b3cf0a16a3:scratch/design.md`.
 
 ## Delete — do not maintain
 
@@ -69,6 +58,8 @@ planned/local-only wording and describe local/remote admission binding.
 Keep exact-owner selection and recovery together for both transports; keep
 the running-owner prerequisite and missing-owner error beside the remote example.
 These docs own the contract; this plan keeps only remaining integration work.
+The phone overview keeps the connection steps; protocol details and shared
+owner recovery stay in the server README to avoid repeating them here.
 Desktop visual inspection remains for QA; opening results are in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

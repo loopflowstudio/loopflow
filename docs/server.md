@@ -115,11 +115,11 @@ does not mean a phone can connect. Pairing a phone will grant client access to a
 host, independently of adding a Machine as an execution destination.
 
 The planned [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
-lets a phone view an existing Session's terminal without starting or resuming a
-provider. The phone requests a ticket, then opens a separate terminal connection.
-The ticket works once, within 60 seconds including host sleep, on the same
-authenticated device and account that requested it. If it expires or a connection
-attempt fails, request a fresh ticket from that device.
+lets a phone view a Session's running terminal without starting or resuming a
+provider. Request a ticket, then open a separate terminal connection within
+60 seconds of issue including host sleep, on the same authenticated device and account
+that requested it. Each ticket works once; expiry does not end an established
+connection. After expiry or a failed attempt, request a fresh ticket from that device.
 
 Local use needs no network listener. Keep the local socket private; remote
 clients require their own authenticated endpoint.

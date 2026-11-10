@@ -316,7 +316,7 @@ part of what a phone or bot client is offered.
   connection, which stays a client. A separate bridge connection sends
   `{"type":"attach","ticket":"<ticket>"}` as its only JSON message; the server answers
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
-  [binary owner protocol](../transport/README.md) in `transport/wire.rs`. A
+  [binary owner protocol](../transport/README.md). A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
   60 seconds and is bound to the requesting client's Unix peer UID. Presenting
   a ticket consumes it even when the UID does not match. An unknown,
@@ -406,9 +406,9 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-Planned for the authenticated endpoint in [Phone access](../../../../docs/server.md#phone-access).
-This build supports local attachment only. Owner selection and terminal control
-follow `session.attach` above.
+Planned for [Phone access](../../../../docs/server.md#phone-access); this build
+supports local attachment only. Owner selection, terminal control and the binary
+owner protocol follow `session.attach` above.
 
 Connect to the host's authenticated `/v1/machine` WebSocket, complete
 `hello`/`welcome`, and request `session.attach` with a Session ID from
@@ -438,5 +438,4 @@ An unknown, spent, expired or identity-mismatched ticket returns `not_found`
 with a null `id` and closes the bridge connection. Presenting a terminal ticket
 consumes it even when the identities do not match. To retry or reconnect,
 request a fresh ticket on the authenticated client connection and open a new
-bridge from the same device and account. After `bridged`, use the
-[binary owner protocol](../transport/README.md) on that bridge.
+bridge from the same device and account.

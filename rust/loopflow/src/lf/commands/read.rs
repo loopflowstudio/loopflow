@@ -840,9 +840,17 @@ impl Read {
             paths.extend(self.ending_paths().iter().map(|path| path.to_string()));
             paths
         });
+        let events = matches!(
+            self,
+            Self::TaskGet { .. }
+                | Self::TaskWait { .. }
+                | Self::PlanList { .. }
+                | Self::DesktopViewList { .. }
+        );
         let transport = Transport::Pull {
             wake: Box::new(wake),
             select,
+            events,
         };
         let subscription = match self {
             Self::ProcessList => super::top::subscribe_ps(transport),

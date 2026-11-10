@@ -61,6 +61,14 @@ attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
+Subscriptions carry complete readings of current state and typed events for
+occurrences such as a Task shipping, a steer arriving or a Graph step finishing.
+Clients can use an event payload to animate a change or append a thread entry
+without re-reading. Events have connection-local sequence numbers and no replay
+cursor; a gap or reconnect requires a fresh reading before incremental updates
+continue. The [event contract](../../rust/loopflow/src/server/README.md#events-alongside-readings)
+defines sequencing and recovery alongside reading checkpoint resumption.
+
 Every shared native Work read, write and subscription uses this server. Desktop
 links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
 the same shared Rust functions, which return typed values: `Write::run`

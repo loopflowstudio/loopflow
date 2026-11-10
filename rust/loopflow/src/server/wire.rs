@@ -118,6 +118,38 @@ pub struct SessionAttached {
     pub expires_in_ms: u64,
 }
 
+/// An occurrence within the Tasks included in a subscription reading.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum SubscriptionEvent {
+    #[serde(rename = "task.shipped")]
+    TaskShipped {
+        task_id: crate::work::task::TaskId,
+        pr_id: crate::work::task::TaskPrId,
+        number: u32,
+        url: String,
+        merge_commit: String,
+    },
+    #[serde(rename = "task.steer")]
+    TaskSteer {
+        task_id: crate::work::task::TaskId,
+        steer: crate::steer::Steer,
+        /// The thread entry when this direction came from a retained comment.
+        comment: Option<crate::work::task::comment::TaskComment>,
+    },
+    #[serde(rename = "graph.step_finished")]
+    GraphStepFinished {
+        task_id: crate::work::task::TaskId,
+        graph_process_id: LfProcessId,
+        step: crate::durable::GraphStepProcess,
+    },
+    /// Newer event kinds can be ignored or resynced without losing the connection.
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
+}
+
 /// One message from the server.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -144,6 +176,12 @@ pub enum ServerMessage {
         checkpoint: String,
         #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
+    },
+    /// Connection-local ordering; never a replay or reading checkpoint.
+    Event {
+        id: String,
+        seq: u64,
+        event: SubscriptionEvent,
     },
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
@@ -230,6 +268,14 @@ mod tests {
     use super::{ClientMessage, ServerMessage};
 
     #[test]
+    fn unknown_events_keep_their_subscription_envelope() {
+        let message: ServerMessage = serde_json::from_str(r#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.event","payload":true}}"#).unwrap();
+        assert!(
+            matches!(message, ServerMessage::Event { id, seq:2, event: super::SubscriptionEvent::Unknown } if id == "task")
+        );
+    }
+
+    #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/hello.json"),
@@ -294,6 +340,9 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../../../tests/fixtures/dto/server/bridged.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_shipped.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_running.json"),

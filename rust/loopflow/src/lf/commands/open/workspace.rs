@@ -1059,6 +1059,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
             }
         },
         super::super::subscribe::Transport::Pull {
+            events: false,
             wake: Box::new(|| {}),
             select: None,
         },

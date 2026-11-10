@@ -486,6 +486,7 @@ async fn session(
     // work finishes on its worker. Final frame delivery releases the request ID.
     let mut tasks: JoinSet<()> = JoinSet::new();
     let mut inflight: HashMap<String, Inflight> = HashMap::new();
+    let mut event_seq = 0u64;
     loop {
         tokio::select! {
             incoming = lines.next() => {
@@ -610,7 +611,8 @@ async fn session(
             Some(frame) = queue.recv() => {
                 let Some(entry) = inflight.get(&frame.id).filter(|entry| Some(entry.task.id()) == frame.task) else { continue; };
                 let complete = frame.complete || (frame.response && entry.checkpoints.is_none());
-                tokio::time::timeout(SEND, lines.send(frame.line)).await.context("client did not take a message within five seconds")??;
+                let line = frame.payload.into_line(&mut event_seq)?;
+                tokio::time::timeout(SEND, lines.send(line)).await.context("client did not take a message within five seconds")??;
                 drop(frame.reservation);
                 let _ = frame.delivered.send(());
                 if complete { inflight.remove(&frame.id); }
@@ -946,26 +948,38 @@ async fn subscribe(
                 let reservation = outgoing.wait().await?;
                 let held = (reservation.clone(), slot.clone());
                 let pull = Arc::clone(&subscription);
-                let frame = tokio::task::spawn_blocking(move || {
+                let update = tokio::task::spawn_blocking(move || {
                     let _held = held;
-                    crate::journal::request::isolate(|| pull.pull())
-                }).await?;
+                    crate::journal::request::isolate(|| -> Result<_> {
+                        let update = pull.pull_update();
+                        let mut bytes = update.frame.as_ref().map_or(0, Vec::len) + 1024;
+                        for event in &update.events {
+                            bytes += serde_json::to_vec(event)?.len() + 1024;
+                            anyhow::ensure!(bytes <= MAX_MESSAGE, "subscription event batch exceeds retained bytes; subscribe again for current state");
+                        }
+                        Ok(update)
+                    })
+                }).await??;
+                if !update.events.is_empty() { reservation.batch(); }
                 let mut reason = None;
-                if let Some(frame) = frame {
+                let mut last = false;
+                if let Some(frame) = update.frame {
                     let frame: serde_json::Value = serde_json::from_slice(&frame)?;
                     reason = frame["unavailable"].as_str().map(str::to_owned);
-                    let last = ends.ends_after(&frame["body"]);
+                    last = ends.ends_after(&frame["body"]);
                     let checkpoint = reading_checkpoint(&scope, &frame)?;
                     let unchanged = resume.take().as_ref() == Some(&checkpoint)
                         && frame["answers"].is_null() && reason.is_none();
                     if !unchanged {
-                        outgoing.deliver(ServerMessage::Reading { id: id.into(), checkpoint, frame }, reservation).await?;
-                    } else {
-                        drop(reservation);
+                        outgoing.deliver(ServerMessage::Reading { id: id.into(), checkpoint, frame }, reservation.clone()).await?;
                     }
-                    if last {
-                        return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
-                    }
+                }
+                for event in update.events {
+                    outgoing.deliver(ServerMessage::Event { id: id.into(), seq: 0, event }, reservation.clone()).await?;
+                }
+                drop(reservation);
+                if last {
+                    return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
                 }
                 if subscription.ended() {
                     anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
@@ -1132,6 +1146,150 @@ mod tests {
             .build()
             .unwrap()
             .block_on(body);
+    }
+
+    #[test]
+    fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
+        with_empty_home(async {
+            use crate::durable::{Author, WorkRef};
+            use crate::work::task::TaskId;
+            let path = crate::store::database_path_from_env().unwrap();
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute_batch(include_str!(
+                    "../../tests/fixtures/saved_selection_work.sql"
+                ))
+                .unwrap();
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute_batch(
+                    "UPDATE tasks SET project_id=NULL;
+                 INSERT OR IGNORE INTO machines(id,is_local,created_at,observed_at)
+                 VALUES('home_11111111111111111111111111111111',1,1,1);",
+                )
+                .unwrap();
+            let task = TaskId::parse("task_11111111111111111111111111111111").unwrap();
+            let work = WorkRef::Task(task);
+            store
+                .save_steer(&work, &Author::User, "historical")
+                .unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            for id in ["a", "b"] {
+                client
+                    .send(&ClientMessage::Subscribe {
+                        id: id.into(),
+                        operation: Read::TaskWait {
+                            issue: "FIX-1".into(),
+                            until: crate::ops::task::TaskWaitUntil::Terminal,
+                        },
+                        select: Some(vec!["reached".into()]),
+                        resume: None,
+                    })
+                    .await;
+                assert!(matches!(
+                    client.receive().await.unwrap(),
+                    ServerMessage::Response { .. }
+                ));
+                let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
+                    panic!("missing baseline")
+                };
+                assert_eq!(
+                    frame["body"],
+                    serde_json::json!({"reached":false}),
+                    "{frame}"
+                );
+            }
+            store
+                .save_steer(&work, &Author::User, "first occurrence")
+                .unwrap();
+            for id in ["a", "b"] {
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: id.into(),
+                        checkpoint: 1,
+                    })
+                    .await;
+            }
+            let mut ids = Vec::new();
+            while ids.len() < 2 {
+                let message = tokio::time::timeout(Duration::from_secs(10), client.receive())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                match message {
+                    ServerMessage::Event {
+                        id,
+                        seq,
+                        event: crate::server::wire::SubscriptionEvent::TaskSteer { steer, .. },
+                    } => {
+                        assert_eq!(seq, ids.len() as u64 + 1);
+                        assert_eq!(steer.text, "first occurrence");
+                        ids.push(id);
+                    }
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            ids.sort();
+            assert_eq!(ids, ["a", "b"]);
+            client.send(&ClientMessage::Cancel { id: "a".into() }).await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "a".into(),
+                    checkpoint: 2,
+                })
+                .await;
+            loop {
+                match client.receive().await.unwrap() {
+                    ServerMessage::Error {
+                        id: Some(id),
+                        code: ErrorCode::NotFound,
+                        ..
+                    } if id == "a" => break,
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            store
+                .save_steer(&work, &Author::User, "after cancellation")
+                .unwrap();
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "b".into(),
+                    checkpoint: 2,
+                })
+                .await;
+            loop {
+                match tokio::time::timeout(Duration::from_secs(10), client.receive())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                {
+                    ServerMessage::Event { id, seq, .. } => {
+                        assert_eq!(id, "b");
+                        assert_eq!(seq, 3);
+                        break;
+                    }
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            client.send(&ClientMessage::Cancel { id: "b".into() }).await;
+            client
+                .send(&ClientMessage::Request {
+                    id: "sibling".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "sibling")
+            );
+            drop(client.writer);
+            client.server.await.unwrap().unwrap();
+        });
     }
 
     #[test]

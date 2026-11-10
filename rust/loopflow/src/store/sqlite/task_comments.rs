@@ -94,7 +94,7 @@ pub(super) fn ingest_task_comment(
     Ok(true)
 }
 
-fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
+pub(super) fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
     let author: String = row.get(2)?;
     let body: String = row.get(1)?;
     let author = serde_json::from_str::<TaskCommentAuthor>(&author).map_err(|error| {

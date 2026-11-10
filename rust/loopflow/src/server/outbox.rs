@@ -1,10 +1,11 @@
 //! Reserve before materializing; release only after delivery or worker completion.
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 
-use super::wire::{ServerMessage, MAX_MESSAGE};
+use super::wire::{ServerMessage, SubscriptionEvent, MAX_MESSAGE};
 
 pub(super) const MAX_OPEN: usize = 256;
 pub(super) const MAX_WRITES: usize = 16;
@@ -19,7 +20,7 @@ pub(super) struct Outbox {
 }
 
 pub(super) struct Frame {
-    pub line: String,
+    pub payload: Payload,
     pub delivered: oneshot::Sender<()>,
     pub id: String,
     pub task: Option<tokio::task::Id>,
@@ -29,18 +30,55 @@ pub(super) struct Frame {
     pub reservation: Arc<Reservation>,
 }
 
+#[derive(Debug)]
+pub(super) enum Payload {
+    Line(String),
+    // Events acquire their sequence only after the connection discards cancelled frames.
+    Event {
+        id: String,
+        event: Box<SubscriptionEvent>,
+    },
+}
+
+impl Payload {
+    pub fn into_line(self, sequence: &mut u64) -> Result<String> {
+        match self {
+            Self::Line(line) => Ok(line),
+            Self::Event { id, event } => {
+                *sequence = sequence
+                    .checked_add(1)
+                    .context("event sequence exhausted")?;
+                Ok(serde_json::to_string(&ServerMessage::Event {
+                    id,
+                    seq: *sequence,
+                    event: *event,
+                })?)
+            }
+        }
+    }
+}
+
 type RequestSlots = (OwnedSemaphorePermit, Option<OwnedSemaphorePermit>);
 
 pub(super) struct Reservation {
+    batch: AtomicBool,
     slots: Mutex<Option<RequestSlots>>,
     permits: Mutex<(OwnedSemaphorePermit, OwnedSemaphorePermit)>,
 }
 
 impl Reservation {
+    /// Keep producer headroom until every frame in this materialized batch leaves.
+    pub fn batch(&self) {
+        self.batch.store(true, Ordering::Relaxed);
+    }
+
     pub fn hold(&self, slots: RequestSlots) {
         *self.slots.lock().expect("reservation lock poisoned") = Some(slots);
     }
     fn shrink(&self, bytes: usize) {
+        if self.batch.load(Ordering::Relaxed) {
+            return;
+        }
         let mut permits = self.permits.lock().expect("reservation lock poisoned");
         let release = permits.0.num_permits() - bytes;
         drop(permits.0.split(release));
@@ -86,6 +124,7 @@ impl Outbox {
             .try_acquire_many_owned(MAX_MESSAGE as u32)
             .ok()?;
         Some(Arc::new(Reservation {
+            batch: AtomicBool::new(false),
             slots: Mutex::new(None),
             permits: Mutex::new((local, process)),
         }))
@@ -103,6 +142,7 @@ impl Outbox {
             .acquire_many_owned(MAX_MESSAGE as u32)
             .await?;
         Ok(Arc::new(Reservation {
+            batch: AtomicBool::new(false),
             slots: Mutex::new(None),
             permits: Mutex::new((local, process)),
         }))
@@ -110,26 +150,45 @@ impl Outbox {
 
     pub async fn deliver(
         &self,
-        message: ServerMessage,
+        mut message: ServerMessage,
         reservation: Arc<Reservation>,
     ) -> Result<()> {
+        if let ServerMessage::Event { seq, .. } = &mut message {
+            // Reserve enough digits before the connection assigns delivery order.
+            *seq = u64::MAX;
+        }
         let (id, complete, response) = match &message {
             ServerMessage::Response { id, .. } => (id.clone(), false, true),
-            ServerMessage::Reading { id, .. } => (id.clone(), false, false),
+            ServerMessage::Reading { id, .. } | ServerMessage::Event { id, .. } => {
+                (id.clone(), false, false)
+            }
             ServerMessage::Ended { id } => (id.clone(), true, false),
             ServerMessage::Error { id: Some(id), .. } => (id.clone(), true, false),
             _ => unreachable!("only request frames enter an outbox"),
         };
         let mut bytes = Limited(Vec::new());
         serde_json::to_writer(&mut bytes, &message)?;
-        // Free the materialized value before releasing its producer headroom.
-        drop(message);
-        reservation.shrink(bytes.0.len());
-        let line = String::from_utf8(bytes.0).expect("JSON is UTF-8");
+        // Keep only one representation: readings are encoded; events wait for
+        // their delivery sequence under the batch's producer headroom.
+        let size = bytes.0.len();
+        let payload = match message {
+            ServerMessage::Event { id, event, .. } => {
+                drop(bytes);
+                Payload::Event {
+                    id,
+                    event: Box::new(event),
+                }
+            }
+            message => {
+                drop(message);
+                Payload::Line(String::from_utf8(bytes.0).expect("JSON is UTF-8"))
+            }
+        };
+        reservation.shrink(size);
         let (delivered, taken) = oneshot::channel();
         self.sender
             .send(Frame {
-                line,
+                payload,
                 delivered,
                 reservation,
                 id,
@@ -211,7 +270,10 @@ mod tests {
                 .unwrap();
         });
         let frame = receiver.recv().await.unwrap();
-        assert_eq!(outbox.retained(), MAX_MESSAGE + frame.line.len());
+        assert_eq!(
+            outbox.retained(),
+            MAX_MESSAGE + frame.payload.into_line(&mut 0).unwrap().len()
+        );
         frame.delivered.send(()).unwrap();
         drop(frame.reservation);
         delivering.await.unwrap();

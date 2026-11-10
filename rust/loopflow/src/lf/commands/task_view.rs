@@ -25,6 +25,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
         repo,
         issue,
         subscribe::Transport::Pull {
+            events: false,
             wake: Box::new(|| {}),
             select: None,
         },

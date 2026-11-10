@@ -16,11 +16,8 @@ answering it executes its effect once. Cancellation/save-back, blocked Keychain
 stdin and partial-install tests pass.
 Exact commands, candidate hashes, initial fixture failures and remaining checks
 are in the design. Earlier unconditional sends establish none of these guarantees.
-Publication checks on main `8155d1fcd` passed after DTO fixture repairs; see
-the design’s “Publication review — November 9” for commands and results. Compression reran both
-native bulk cases on candidate `21dd464633268c528d094ca7ef2d3180ff195e56b05d42b9cae6b8cb6aa263b1`;
-approval/cancellation receipts are from earlier candidates. Rendered Desktop,
-installed and real-login checks remain open. Held-lock cancellation precedes
+Publication checks on main `9c3403a88` passed after DTO fixture repairs; see
+the design’s “Publication review — November 9” for commands and results. Rendered Desktop, installed and real-login checks remain open. Held-lock cancellation precedes
 installation; it does not establish cancellation of an already-sent native login.
 
 November 9 QA reran both providers' bulk, approval and held-lock cancellation

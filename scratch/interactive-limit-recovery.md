@@ -92,6 +92,14 @@ and canonical TMPDIR. Full commands/filters are in the named local logs.
 - `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DTOFixtureTests|sessionRecovery|uncertainRecovery'` — 59 passed after fixture repair; same final-check log. The full build also reported main's existing nil-coalescing warning in TaskWorkView.
 - `scripts/check_swift_multiplatform_boundaries.py`, `cargo fmt --check`, `git diff --check` — passed. `scripts/third_party.py refresh` updated the Cargo.lock input hash; Python inventory tests passed.
 
+After integration with main `9c3403a885356276c52c345b426dc9d7b4714be7`
+(merge `14f80557f`), the focused served bulk-recovery check passed. Additional
+checks and exact filters are in `.lf/tmp/loo-811-publish-post-sync.log`:
+
+- `cargo nextest run -p loopflow` — 134 affected typed-write, screen, event, subscription, DTO and served-read checks passed.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`, CLI build and formatting — passed.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'ServerProtocolTests|ServerClientTests|SessionsStoreTests|WorkspaceSessionLifecycleTests|DTOFixtureTests|sessionRecovery|uncertainRecovery'` — 124 passed; Swift boundaries and diff whitespace passed. Main's existing Swift warnings remain.
+
 Prior six-case native QA remains applicable: production edits in this review
 change DTO decoding/encoding, not native dispatch or credentials. Rendered
 Desktop, ordinary physical typing after reopen, installed and real-login checks

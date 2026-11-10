@@ -64,7 +64,9 @@ CLI operations can run without the server. Desktop owns rendering and UI actions
 Every shared native Work read, write and subscription uses this server. Desktop
 links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
 the same shared Rust functions, which return typed values: `Write::run`
-(`lf/commands/write.rs`) returns the value as the response, and the CLI
+(`lf/commands/write.rs`) keeps each write's declared result type through
+dispatch, and that type supplies its `x-result` schema. The server serializes
+the value into `response.result`, and the CLI
 (`lf/commands/mutation.rs`) prints it with `--json` or renders it as text. The
 server runs a write in a request-scoped worker with the request's directory,
 without starting a CLI child, parsing standard output or changing

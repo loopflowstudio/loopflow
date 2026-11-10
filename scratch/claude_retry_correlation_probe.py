@@ -30,15 +30,26 @@ def _hook(
     block_recovery: bool = False,
     admit_recovery: bool = False,
     gate_failure: bool = False,
+    gate_only: bool = False,
+    observe_only: bool = False,
+    gate_hold: bool = False,
 ) -> None:
     event = json.load(sys.stdin)
     payload = {
         "event": event,
         "inbox_available": bool(os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET")),
     }
-    request = urllib.request.Request(base + "/hook", data=json.dumps(payload).encode())
-    with urllib.request.urlopen(request, timeout=3):
-        pass
+    request = urllib.request.Request(
+        base + ("/gate_entered" if gate_only else "/hook"), data=json.dumps(payload).encode()
+    )
+    with urllib.request.urlopen(request, timeout=3) as response:
+        admission = json.load(response)
+    if gate_only and admission.get("duplicate"):
+        print(json.dumps({"decision": "block", "reason": "Recovery attempt already consumed"}))
+        return
+    if observe_only:
+        # The ordinary lf context hook may be unavailable; native input must pass.
+        raise SystemExit(1)
     recovery = event["hook_event_name"] == "UserPromptSubmit" and any(
         marker in event.get("prompt", "")
         for marker in ("RETRY_CORRELATION_FIXTURE", "REWAKE_REJECTED_TURN_FIXTURE")
@@ -46,6 +57,8 @@ def _hook(
     if admit_recovery and recovery:
         if gate_failure:
             raise SystemExit(1)
+        if gate_hold:
+            time.sleep(30)
         for phase in ("gate_prepare", "gate_dispatch"):
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
@@ -146,10 +159,18 @@ def main() -> None:
     parser.add_argument("--block-recovery", action="store_true")
     parser.add_argument("--admit-recovery", action="store_true")
     parser.add_argument("--gate-failure", action="store_true")
+    parser.add_argument("--guard-recovery", action="store_true")
+    parser.add_argument("--gate-only", action="store_true")
+    parser.add_argument("--observe-only", action="store_true")
+    parser.add_argument("--gate-timeout", action="store_true")
+    parser.add_argument("--gate-cancel", action="store_true")
     parser.add_argument("--handoff", action="store_true")
     parser.add_argument("--gate-race", choices=("none", "preparation", "dispatch"), default="none")
     parser.add_argument("--race", choices=("none", "preparation", "dispatch"), default="none")
     args = parser.parse_args()
+    rejected_gate = args.guard_recovery and (
+        args.gate_failure or args.gate_timeout or args.gate_cancel
+    )
     if args.hook:
         _hook(
             args.hook,
@@ -157,6 +178,9 @@ def main() -> None:
             args.block_recovery,
             args.admit_recovery,
             args.gate_failure,
+            args.gate_only,
+            args.observe_only,
+            args.gate_timeout or args.gate_cancel,
         )
         return
     if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
@@ -176,13 +200,26 @@ def main() -> None:
     native = None
 
     def stale():
-        prompts = [
-            h["event"].get("prompt", "")
-            for h in hooks
-            if h["event"].get("hook_event_name") == "UserPromptSubmit"
-            and "REWAKE_REJECTED_TURN_FIXTURE" not in h["event"].get("prompt", "")
+        event = next(
+            (h["event"] for h in reversed(hooks) if h["event"].get("transcript_path")), None
+        )
+        if event is None:
+            return True
+        rows = [
+            json.loads(line) for line in Path(event["transcript_path"]).read_text().splitlines()
         ]
-        return bool(prompts and prompts[-1] != "FIRST_CORRELATION_FIXTURE")
+        (out / "submission-history.json").write_text(json.dumps(rows, indent=2))
+        prompts = [
+            row.get("message", {}).get("content")
+            for row in rows
+            if row.get("type") == "user"
+            and row.get("isSidechain") is False
+            and not any(
+                marker in json.dumps(row.get("message", {}))
+                for marker in ("REWAKE_REJECTED_TURN_FIXTURE", "RETRY_CORRELATION_FIXTURE")
+            )
+        ]
+        return not prompts or prompts[-1] != "FIRST_CORRELATION_FIXTURE"
 
     class Messages(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -210,12 +247,22 @@ def main() -> None:
                         "prompt_id": event.get("prompt_id"),
                     }
                 )
-                if event[
-                    "hook_event_name"
-                ] == "UserPromptSubmit" and "REWAKE_REJECTED_TURN_FIXTURE" in event.get(
-                    "prompt", ""
+                if (
+                    not args.guard_recovery
+                    and event["hook_event_name"] == "UserPromptSubmit"
+                    and "REWAKE_REJECTED_TURN_FIXTURE" in event.get("prompt", "")
                 ):
                     gate_entered.set()
+            elif self.path == "/gate_entered":
+                duplicate = gate_entered.is_set()
+                gate_entered.set()
+                order.append({"event": "gate_entered"})
+                payload = json.dumps({"duplicate": duplicate}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             elif self.path in ("/gate_prepare", "/gate_dispatch"):
                 is_stale = stale()
                 if self.path == "/gate_prepare":
@@ -344,6 +391,10 @@ def main() -> None:
                 command += " --admit-recovery"
             if args.gate_failure:
                 command += " --gate-failure"
+            if args.gate_timeout:
+                command += " --gate-timeout"
+            if args.gate_cancel:
+                command += " --gate-cancel"
             settings = {
                 "hooks": {
                     name: [
@@ -367,6 +418,27 @@ def main() -> None:
                     for name in ("SessionStart", "UserPromptSubmit", "Stop", "StopFailure")
                 }
             }
+            if args.guard_recovery:
+                # This shell has no dependency on lf or its state for ordinary
+                # input. Only our own recovery envelope invokes the gate.
+                guard = (
+                    'payload=$(/bin/cat); case "$payload" in '
+                    "*REWAKE_REJECTED_TURN_FIXTURE*|*RETRY_CORRELATION_FIXTURE*) "
+                    "printf '%s' \"$payload\" | " + command + " --gate-only ;; *) exit 0 ;; esac"
+                )
+                settings["hooks"]["UserPromptSubmit"] = [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": command + " --observe-only"},
+                            {
+                                "type": "command",
+                                "command": guard,
+                                "timeout": 2 if args.gate_timeout else 90,
+                                "onFailure": "block",
+                            },
+                        ]
+                    }
+                ]
             (native / "settings.json").write_text(json.dumps(settings))
             env = {
                 "HOME": str(root),
@@ -440,6 +512,38 @@ def main() -> None:
                 type_text("\r")
                 wait_for(lambda: stopped() >= 1, "newer typed turn did not complete")
 
+            def _finish_submission(requests_before):
+                # Inbox and async wake reach the same native submission gate.
+                wait_for(gate_entered.is_set, "recovery did not reach submission gate")
+                if rejected_gate:
+                    if args.gate_cancel:
+                        type_text("\x1b")
+                    read(4)
+                    results["failed_recovery_blocked"] = len(messages) == requests_before
+                    return
+                if args.gate_failure:
+                    read(3)
+                    return
+                if args.gate_race == "preparation":
+                    type_text("_NEWER_DURING_PREPARATION")
+                    type_text("\r")
+                    read(1)
+                dispatch["gate_prepare"] = True
+                wait_for(gate_prepared.is_set, "credential preparation did not run")
+                if args.handoff and not stale():
+                    read(31)
+                if args.gate_race == "dispatch":
+                    type_text("_NEWER_DURING_DISPATCH")
+                    type_text("\r")
+                    read(1)
+                dispatch["gate_dispatch"] = True
+                # Native cancellation can stop the hook before this point.
+                read(3)
+                results["gate_finished"] = gate_finished.is_set()
+                results["requests_after_gate"] = len(messages)
+                if args.gate_race != "none":
+                    type_text("DRAFT_BEFORE_RETRY")
+
             read(4)
             if b"ANTHROPIC_API_KEY" in terminal:
                 type_text("\x1b[A\r")
@@ -474,29 +578,10 @@ def main() -> None:
                 type_text("DRAFT_BEFORE_RETRY")
                 dispatch["admit"] = True
                 wait_for(sent.is_set, "failure hook did not exit")
-                if args.gate_failure:
+                if rejected_gate or args.admit_recovery:
+                    _finish_submission(before_wake)
+                elif args.gate_failure:
                     read(3)
-                if args.admit_recovery and not args.gate_failure:
-                    wait_for(gate_entered.is_set, "wake did not reach admission hook")
-                    if args.gate_race == "preparation":
-                        type_text("_NEWER_DURING_PREPARATION")
-                        type_text("\r")
-                        read(1)
-                    dispatch["gate_prepare"] = True
-                    wait_for(gate_prepared.is_set, "credential preparation did not run")
-                    if args.handoff and not stale():
-                        read(31)
-                    if args.gate_race == "dispatch":
-                        type_text("_NEWER_DURING_DISPATCH")
-                        type_text("\r")
-                        read(1)
-                    dispatch["gate_dispatch"] = True
-                    # Native cancellation can stop the hook before this point.
-                    read(3)
-                    results["gate_finished"] = gate_finished.is_set()
-                    results["requests_after_gate"] = len(messages)
-                    if args.gate_race != "none":
-                        type_text("DRAFT_BEFORE_RETRY")
                 if args.block_recovery:
                     wait_for(
                         lambda: any(
@@ -506,7 +591,7 @@ def main() -> None:
                         "wake did not reach submission hook",
                     )
                     read(1)
-                elif not (args.admit_recovery and stale()):
+                elif not rejected_gate and not (args.admit_recovery and stale()):
                     wait_for(lambda: stopped() > stops_before, "native hook wake did not complete")
                 results.update(
                     mechanism="StopFailure.asyncRewake",
@@ -523,9 +608,14 @@ def main() -> None:
             else:
                 type_text("DRAFT_BEFORE_RETRY")
                 dispatch["uuid"] = str(uuid.uuid4())
+                if args.guard_recovery:
+                    _finish_submission(1)
                 read(6)
                 results["dispatch_uuid"] = dispatch["uuid"]
                 results["socket_write_completed"] = sent.is_set()
+                results["wake_reached_model"] = any(
+                    "RETRY_CORRELATION_FIXTURE" in json.dumps(m) for m in messages
+                )
             type_text("_AFTER_RETRY")
             type_text("\r")
             read(4)
@@ -576,7 +666,7 @@ def main() -> None:
                     h["event"] for h in hooks if h["event"].get("hook_event_name") == "StopFailure"
                 ]
                 assert results["limit_hook"], "quota rejection never reached StopFailure"
-            elif not args.block_recovery:
+            elif not args.block_recovery and not args.guard_recovery:
                 assert len(messages) == 3, "expected initial, inbox and subsequent local turns"
             required = ["client_alive", "draft_submitted_intact", "subsequent_turn_completed"]
             if args.admit_recovery:
@@ -587,7 +677,15 @@ def main() -> None:
                     and not results["wake_reached_model"]
                     and not any(row["event"] == "credentials_installed" for row in order)
                 )
-                if expected_stale:
+                if args.guard_recovery:
+                    results["ordinary_context_failure_ignored"] = results[
+                        "subsequent_turn_completed"
+                    ]
+                    required.append("ordinary_context_failure_ignored")
+                if rejected_gate:
+                    required.append("failed_recovery_blocked")
+                    assert not results["retry_stop_correlated"]
+                elif expected_stale:
                     if args.gate_failure:
                         results["failed_gate_admitted_stale_wake"] = results["wake_reached_model"]
                         required.append("failed_gate_admitted_stale_wake")
@@ -624,7 +722,7 @@ def main() -> None:
                     required.append("wake_reached_model")
                 if args.race != "none" and not args.block_recovery and not args.admit_recovery:
                     required.append("stale_wake_after_newer_input")
-            elif not args.block_recovery:
+            elif not args.block_recovery and not rejected_gate:
                 required.append("retry_stop_correlated")
             if args.block_recovery:
                 results["recovery_submission_hooks"] = [

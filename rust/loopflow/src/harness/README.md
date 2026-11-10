@@ -82,9 +82,10 @@ The projection folds each failed turn's dispatch and correlated result; a late
 wait cannot replace them or hide a subsequent rejection. Checking again cannot
 resend an attempt already dispatched.
 
-Native admission remains missing: Codex has no conditional account-handoff/start
-operation, and Claude's inbox can queue behind newer input. Recovery checks
-capacity, then reports a native wait without switching credentials or sending.
+Native submission gates are not yet integrated with the account broker.
+Recovery checks capacity, then reports a native wait without switching credentials
+or sending. Guarded submission ordering has native probe coverage; bounded
+credential preparation, cancellation and partial installation still need integration.
 The existing broker still handles Codex same-account refresh callbacks, and the
 watchers still settle previously dispatched attempts by native correlation.
 

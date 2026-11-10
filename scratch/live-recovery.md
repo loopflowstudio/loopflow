@@ -8,9 +8,12 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 scope, native counterexamples and remaining preservation cases. Automatic
 continuation remains unfinished: runtime checks capacity and reports waits.
 Earlier two-client product successes exercised the removed unconditional sends;
-current probes establish safe waits and editable drafts. Claude's ordered
-submission hook still fails open; Codex replacement loses active work/approvals.
-No replacement sending path is integrated. The latest main merge needs gate;
+current probes establish safe waits and editable drafts. Both native submission hooks now demonstrate ordered retry and stale
+rejection; isolated guards reject failures/timeouts and retain drafts after
+cancellation. Codex's pending approval executes once before stale recovery is
+rejected. Native timeout alone still admits Codex recovery. These are probes,
+not product sends: bounded broker activation, partial writes, cancellation and
+Session-owner integration remain. Main `6f7a6c9ca`, merged at `c5b22af31`, still needs gate;
 Task-bound native/Desktop preservation and real-login checks remain open.
 
 The implemented experience is described in `docs/sessions.md`, subscriptions

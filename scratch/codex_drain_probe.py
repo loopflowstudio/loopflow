@@ -3,12 +3,14 @@
 # ///
 import argparse
 import fcntl
+import hashlib
 import http.server
 import json
 import os
 import pathlib
 import pty
 import select
+import shlex
 import signal
 import struct
 import subprocess
@@ -33,7 +35,15 @@ parser.add_argument("--token-handoff", action="store_true")
 parser.add_argument("--control", action="store_true")
 parser.add_argument("--conditional-steer", action="store_true")
 parser.add_argument("--replace-server", action="store_true")
-parser.add_argument("--race", choices=("none", "preparation", "disconnected"), default="none")
+parser.add_argument("--submission-gate", action="store_true")
+parser.add_argument(
+    "--gate-fault", choices=("none", "failure", "timeout", "cancel"), default="none"
+)
+parser.add_argument("--guard-recovery", action="store_true")
+parser.add_argument("--gate-race", choices=("none", "preparation", "dispatch"), default="none")
+parser.add_argument(
+    "--race", choices=("none", "preparation", "dispatch", "disconnected"), default="none"
+)
 parser.add_argument("--quota", action="store_true")
 parser.add_argument("--refresh", action="store_true")
 parser.add_argument("--refresh-request", type=int, default=2)
@@ -42,6 +52,9 @@ if args.conditional_steer:
     args.quota = True
 if args.replace_server:
     args.quota = not args.approval
+    args.token_handoff = True
+if args.submission_gate:
+    args.quota = True
     args.token_handoff = True
 if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
     raise RuntimeError("run through scripts/test_network.py")
@@ -55,6 +68,11 @@ request_accounts = []
 refresh_requests = []
 refreshed = threading.Event()
 approval = args.approval
+hooks = []
+gate_entered = threading.Event()
+gate_prepare = threading.Event()
+gate_prepared = threading.Event()
+gate_dispatch = threading.Event()
 
 
 class RefreshClient(Client):
@@ -109,6 +127,64 @@ class Model(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self.path == "/hook":
+            event = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            hooks.append(event)
+            decision = {}
+            if "RECOVERY_SUBMISSION_FIXTURE" in event.get("prompt", ""):
+                rows = [
+                    json.loads(line)
+                    for line in pathlib.Path(event["transcript_path"]).read_text().splitlines()
+                ]
+                (out / "submission-history.json").write_text(json.dumps(rows, indent=2))
+                prior = [
+                    row["payload"].get("content", [])
+                    for row in rows
+                    if row.get("type") == "response_item"
+                    and row.get("payload", {}).get("type") == "message"
+                    and row["payload"].get("role") == "user"
+                    and "RECOVERY_SUBMISSION_FIXTURE" not in json.dumps(row["payload"])
+                ]
+                latest_input = (
+                    "".join(part.get("text", "") for part in prior[-1]) if prior else None
+                )
+                results["native_prior_input"] = latest_input
+                gate_entered.set()
+                if args.gate_fault != "none":
+                    decision = {"fixtureFault": args.gate_fault}
+                elif not gate_prepare.wait(25):
+                    decision = {"decision": "block", "reason": "Fixture preparation timed out"}
+                elif latest_input != "Run the disposable fixture.":
+                    decision = {"decision": "block", "reason": "Newer input superseded recovery"}
+                    results["stale_rejected"] = True
+                else:
+                    saved = _auth(home, "second")
+                    broker = Client(endpoint)
+                    try:
+                        broker.call(
+                            "account/login/start",
+                            {
+                                "type": "chatgptAuthTokens",
+                                "accessToken": json.loads(saved)["tokens"]["access_token"],
+                                "chatgptAccountId": "second",
+                                "chatgptPlanType": "plus",
+                            },
+                        )
+                        results["credentials_installed_in_gate"] = True
+                    finally:
+                        broker.close()
+                    gate_prepared.set()
+                    if not gate_dispatch.wait(25):
+                        decision = {"decision": "block", "reason": "Fixture dispatch timed out"}
+            body = json.dumps(decision).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                results["hook_cancelled"] = True
+            return
         if self.path != "/v1/responses":
             self.send_error(404)
             return
@@ -141,8 +217,12 @@ class Model(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if (len(requests) == 1 and not approval) or (
-            (args.conditional_steer or (args.replace_server and args.race == "preparation"))
+            (
+                args.conditional_steer
+                or ((args.replace_server or args.submission_gate) and args.race == "preparation")
+            )
             and len(requests) == 2
+            and not approval
         ):
             held.set()
             if not release.wait(30):
@@ -156,7 +236,7 @@ class Model(http.server.BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": "DRAIN_TURN_COMPLETED"}],
         }
-        if len(requests) == 1 and approval:
+        if approval and len(requests) == (2 if args.submission_gate else 1):
             item = {
                 "id": "fc_approval",
                 "type": "function_call",
@@ -289,10 +369,71 @@ trust_level="trusted"
                 time.sleep(max(0, deadline - time.monotonic()))
                 return
 
+    def _wait_for(predicate, label):
+        deadline = time.monotonic() + 15
+        while not predicate() and time.monotonic() < deadline:
+            read(0.1)
+        assert predicate(), label
+
     try:
         provider = server()
         setup = RefreshClient(endpoint) if args.refresh else Client(endpoint)
         connections.append(setup)
+        hook_config = {}
+        if args.submission_gate:
+            hook_script = root / "submit.py"
+            hook_script.write_text("""import json, sys, time, urllib.request
+event = json.load(sys.stdin)
+request = urllib.request.Request(sys.argv[1], data=json.dumps(event).encode())
+with urllib.request.urlopen(request, timeout=55) as response:
+    decision = json.load(response)
+if decision.get('fixtureFault') == 'failure':
+    sys.exit(1)
+if decision.get('fixtureFault') in ('timeout', 'cancel'):
+    time.sleep(30)
+print(json.dumps(decision))
+""")
+            hook_command = shlex.join(
+                [sys.executable, str(hook_script), f"http://127.0.0.1:{model.server_port}/hook"]
+            )
+            if args.guard_recovery:
+                hook_command = (
+                    'payload=$(/bin/cat); case "$payload" in *RECOVERY_SUBMISSION_FIXTURE*) '
+                    "printf '%s' \"$payload\" | " + hook_command + " & gate=$!; "
+                    '(sleep 2 & sleeper=$!; trap \'kill "$sleeper" 2>/dev/null; '
+                    'wait "$sleeper" 2>/dev/null; exit\' TERM INT; '
+                    'wait "$sleeper"; kill -TERM "$gate") & timer=$!; '
+                    'wait "$gate"; gate_status=$?; kill "$timer" 2>/dev/null; '
+                    'wait "$timer" 2>/dev/null; '
+                    '[ "$gate_status" = 0 ] || '
+                    'printf \'{"decision":"block","reason":"Recovery gate did not finish"}\\n\' '
+                    ";; *) exit 0 ;; esac"
+                )
+            handler = {
+                "type": "command",
+                "command": hook_command,
+                "timeout": 10 if args.guard_recovery else 2 if args.gate_fault == "timeout" else 60,
+                "async": False,
+            }
+            digest = hashlib.sha256(
+                json.dumps(
+                    {"event_name": "user_prompt_submit", "hooks": [handler]},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            hook_config = {
+                "config": {
+                    "hooks": {
+                        "UserPromptSubmit": [{"hooks": [handler]}],
+                        "state": {
+                            "/<session-flags>/config.toml:user_prompt_submit:0:0": {
+                                "trusted_hash": "sha256:" + digest
+                            }
+                        },
+                    }
+                }
+            }
         thread = setup.call(
             "thread/start",
             {
@@ -301,6 +442,7 @@ trust_level="trusted"
                 "modelProvider": "fixture",
                 "approvalPolicy": "on-request" if approval else "never",
                 "sandbox": "read-only" if approval else "danger-full-access",
+                **hook_config,
             },
         )["thread"]["id"]
         setup.call("thread/name/set", {"threadId": thread, "name": "Drain probe"})
@@ -325,6 +467,149 @@ trust_level="trusted"
         read(3)
         turn = setup.start_turn(thread, "Run the disposable fixture.")
         read(3)
+        if args.submission_gate:
+            assert hooks or args.guard_recovery, "native submission hook did not run"
+            results["mechanism"] = "UserPromptSubmit with supplied-token login"
+            if args.race != "none" or approval:
+                os.write(master, b"NEWER_BEFORE_RECOVERY")
+                read(0.3)
+                os.write(master, b"\r")
+                read(3)
+            if not approval:
+                os.write(master, b"DRAFT_BEFORE_RECOVERY")
+                read(0.3)
+            retry = setup.start_turn(thread, "RECOVERY_SUBMISSION_FIXTURE")
+            if args.race == "preparation" or approval:
+                read(1)
+                results["retry_waited_for_active_work"] = not gate_entered.is_set()
+                results["no_handoff_during_active_work"] = not results.get(
+                    "credentials_installed_in_gate", False
+                )
+                if approval:
+                    results["approval_still_pending"] = any(
+                        e.get("method") == "item/commandExecution/requestApproval"
+                        for e in setup.events
+                    )
+                    os.write(master, b"y")
+                    read(0.3)
+                    os.write(master, b"\r")
+                release.set()
+            _wait_for(gate_entered.is_set, "retry did not reach native hook")
+            if args.gate_fault != "none":
+                if args.gate_fault == "cancel":
+                    os.write(master, b"\x1b")
+                read(4)
+                results["failed_gate_rejected_recovery"] = len(requests) == (
+                    2 if args.race != "none" else 1
+                )
+                results["gate_fault"] = args.gate_fault
+                results["guard_recovery"] = args.guard_recovery
+            if args.gate_race == "preparation":
+                os.write(master, b"_DURING_PREPARATION")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            gate_prepare.set()
+            if args.gate_fault == "none":
+                _wait_for(
+                    lambda: gate_prepared.is_set() or results.get("stale_rejected"),
+                    "gate did not prepare or reject",
+                )
+            if args.gate_race == "dispatch":
+                os.write(master, b"_DURING_DISPATCH")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            gate_dispatch.set()
+            read(3)
+            release.set()
+            read(4)
+            results["turns_before_subsequent_input"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            if args.gate_race != "none":
+                os.write(master, b"DRAFT_BEFORE_RECOVERY")
+                read(0.3)
+            os.write(master, b"_AFTER_RECOVERY")
+            read(0.3)
+            os.write(master, b"\r")
+            read(4)
+            results["native_turns"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            results["request_accounts"] = request_accounts
+            results["hooks"] = hooks
+            results["requests"] = requests
+            turns = results["native_turns"]["thread"]["turns"]
+            results["retry_reply_turn"] = retry
+            submissions = [h for h in hooks if h.get("prompt") == "RECOVERY_SUBMISSION_FIXTURE"]
+            assert len(submissions) == 1, "expected one native recovery submission"
+            results["retry_prompt_turn"] = submissions[0]["turn_id"]
+            # Queued input can return the earlier active turn's ID. Completion
+            # belongs to the hook's turn only if that turn contains our input.
+            results["retry_completed"] = any(
+                t["id"] == results["retry_prompt_turn"]
+                and t["status"] == "completed"
+                and any(
+                    part.get("text") == "RECOVERY_SUBMISSION_FIXTURE"
+                    for item in t["items"]
+                    if item["type"] == "userMessage"
+                    for part in item["content"]
+                )
+                for t in turns
+            )
+            results["completed_inputs"] = [
+                i["content"]
+                for t in turns
+                if t["status"] == "completed"
+                for i in t["items"]
+                if i["type"] == "userMessage"
+            ]
+            results["interrupted_turns"] = [t["id"] for t in turns if t["status"] == "interrupted"]
+            results["client_alive"] = client.poll() is None
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in setup.events
+            )
+            completed_text = [
+                i["text"]
+                for content in results["completed_inputs"]
+                for i in content
+                if i["type"] == "text"
+            ]
+            results["draft_submitted_intact"] = (
+                "DRAFT_BEFORE_RECOVERY_AFTER_RECOVERY" in completed_text
+            )
+            if args.gate_race != "none":
+                results["queued_input_completed"] = (
+                    "DRAFT_BEFORE_RECOVERY_DURING_" + args.gate_race.upper() in completed_text
+                )
+                assert results["queued_input_completed"]
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            assert results["client_alive"]
+            if args.gate_fault != "none":
+                assert results["draft_submitted_intact"]
+                if args.guard_recovery or args.gate_fault == "cancel":
+                    assert results["failed_gate_rejected_recovery"]
+                else:
+                    assert not results["failed_gate_rejected_recovery"]
+            elif args.race == "none" and not approval:
+                assert results["retry_completed"] and results["draft_submitted_intact"]
+                assert request_accounts == ["first"] + ["second"] * (len(requests) - 1)
+            else:
+                assert results["stale_rejected"]
+                assert not results.get("credentials_installed_in_gate", False)
+                assert not any("RECOVERY_SUBMISSION_FIXTURE" in json.dumps(r) for r in requests)
+                assert not results["interrupted_turns"]
+                assert all(a == "first" for a in request_accounts)
+                if approval:
+                    assert results["approval_still_pending"] and results["completed_commands"] == 1
+                else:
+                    assert results["draft_submitted_intact"]
+            raise SystemExit(0)
         if approval:
             results["approval_before_drain"] = any(
                 e.get("method") == "item/commandExecution/requestApproval" for e in setup.events
@@ -428,12 +713,6 @@ trust_level="trusted"
             raise SystemExit(0)
         if args.conditional_steer:
 
-            def wait_for(predicate, label):
-                deadline = time.monotonic() + 15
-                while not predicate() and time.monotonic() < deadline:
-                    read(0.1)
-                assert predicate(), label
-
             def complete(ident):
                 return any(
                     e.get("method") == "turn/completed"
@@ -474,7 +753,7 @@ trust_level="trusted"
             os.write(master, b"_DURING_PREPARATION")
             read(0.3)
             os.write(master, b"\r")
-            wait_for(held.is_set, "newer typed turn did not reach model")
+            _wait_for(held.is_set, "newer typed turn did not reach model")
             active = [
                 e["params"]["turn"]["id"] for e in setup.events if e.get("method") == "turn/started"
             ][-1]
@@ -482,12 +761,12 @@ trust_level="trusted"
             results["during_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
             results["active_turn_control"] = steer(active, "ACTIVE_STEER_CONTROL")
             release.set()
-            wait_for(lambda: complete(active), "newer typed turn did not complete")
+            _wait_for(lambda: complete(active), "newer typed turn did not complete")
             results["after_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
             os.write(master, b"SUBSEQUENT_TYPED_INPUT")
             read(0.3)
             os.write(master, b"\r")
-            wait_for(
+            _wait_for(
                 lambda: any(
                     e.get("method") == "turn/completed"
                     and e["params"]["turn"]["id"] not in (active, turn)
@@ -631,6 +910,8 @@ trust_level="trusted"
         )
     finally:
         release.set()
+        gate_prepare.set()
+        gate_dispatch.set()
         for connection in connections:
             connection.close()
         # Close the PTY before wait: native exit may block flushing an unread tty.
@@ -644,6 +925,9 @@ trust_level="trusted"
         worker.join()
         results["http_worker_reaped"] = not worker.is_alive()
         results["all_children_reaped"] = all(p.poll() is not None for p in children)
+        if args.submission_gate:
+            results["hooks"] = hooks
+            results["requests"] = requests
         (out / f"drain-{results['case']}-terminal.bin").write_bytes(transcript)
         (out / f"drain-{results['case']}-results.json").write_text(json.dumps(results, indent=2))
         print(
@@ -654,6 +938,7 @@ trust_level="trusted"
                     if key
                     not in (
                         "native_turns",
+                        "hooks",
                         "requests",
                         "successor_events",
                         "resumed_thread",

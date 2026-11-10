@@ -565,7 +565,7 @@ headlessly. Closing their client preserves the Session and its history.
 **Recover affected sessions** appears beside a waiting conversation. It checks
 affected Sessions together, showing native completion and remaining waits. See
 [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit)
-for capacity waits, the remaining native-admission limit on automatic recovery,
+for capacity waits, the current limits on automatic recovery,
 and retaining history, drafts and approvals.
 
 **Take back** transfers input to this pane; the previous terminal reports the move.

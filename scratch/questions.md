@@ -28,34 +28,12 @@ Security follow-up: the preceding assessment reported Session capture keys expos
 in process-list output. They need rotation; their values were not repeated or
 inspected in this run. Production capture state was not changed.
 
-2026-11-09 integration: two native Claude clients retried immediately after a
-shared switch using the old token; later typed turns used the replacement.
-The installed 2.1.321 Keychain reader contains a 30-second cache. The earlier recovery
-worker waited 31 seconds without a credential lock, then checked the active
-login and rejected transcript again. That wait was removed with the unsafe inbox
-send; it did not serialize newer native input. Before that removal, the two-client
-native probe completed both continuations and edited drafts with second-login
-request headers. This supports the cache-expiry choice for that native build;
-sleeping alone does not establish credential adoption.
-
-2026-11-09 admission repair: no conditional native handoff/retry mechanism is
-established for either provider. Retain truthful native-admission waits and remove
-the unsafe sends, as the concept-review direction permits. Automatic continuation
-remains unfinished. No production Sessions, credentials or installation changed.
-
-2026-11-09 native admission investigation tested conditional steering and hook wake
-before adding credential handoff. Codex's conditional steer cannot restart a
-failed turn; Claude's asynchronous failure-hook wake survives newer completed
-input at both held barriers. Keep these counterexamples in the existing probe
-scripts and stop dependent integration. No production credential switch is needed
-to establish these admission failures. Details and the missing native contract
-are in interactive-limit-recovery.md.
-
-2026-11-09 latest probes: use the already isolated synthetic Keychain fixture to
-test credential preparation inside Claude's native submission hook. Claude now
-reports 2.1.322; the earlier 2.1.321 results remain historical. No real login is
-needed for native ordering. A failed hook admits a stale wake, so keep runtime
-sends removed until recovery-only failure rejection is demonstrated without
-making ordinary input depend on lf. Direct Codex replacement adopts credentials
-but loses active work/approvals. No new product judgment or production action is
-implied by these mechanism results.
+2026-11-09 guarded submission: native prompt hooks are the simpler demonstrated
+admission path for both clients; server replacement is unnecessary for the tested
+cases. The probe guards classify only recovery envelopes, so ordinary input does
+not depend on the recovery gate. Claim an attempt once: Claude requeues a cancelled
+async wake, and Codex can acknowledge queued input with the existing active turn
+ID. Native transcript validation occurs inside the gate. These choices do not
+license killing a broker worker while it owns a rotated refresh grant; bounded
+activation and cancellation remain part of integration, with unsupported cases
+waiting or uncertain.

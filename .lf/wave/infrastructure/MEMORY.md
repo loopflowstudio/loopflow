@@ -27,37 +27,38 @@ continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
 work. Account switching alone does not establish continuation. Keep history,
 model, drafts and approvals; distinguish rejection from uncertain/completed work.
 
-Codex 0.167.0 replacement kept drafts; SIGHUP drain lost racing input and exited
-the client. Separate approvals survived. Managed refresh reloaded only the same
-account. Broker-supplied tokens passed native 401 callbacks, but handoff failed an
-active response. Conditional `turn/steer.expectedTurnId` protects active turns
-yet cannot restart a rejected turn: `no active turn to steer`. Server replacement
-remains allowed, unproven for complete recovery.
+Codex 0.167.0 direct server replacement adopts another managed login and retains
+idle history/model/drafts, but interrupts active responses and loses pending
+approvals. SIGHUP drain preserves an admitted approval yet exits the TUI on racing
+input. Token handoff fails active responses despite native 401 refresh success;
+`turn/steer` cannot restart failed turns. Server replacement remains allowed;
+client survival proves neither preserved work nor transparent delivery.
 
-Claude 2.1.321 correlates inbox UUID → user `promptId` → Stop `prompt_id`.
-Transcripts lag hooks. Cache expiry allowed changed tokens on retry, but reserves
-no input position. `StopFailure.asyncRewake` wakes after quota rejection; held
-preparation/dispatch probes both woke again after newer typed input completed.
-Their barriers performed no credential writes; wake correlation was unestablished.
+Claude 2.1.322 runs `UserPromptSubmit` for `StopFailure.asyncRewake` input.
+Submission/Stop prompt IDs correlate completion. Its blocking submission hook
+rejects stale wake before credentials change; a valid wake adopts scoped synthetic
+credentials and orders retry before later typed input at both held barriers.
+But hook exit 1 admits stale wake after newer input completes. Correlation then
+proves execution, not admission. Recovery-only failure/timeout/cancellation
+rejection remains unproved; ordinary hooks must stay best-effort. Earlier stale-wake
+counterexamples still apply.
 
-Earlier two-client synthetic-login probes completed retries and edited drafts.
-Admission review removed Codex login/start and Claude switch/inbox sends because
-they can race native input. Current probes establish safe waits, editable drafts,
-later typed completion and cleanup, not automatic continuation. These failures
-rule out the tested mechanisms, not every native alternative. Reads and lf locks
-cannot reserve input on an independently connected client.
+Runtime sends remain removed; earlier two-client successes used unconditional
+sends. Cache expiry, history reads and lf locks reserve no native input position.
+Release's entry-point lesson applies: mechanism probes do not establish product
+recovery through the broker and Session owners.
 
 Late waits retain dispatch/completion across reconnect and provider replacement;
 subsequent rejections stay separate. Task-bound served fixtures retain memberships
-and attempts without new owners. Native admission with credential adoption,
+and attempts without new owners. Recovery admission that survives failures,
 Task-bound bulk/approval preservation, model/routes and merged-tree gate remain.
-Observer checks prove neither Desktop continuation nor ordinary-typing repair.
+Desktop continuation and ordinary-typing repair remain unproved.
 
-Scoped Keychain checks cover USER plus one lexical legacy item, leaving a third.
+Scoped Keychain checks cover USER plus one lexical legacy item.
 Native write rejection, installed/unsuffixed repair, real token rotation, Codex
 overwriting another login, Claude no-model quota with healthy windows and rental
 token invalidation remain unobserved. Direction/results:
-`98c32372889f39819bcaccd512f1849ea5446d55:scratch/`.
+`4655b419a5de05781aa04206c89bd31097987206:scratch/`.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

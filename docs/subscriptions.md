@@ -377,9 +377,8 @@ for the selected model. A failed native model keeps a short scoped hold even
 when a general usage poll shows room. Drafts stay in the client; uncertain work
 is never resent.
 
-**Current implementation limit:** automatic cross-login continuation waits for
-native admission support. Recovery checks capacity but does not hand off Codex
-credentials or enqueue a Claude retry while newer input can race it. Automatic continuation on another eligible login remains unfinished.
+**Automatic cross-login continuation is unfinished.** Recovery checks capacity
+but does not yet switch logins and retry automatically.
 
 Desktop's **Recover affected sessions** checks waiting conversations together.
 See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit) for
@@ -450,8 +449,7 @@ another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
 terminals run their own private app-server. A shared-home switch leaves their
-login unchanged. Automatic quota handoff currently waits for native admission
-support that protects newer input.
+login unchanged.
 An unreadable daemon login returns an error without restarting it; the selected
 login remains installed. Failed activity checks keep the grace period rather than
 ending it early. Expiry warns that restarting may interrupt remaining turns.

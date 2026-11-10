@@ -9,37 +9,24 @@ and bulk protocol are outside this Task.
 Inspected PR #1812 at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
-Terminal consume-on-attempt coverage is missing.
+Only bulk tickets have direct store coverage; terminal consume-on-attempt
+coverage is missing. Background expiry already releases abandoned bulk
+reservations.
 
 At November 10 21:25 UTC, GitHub reports PR #1812 open and unmerged at
 `23b48c659d574d32c0a2356deaec37a9be43cb22`, with no auto-merge. Freshly fetched
 main remains `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
-or `server/ticket.rs`. The new PR head has not been inspected; the code findings
-below describe the previously inspected revision. Implementation remains blocked
+or `server/ticket.rs`. The new PR head has not been inspected; code findings
+describe the previously inspected revision. Implementation remains blocked
 on LOO-718 landing, not on a product decision or Desktop visual inspection.
-
-At November 10 20:51 UTC, PR #1812 remains
-open and unmerged at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`, still mergeable
-with no auto-merge. Freshly fetched main is
-`454f768944fb4b4aa4ee572beb1ca5418b18df6d`; `server/mobile.rs` and
-`server/ticket.rs` remain absent. The fresh `lf task status LOO-718 --json`
-read still places the transport Task at `feature/demo`, with PR #1812 open and
-settlement not armed. `mobile.rs` and `ticket.rs` are unchanged from the previously
-inspected `e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`. The shared store still
-checks identity before removal for every purpose; only bulk tickets have direct
-store coverage. Its background expiry sweep already releases abandoned bulk
-reservations, so retain that behavior while replacing the expiry clock.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;
 no product decision is missing.
 
-Earlier dependency observations are in
-`811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
-to older status reads; the conflicting PR status at 19:35 UTC is retained in
-`074561f725255dfe5c56d46fed3969eed725b75a:scratch/design.md`.
-The detailed transport inspection and 20:14 UTC status are in
-`7f2ffc44ddb84377d31bf05bb689d5b3cf0a16a3:scratch/design.md`.
+Earlier status reads and inspection references are in
+`1325549f96cb65e22e580d1e35095296fd43d5c0:scratch/design.md`, including the
+reference to the conflicting PR status at 19:35 UTC.
 
 ## Delete — do not maintain
 
@@ -68,9 +55,8 @@ After integration, update `docs/server.md` (Phone access) and
 planned/local-only wording and describe local/remote admission binding.
 Keep exact-owner selection and recovery together for both transports; keep
 the running-owner prerequisite and missing-owner error beside the remote example.
-These docs own the contract; this plan keeps only remaining integration work.
-The phone overview keeps the connection steps; protocol details and shared
-owner recovery stay in the server README to avoid repeating them here.
+The phone overview keeps connection steps; the server README owns protocol
+details and shared owner recovery, avoiding duplicate contracts.
 Desktop visual inspection remains for QA; opening results are in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

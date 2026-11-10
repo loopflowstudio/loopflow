@@ -25,27 +25,17 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 05:12 UTC, `gh pr view 1812` returned `state: OPEN`,
-`mergedAt: null`, `autoMergeRequest: null` and the same head. Freshly fetched main is
-`8155d1fcde597154ee9746ad72280bf6687a7da8`; `server/mobile.rs` and
-`server/ticket.rs` are still absent. This checkout still uses the UID-only
-store with consume-on-attempt and `Instant` timing. Remote implementation and
-acceptance remain dependent on LOO-718 landing.
-
 At November 10 05:46 UTC, PR #1812 remains open at the same head, with no
 merge time or auto-merge request. Freshly fetched main is
 `169485522edd24e3ea9c0946dfea79c881fe546b`; both transport files remain absent.
 Implementation and remote acceptance remain blocked on LOO-718 landing.
-
-Implementation and remote acceptance depend on LOO-718's transport, which is
-not on main. Landing that separate PR is outside this Task's scope. No product
-decision is missing; the contract remains planned.
+Landing that separate PR is outside this Task's scope. No product decision is
+missing.
 
 Earlier dependency observations are in
-`fc92556bbcb8c96e984df93c18e2882da29318c3:scratch/design.md` and
-`b567998a6b700a12757ee1a613fbf5076b256e30:scratch/design.md`; stalled Task status
-reads and revision comparisons are in
-`cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
+`811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
+to older status reads. Keep only the latest observation here so repeated Graph
+passes do not grow the plan.
 
 ## Delete — do not maintain
 

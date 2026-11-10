@@ -402,17 +402,28 @@ pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
     ))
 }
 
+// The bound Session, or the Task a preview would assign.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+#[schemars(inline)]
+pub(crate) enum SessionBinding {
+    Bound(Box<crate::ops::human_session::SessionRecord>),
+    Preview(Box<crate::ops::human_session::SessionBindingPreview>),
+}
+
 /// `lf session bind <id> --task <task> --json`: the bound Session, or with
 /// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
-pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<SessionBinding> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         Ok(if preview {
-            serde_json::to_value(
+            SessionBinding::Preview(Box::new(
                 crate::ops::human_session::preview_binding(&store, id, task).await?,
-            )?
+            ))
         } else {
-            serde_json::to_value(crate::ops::human_session::bind(&store, id, task).await?)?
+            SessionBinding::Bound(Box::new(
+                crate::ops::human_session::bind(&store, id, task).await?,
+            ))
         })
     })
 }

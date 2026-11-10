@@ -896,22 +896,63 @@ pub fn save_arrangement(
     command: &crate::lf::DesktopCommand,
     input: &mut dyn std::io::Read,
 ) -> Result<serde_json::Value> {
-    use crate::lf::DesktopCommand;
-    match command {
-        DesktopCommand::Dashboard { cmd } => match cmd.tile_verb() {
-            Some((verb, tile, args)) => {
-                let (board, member) = tile.split_once('/').ok_or_else(|| {
-                    DesktopError::Argument(format!(
-                        "`{tile}` names no saved board tile; use query:ID/<tile> or working-tasks/<tile>."
-                    ))
-                })?;
-                save_tile(selected, directory, board, member, verb, &args)
-            }
-            None => saved_intent(selected, directory, command, input),
-        },
-        DesktopCommand::Layout { save: true, .. } => {
-            saved_intent(selected, directory, command, input)
+    use crate::lf::{DashboardCommand, DesktopCommand};
+    if let DesktopCommand::Dashboard { cmd } = command {
+        if let Some((verb, tile, args)) = cmd.tile_verb() {
+            let (board, member) = tile.split_once('/').ok_or_else(|| {
+                DesktopError::Argument(format!(
+                    "`{tile}` names no saved board tile; use query:ID/<tile> or working-tasks/<tile>."
+                ))
+            })?;
+            return Ok(serde_json::to_value(DesktopTileOutput::Record(
+                &save_tile(selected, directory, board, member, verb, &args)?,
+            ))?);
         }
+    }
+    match command {
+        DesktopCommand::Dashboard {
+            cmd:
+                DashboardCommand::Rename {
+                    target,
+                    name,
+                    revision,
+                },
+        } if target.starts_with("task:") => {
+            let reader = crate::store::read_existing_registry()?
+                .ok_or(crate::store::StoreError::NotFound)
+                .context("Work registry is unavailable")?;
+            let repository = repository_in(selected, directory, &reader.sqlite)?;
+            drop(reader);
+            let store =
+                crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+            let task = target.strip_prefix("task:").expect("matched Task target");
+            let key = work_key(&repository, target)?;
+            // The shared reader checks repository ownership before the Task writer runs.
+            let resolved = store.resolve_selection(
+                &repository,
+                &crate::work::selection::Selection {
+                    id: crate::work::selection::SelectionId("rename-target".into()),
+                    expression: crate::work::selection::SelectionExpression::Work { work: key },
+                },
+            )?;
+            if resolved.members.is_empty() {
+                return Err(crate::store::StoreError::NotFound.into());
+            }
+            Ok(serde_json::to_value(store.edit_task(
+                &crate::durable::TaskId::parse(task)?,
+                *revision,
+                &crate::work::task::TaskUpdate {
+                    title: Some(name.clone()),
+                    ..Default::default()
+                },
+            )?)?)
+        }
+        DesktopCommand::Dashboard { cmd } => Ok(serde_json::to_value(save_dashboard(
+            selected, directory, cmd, input,
+        )?)?),
+        DesktopCommand::Layout { work, save: true } => Ok(serde_json::to_value(save_layout(
+            selected, directory, work, input,
+        )?)?),
         _ => bail!("not a saved arrangement"),
     }
 }
@@ -926,7 +967,7 @@ pub(crate) fn save_tile(
     tile: &str,
     verb: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<serde_json::Value> {
+) -> Result<DesktopTileRecord> {
     let path = format!("{board}/{tile}");
     let (board, tile) = saved_tile(verb, Some(&path)).ok_or_else(|| {
         DesktopError::Argument(format!(
@@ -936,18 +977,15 @@ pub(crate) fn save_tile(
     edit_saved_tile(selected, directory, board, tile, verb, args)
 }
 
-fn saved_intent(
+pub(crate) fn save_dashboard(
     selected: Option<&crate::durable::RepositoryId>,
     directory: &std::path::Path,
-    command: &crate::lf::DesktopCommand,
+    cmd: &crate::lf::DashboardCommand,
     input: &mut dyn std::io::Read,
-) -> Result<serde_json::Value> {
-    use crate::lf::{DashboardCommand, DesktopCommand};
-    use crate::work::selection::{DashboardId, WorkPaneLayout};
-    if let DesktopCommand::Dashboard {
-        cmd: DashboardCommand::Query { expression, .. },
-    } = command
-    {
+) -> Result<crate::work::selection::Dashboard> {
+    use crate::lf::DashboardCommand;
+    use crate::work::selection::DashboardId;
+    if let DashboardCommand::Query { expression, .. } = cmd {
         crate::work::selection::Selection::parse(expression, None)?;
     }
     let reader = crate::store::read_existing_registry()?
@@ -957,98 +995,66 @@ fn saved_intent(
     drop(reader);
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
-    let result = match command {
-        DesktopCommand::Dashboard { cmd } => match cmd {
-            DashboardCommand::Query {
-                container,
-                expression,
-                revision,
-                ..
-            } => serde_json::to_value(store.edit_dashboard(
-                &repository,
-                &dashboard_id(container),
-                expression,
-                *revision,
-            )?)?,
-            DashboardCommand::Pin {
-                query, revision, ..
-            }
-            | DashboardCommand::Unpin {
-                query, revision, ..
-            } => serde_json::to_value(store.set_dashboard_metadata(
-                &repository,
-                &dashboard_id(query),
-                *revision,
-                None,
-                Some(matches!(cmd, DashboardCommand::Pin { .. })),
-            )?)?,
-            DashboardCommand::Slots { query, revision } => {
-                let slots: Option<crate::work::selection::SlotLayout> =
-                    serde_json::from_reader(&mut *input)?;
-                serde_json::to_value(store.set_dashboard_slots(
-                    &repository,
-                    &dashboard_id(query),
-                    *revision,
-                    slots.as_ref(),
-                )?)?
-            }
-            DashboardCommand::Rename {
-                target,
-                name,
-                revision,
-                ..
-            } => {
-                if let Some(task) = target.strip_prefix("task:") {
-                    let key = work_key(&repository, target)?;
-                    // The shared reader checks repository ownership before the Task writer runs.
-                    let resolved = store.resolve_selection(
-                        &repository,
-                        &crate::work::selection::Selection {
-                            id: crate::work::selection::SelectionId("rename-target".into()),
-                            expression: crate::work::selection::SelectionExpression::Work {
-                                work: key,
-                            },
-                        },
-                    )?;
-                    if resolved.members.is_empty() {
-                        return Err(crate::store::StoreError::NotFound.into());
-                    }
-                    serde_json::to_value(store.edit_task(
-                        &crate::durable::TaskId::parse(task)?,
-                        *revision,
-                        &crate::work::task::TaskUpdate {
-                            title: Some(name.clone()),
-                            ..Default::default()
-                        },
-                    )?)?
-                } else {
-                    serde_json::to_value(store.set_dashboard_metadata(
-                        &repository,
-                        &dashboard_id(target),
-                        i64::try_from(*revision)?,
-                        Some(name),
-                        None,
-                    )?)?
-                }
-            }
-            DashboardCommand::Hide { .. }
-            | DashboardCommand::Show { .. }
-            | DashboardCommand::Move { .. }
-            | DashboardCommand::Resize { .. } => unreachable!("tile verbs edit saved tiles"),
-        },
-        DesktopCommand::Layout { work, save: true } if work.starts_with("query:") => {
-            bail!("a Dashboard's slots are saved with `lf desktop dashboard slots {work} --revision <revision>`")
+    Ok(match cmd {
+        DashboardCommand::Query {
+            container,
+            expression,
+            revision,
+            ..
+        } => store.edit_dashboard(&repository, &dashboard_id(container), expression, *revision),
+        DashboardCommand::Pin {
+            query, revision, ..
         }
-        DesktopCommand::Layout { work, save: true } => {
-            let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
-            if layout.work != work_key(&repository, work)? {
-                bail!("layout belongs to different Work");
-            }
-            serde_json::to_value(store.save_pane_layout(&layout)?)?
+        | DashboardCommand::Unpin {
+            query, revision, ..
+        } => store.set_dashboard_metadata(
+            &repository,
+            &dashboard_id(query),
+            *revision,
+            None,
+            Some(matches!(cmd, DashboardCommand::Pin { .. })),
+        ),
+        DashboardCommand::Slots { query, revision } => {
+            let slots: Option<crate::work::selection::SlotLayout> =
+                serde_json::from_reader(&mut *input)?;
+            store.set_dashboard_slots(&repository, &dashboard_id(query), *revision, slots.as_ref())
         }
-        _ => unreachable!("saved intent command"),
-    };
-    Ok(result)
+        DashboardCommand::Rename {
+            target,
+            name,
+            revision,
+        } => store.set_dashboard_metadata(
+            &repository,
+            &dashboard_id(target),
+            i64::try_from(*revision)?,
+            Some(name),
+            None,
+        ),
+        _ => bail!("not a Dashboard edit"),
+    }?)
+}
+
+pub(crate) fn save_layout(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    work: &str,
+    input: &mut dyn std::io::Read,
+) -> Result<crate::work::selection::WorkPaneLayout> {
+    use crate::work::selection::WorkPaneLayout;
+    if work.starts_with("query:") {
+        bail!("a Dashboard's slots are saved with `lf desktop dashboard slots {work} --revision <revision>`");
+    }
+    let reader = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &reader.sqlite)?;
+    drop(reader);
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
+    if layout.work != work_key(&repository, work)? {
+        bail!("layout belongs to different Work");
+    }
+    store.save_pane_layout(&layout).map_err(Into::into)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -1766,7 +1772,7 @@ fn edit_saved_tile(
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<serde_json::Value> {
+) -> Result<DesktopTileRecord> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
@@ -1779,8 +1785,7 @@ fn edit_saved_tile(
         member: key(tile)?,
         edit: TileEdit::parse(name, args, key)?,
     };
-    let record = edit_tiles(&repository, &request)?;
-    Ok(serde_json::to_value(DesktopTileOutput::Record(&record))?)
+    edit_tiles(&repository, &request)
 }
 
 fn edit_shown_tile(

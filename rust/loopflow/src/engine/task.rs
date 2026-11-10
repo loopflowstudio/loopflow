@@ -144,21 +144,7 @@ pub fn run(
     agent: Option<&str>,
     approve: bool,
 ) -> Result<TaskRun> {
-    let spell = |task: &str| {
-        let mut args = Vec::new();
-        if approve {
-            args.push("--batch".to_owned());
-        }
-        if let Some(agent) = agent {
-            args.extend(["--agent".to_owned(), agent.to_owned()]);
-        }
-        args.extend(["task", "run", task].map(str::to_owned));
-        if let Some(from) = from {
-            args.extend(["--from".to_owned(), from.to_owned()]);
-        }
-        args.push("--json".to_owned());
-        args
-    };
+    let spell = |task: &str| spell_run(task, from, agent, approve);
     if let Some(run) = remote(directory, issue, spell)? {
         return Ok(run);
     }
@@ -169,11 +155,7 @@ pub fn run(
 /// <issue> ship` does: every remaining step headless, an interactive step
 /// standing in for the person, until the PR lands.
 pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
-    let spell = |task: &str| {
-        ["--task", task, "ship", "--json"]
-            .map(str::to_owned)
-            .to_vec()
-    };
+    let spell = |task: &str| spell_task(task, "ship");
     if let Some(shipping) = remote(directory, issue, spell)? {
         return Ok(shipping);
     }
@@ -183,7 +165,7 @@ pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
 /// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
 /// ship --stop` does, until the next `task.ship`.
 pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let spell = |task: &str| ["task", "hold", task, "--json"].map(str::to_owned).to_vec();
+    let spell = |task: &str| spell_task(task, "hold");
     if let Some(held) = remote(directory, issue, spell)? {
         return Ok(held);
     }
@@ -256,7 +238,7 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
         OwnershipChange::Claim => "claim",
         _ => "unassign",
     };
-    let spell = |task: &str| ["task", verb, task, "--json"].map(str::to_owned).to_vec();
+    let spell = |task: &str| spell_task(task, verb);
     if let Some(ownership) = remote(directory, issue, spell)? {
         return Ok(ownership);
     }
@@ -334,6 +316,37 @@ fn written(error: impl Into<anyhow::Error>) -> Error {
 fn missing(issue: &str) -> Error {
     Error::new(ErrorCode::NotFound, format!("no Task exists for {issue:?}"))
         .with(serde_json::json!({ "task": issue }))
+}
+
+pub(super) fn spell_run(
+    issue: &str,
+    from: Option<&str>,
+    agent: Option<&str>,
+    approve: bool,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if approve {
+        args.push("--batch".to_owned());
+    }
+    if let Some(agent) = agent {
+        args.extend(["--agent".to_owned(), agent.to_owned()]);
+    }
+    args.extend(["task", "run", issue].map(str::to_owned));
+    if let Some(from) = from {
+        args.extend(["--from".to_owned(), from.to_owned()]);
+    }
+    args.push("--json".to_owned());
+    args
+}
+
+pub(super) fn spell_task(issue: &str, verb: &str) -> Vec<String> {
+    if verb == "ship" {
+        ["--task", issue, "ship", "--json"]
+    } else {
+        ["task", verb, issue, "--json"]
+    }
+    .map(str::to_owned)
+    .to_vec()
 }
 
 #[cfg(test)]

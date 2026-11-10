@@ -206,7 +206,15 @@ pub fn arm(directory: &Path, input: &LandInput, progress: &impl Progress) -> Res
 /// it. Landing syncs first, which may launch an agent to resolve conflicts;
 /// with `wait_and_fix` the Process stays until the merge is verified.
 pub fn land(directory: &Path, input: &LandInput) -> Result<launch::Launched> {
-    let mut args = vec!["pr".to_owned(), "land".to_owned()];
+    launch::start(directory, &spell_land(input))
+}
+
+pub(super) fn spell_land(input: &LandInput) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(agent) = &input.agent {
+        args.extend(["--agent".to_owned(), agent.clone()]);
+    }
+    args.extend(["pr".to_owned(), "land".to_owned()]);
     for (flag, on) in [
         ("--strict", input.strict),
         ("--local", input.local),
@@ -227,12 +235,7 @@ pub fn land(directory: &Path, input: &LandInput) -> Result<launch::Launched> {
         }
     }
     args.push("--json".to_owned());
-    let mut argv = Vec::new();
-    if let Some(agent) = &input.agent {
-        argv.extend(["--agent".to_owned(), agent.clone()]);
-    }
-    argv.extend(args);
-    launch::start(directory, &argv)
+    args
 }
 
 /// `lf pr land` in this process. Started by [`land`], it reports its Process

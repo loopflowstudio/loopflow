@@ -43,6 +43,7 @@ pub(crate) mod terminal_title;
 pub mod linear;
 #[allow(dead_code)]
 pub mod notion;
+pub(crate) mod observe;
 pub mod ops;
 pub mod performance;
 pub mod planning_exchange;

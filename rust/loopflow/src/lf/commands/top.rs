@@ -139,14 +139,12 @@ pub fn run_top() -> Result<()> {
     }
 }
 
-/// Stream the call trees: Process rows change with the store, liveness and
-/// activity state only on the clock.
+/// Stream the call trees as stored Process rows or observed OS states change.
 pub fn subscribe_ps(
     transport: super::subscribe::Transport,
 ) -> Result<Option<super::subscribe::Subscription>> {
     super::subscribe::start(
         (),
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         {
             let mut reader = ActivityReader::default();
             move |_, ()| {

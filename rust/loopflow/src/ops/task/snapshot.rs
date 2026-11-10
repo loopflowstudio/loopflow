@@ -8,8 +8,6 @@ use super::{
     TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -340,13 +338,11 @@ pub(super) fn diff_snapshot(
         .into_iter()
         .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
     for path in include_untracked {
-        let output = Command::new("git")
-            .current_dir(workspace.checkout.worktree)
-            .args(["diff", "--no-index", "--no-color", "--", "/dev/null", &path])
-            .output()
-            .map_err(|error| {
-                task_error(format!("failed to diff untracked file {path}: {error}"))
-            })?;
+        let output = crate::observe::git(
+            workspace.checkout.worktree,
+            &["diff", "--no-index", "--no-color", "--", "/dev/null", &path],
+        )
+        .map_err(|error| task_error(format!("failed to diff untracked file {path}: {error}")))?;
         if !output.status.success() && output.status.code() != Some(1) {
             return Err(task_error(format!(
                 "failed to diff untracked file {path}: {}",
@@ -468,12 +464,9 @@ pub(super) fn file_snapshot(
     {
         snapshot.read_only_reason = Some("Git metadata is read-only.".into());
     }
-    let file = File::open(&absolute)
+    let (size, bytes) = crate::observe::file_bytes(&absolute, MAX_FILE_BYTES + 1)
         .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
-    snapshot.size_bytes = file.metadata()?.len();
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
+    snapshot.size_bytes = size;
     snapshot.state = if bytes.len() > MAX_FILE_BYTES {
         TaskFileState::Truncated
     } else if bytes.contains(&0) {
@@ -724,10 +717,7 @@ pub(super) fn git_output(worktree: &Path, args: &[&str]) -> OpsResult<String> {
 }
 
 pub(super) fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
-    let output = Command::new("git")
-        .current_dir(worktree)
-        .args(args)
-        .output()
+    let output = crate::observe::git(worktree, args)
         .map_err(|error| task_error(format!("failed to run git {}: {error}", args.join(" "))))?;
     if !output.status.success() {
         return Err(task_error(format!(

@@ -13606,6 +13606,10 @@
               "description": "The graph and where the run set out: `code from implement`.",
               "type": "string"
             },
+            "ships": {
+              "description": "No interactive step is left ahead: Auto-Ship is approved and the\nrun may merge the PR.",
+              "type": "boolean"
+            },
             "state": {
               "const": "running",
               "type": "string"
@@ -13615,6 +13619,7 @@
             "state",
             "issue",
             "run",
+            "ships",
             "graph_process",
             "log"
           ],
@@ -15859,6 +15864,7 @@
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
             "run": "code from implement",
+            "ships": false,
             "state": "running"
           }
         },

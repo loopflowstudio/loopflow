@@ -1193,26 +1193,9 @@ cat > /dev/null
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
-            chrome: None,
-            session_attachment: None,
-            system_prompt: String::new(),
-            conversation_context: None,
-            task_prompt: String::new(),
-            skill_invocation: None,
-            output_schema: None,
             agent: Some("claude".into()),
-            fallback_agents: Vec::new(),
             cwd: Some(std::env::temp_dir()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: crate::agent::AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: Default::default(),
+            ..Default::default()
         }
     }
 

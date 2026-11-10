@@ -142,6 +142,26 @@ Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
+For a checkout without launching a Graph, run `lf wt create qa --json`, take
+its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.
+Creation returns a receipt containing the Task: use `task.id`.
+
+To exercise external observations, subscribe to `task.get` and inspect
+`row.condition.local_progress.dirty`. Edit a tracked file, add an untracked
+file, and move the disposable checkout aside and back. Read-only queries of
+`store_revisions` before and after establish whether the change arrived without
+a store write. A simultaneous selection of `task.title` should send no frame
+for those edits. `graph.list` and `config.settings` are request-only reads;
+repeat them after editing `.lf/graphs/` or `.lf/config.yaml` externally.
+For process liveness, start `lf task create --title ...` with a pipe held open
+on stdin. Watch its PID through `process.list`, kill and reap it before sending
+input, and expect its removal without a store revision. Repeat through
+`lf process list --subscribe --json` with the server stopped.
+
+A Swift command-line probe can import the built module with
+`swiftc -I swift/.build/debug/Modules probe.swift swift/.build/debug/Loopflow.build/*.o -o probe`.
+Encode `ServerClientMessage` values in the probe, then send those exact JSON
+lines to the private server. This exercises production encoding, not a window.
 
 To delay a report, SIGSTOP the launched command before it reports, leaving its
 execution owner running. Check that a live owner waits beyond the unknown grace.
@@ -208,3 +228,26 @@ component probe: it does not establish mounted panes, hidden-pane rendering,
 focus, copy/Find, or Move here interaction. Keep display diagnostics optional in
 headless runs; record those limits and leave the full Swift suite and Xcode
 fallback build to gate. See `swift/README.md` for the supported checks.
+
+## Codex launch settings
+
+Also isolate `CODEX_HOME`; set `cli_auth_credentials_store = "file"` in its
+disposable `config.toml` to keep probes away from the account's keychain.
+Start the branch's `lf -i -a codex : "Reply only with QA_OK"` in a PTY. A PTY
+driver must answer Codex's cursor-position query (`ESC[6n`, reply `ESC[1;1R`).
+Save the terminal transcript, including sign-in or startup failures.
+
+The private store's `agent_sessions.provider_thread` and joined
+`processes.endpoint` identify the launched provider. Read them without changing
+rows. Connect a WebSocket over that Unix socket with URI `ws://localhost`, send
+`initialize` with `clientInfo` and `capabilities.experimentalApi: true`, then
+`initialized`. Real Codex supports `thread/resume` with only `threadId` to read
+the tier, and `thread/settings/update` to change `serviceTier`. Reattach through
+`lf --setting codex.service_tier=default resume SESSION`; compare the thread,
+endpoint, provider PID and tier before and after. Stop and reap private children.
+
+Unauthenticated Codex can create, fork and configure threads through this API,
+but its terminal stops at sign-in. Label these provider API checks; they do not
+establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
+Use different names for a headless Graph and its skill so Graph resolution does
+not treat the step as a recursive Graph call.

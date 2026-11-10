@@ -416,10 +416,10 @@ read -r answer < /dev/tty
         while self
             .sql()
             .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
-                r.get::<_, bool>(0)
+                r.get::<_, Option<bool>>(0)
             })
             .unwrap()
-            != viewed
+            != Some(viewed)
         {
             assert!(
                 Instant::now() < deadline,
@@ -6892,6 +6892,25 @@ fn server_startup_cancels_its_pending_installer_when_pane_closes() {
         -1,
         "cancelled setup must be reaped"
     );
+}
+
+#[test]
+fn owned_program_does_not_inherit_the_desktop_pane_relay() {
+    let fixture = Fixture::new();
+    let mut serve = fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf '%s %s' \"${LF_SERVER-unset}\" \"${LF_SERVER_STATUS-unset}\" > \"$HOME/relay-env\"; read -r answer",
+        ],
+    );
+    serve
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", fixture.home.path().join("status.json"));
+    let owner = fixture.owner(serve);
+    let _cleanup = StopOwner(&fixture, owner);
+    assert_eq!(fixture.wait_file("relay-env"), "unset unset");
 }
 
 #[test]

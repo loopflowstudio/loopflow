@@ -583,9 +583,7 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-Planned for [Phone access](../../../../docs/server.md#phone-access); this build
-supports local attachment only. Owner selection and terminal control follow
-`session.attach` above.
+Planned for [Phone access](../../../../docs/server.md#phone-access).
 
 Connect to the host's authenticated `/v1/machine` WebSocket, complete
 `hello`/`welcome`, and request `session.attach` with a Session ID from
@@ -607,6 +605,11 @@ endpoint and send `attach` first, without `hello`:
 After `bridged`, use the [binary owner protocol](../transport/README.md).
 Keep `/v1/machine` for requests and live Work updates; each terminal has its
 own bridge.
+
+To reconnect to a specific owner, pass its ID as `owner_lf_process_id` instead
+of null. The same [terminal and provider recovery](#terminal-and-provider-recovery)
+rules apply: a changed owner returns `not_found`, and attachment never starts or
+resumes a provider.
 
 Both connections must authenticate as the same Tailscale node stable ID and
 user ID; another device on the same account does not match. Neither the ticket,

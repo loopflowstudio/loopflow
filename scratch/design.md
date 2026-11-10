@@ -23,15 +23,16 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 14:37 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with `mergeable: CONFLICTING`. Freshly fetched main is
+At November 10 15:14 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 The accompanying `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;
-no product decision is missing.
+no product decision is missing. Implementation remains pending for the authored
+Graph decision because the authenticated transport is absent from main.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references

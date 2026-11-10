@@ -882,6 +882,10 @@ must retain Wave identity before projecting accepted plans.
 
 ### Shared identity fixtures
 
+Changes to served observation or subscription wake tracking also run
+`session_record::activity::tests::` and `ops::task_execution::tests::`: quiet
+and stale-sample deadlines must advance Task status without new rows.
+
 When changing Session activity or Waiting, run `session_cli_tests` and
 `world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and

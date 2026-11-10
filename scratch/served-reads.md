@@ -111,3 +111,16 @@ Publication checks after syncing `7cf2d25b3` (2026-11-09):
 - `cargo fmt`, `git diff --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed.
 - `scripts/test_desktop.sh --filter 'PortfolioServiceTests|WorkCLISubscriptionTests|ServerClientTests' -Xswiftc -gnone` — app/test build passed; all 21 tests passed after sync. No private server remained.
 The QA recipe now reads `task.id` from the creation receipt introduced on main.
+
+Gate, 2026-11-09: review found that Task execution's activity projection still
+depended on the removed polling clock. Quiet-provider, startup-grace and stale
+CPU-sample transitions now read observed deadlines. The result uses the observed
+boolean too, so a deadline passing during a reading cannot leave an old status
+with no future wake. Regression tests cover all four expiry paths and that race;
+the test-owner README now requires these suites for observation/wake changes.
+
+Checks (inherited LF variables unset, `TMPDIR=/private/tmp`, stdin closed):
+- `uv run python scripts/test.py --base HEAD --rust --reuse-passing --rust-filter 'test(session_cli_tests::) | test(world_recipes::)'` — 28 passed before the activity repair; formatting and full clippy passed (run-18219).
+- `uv run python scripts/test.py --base HEAD --reuse-passing --rust-filter 'test(session_record::activity::tests::) | test(ops::task_execution::) | test(ops::task::tests::) | test(lf::commands::waves::tests::) | test(world_recipes::)'` — 61 passed after adding deadline tracking, before the race refinement; architecture, formatting and full clippy passed (run-14827).
+- `uv run python scripts/test.py --base HEAD --reuse-passing --rust-filter 'test(session_record::activity::tests::) | test(ops::task_execution::tests::)'` — final 9 passed, including both regressions; architecture, formatting, CLI build and full clippy passed (run-26639).
+- `cargo fmt` and `git diff --check` — passed. Earlier served-protocol, website and Swift checks above retain their results; their code is unchanged by this gate. Hosted CI and landing remain with the running auto Graph; live provider/GitHub and display QA retain their recorded limits.

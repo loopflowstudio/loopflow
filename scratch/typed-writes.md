@@ -18,8 +18,8 @@ Production and parser coverage share the engine's child-command builders.
 Coverage includes Task run/ship/hold/claim/unassign, Graph and skill runs,
 release, PR landing and checkout sync, with optional arguments empty and set.
 
-Remaining: review, gate, pre-delivery sync, publication, CI repair if needed,
-merge and Task completion. Gate covers `server::schema`,
+Remaining: landing sync, full CI and repair if needed, merge and Task completion.
+PR #1867 is published; review and gate passed. Gate covers `server::schema`,
 `server::service`, `lf::commands::write`, `lf::commands::desktop`,
 `lf::commands::session`, `lf::tests`, affected `engine` modules, `binary(lf)` and `served_reads`
 (CLI/server parity, binding and request attribution), plus formatting and clippy.
@@ -66,3 +66,13 @@ advance; this review changed no implementation direction.
   warnings denied, and website checks; 281 seconds. Inherited `LF_*` were
   unset, stdin closed, and the candidate CLI was first on PATH. Logs are in
   `.lf/tmp/gate/run-75271/`. `git diff --check` passed. CI owns the full matrix.
+
+- Gate (2026-11-09): the same affected-suite command above passed on published
+  HEAD `9cbc195df`, without result reuse: 136 Rust tests, 73 website tests,
+  architecture, CLI build, formatting and clippy with warnings denied; 380 seconds.
+  Rustup Rust 1.99.1 preceded Homebrew 1.98.1 on PATH; TMPDIR was resolved.
+  Logs: `.lf/tmp/gate/run-13693/`. `git diff --check` passed. Review found no
+  scoped defect or required code/doc repair. The Apple linker repeated its
+  compact-unwind size warning; no check failed or timed out. Full CI remains
+  with landing; remote SSH and mounted Desktop remain unexercised. No server
+  or watcher was left running by the completed gate.

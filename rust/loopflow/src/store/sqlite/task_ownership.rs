@@ -173,7 +173,10 @@ fn read_log(rows: &[Row], local: &MachineId) -> Reading {
 }
 
 pub(super) fn local_machine_in(conn: &Connection) -> StoreResult<MachineId> {
-    Ok(super::durable::map_local_machine(conn)?.id)
+    let id: String = conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+        row.get(0)
+    })?;
+    Ok(MachineId::from_raw(id))
 }
 
 fn reading_in(conn: &Connection, task: &TaskId) -> StoreResult<(Vec<Row>, Reading)> {

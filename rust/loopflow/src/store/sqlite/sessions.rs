@@ -270,7 +270,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
+        s.id IN (SELECT primary_session_id FROM tasks WHERE primary_session_id IS NOT NULL),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -2140,6 +2140,42 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{GraphProcessSummaryState, SessionFilter};
+
+    #[test]
+    fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("primary", &crate::session_record::new_artifact_key());
+        store.test_session("other", &crate::session_record::new_artifact_key());
+        let repository = crate::durable::RepositoryId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES(?1,'/repo',1)",
+                [repository.as_str()],
+            )
+            .unwrap();
+            for primary in [Some("primary"), None] {
+                conn.execute(
+                    "INSERT INTO tasks(repository_id,id,created_at,primary_session_id,issue_identifier)
+                     VALUES(?1,?2,1,?3,?2)",
+                    params![
+                        repository.as_str(),
+                        crate::durable::TaskId::new().as_str(),
+                        primary
+                    ],
+                )
+                .unwrap();
+            }
+        }
+        let rows = store
+            .session_summaries(&SessionFilter::default(), 0)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(row.task_primary, row.id.as_str() == "primary");
+        }
+    }
 
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {

@@ -30,7 +30,7 @@ the new repository's sheet. Unconditional dismissal/navigation are removed.
   lost/repeated input or duplicate launch. Compose with LOO-812's silent writable
   bridge and healthy quiet provider checks, retaining owner/input/geometry through
   expiry and replacement. Headless protocol coverage does not establish this.
-- Publish/review the repair separately from merged #1854. No demo occurred in
+- Review the repair in #1872, separately from merged #1854. No demo occurred in
   the headless run; no new product choice is needed for the implemented repair.
 
 ## Concept review · 2026-11-09
@@ -188,3 +188,33 @@ configured-provider sleep/wake remain for interactive demo review.
 
 - The Rust acceptance command above, repeated after sync: 45/45 passed in 168.429 seconds (3 slow), including all five terminal cases, creation restart/retry, budgets, provider transitions, CLI/server parity and documented commands; log `/tmp/loo-810-publish-rust.log`.
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check`: passed; Clippy log `/tmp/loo-810-publish-clippy.log`. No additional production changes were needed for publication.
+
+## Gate · 2026-11-09
+
+Comparison: checkout base `7cf2d25b3` through `61be8adac`, including the worktree.
+The production diff is limited to `WorkModel.createTask` and
+`WorkNavigation.palette`; `WorkDestinationTests` covers 14 late-reply cases.
+`swift/README.md` describes the behavior. Other changes are QA guidance, Wave
+context and review records. No Rust, wire, dependency or build inputs changed.
+
+Plan: retain the publication build, 162 Swift tests, 45 Rust acceptance checks
+and Rust static-analysis results: their source inputs are unchanged since
+`d2b01a94b`. Add `NewTaskTests` (the production sheet and query mapping),
+architecture and Swift platform-boundary checks. The changed-aware runner's
+`--list` selects architecture and Swift; it has no Swift filter, so use the
+documented filtered Desktop entry point for the additional suite. No second
+full Swift or Rust pass is needed. Xcode packaging and launch/quit remain CI's;
+mounted cold recovery and physical sleep/wake remain demo/review's.
+
+Review found no further production repair. The QA page now states the observed
+HTTP 401 beside its saved-prompt count, so those results cannot imply healthy
+provider continuation. No performance claim is made: this change adds only
+in-memory presentation comparisons, with no new reads or waits.
+
+- `scripts/test_desktop.sh --jobs 4 --filter NewTaskTests`: CLI/Desktop build and 2 tests passed; log `/tmp/loo-810-gate-new-task.log`; inherited `LF_*` and `GHOSTTY_RESOURCES_DIR` unset, stdin closed.
+- `uv run python scripts/check_architecture.py`: passed, zero unexplained owners, mirrors, shims or stale vocabulary.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- `git diff --check`: passed. No server or watcher was started by this gate.
+
+Headless gate has no code blocker. The remaining mounted and configured-provider
+acceptance above is still unverified; the Task's full done condition is not met.

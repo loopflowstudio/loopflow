@@ -56,6 +56,9 @@ or mounted native rendering. Those broader cases have earlier automated coverage
 <p>The original request was <q>Keep this exact first request after reconnect.</q>
 The count above reads the real provider JSONL's user-message records; it does not
 count the provider's second event representation of the same message.</p>
+<p>The provider request then failed with HTTP 401. This establishes saved initial
+input and single-launch recovery, not a healthy provider conversation or
+configured-provider sleep/wake.</p>
 <h3>Terminal ownership and expired replay</h3>
 <pre>{
   &quot;inputs&quot;: [

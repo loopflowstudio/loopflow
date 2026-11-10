@@ -19,6 +19,12 @@ are in the design. Earlier unconditional sends establish none of these guarantee
 Main `6f7a6c9ca`, merged at `c5b22af31`, still needs gate; rendered Desktop,
 installed and real-login checks remain open.
 
+November 9 sync onto `8155d1fcd` kept both harness README sections. The new
+observer measurement fixture needed a no-op recovery tick for `watch`.
+`cargo test -p loopflow --lib harness::codex_connection::tests::task_update_wakes_an_idle_conversation_from_the_side < /dev/null`
+(inherited LF_* unset) — 1 passed after that repair; existing large `__eh_frame`
+linker warning. Gate owns broader checks and static analysis.
+
 The ordinary-typing incident remains unresolved: the LOO-813 handoff reported
 physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
 revealed xzy, and both affected conversations subsequently worked after Reset.

@@ -269,6 +269,7 @@ fn observer_baseline() {
                     &json!({"hook_event_name":"SessionStart"}),
                     adapter,
                     "native-thread",
+                    |_| Ok(()),
                     |store, adapter, _, update| {
                         // One failed fixture delivery exercises the actual loop retry;
                         // no provider input, network, or Task sync is invoked.

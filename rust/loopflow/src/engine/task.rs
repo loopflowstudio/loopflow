@@ -141,10 +141,11 @@ pub fn run(
     directory: &Path,
     issue: &str,
     from: Option<&str>,
+    graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
 ) -> Result<TaskRun> {
-    let spell = |task: &str| spell_run(task, from, agent, approve);
+    let spell = |task: &str| spell_run(task, from, graph, agent, approve);
     if let Some(run) = remote(directory, issue, spell)? {
         return Ok(run);
     }
@@ -321,6 +322,7 @@ fn missing(issue: &str) -> Error {
 pub(super) fn spell_run(
     issue: &str,
     from: Option<&str>,
+    graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
 ) -> Vec<String> {
@@ -332,6 +334,7 @@ pub(super) fn spell_run(
         args.extend(["--agent".to_owned(), agent.to_owned()]);
     }
     args.extend(["task", "run", issue].map(str::to_owned));
+    args.extend(graph.map(str::to_owned));
     if let Some(from) = from {
         args.extend(["--from".to_owned(), from.to_owned()]);
     }

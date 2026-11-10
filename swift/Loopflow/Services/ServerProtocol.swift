@@ -4,8 +4,8 @@ import Foundation
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 3
-    public static let minRevision = 3
+    public static let revision = 4
+    public static let minRevision = 4
     public static let maxMessage = 32 * 1024 * 1024
 }
 
@@ -127,6 +127,8 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
+    /// The unchanged payload of a submitted creation; never arbitrary command replay.
+    case submittedCreation(JSONValue)
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
@@ -136,6 +138,7 @@ public enum ServerOperation: Encodable, Sendable {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
+        case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
@@ -247,8 +250,10 @@ public struct ServerWelcome: Decodable, Sendable {
 public struct ServerLimits: Decodable, Sendable {
     public let maxMessage: Int
     public let maxConnections: Int
+    public let maxOpen: Int
+    public let maxRetainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections" }
+    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections", maxOpen = "max_open", maxRetainedBytes = "max_retained_bytes" }
 }
 
 public struct ServerStatus: Decodable, Sendable {
@@ -272,6 +277,8 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
     public let connectedAt: String
     /// Requests the connection has sent, subscriptions included.
     public let requests: UInt64
+    public let open: Int
+    public let retainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
+    private enum CodingKeys: String, CodingKey { case id, client, requests, open, retainedBytes = "retained_bytes", connectedAt = "connected_at" }
 }

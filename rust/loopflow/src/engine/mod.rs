@@ -12,6 +12,7 @@
 pub mod account;
 pub mod checkout;
 pub mod config;
+pub mod creation;
 pub mod graph;
 pub mod launch;
 pub mod pr;
@@ -175,6 +176,7 @@ mod tests {
             let cli = parse(task::spell_run(
                 "LOO-1",
                 optional("implement"),
+                optional("code"),
                 optional("codex"),
                 populated,
             ));

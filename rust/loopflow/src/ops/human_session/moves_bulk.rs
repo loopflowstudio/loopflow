@@ -131,7 +131,16 @@ async fn move_agent(
         }
         return;
     }
-    match new_thread(store, session.id.as_str(), Some(agent), false, false).await {
+    match new_thread(
+        store,
+        session.id.as_str(),
+        Some(agent),
+        false,
+        false,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await
+    {
         Ok(_) => report.moved(session, format!("continues on {agent} at its next open")),
         Err(error) => report.skip(session, format!("{error:#}")),
     }
@@ -186,7 +195,15 @@ async fn apply_move(store: &SharedStore, session: &str) -> Result<()> {
     let Some(agent) = store.sqlite.pending_session_move(session)? else {
         return Ok(());
     };
-    new_thread(store, session, Some(&agent), false, false).await?;
+    new_thread(
+        store,
+        session,
+        Some(&agent),
+        false,
+        false,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await?;
     store.sqlite.clear_session_move(session, &agent)?;
     Ok(())
 }

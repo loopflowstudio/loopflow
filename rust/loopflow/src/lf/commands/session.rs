@@ -202,8 +202,18 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::New { id, connection } => {
-            new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
+        SessionCommand::New {
+            id,
+            connection,
+            request_id,
+        } => {
+            new_thread(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                request_id.as_deref(),
+            )
+            .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send { id, task, to } => {
@@ -705,9 +715,22 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 let target = connection.target(cli, id.as_deref())?;
                 reopen(&store, directory, target, connection, *fork, false).await
             }
-            SessionCommand::New { id, connection } if connection.prepare => {
+            SessionCommand::New {
+                id,
+                connection,
+                request_id,
+            } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                restarted(&store, directory, target, false, false).await
+                restarted(
+                    &store,
+                    directory,
+                    target,
+                    false,
+                    false,
+                    request_id.as_deref(),
+                    cli.agent.as_deref(),
+                )
+                .await
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -720,6 +743,7 @@ async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
     target: crate::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         connection.message.is_none(),
@@ -732,6 +756,8 @@ async fn new_thread(
         target,
         true,
         connection.json || cli.json,
+        request_id,
+        cli.agent.as_deref(),
     )
     .await?;
     print_opened(connection.json || cli.json, &record)
@@ -745,6 +771,8 @@ async fn restarted(
     target: crate::ops::human_session::SessionTarget<'_>,
     launch: bool,
     json: bool,
+    request_id: Option<&str>,
+    agent: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
     let selected = crate::ops::human_session::select_connection(
         store,
@@ -753,34 +781,25 @@ async fn restarted(
         SessionOpenIntent::Resume,
     )
     .await?;
-    let session = crate::ops::human_session::session_by_id(store, &selected.id)
-        .await?
-        .context("Session not found")?;
-    let threaded = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
-        None => false,
-    };
-    if !threaded {
-        // No earlier thread to hand off from: opening starts the first one.
-        if selected.started {
-            crate::journal::request::diagnostic(format_args!(
-                "Nothing to restart here; starting a new conversation."
-            ));
-        }
-        return crate::ops::human_session::open(
-            store,
-            directory,
-            &selected.id,
-            false,
-            launch,
-            json,
-        )
-        .await;
+    let request_id = request_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let next = crate::ops::human_session::new_thread(
+        store,
+        &selected.id,
+        agent,
+        launch,
+        json,
+        &request_id,
+    )
+    .await?;
+    if let Some(result) = store
+        .sqlite
+        .creation_receipt(&request_id)?
+        .and_then(|r| r.result)
+    {
+        return Ok(serde_json::from_value(result)?);
     }
-    let agent = crate::config::agent_override();
-    let next =
-        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json)
-            .await?;
     crate::ops::human_session::surface(store, &next).await
 }
 

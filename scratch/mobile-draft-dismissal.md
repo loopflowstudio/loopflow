@@ -1,9 +1,0 @@
-# Keep an unsaved New Task draft visible
-
-Close already requires a successful save. Interactive sheet dismissal must respect the same data: disable it while the current draft differs from its last successful local save. A load failure has no editable in-memory draft and can still close. After a save succeeds, ordinary swipe dismissal returns. This changes neither creation requests nor server recovery.
-
-Verify the presented production sheet with a real failed local write, then repair storage and save: UIKit must disallow interactive dismissal before recovery and allow it afterward, with the original text persisted. Also cover edits before the autosave and loaded drafts. No new source publication until CI42918523157 finishes.
-
-November10: presented production sheet reproduced failed-save dismissal exposure in3.872s before repair. Sourcef3bdc73ac65282699355d7514191e1ec3919b198 tracks the last successful local save and disables interactive dismissal while the draft differs.19 creation/recovery tests passed9.323s; new presented-sheet check passed0.486s, asserting UIKit dismissal protection, storage recovery and exact persisted text. It verifies native presentation policy, not a physical swipe or phone storage exhaustion. Sync changed no source, whitespace passed. Logs:reviewroot/draft-dismissal. Committed locally, not published. Signed phone build passed; handle43291 ended. Signature verified, artifact /Users/jack/.lf-machine/demos/mobile-718-live-f3bdc73ac/LoopflowiOS.app retained, not installed/launched. Published-head CI42918523157 still in progress; watcher71741 retained. Do not publish this next change until that run finishes.
-
-Installed signed artifact on mobile heart23:08:34UTC and launched normally23:08:59UTC. Handles93421/49641 succeeded. No fixture arguments, no actual pairing/input established. CI42918523157 still running its final iOS job; all other jobs passed. Local source remains unpublished.

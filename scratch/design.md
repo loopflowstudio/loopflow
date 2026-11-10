@@ -16,8 +16,8 @@ Terminal redemption answers `bridged {owner_lf_process_id}`, matching this
 Task's planned wire contract; bulk redemption answers `admitted`.
 
 That revision shares `server/ticket.rs` between terminal and bulk transfer,
-leaves foreign attempts unconsumed and expires tickets with `Instant`, contrary to this
-Task's consume-on-attempt and host-sleep requirements.
+leaves foreign attempts unconsumed and expires tickets with `Instant`, contrary
+to this Task's consume-on-attempt and host-sleep requirements.
 `Admission::Local` follows a same-effective-UID check on
 every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
@@ -26,7 +26,7 @@ the terminal consume-on-attempt requirement.
 At November 10 18:58 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The implement `lf task status LOO-718 --json` recheck still places the
+The `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
@@ -48,11 +48,6 @@ while waiting for transport to land.
 
 ## Implementation and acceptance
 
-Shipping docs are written in `docs/server.md` (Phone access) and
-`rust/loopflow/src/server/README.md` (Remote attach contract and shared recovery).
-The write-docs pass retained their examples and contract; no product question
-is open. Desktop presentation results are in `questions.md`.
-
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Through authenticated client and bridge connections, test that
 matching node/user succeeds once; a different node, different user, or
@@ -70,9 +65,9 @@ planned/local-only wording and replace the general attach section's UID-only
 description with the local/remote admission binding. Keep same-device ticket
 use, exact-owner recovery and attachment without provider launch.
 
-Keep exact-owner mismatch and recovery rules in the shared recovery section;
-the attach API and remote contract link there instead of repeating them.
-Desktop visual inspection remains for
-display-capable QA; opening results are in `questions.md`.
+Keep the exact-owner parameter, mismatch and recovery rules together in the
+shared recovery section so local and remote callers use one contract.
+Desktop visual inspection remains for display-capable QA; opening results are
+in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

@@ -373,7 +373,6 @@ part of what a phone or bot client is offered.
   provider. A Session with no running owner is `not_found {session}`; an owner
   whose endpoint is gone is `not_found {owner_lf_process_id}`: it ended, at
   issue or when the ticket is presented. When the owner ends, the bridge closes.
-  Pass `owner_lf_process_id` to attach only to that owner, as Desktop's relays do.
   `lf session resume` and `server::client::attach` perform both ticket steps.
   Each terminal has its own connection, so readings never wait behind terminal
   bytes and a control failure never closes a bridged terminal. Follow
@@ -597,9 +596,8 @@ After `bridged`, use the [binary owner protocol](../transport/README.md).
 Keep `/v1/machine` for requests and live Work updates; each terminal has its
 own bridge.
 
-To reconnect to a specific owner, pass its ID as `owner_lf_process_id` instead
-of null and follow the shared
-[terminal and provider recovery](#terminal-and-provider-recovery) rules.
+For reconnection and exact-owner attachment, follow
+[terminal and provider recovery](#terminal-and-provider-recovery).
 
 Both connections must authenticate as the same Tailscale node stable ID and
 user ID; another device on the same account does not match. Neither the ticket,
@@ -802,10 +800,11 @@ own stale connection; a newer viewer keeps input and geometry. Replacing that
 stale socket cannot let its later close revoke the replacement's claims.
 A stalled bridge cannot block another viewer or Work control traffic.
 
-If the Session has a new owner, exact-owner attachment returns `not_found` with
-`owner_lf_process_id` and `current_lf_process_id`. Attaching by Session can reach
-the current owner; neither attachment starts or resumes a provider. A lost
-connection alone does not establish process death.
+Pass `owner_lf_process_id` to `session.attach` to reconnect only to that owner.
+If the Session has a new owner, attachment returns `not_found` with
+`owner_lf_process_id` and `current_lf_process_id`. Passing null reaches the
+Session's current owner; neither attachment starts or resumes a provider.
+A lost connection alone does not establish process death.
 
 Desktop reconnects to the exact owner with bounded backoff. Connection status
 stays outside terminal bytes; unavailability marks the last screen stale.

@@ -25,22 +25,25 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 03:57 UTC, `gh pr view 1812` returned `state: OPEN`,
-`mergedAt: null`, `autoMergeRequest: null` and the same head. A fresh fetch kept main at
-`6f7a6c9caf7f68554445df008593d71baf95cfbe`; `git ls-tree` still found neither
-`server/mobile.rs` nor `server/ticket.rs`.
-
-At November 10 04:31 UTC, the same PR query still returned `state: OPEN`,
+At November 10 04:35 UTC, `gh pr view 1812` returned `state: OPEN`,
 `mergedAt: null`, `autoMergeRequest: null` and the same head. Freshly fetched
-main advanced to `c7094eb9736a8c66a789558019d6cc9b7b476b84`; neither transport
+main remains at `c7094eb9736a8c66a789558019d6cc9b7b476b84`; neither transport
 file exists there. The dependency remains unresolved.
+
+At November 10 05:09 UTC, PR #1812 is still open, without a merge time or
+auto-merge request, at the same head. Freshly fetched main is now
+`8155d1fcde597154ee9746ad72280bf6687a7da8`; `server/mobile.rs` and
+`server/ticket.rs` are still absent. Implementation remains blocked on LOO-718
+landing; no code or acceptance test can proceed against its shared store here.
 
 Implementation and remote acceptance depend on LOO-718's transport, which is
 not on main. Landing that separate PR is outside this Task's scope. No product
 decision is missing; the contract remains planned.
 
-Earlier observations, stalled Task status reads and revision comparisons are
-recorded in `cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
+Earlier dependency observations are in
+`b567998a6b700a12757ee1a613fbf5076b256e30:scratch/design.md`; stalled Task status
+reads and revision comparisons are in
+`cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
 
 ## Delete — do not maintain
 
@@ -72,9 +75,6 @@ and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
-
-Compression removes the repeated client-slot limit from attachment docs (the
-local protocol introduction owns it) and condenses remote retry instructions.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

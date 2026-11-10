@@ -461,7 +461,7 @@ struct Reader<A, F> {
     wakes: Wake,
     read: F,
     args: A,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
     checkouts: checkouts::Checkouts,
     configuration: observation::Files,
     configuration_checked: Option<Instant>,
@@ -483,6 +483,17 @@ struct Reader<A, F> {
     sent: Option<[u8; 32]>,
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
+}
+
+// A served subscription may be cancelled while its async owner is shutting
+// down. Its private runtime has finished its blocking reads and must not wait
+// for runtime shutdown from that async worker.
+impl<A, F> Drop for Reader<A, F> {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -512,7 +523,7 @@ where
             read,
             args,
             select,
-            runtime: tokio::runtime::Runtime::new()?,
+            runtime: Some(tokio::runtime::Runtime::new()?),
             checkouts: checkouts::Checkouts::default(),
             configuration: observation::Files::default(),
             configuration_checked: None,
@@ -555,6 +566,8 @@ where
             let config = StorageConfig::sqlite(self.database.clone());
             match self
                 .runtime
+                .as_ref()
+                .expect("the reader owns its runtime until drop")
                 .block_on(crate::store::open_read_only_store(&config))
             {
                 Ok(opened) => {
@@ -627,6 +640,8 @@ where
                     Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
                     None => crate::git::retain_reads(self.wakes.checkouts, || {
                         self.runtime
+                            .as_ref()
+                            .expect("the reader owns its runtime until drop")
                             .block_on((self.read)(self.store.clone(), self.args.clone()))
                     }),
                 };
@@ -647,7 +662,7 @@ where
             };
             drop(snapshot);
             self.cost = began.elapsed();
-            let identity = identity(&unavailable, &body)?;
+            let identity = identity(unavailable.as_deref(), body.as_ref())?;
             if self.force || self.sent != Some(identity) {
                 frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
@@ -738,12 +753,15 @@ fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity(unavailable: &Option<String>, body: &Option<serde_json::Value>) -> Result<[u8; 32]> {
-    let mut value = body.clone().unwrap_or(serde_json::Value::Null);
+pub(crate) fn identity(
+    unavailable: Option<&str>,
+    body: Option<&serde_json::Value>,
+) -> Result<[u8; 32]> {
+    let mut value = body.cloned().unwrap_or(serde_json::Value::Null);
     strip_reading_time(&mut value);
     // Streamed: a large reading is never held a third time as bytes.
     let mut hash = Sha256::new();
-    serde_json::to_writer(&mut hash, unavailable)?;
+    serde_json::to_writer(&mut hash, &unavailable)?;
     serde_json::to_writer(&mut hash, &value)?;
     Ok(hash.finalize().into())
 }
@@ -1162,11 +1180,11 @@ mod tests {
     #[test]
     fn the_time_of_a_reading_is_not_a_change() {
         let rows = |at| serde_json::json!([{"id": 1, "condition": {"observed_at": at}}]);
-        let read = |body| identity(&None, &Some(body)).unwrap();
+        let read = |body| identity(None, Some(&body)).unwrap();
         assert_eq!(read(rows(1)), read(rows(2)));
         assert_ne!(
             read(rows(1)),
-            identity(&Some("gone".into()), &Some(rows(1))).unwrap()
+            identity(Some("gone"), Some(&rows(1))).unwrap()
         );
     }
 }

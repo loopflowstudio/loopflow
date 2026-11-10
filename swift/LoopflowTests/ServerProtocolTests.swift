@@ -50,14 +50,14 @@ struct ServerProtocolTests {
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
-        let hello = ServerClientMessage.hello(ServerHello(revision: 2, minRevision: 2, client: ServerClientIdentity(
+        let hello = ServerClientMessage.hello(ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
             kind: "desktop", platform: "macos", name: "Loopflow", version: "0.15.1")))
         #expect(try encoded(hello) == value("hello"))
         guard case .welcome(let welcome) = try message("welcome") else { Issue.record("Missing welcome"); return }
         #expect(welcome.clientID == "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f")
-        #expect(welcome.revision == 2)
-        #expect(welcome.serverRevision == 2)
-        #expect(welcome.minRevision == 2)
+        #expect(welcome.revision == ServerProtocol.revision)
+        #expect(welcome.serverRevision == ServerProtocol.revision)
+        #expect(welcome.minRevision == ServerProtocol.minRevision)
         #expect(welcome.instance == "service-incarnation")
         #expect(welcome.executableSHA256.count == 64)
         #expect(welcome.limits.maxMessage == 33554432)
@@ -69,8 +69,8 @@ struct ServerProtocolTests {
     @Test func readinessProbesWithoutHello() throws {
         #expect(try encoded(.status) == value("status_request"))
         guard case .status(let status) = try message("status") else { Issue.record("Missing status"); return }
-        #expect(status.revision == 2)
-        #expect(status.minRevision == 2)
+        #expect(status.revision == ServerProtocol.revision)
+        #expect(status.minRevision == ServerProtocol.minRevision)
         #expect(status.instance == "server-1")
         #expect(status.executableSHA256 == String(repeating: "a", count: 64))
         #expect(status.clients.map(\.id) == ["6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"])
@@ -91,10 +91,11 @@ struct ServerProtocolTests {
 
     @Test func subscriptionsCarryTheirRequestId() throws {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
-            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"])
+            .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let checkpoint, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
+        #expect(checkpoint == "fixture-checkpoint")
         guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
         #expect(fields["body"] == .null)
         #expect(fields["unavailable"] == .string("repository is unavailable"))
@@ -158,14 +159,13 @@ struct ServerProtocolTests {
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskCreate(directory: "/repo", id: "session_5e55105e000040008000000000000001",
-                             title: "Keep the conversation")), select: nil)
+            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
-            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", from: "implement", agent: "claude", approve: false)),
+            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
             ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
             ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
@@ -219,7 +219,7 @@ struct ServerProtocolTests {
         for (name, id, write) in writes {
             #expect(try encoded(.request(id: id, operation: .command(write), select: nil)) == value(name), "\(name)")
         }
-        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", from: nil, agent: nil, approve: true).argv
+        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
         guard case .response(_, _, .object(let running)) = try message("task_running") else {
             Issue.record("Missing task.run result"); return
@@ -302,7 +302,7 @@ struct ServerProtocolTests {
     }
 
     @Test func aWaitEndsAfterTheReadingThatReachedIt() throws {
-        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil)
+        let wait = ServerClientMessage.subscribe(id: "wait-1", operation: .taskWait(issue: "LOO-1", until: "submitted"), select: nil, resume: nil)
         #expect(try encoded(wait) == value("task_wait"))
         guard case .ended(let id) = try message("ended") else { Issue.record("Missing ended"); return }
         #expect(id == "wait-1")
@@ -377,7 +377,7 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":2}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

@@ -1,0 +1,96 @@
+[
+  {
+    "request_id": "complete",
+    "kind": "task.create",
+    "milestone": "admitted",
+    "disposition": "complete",
+    "explanation": "Task created",
+    "run": true,
+    "task_id": "original",
+    "session_id": null,
+    "artifact_key": null,
+    "result": {
+      "task": {
+        "id": "original"
+      }
+    },
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  },
+  {
+    "request_id": "continue",
+    "kind": "task.create",
+    "milestone": "filed",
+    "disposition": "continue",
+    "explanation": "Task created; start pending",
+    "run": true,
+    "task_id": "original",
+    "session_id": null,
+    "artifact_key": null,
+    "result": null,
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  },
+  {
+    "request_id": "unknown",
+    "kind": "task.create",
+    "milestone": "run_requested",
+    "disposition": "inspect",
+    "explanation": "Task created; start unconfirmed",
+    "run": true,
+    "task_id": "original",
+    "session_id": null,
+    "artifact_key": null,
+    "result": null,
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  },
+  {
+    "request_id": "stopping",
+    "kind": "session.new",
+    "milestone": "stopping",
+    "disposition": "inspect",
+    "explanation": "Conversation change unconfirmed",
+    "run": false,
+    "task_id": null,
+    "session_id": "conversation",
+    "artifact_key": null,
+    "result": null,
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  },
+  {
+    "request_id": "removed",
+    "kind": "task.create",
+    "milestone": "admitted",
+    "disposition": "inspect",
+    "explanation": "The created Task was removed",
+    "run": true,
+    "task_id": "original",
+    "session_id": null,
+    "artifact_key": null,
+    "result": null,
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  },
+  {
+    "request_id": "superseded",
+    "kind": "session.new",
+    "milestone": "admitted",
+    "disposition": "inspect",
+    "explanation": "Newer conversation input replaced this change",
+    "run": false,
+    "task_id": null,
+    "session_id": "conversation",
+    "artifact_key": null,
+    "result": null,
+    "launch": null,
+    "created_at": 1,
+    "updated_at": 2
+  }
+]

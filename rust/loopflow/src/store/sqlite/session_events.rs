@@ -1627,7 +1627,7 @@ mod tests {
                     .claim_session_attachment(&session.id, Some(&original), &second, false)
                     .unwrap();
                 assert!(matches!(
-                    crate::session_record::finish_session_attachment(
+                    crate::process::finish_session_attachment(
                         &store,
                         &session.id,
                         &original,
@@ -1641,13 +1641,8 @@ mod tests {
             } else {
                 original
             };
-            crate::session_record::finish_session_attachment(
-                &store,
-                &session.id,
-                &current,
-                "completed",
-            )
-            .unwrap();
+            crate::process::finish_session_attachment(&store, &session.id, &current, "completed")
+                .unwrap();
             // Close leaves reaping to the parent; an unreaped zombie is dead.
             assert_eq!(
                 crate::journal::process_identity_evidence(child.id(), started),
@@ -1962,7 +1957,7 @@ mod tests {
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(session.captured, replacement.clone())
+            .replace_session_input(session.captured, replacement.clone(), None)
             .unwrap();
         store
             .claim_session_attachment(&session.id, Some(&attachment), &second, true)

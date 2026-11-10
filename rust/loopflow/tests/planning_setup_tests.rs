@@ -158,7 +158,7 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let task = serde_json::from_slice::<Value>(&output.stdout).unwrap()["task"].clone();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let title: String = conn
         .query_row(

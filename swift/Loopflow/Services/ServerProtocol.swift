@@ -1,11 +1,11 @@
 import Foundation
 
-/// Revision 2 of the server protocol: one connection per client, a negotiated
+/// Revision 3 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 2
-    public static let minRevision = 2
+    public static let revision = 4
+    public static let minRevision = 4
     public static let maxMessage = 32 * 1024 * 1024
 }
 
@@ -76,7 +76,7 @@ public enum ServerClientMessage: Encodable, Sendable {
     case request(id: String, operation: ServerOperation, select: [String]?)
     /// A read with a subscription: a null `response`, then readings until cancelled.
     /// `select` is as for a request; a change outside it sends no reading.
-    case subscribe(id: String, operation: ServedRead, select: [String]?)
+    case subscribe(id: String, operation: ServedRead, select: [String]?, resume: String?)
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
     case checkpoint(id: String, checkpoint: UInt64)
@@ -86,7 +86,7 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// The server answers `bridged`, and the connection then speaks the owner protocol.
     case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, select, checkpoint, ticket, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, select, resume, checkpoint, ticket, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -101,11 +101,12 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
-        case .subscribe(let id, let operation, let select):
+        case .subscribe(let id, let operation, let select, let resume):
             try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
+            try box.encode(resume, forKey: .resume)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)
@@ -126,6 +127,8 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
+    /// The unchanged payload of a submitted creation; never arbitrary command replay.
+    case submittedCreation(JSONValue)
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
@@ -135,6 +138,7 @@ public enum ServerOperation: Encodable, Sendable {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
+        case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
@@ -188,7 +192,7 @@ public enum ServerMessage: Decodable, Sendable {
     case response(id: String, traceID: String, result: JSONValue)
     /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
     case bridged(ownerLfProcessID: String)
-    case reading(id: String, frame: JSONValue)
+    case reading(id: String, checkpoint: String, frame: JSONValue)
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     case ended(id: String)
@@ -199,7 +203,7 @@ public enum ServerMessage: Decodable, Sendable {
     case error(id: String?, code: String, message: String, data: JSONValue)
 
     private enum Keys: String, CodingKey {
-        case type, id, result, frame, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+        case type, id, result, frame, checkpoint, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -211,7 +215,7 @@ public enum ServerMessage: Decodable, Sendable {
                              result: try box.decode(JSONValue.self, forKey: .result))
         case "bridged": self = .bridged(ownerLfProcessID: try box.decode(String.self, forKey: .ownerLfProcessID))
         case "reading":
-            self = .reading(id: try box.decode(String.self, forKey: .id), frame: try box.decode(JSONValue.self, forKey: .frame))
+            self = .reading(id: try box.decode(String.self, forKey: .id), checkpoint: try box.decode(String.self, forKey: .checkpoint), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
@@ -246,8 +250,10 @@ public struct ServerWelcome: Decodable, Sendable {
 public struct ServerLimits: Decodable, Sendable {
     public let maxMessage: Int
     public let maxConnections: Int
+    public let maxOpen: Int
+    public let maxRetainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections" }
+    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections", maxOpen = "max_open", maxRetainedBytes = "max_retained_bytes" }
 }
 
 public struct ServerStatus: Decodable, Sendable {
@@ -271,6 +277,8 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
     public let connectedAt: String
     /// Requests the connection has sent, subscriptions included.
     public let requests: UInt64
+    public let open: Int
+    public let retainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
+    private enum CodingKeys: String, CodingKey { case id, client, requests, open, retainedBytes = "retained_bytes", connectedAt = "connected_at" }
 }

@@ -388,6 +388,7 @@ pub struct SessionPage<T = SessionRecord> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
     pub recovery: Option<crate::session_recovery::SessionRecovery>,
+    pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -499,7 +500,7 @@ pub(crate) fn publish_prepared_input(
         session.captured.is_some(),
         "Session input must be reserved before artifact publication"
     );
-    crate::session_record::CaptureHandle::prepare(
+    crate::session_record::SessionRecorder::prepare(
         crate::session_record::SessionCaptureSpec {
             harness: session.provider.clone().unwrap_or_default(),
             model: session.model.clone(),
@@ -736,6 +737,7 @@ fn summary_surface(
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
         recovery: None,
+        transition: session.transition.clone(),
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         availability: session_availability(session),
@@ -988,7 +990,15 @@ pub(crate) async fn open(
             conversation_log::read(&store.sqlite, session)?;
         } else {
             drop(progress);
-            new_thread(store, &session.id, Some(&agent), true, json).await?;
+            new_thread(
+                store,
+                &session.id,
+                Some(&agent),
+                true,
+                json,
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .await?;
             let session = store
                 .session(&session.id)
                 .await?
@@ -1288,6 +1298,9 @@ async fn fork(
         "Forked {} into {}; the original keeps running.",
         source.id, next.id
     ));
+    store
+        .sqlite
+        .record_provider_lineage(&next, &store.sqlite.provider_lineage(source)?)?;
     let record = surface(store, &next).await?;
     if launch {
         open_prepared(store, &next.id, json).await?;
@@ -1424,10 +1437,41 @@ pub(crate) async fn new_thread(
     agent: Option<&str>,
     launch: bool,
     json: bool,
+    request_id: &str,
 ) -> Result<LfSession> {
+    let identity = crate::engine::creation::identity(
+        "session.new",
+        request_id,
+        &serde_json::json!({"id":id,"agent":agent}),
+        false,
+    )?;
+    let request = request_id.to_owned();
+    let _creation_lock =
+        crate::journal::request::spawn_blocking(move || crate::engine::creation::lock(&request))
+            .await??;
+    store.sqlite.check_creation(&identity)?;
+    // Serialize with other Session launches and new-thread requests.
     let lock_id = id.to_string();
     let launch_lock =
         crate::journal::request::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    if let Some(receipt) = store.sqlite.creation_receipt(request_id)? {
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Inspect {
+            return Err(crate::engine::creation::unknown(&receipt).into());
+        }
+        let next = store
+            .session(id)
+            .await?
+            .ok_or_else(|| session_not_found(id))?;
+        if receipt.disposition == crate::store::sqlite::creation::RecoveryDisposition::Continue {
+            // The input and receipt committed together, before filesystem publication.
+            // Only that exact input may finish publishing; never replace a newer one.
+            if next.artifact_key != receipt.artifact_key {
+                return Err(crate::engine::creation::unknown(&receipt).into());
+            }
+            return finish_thread_creation(store, next, request_id).await;
+        }
+        return Ok(next);
+    }
     let session = store
         .session(id)
         .await?
@@ -1437,7 +1481,23 @@ pub(crate) async fn new_thread(
     if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
         bail!(refusal);
     }
-    let request = conversation_log::continuation(&store.sqlite, &session)?;
+    let threaded = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
+        None => false,
+    };
+    // A conversation with no provider history carries its original first prompt.
+    let request = if threaded {
+        Some(conversation_log::continuation(&store.sqlite, &session)?)
+    } else {
+        session.request.clone()
+    };
+    let lineage = threaded
+        .then(|| store.sqlite.provider_lineage(&session))
+        .transpose()?;
+    let artifact = crate::session_record::new_artifact_key();
+    store
+        .sqlite
+        .begin_thread_creation(&identity, id, &artifact)?;
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
@@ -1451,9 +1511,19 @@ pub(crate) async fn new_thread(
     }
     // The skill ran in the earlier conversation and is in its log. The
     // continuation is stored so a relaunch after a failed start still carries it.
-    next.skill = None;
-    next.request = Some(request);
-    let next = append_input(store, next).await?;
+    if threaded {
+        next.skill = None;
+    }
+    next.request = request;
+    next.artifact_key = Some(artifact);
+    next.input_published = false;
+    let next = store
+        .replace_session_input(next.captured, next, Some(request_id.into()))
+        .await?;
+    if let Some(lineage) = lineage {
+        store.sqlite.record_provider_lineage(&next, &lineage)?;
+    }
+    let next = finish_thread_creation(store, next, request_id).await?;
     crate::journal::request::diagnostic(format_args!(
         "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
@@ -1466,12 +1536,35 @@ pub(crate) async fn new_thread(
     Ok(next)
 }
 
+// First submission and recovery finish the same input. Publication may already
+// have succeeded when the process exited before recording its result.
+async fn finish_thread_creation(
+    store: &SharedStore,
+    next: LfSession,
+    request_id: &str,
+) -> Result<LfSession> {
+    let next = if next.input_published {
+        next
+    } else {
+        publish_prepared_input(
+            &store.sqlite,
+            &next,
+            crate::session_record::SessionGraphMembership::Independent,
+        )?
+    };
+    let result = surface(store, &next).await?;
+    store
+        .sqlite
+        .advance_creation(request_id, "admitted", Some(&serde_json::to_value(result)?))?;
+    Ok(next)
+}
+
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
 pub(crate) async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
     next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;
-    let next = store.replace_session_input(replaced, next).await?;
+    let next = store.replace_session_input(replaced, next, None).await?;
     publish_prepared_input(
         &store.sqlite,
         &next,
@@ -1642,6 +1735,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
     };
     let mut reading = SessionRecord {
         recovery: store.sqlite.session_recovery(&session.id)?,
+        transition: store.sqlite.provider_transition(&session.id)?,
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         availability: session_availability(&metadata),

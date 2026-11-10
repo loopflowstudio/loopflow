@@ -109,10 +109,13 @@ contradicts itself. Confirming refreshes compare the claim; receipt baselines re
 omitted versus explicitly null membership. Conversion refuses scalar type changes that SQLite would otherwise coerce,
 retaining the original schema and input on failure.
 
-`lf task create` generates the durable ID, saves the Task and returns that ID.
-Each explicit invocation creates a distinct Task, including identical titles.
-Internal synchronization retries reuse the saved identity. The transactional creation
-receipt retains the original Project and input through later edits. The same transaction owns local field edits,
+`lf task create` saves the Task and returns a creation result containing `task`,
+`graph`, `session_id` and `milestone`. A fresh invocation generates a request ID;
+`--request-id` supplies one for safe recovery. Identical content with the same ID
+reuses the original creation, while different content conflicts. A fresh ID means
+a new submission, even with an identical title. The shared creation receipt
+retains the original identity through retries; provider synchronization separately
+retains the original Project and input through later edits. The same transaction owns local field edits,
 assignment, Project ordering and comments. Revisions are local write concurrency,
 not fabricated provider observation times. Local Task selection displays the shortest
 unique UUID prefix of at least seven digits; full IDs remain stable. References
@@ -578,15 +581,18 @@ belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
-`task run` places the Task, then runs a fresh ordinary Graph in its checkout:
-the same command, checks and records as `lf --task ISSUE graph GRAPH` or a run
-from the worktree. It blocks until the Graph ends; a caller that will not wait
-backgrounds it. `--reason` publishes direction to the Task first. To change
-direction, interrupt, inspect, then run.
+`task run` takes up the Task's captured graph and starts a fresh Graph process
+from its saved position. It returns after registration; `-b` waits and runs
+interactive steps headless. Ordinary runs stop at the next interactive step for
+the Task conversation. A direct `lf --task ISSUE graph GRAPH` uses the same runner
+but does not move the Task's position. `--reason` publishes direction first.
+Inspect live and unfinished processes before launching more work.
 
-Task status and `plan list` `execution` observe the Task's most recently launched
-Graph: `none`, `latest` or `finished`. Its only control is `start`, available
-whenever the Task can run, even when an earlier Graph exists.
+Task status and `plan list` separate the Task's graph position from `execution`,
+which describes its latest Graph as `idle`, `starting`, `running`, `stalled`,
+`blocked` or `unknown`. `run_control` describes the available action; recorded
+history alone is not permission to start a competing Graph. See
+[interactive steps and Task states](../orchestration.md#where-a-person-takes-part).
 
 Automatic provider retries within one Process retain earlier failure and usage and
 select only an authorized successor. An uncertain mechanical effect requires

@@ -55,7 +55,7 @@ For Loopflow:
 Linear and Figma prove that performance is not a technical metric but a product feature. Speed enables flow state.
 
 For Loopflow:
-- Optimistic UI updates—show results before server confirmation
+- Show pending actions immediately; confirm results from server receipts or refreshed Work
 - Keyboard-first navigation (see Cmd+K below)
 - Prefetch likely next states
 - Never block the UI on network requests

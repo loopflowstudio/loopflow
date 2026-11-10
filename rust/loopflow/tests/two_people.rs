@@ -111,7 +111,8 @@ impl Pair {
             &[
                 "task", "create", "--wave", "infra", "--title", title, "--json",
             ],
-        );
+        )["task"]
+            .clone();
         task["identifier"].as_str().unwrap().to_string()
     }
 

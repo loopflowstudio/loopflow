@@ -73,9 +73,15 @@ lf server status   # readiness, socket, server instance and connection diagnosis
 lf doctor          # selected installation and store health
 ```
 
-**Reconnecting…** means Desktop is trying the same Session owner. Keep the pane
+**Opening… Input paused** means Desktop is waiting for attachment and native
+input readiness. Its last available screen stays readable; without a saved
+screen the same pane stays empty until output arrives.
+**Reconnecting…** means a connection was lost and Desktop is trying the same
+Session owner. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
-end, **Retry** reconnects without replaying input or restarting the provider.
+end, **Retry connection** reconnects without replaying input or restarting the provider.
+A lost connection-status channel also pauses input; the terminal relay keeps
+running and restores its status automatically when that channel returns.
 A read-only pane's **Move here** requests control explicitly; a lost connection
 alone never takes it from another viewer.
 
@@ -84,6 +90,24 @@ System Settings, or enable its user service on Linux. Retry and status do not
 change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
+
+## A creation has no confirmed answer
+
+Desktop retains submitted Task creations and new Session threads across app
+restart. Reconnect to the original Machine and let it look up the receipt;
+changing repositories does not change the saved destination. An unavailable
+receipt lookup leaves the submission unresolved.
+
+For a CLI submission with a saved request ID:
+
+```bash
+lf server receipt REQUEST_ID --json  # read the recorded creation; starts nothing
+lf task status TASK_ID --json        # inspect any Task the receipt identifies
+```
+
+A `run_requested` receipt means launch is unconfirmed. Inspect the Task's Graphs
+and processes before starting anything; a lost answer does not establish a failed
+launch. See [creation recovery](server.md#recover-a-submitted-creation).
 
 ## A launch reports `outcome_unknown`
 

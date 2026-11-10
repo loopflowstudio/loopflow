@@ -615,7 +615,7 @@ fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let selected = TestRepo::new();
     let other = TestRepo::new();
-    let created: serde_json::Value = serde_json::from_str(&success(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             home.path(),
             other.path(),
@@ -624,7 +624,8 @@ fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     for args in [
         vec![
@@ -952,7 +953,7 @@ fn task_run_explain_reads_unstarted_work_without_preparing_it() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
-    let created: serde_json::Value = serde_json::from_str(&success(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             home.path(),
             repo.path(),
@@ -967,7 +968,8 @@ fn task_run_explain_reads_unstarted_work_without_preparing_it() {
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let path = home.path().join(".lf/loopflow.db");
     let conn = rusqlite::Connection::open(&path).unwrap();
@@ -1092,7 +1094,7 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
     let repo = TestRepo::new();
-    let created: serde_json::Value = serde_json::from_str(&success(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             home.path(),
             repo.path(),
@@ -1101,7 +1103,8 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
@@ -1877,7 +1880,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .into_owned();
     assert!(store.peer_planning_status(&repo, None).unwrap().is_empty());
     assert!(store.list_waves(None).unwrap().is_empty());
-    let task: serde_json::Value = serde_json::from_str(&success(
+    let task: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             target_home.path(),
             target.path(),
@@ -1892,7 +1895,8 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let planning_before =
         serde_json::to_value(store.peer_planning_status(&repo, None).unwrap()).unwrap();
     let other = loopflow::durable::RepositoryId::new();
@@ -3064,7 +3068,7 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
     .unwrap();
     assert!(absent["action"].is_null());
     assert!(!path.exists());
-    let created: serde_json::Value = serde_json::from_str(&success(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             home.path(),
             repo.path(),
@@ -3073,7 +3077,8 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
@@ -3134,7 +3139,7 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
     repo.stage_all();
     repo.commit("Fixture Graph");
     repo.push();
-    let created: serde_json::Value = serde_json::from_str(&success(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
             home.path(),
             repo.path(),
@@ -3143,7 +3148,8 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
         .output()
         .unwrap(),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     success(
         command(

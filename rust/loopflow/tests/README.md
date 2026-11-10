@@ -120,7 +120,7 @@ must retain drafts, requests, history and Session/Task/capture identity through
 build replacement and viewer return; only provider replacement changes its fence.
 An unanswering protected owner survives failed attachment and completes continued
 turns after transport returns.
-`session_record::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
+`process::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
 natural helper exit permits continuation, persistent helpers refuse it without
 signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
@@ -925,7 +925,7 @@ Terminal-status isolation assertions match the escaped OSC sequence, not its
 numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
 fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
-`session_record::runtime::tests` module: native refusal and headless cleanup
+`process::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
 
 ## Client API server

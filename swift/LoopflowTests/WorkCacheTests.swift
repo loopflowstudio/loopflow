@@ -229,7 +229,7 @@ struct WorkCacheTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation")
         }
-        _ = try view.inspect().find(text: "Opening conversation…")
+        _ = try view.inspect().find(text: "Opening… Input paused.")
 
         await source.releasePreparations()
         await spin { await source.releasePreparations(); return await !source.preparedTasks.contains(queued.id) }
@@ -434,7 +434,7 @@ struct WorkCacheTests {
         #expect(throws: (any Error).self) {
             try offer.inspect().find(viewWithAccessibilityIdentifier: "open-conversation")
         }
-        _ = try offer.inspect().find(text: "Opening conversation…")
+        _ = try offer.inspect().find(text: "Opening… Input paused.")
 
         await source.releasePreparations()
         for id in working {
@@ -526,7 +526,7 @@ struct WorkCacheTests {
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let view = WorkspacePanesView(workspace: queued, isFocused: true, sessions: store, model: model,
             onFocus: { id, _ in queued.multiplexer.setFocusedPane(id) })
-        _ = try view.inspect().find(text: "Opening conversation…")
+        _ = try view.inspect().find(text: "Opening… Input paused.")
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
 
         await source.setPreparationFailure("Claude account unavailable")

@@ -23,8 +23,8 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 13:20 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with `mergeable: false`. Freshly fetched main is
+At November 10 13:59 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeable: CONFLICTING`. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 The accompanying `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
@@ -39,12 +39,12 @@ to older status reads.
 
 ## Delete — do not maintain
 
-The transport replaces `server/service.rs::Ticket` and `Tickets` with the shared
-`server/ticket.rs` store. Leave the UID-only store alone until that lands.
-Move coverage from
-`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` to the shared-store
-tests, then delete that predecessor test. Retain bulk cases, service-level bridge
-tests and wire fixtures.
+The inspected transport revision already replaces `server/service.rs::Ticket`
+and `Tickets` with `server/ticket.rs` and deletes
+`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`. Restore its terminal
+single-use, foreign-attempt consumption and lifetime coverage in the shared-store
+tests. Retain bulk cases, service-level bridge tests and wire fixtures. The
+UID-only implementation in this checkout remains unchanged until transport lands.
 
 ## Implementation and acceptance
 

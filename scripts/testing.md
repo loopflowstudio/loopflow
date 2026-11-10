@@ -35,6 +35,10 @@ Creation receipt changes also run `test(local_planning::)`,
 `test(store::sqlite::sessions::metadata_tests::)`: recovery owners, turn attribution
 and metadata reads over historical detail all depend on it.
 
+Store-wide schema or trigger changes also run `binary(two_people)` and
+`binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
+exercise writers beyond the changed store module.
+
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
 lookup completes in a deterministic output test; a live attachment can miss that

@@ -25,20 +25,18 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 03:18 UTC,
-`gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
-returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at the same head.
-The 03:16 UTC fetch advanced main to
+At November 10 03:54 UTC, `gh pr view 1812` returned `state: OPEN`,
+`mergedAt: null`, `autoMergeRequest: null` and the same head. A fresh fetch kept main at
 `6f7a6c9caf7f68554445df008593d71baf95cfbe`; `git ls-tree` still found neither
 `server/mobile.rs` nor `server/ticket.rs`.
 
-Implementation and remote acceptance depend on LOO-718's merged transport.
-Landing that PR is outside this Task's scope. No product decision is missing.
-Keep this checkout and planned contract for continuation after LOO-718 lands.
+Graph decision finding: stop until LOO-718's PR #1812 merges. Implementation
+and remote acceptance depend on its transport; landing it is outside this
+Task's scope. No product decision is missing. Keep this checkout and planned
+contract, then inspect the landed transport before changing its shared store.
 
 Earlier observations, stalled Task status reads and revision comparisons are
 recorded in `cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
-The repeated dependency history is condensed here; the remaining work follows.
 
 ## Delete — do not maintain
 
@@ -70,6 +68,10 @@ and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
+
+Compression keeps the dependency decision in one place and removes the repeated
+bridge-lifetime explanation from the contract; the owner lifecycle below it
+already describes closure.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

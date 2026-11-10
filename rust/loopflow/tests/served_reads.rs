@@ -557,7 +557,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 }
 
 #[test]
-fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
+fn observed_git_changes_reach_subscriptions_and_requests_on_the_same_connection() {
     use loopflow::lf::commands::read::Read;
     use loopflow::server::wire::Operation;
 
@@ -593,12 +593,30 @@ fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
     assert!(before["files"].as_array().unwrap().is_empty(), "{before}");
     repo.create_file("edit.txt", "after\n");
     repo.create_file("new.txt", "new\n");
+    // External edits wake the dependent view without a store commit. One-shot
+    // requests then read the same observation, rather than bypassing it.
+    let changed = connection.reading(&id).unwrap().unwrap();
+    assert_eq!(
+        changed["body"]["row"]["condition"]["local_progress"]["dirty"], true,
+        "{changed}"
+    );
     let detail = connection.request(Operation::Read(pane())).unwrap().result;
     assert_eq!(
         detail["row"]["condition"]["local_progress"]["dirty"], true,
         "{detail}"
     );
-    let after = connection.request(changes()).unwrap().result;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let after = loop {
+        let after = connection.request(changes()).unwrap().result;
+        if after["files"].as_array().unwrap().len() == 2 {
+            break after;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Git changes were not observed: {after}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     let files = after["files"].as_array().unwrap();
     assert!(
         files

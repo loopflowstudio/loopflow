@@ -128,7 +128,8 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
                 machine_id: home.clone(),
                 worktree: resolver.root(cwd).unwrap_or_else(|| cwd.to_path_buf()),
                 task_id: None,
-                unavailable: (!cwd.exists()).then(|| "Persistent checkout is unavailable".into()),
+                unavailable: (!crate::observe::exists(&cwd))
+                    .then(|| "Persistent checkout is unavailable".into()),
             });
             session.task_ids.clear();
             continue;

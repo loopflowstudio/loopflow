@@ -451,12 +451,29 @@ pub(super) fn primary_session_in(
     }
 }
 
+fn observe_availability(conn: &Connection, mut now: i64) -> StoreResult<i64> {
+    while crate::observe::active() {
+        // Availability changes once at the next quiet deadline, not on every tick.
+        let next: Option<i64> = conn.query_row(
+            "SELECT MIN(observed_at + ?1) FROM session_activity WHERE observed_at + ?1 > ?2",
+            rusqlite::params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            |row| row.get(0),
+        )?;
+        match next {
+            Some(next) if crate::observe::deadline(next) => now = next,
+            _ => break,
+        }
+    }
+    Ok(now)
+}
+
 pub(super) fn session_summaries_in(
     conn: &Connection,
     filter: &crate::session::SessionFilter,
     now: i64,
     live_agents: &str,
 ) -> StoreResult<Vec<crate::session::SessionSummary>> {
+    let now = observe_availability(conn, now)?;
     let mut labels = std::collections::HashMap::new();
     let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
     let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
@@ -886,47 +903,6 @@ impl SqliteStore {
         Ok(serde_json::to_string(&live)?)
     }
 
-    /// What Session summaries read at `now` besides committed rows: each
-    /// unfinished AgentProcess's OS evidence, how many activity rows are quiet
-    /// enough to make a Session available, and which persistent checkouts
-    /// exist. Without a commit, summaries change only when this does.
-    pub(crate) fn session_observations(&self, now: i64) -> StoreResult<Vec<u8>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // The agent-only index: ordering by id in SQL would walk every row.
-        let mut agents = conn
-            .prepare(
-                "SELECT id,pid,os_started_at,started_at FROM processes INDEXED BY agent_process_session
-                 WHERE kind='agent' AND completed_at IS NULL",
-            )?
-            .query_map([], |row| {
-                let evidence = crate::journal::agent_process_evidence(
-                    None,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    crate::journal::process_identity_evidence,
-                );
-                Ok(format!("{}:{evidence:?}\n", row.get::<_, String>(0)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        agents.sort_unstable();
-        let mut observed = agents.concat();
-        let quiet: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM session_activity WHERE observed_at<=?1",
-            [now - crate::session::AVAILABILITY_QUIET_SECONDS],
-            |row| row.get(0),
-        )?;
-        observed.push_str(&format!("quiet:{quiet}\n"));
-        let mut checkouts = conn.prepare(
-            "SELECT DISTINCT cwd FROM agent_sessions WHERE primary_scope IS NOT NULL ORDER BY cwd",
-        )?;
-        for cwd in checkouts.query_map([], |row| row.get::<_, String>(0))? {
-            let cwd = cwd?;
-            observed.push_str(&format!("{}:{cwd}\n", Path::new(&cwd).exists()));
-        }
-        Ok(observed.into_bytes())
-    }
-
     /// Each row's Available is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
@@ -948,6 +924,7 @@ impl SqliteStore {
         let id = canonical.as_str();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
+        let now = observe_availability(&conn, now)?;
         let mut labels = std::collections::HashMap::new();
         conn.query_row(
             &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),

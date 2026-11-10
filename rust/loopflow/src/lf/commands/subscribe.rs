@@ -2,14 +2,9 @@
 //! streams. Each frame is one NDJSON line whose `body` is what `--json` prints,
 //! sent first and then each time that result changes.
 //!
-//! The store's change revisions say when a commit can have changed the result.
-//! A reading runs only then, or on the read's clock for facts outside the store
-//! (Process liveness, Git), on a read-only connection with one pinned snapshot.
-//! A read whose outside facts can be observed cheaply probes them on its clock
-//! and reads only when they moved. An unchanged result sends nothing. A slow
-//! reading rests `BUSY_SHARE` times its duration before a change is read again.
-//! Configuration inputs are captured during each reading and checked on the
-//! short observation clock, independently of Git and planning refreshes.
+//! Store revisions and the external facts captured by a reading determine when
+//! it runs again. Observations are shared in memory; selected answers are sent
+//! only when they change. Database joins use one pinned read snapshot.
 //!
 //! Each stdin line is a request, `{"id": 1, "args": {...}}`. `args` replaces
 //! the read's arguments; without it the request confirms the current result.
@@ -23,8 +18,6 @@
 //! command would print. A subscription's arguments are fixed; it takes only
 //! checkpoints.
 
-mod checkouts;
-
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -37,9 +30,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::observation;
+use crate::observe::{Cache, Dependencies};
 use crate::store::changes::StoreChanges;
-use crate::store::sqlite::{SqliteStore, StoreRevisions};
+use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
 
 /// A burst is read once it has been quiet this long…
@@ -54,10 +47,6 @@ const RETRY_CAP: Duration = Duration::from_secs(60);
 /// took `d`, a change is read once `BUSY_SHARE × d` has passed since it began.
 /// Requests read at once.
 const BUSY_SHARE: u32 = 5;
-/// Git and filesystem facts are not store commits; this bounds how stale they get.
-pub(crate) const PLANNING_CLOCK: Duration = Duration::from_secs(300);
-/// Process liveness is observed, never committed.
-pub(crate) const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
 const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 
@@ -102,49 +91,6 @@ struct Request<A> {
     args: Option<A>,
 }
 
-/// What a subscribed read depends on beyond the store: every displayed revision
-/// domain except token totals can change its result.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Wake {
-    /// Facts outside the store are read again this often.
-    pub clock: Duration,
-    /// The result shows Git facts of Task checkouts: read again when one
-    /// changes on disk and Git's answer about it differs.
-    pub checkouts: bool,
-    /// The facts outside the store the result reads, observed far more
-    /// cheaply than the reading. Without one, every clock tick reads.
-    pub probe: Option<Probe>,
-}
-
-/// Observe the facts a read takes from outside the store at this moment.
-pub(crate) type Probe = fn(&SqliteStore) -> Result<Vec<u8>>;
-
-impl Wake {
-    pub(crate) fn every(clock: Duration) -> Self {
-        Self {
-            clock,
-            checkouts: false,
-            probe: None,
-        }
-    }
-
-    /// Read on the clock only when `probe`'s answer differs from the one
-    /// observed before the last reading.
-    pub(crate) fn probing(self, probe: Probe) -> Self {
-        Self {
-            probe: Some(probe),
-            ..self
-        }
-    }
-
-    pub(crate) fn following_checkouts(clock: Duration) -> Self {
-        Self {
-            checkouts: true,
-            ..Self::every(clock)
-        }
-    }
-}
-
 /// The store a read needs, or why the subscription has none to read.
 pub(crate) fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
     store.ok_or_else(|| anyhow::anyhow!("no Loopflow store exists on this Machine"))
@@ -167,7 +113,7 @@ struct Mailbox<A> {
 }
 
 impl<A> Mailbox<A> {
-    /// Whether the subscription should step before its clock says.
+    /// Whether the subscription should step before its next scheduled check.
     fn asked(&self) -> bool {
         self.look || !self.requests.is_empty() || self.error.is_some()
     }
@@ -182,7 +128,7 @@ fn lock<A>(shared: &Shared<A>) -> MutexGuard<'_, Mailbox<A>> {
 /// Print `read(store, args)` as frames, keeping the invocation's `--select`,
 /// until stdin closes or the parent exits.
 /// `store` is `None` until a Loopflow store exists on this Machine.
-pub(crate) fn run<A, T, F, Fut>(args: A, wakes: Wake, read: F) -> Result<()>
+pub(crate) fn run<A, T, F, Fut>(args: A, read: F) -> Result<()>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
@@ -195,7 +141,7 @@ where
     let shared = mailbox();
     let input = shared.clone();
     std::thread::spawn(move || read_requests(&input));
-    let mut reader = Reader::new(shared.clone(), parent, args, wakes, read, selected())?;
+    let mut reader = Reader::new(shared.clone(), parent, args, read, selected())?;
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
@@ -243,7 +189,6 @@ impl std::fmt::Debug for Transport {
 /// subscription returns its handle at once.
 pub(crate) fn start<A, T, F, Fut>(
     args: A,
-    wakes: Wake,
     read: F,
     transport: Transport,
 ) -> Result<Option<Subscription>>
@@ -254,8 +199,8 @@ where
     Fut: std::future::Future<Output = Result<T>>,
 {
     match transport {
-        Transport::Stdio => run(args, wakes, read).map(|()| None),
-        Transport::Pull { wake, select } => start_pull(args, wakes, read, wake, select).map(Some),
+        Transport::Stdio => run(args, read).map(|()| None),
+        Transport::Pull { wake, select } => start_pull(args, read, wake, select).map(Some),
     }
 }
 
@@ -338,7 +283,6 @@ impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
 /// process only waits for the next reason to read and calls `wake`.
 fn start_pull<A, T, F, Fut>(
     args: A,
-    wakes: Wake,
     read: F,
     wake: Box<dyn Fn() + Send + Sync>,
     select: Option<Vec<String>>,
@@ -351,7 +295,7 @@ where
 {
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
-    let mut reader = Reader::new(shared.clone(), None, args, wakes, read, select)?;
+    let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
     std::thread::spawn(move || {
@@ -458,15 +402,11 @@ struct Step {
 struct Reader<A, F> {
     shared: Shared<A>,
     database: PathBuf,
-    wakes: Wake,
     read: F,
     args: A,
     runtime: tokio::runtime::Runtime,
-    checkouts: checkouts::Checkouts,
-    configuration: observation::Files,
-    configuration_checked: Option<Instant>,
-    followed_at: Option<i64>,
-    stale: bool,
+    observations: Arc<Cache>,
+    dependencies: Dependencies,
     store: Option<SharedStore>,
     // Why the store that exists cannot be opened; a refused store is not an empty one.
     refused: Option<String>,
@@ -474,10 +414,6 @@ struct Reader<A, F> {
     force: bool,
     read_at: Option<StoreRevisions>,
     read_on: Option<Instant>,
-    /// When the clock last read or probed the facts outside the store.
-    clocked_on: Option<Instant>,
-    /// What the probe observed just before the last reading.
-    probed: Option<Vec<u8>>,
     cost: Duration,
     failures: u32,
     sent: Option<[u8; 32]>,
@@ -498,7 +434,6 @@ where
         shared: Shared<A>,
         parent: Option<u32>,
         args: A,
-        wakes: Wake,
         read: F,
         select: Option<Vec<String>>,
     ) -> Result<Self> {
@@ -508,24 +443,18 @@ where
         Ok(Self {
             shared,
             database,
-            wakes,
             read,
             args,
             select,
             runtime: tokio::runtime::Runtime::new()?,
-            checkouts: checkouts::Checkouts::default(),
-            configuration: observation::Files::default(),
-            configuration_checked: None,
-            followed_at: None,
-            stale: false,
+            observations: Cache::shared(),
+            dependencies: Dependencies::default(),
             store: None,
             refused: None,
             answers: None,
             force: true,
             read_at: None,
             read_on: None,
-            clocked_on: None,
-            probed: None,
             cost: Duration::ZERO,
             failures: 0,
             sent: None,
@@ -568,27 +497,8 @@ where
             .store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok());
-        if self.wakes.checkouts {
-            if let (Some(store), Some(revisions)) = (&self.store, revisions) {
-                if self.followed_at != Some(revisions.planning) {
-                    follow_checkouts(&mut self.checkouts, store, &self.shared);
-                    self.followed_at = Some(revisions.planning);
-                }
-            }
-            let changed = self.checkouts.take(Instant::now());
-            // Every one is asked again, not only up to the first that differs.
-            for worktree in &changed {
-                self.stale |= crate::git::reread_retained(worktree);
-            }
-        }
         let now = Instant::now();
-        if self
-            .configuration_checked
-            .is_none_or(|at| now - at >= CHECK)
-        {
-            self.stale |= self.configuration.changed();
-            self.configuration_checked = Some(now);
-        }
+        let observed_changes = self.dependencies.changed();
         let due = self.force
             || match self.read_on {
                 None => true,
@@ -600,12 +510,13 @@ where
                     };
                     retry_due(self.failures, read_on, now)
                         || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
-                            && (changed || self.stale || self.clock_moved(now)))
+                            && (changed || observed_changes))
                 }
             };
         let mut frame = None;
         if due {
-            if !self.force && (self.stale || (self.read_at.is_some() && self.read_at != revisions))
+            if !self.force
+                && (observed_changes || (self.read_at.is_some() && self.read_at != revisions))
             {
                 settle(&self.shared);
             }
@@ -621,20 +532,13 @@ where
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
             let began = Instant::now();
-            let ((probed, reading), configuration) = observation::Files::capture(|| {
-                let probed = self.probe();
-                let reading = match &self.refused {
-                    Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
-                    None => crate::git::retain_reads(self.wakes.checkouts, || {
-                        self.runtime
-                            .block_on((self.read)(self.store.clone(), self.args.clone()))
-                    }),
-                };
-                (probed, reading)
+            let (reading, dependencies) = self.observations.capture(|| match &self.refused {
+                Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
+                None => self
+                    .runtime
+                    .block_on((self.read)(self.store.clone(), self.args.clone())),
             });
-            self.probed = probed;
-            self.configuration = configuration;
-            self.configuration_checked = Some(began);
+            self.dependencies = dependencies;
             let (unavailable, body) = match reading.and_then(|body| {
                 let body = serde_json::to_value(body)?;
                 Ok(match &self.select {
@@ -663,51 +567,20 @@ where
             self.sent = Some(identity);
             self.read_at = revisions;
             self.read_on = Some(began);
-            self.clocked_on = Some(began);
             self.force = false;
-            self.stale = false;
         }
         let read_on = self.read_on.expect("a subscription reads before it waits");
         let rest_end = read_on + self.cost.saturating_mul(BUSY_SHARE);
         let wake = if rest_end > now {
             rest_end
         } else {
-            self.clocked_on.expect("a reading sets the clock") + self.wakes.clock
+            now + CHECK
         };
         Ok(Step {
             frame,
             closing,
             wake,
         })
-    }
-}
-
-impl<A, F> Reader<A, F> {
-    /// Whether the clock says facts outside the store may have moved: its
-    /// period has passed and, for a probed read, the probe's answer differs.
-    fn clock_moved(&mut self, now: Instant) -> bool {
-        let clocked_on = self.clocked_on.expect("a reading sets the clock");
-        if now - clocked_on < self.wakes.clock {
-            return false;
-        }
-        self.clocked_on = Some(now);
-        match self.probe() {
-            Some(observed) => self.probed.as_ref() != Some(&observed),
-            None => true,
-        }
-    }
-
-    /// The probe's answer now; `None` without a probe, a store or an answer.
-    fn probe(&self) -> Option<Vec<u8>> {
-        let probe = self.wakes.probe?;
-        let store = self.store.as_ref()?;
-        match probe(&store.sqlite) {
-            Ok(observed) => Some(observed),
-            Err(error) => {
-                tracing::debug!(%error, "subscription probe unavailable");
-                None
-            }
-        }
     }
 }
 
@@ -861,29 +734,6 @@ fn parent_process() -> Option<u32> {
     None
 }
 
-/// Follow the checkouts of the Tasks registered now and the repositories
-/// they belong to; a change wakes the subscription.
-fn follow_checkouts<A>(
-    checkouts: &mut checkouts::Checkouts,
-    store: &SharedStore,
-    shared: &Shared<A>,
-) where
-    A: Send + 'static,
-{
-    let Ok(rows) = store.sqlite.task_checkouts() else {
-        return;
-    };
-    let mut paths: Vec<_> = rows.into_iter().map(|row| row.worktree).collect();
-    if let Ok(repositories) = store.sqlite.repository_paths() {
-        paths.extend(repositories);
-    }
-    let wake = shared.clone();
-    checkouts.subscribe(paths, move || {
-        lock(&wake).look = true;
-        wake.1.notify_all();
-    });
-}
-
 /// Let a burst of related commits land before reading any of it.
 fn settle<A>(shared: &Shared<A>) {
     let first = Instant::now();
@@ -906,7 +756,7 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::time::{Duration, Instant};
 
-    use super::{changed, identity, retry_due, start_pull, Subscription, Wake, PLANNING_CLOCK};
+    use super::{changed, identity, retry_due, start_pull, Subscription};
     use crate::store::sqlite::StoreRevisions;
 
     fn next_frame(subscription: &Subscription, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
@@ -922,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn subscription_git_retention_does_not_escape_readings_or_reset_for_new_subscriptions() {
+    fn git_changes_reach_shared_subscriptions_without_registered_checkouts() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -933,7 +783,6 @@ mod tests {
             let directory = repo.path().to_owned();
             let subscription = start_pull(
                 (),
-                Wake::following_checkouts(PLANNING_CLOCK),
                 move |_, ()| {
                     let directory = directory.clone();
                     async move {
@@ -958,10 +807,14 @@ mod tests {
             crate::git::git_stdout(repo.path(), &["status", "--porcelain"]).unwrap()
         });
         assert!(seen.contains("new.txt"), "{seen:?}");
-        // No store registers this checkout, so filesystem observation cannot
-        // refresh the answer before the second subscription reads it.
-        let (second, wakes) = subscribe();
-        assert_eq!(next_frame(&second, &wakes)["body"], "");
+        let (second, second_wakes) = subscribe();
+        let initial = next_frame(&second, &second_wakes);
+        let changed = next_frame(&first, &wakes);
+        assert!(changed["body"].as_str().unwrap().contains("new.txt"));
+        if initial["body"] != changed["body"] {
+            assert_eq!(next_frame(&second, &second_wakes)["body"], changed["body"]);
+        }
+        assert!(!home.path().join("loopflow.db").exists());
     }
 
     #[test]
@@ -990,7 +843,6 @@ mod tests {
         let directory = checkout.clone();
         let subscription = start_pull(
             (),
-            Wake::every(PLANNING_CLOCK),
             move |_, ()| {
                 counted.fetch_add(1, Ordering::Relaxed);
                 let directory = directory.clone();
@@ -998,7 +850,7 @@ mod tests {
                     // Task summaries resolve configuration in bounded workers.
                     std::thread::scope(|scope| {
                         scope
-                            .spawn(crate::config::observation::inherit(|| {
+                            .spawn(crate::observe::inherit(|| {
                                 Ok(crate::config::load_wave_config(
                                     Some(&directory),
                                     Some("product"),
@@ -1108,7 +960,6 @@ mod tests {
         let personal = home.path().to_owned();
         let subscription = start_pull(
             (),
-            Wake::every(PLANNING_CLOCK),
             move |_, ()| {
                 let (directory, personal) = (directory.clone(), personal.clone());
                 async move {

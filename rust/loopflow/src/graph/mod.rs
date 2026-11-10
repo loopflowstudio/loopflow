@@ -464,7 +464,7 @@ impl<'a> DefinitionLoader<'a> {
         {
             Some((key, path)) => (
                 key,
-                crate::config::observation::read_to_string(&path)?,
+                crate::observe::read_to_string(&path)?,
                 crate::config::settings::definition_source(Some(&path)),
                 Some(path),
             ),
@@ -725,23 +725,18 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
 
 pub(crate) fn graph_sources_in(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
-    crate::config::observation::directory(&root);
     let mut sources = BTreeMap::<String, PathBuf>::new();
-    if !root.exists() {
+    if !crate::observe::exists(&root) {
         return Ok(sources);
     }
-    for entry in ignore::WalkBuilder::new(&root)
-        .standard_filters(false)
-        .follow_links(false)
-        .sort_by_file_path(|a, b| a.cmp(b))
-        .build()
-    {
-        let entry = entry.map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
-        let path = entry.path();
-        if path.is_dir() {
-            crate::config::observation::directory(path);
+    let mut pending: Vec<_> = crate::observe::read_dir(&root)?.into_iter().rev().collect();
+    while let Some(path) = pending.pop() {
+        let path = path.as_path();
+        if crate::observe::is_dir(path) && !crate::observe::is_symlink(path) {
+            pending.extend(crate::observe::read_dir(path)?.into_iter().rev());
+            continue;
         }
-        if !path.is_file()
+        if !crate::observe::is_file(path)
             || !path
                 .extension()
                 .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")

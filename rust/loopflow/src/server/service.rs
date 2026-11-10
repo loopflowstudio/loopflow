@@ -140,6 +140,7 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
+    let _observations = crate::observe::Cache::shared();
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -737,12 +738,14 @@ async fn operate(
     trace_id: &crate::id::TraceId,
 ) -> Result<serde_json::Value, Error> {
     match operation {
-        Operation::Read(query) => {
-            tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
-                .await
-                .map_err(unavailable)?
-                .map_err(unavailable)
-        }
+        Operation::Read(query) => tokio::task::spawn_blocking(move || {
+            crate::journal::request::isolate(|| {
+                crate::observe::Cache::shared().capture(|| query.read()).0
+            })
+        })
+        .await
+        .map_err(unavailable)?
+        .map_err(unavailable),
         Operation::Write(change) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {

@@ -19,7 +19,6 @@ mod definitions;
 pub mod files;
 pub mod keys;
 pub mod migrate;
-pub(crate) mod observation;
 pub(crate) mod placement;
 pub mod remote;
 pub mod settings;
@@ -549,7 +548,7 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
 
 /// Load YAML file, returning None if not present or empty.
 fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
-    let content = match observation::read_to_string(path) {
+    let content = match crate::observe::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),

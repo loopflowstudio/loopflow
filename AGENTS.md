@@ -226,6 +226,9 @@ Wire types (anything `lf --json` emits and Rust and Swift mirror) get no
 defaults. Every field is required or explicitly optional: no
 `#[serde(default)]`, no `Default` derive, no Swift init defaults, no `?? value`
 fallbacks. Defaults at different layers drift into silent disagreement.
+For a required nullable key, Rust uses `#[serde(deserialize_with = "Option::deserialize")]`
+and Swift uses `decode(Type?.self, forKey:)`; implicit optional decoding accepts
+an absent key and cannot distinguish a complete DTO from selected JSON.
 Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
 field goes into the fixture and each language's fixture test. UI state types
 that carry DTO values are not DTOs.

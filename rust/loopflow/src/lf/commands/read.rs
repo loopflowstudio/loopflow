@@ -99,6 +99,23 @@ pub enum Read {
         after: Option<String>,
         limit: Option<u32>,
     },
+    /// `lf plan board`: compact Task rows for a board.
+    #[serde(rename = "plan.board")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::PlanBoard>()))]
+    PlanBoard {
+        directory: PathBuf,
+        wave: Option<String>,
+        task: Option<String>,
+        all: bool,
+    },
+    /// `lf task detail <issue>`: one Task and its supporting detail.
+    #[serde(rename = "task.detail")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::TaskDetail>()))]
+    TaskDetail { directory: PathBuf, issue: String },
+    /// `lf session card <id>`: a passive reading of one recorded Session.
+    #[serde(rename = "session.card")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::SessionCard>()))]
+    SessionCard { id: String },
     /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
@@ -372,6 +389,25 @@ impl Read {
                 }
                 argv
             }
+            Self::TaskDetail { directory, issue } => {
+                at(directory, &["task", "detail", issue, "--json"])
+            }
+            Self::SessionCard { id } => words(&["session", "card", id, "--json"]),
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => {
+                let mut argv = at(directory, &["plan", "board"]);
+                argv.extend(wave.clone());
+                argv.extend(optional("--task", task.as_ref()));
+                if *all {
+                    argv.push("--all".into());
+                }
+                argv.push("--json".into());
+                argv
+            }
             Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
             Self::TaskChanges { issue, base, head } => {
                 let mut argv = words(&["task", "changes", issue, "--base", base, "--json"]);
@@ -599,6 +635,21 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => value(&super::screens::board(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+            )?),
+            Self::TaskDetail { directory, issue } => {
+                value(&super::screens::task_detail(directory, issue)?)
+            }
+            Self::SessionCard { id } => value(&super::screens::session_card(id)?),
             Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
@@ -743,7 +794,13 @@ impl Read {
                 wave,
                 task,
                 all,
-            } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
+            } => value(&super::waves::show_snapshot(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+                false,
+            )?),
             Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
             Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.

@@ -615,6 +615,214 @@ fn subscription_git_retention_keeps_task_reads_fresh_on_the_same_connection() {
 }
 
 #[test]
+fn screen_reads_are_compact_passive_and_match_cli() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::server::wire::Operation;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: claude\n");
+    let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    store
+        .create_task(&loopflow::work::task::NewTask {
+            id: loopflow::durable::TaskId::new(),
+            repository_id: registered.task.repository_id.clone(),
+            project_id: None,
+            title: "Outside the Wave".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let session = store
+        .create_session(
+            loopflow::session::LfSession {
+                captured: None,
+                id: "session_11111111111141118111111111111111".into(),
+                artifact_key: None,
+                caller_artifact_key: None,
+                input_published: false,
+                cwd: repo.path().into(),
+                skill: None,
+                provider: None,
+                model: None,
+                node: None,
+                iterations: None,
+                task_id: None,
+                wave_id: None,
+                graph_lf_process_id: None,
+                work_source: None,
+                bound_at: None,
+                interactive: true,
+                repo: Some(repo.path().display().to_string()),
+                title: "Recorded conversation".into(),
+                title_source: loopflow::session::TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            None,
+        )
+        .unwrap();
+    let _server = Server::start(repo.path(), home.path());
+    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let directory = repo.path().to_owned();
+    let board = Read::PlanBoard {
+        directory: directory.clone(),
+        wave: None,
+        task: Some("INF-123".into()),
+        all: false,
+    };
+    let detail = Read::TaskDetail {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    };
+    let card = Read::SessionCard {
+        id: session.id.to_string(),
+    };
+    let database = home.path().join("loopflow.db");
+    let before = changes(&database);
+    for operation in [&board, &detail, &card] {
+        let served = connection
+            .request(Operation::Read(operation.clone()))
+            .unwrap()
+            .result;
+        let argv = operation.argv();
+        let printed: Value = serde_json::from_str(&read(
+            repo.path(),
+            home.path(),
+            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+            None,
+        ))
+        .unwrap();
+        let kind = serde_json::to_value(operation).unwrap()["kind"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_declared_result(&kind, &served);
+        assert_eq!(without_clock(served), without_clock(printed));
+    }
+    let compact = board.read().unwrap();
+    let full = Read::PlanList {
+        directory: directory.clone(),
+        wave: None,
+        task: Some("INF-123".into()),
+        all: false,
+    }
+    .read()
+    .unwrap();
+    assert_eq!(
+        compact["tasks"]["items"][0]["identifier"], "INF-123",
+        "{compact}"
+    );
+    assert_eq!(
+        compact["tasks"]["items"][0]["section"],
+        full["tasks"]["items"][0]["section"]
+    );
+    assert!(
+        serde_json::to_vec(&compact).unwrap().len() < serde_json::to_vec(&full).unwrap().len() / 2
+    );
+    let whole_board = Read::PlanBoard {
+        directory: directory.clone(),
+        wave: None,
+        task: None,
+        all: false,
+    }
+    .read()
+    .unwrap();
+    assert_eq!(whole_board["tasks"]["items"].as_array().unwrap().len(), 2);
+    let wave_board = Read::PlanBoard {
+        directory: directory.clone(),
+        wave: Some("task-pr-tests".into()),
+        task: None,
+        all: false,
+    }
+    .read()
+    .unwrap();
+    assert_eq!(wave_board["tasks"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(wave_board["tasks"]["items"][0]["identifier"], "INF-123");
+    let detail = detail.read().unwrap();
+    assert_eq!(detail["task"]["identifier"], "INF-123");
+    let addressed = Read::TaskDetail {
+        directory: "/".into(),
+        issue: registered.task.id.to_string(),
+    }
+    .read()
+    .unwrap();
+    assert_eq!(addressed["task"]["id"], registered.task.id.as_str());
+    assert!(detail["pr"].is_object());
+    assert!(detail["checks"].is_null());
+    assert!(detail["current_session"].is_null());
+    let card = card.read().unwrap();
+    assert_eq!(card["liveness"], "unknown");
+    assert!(card["last_line"].is_null());
+    assert!(card["control_holder"].is_null());
+    for missing in [
+        Read::TaskDetail {
+            directory,
+            issue: "missing".into(),
+        },
+        Read::SessionCard {
+            id: "session_00000000000040008000000000000000".into(),
+        },
+    ] {
+        let error = missing.read().unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<loopflow::engine::Error>()
+                .unwrap()
+                .code,
+            loopflow::engine::ErrorCode::NotFound
+        );
+    }
+    assert_eq!(
+        changes(&database),
+        before,
+        "screen reads changed Work or started a Process"
+    );
+
+    // The detail names the recorded primary and observed PR checks.
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    store
+        .bind_session(session.id.as_str(), session.captured, &registered.task.id)
+        .unwrap();
+    conn.execute(
+        "UPDATE tasks SET primary_session_id=?1 WHERE id=?2",
+        rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
+    )
+    .unwrap();
+    registered.pr.ci_observation = Some(loopflow::work::task::CiObservation {
+        head_sha: "head-with-failure".into(),
+        state: loopflow::work::task::CiState::Failing,
+        failing_checks: vec![loopflow::work::task::CiCheck {
+            name: "rust-test".into(),
+            url: None,
+        }],
+        observed_at: time::OffsetDateTime::UNIX_EPOCH,
+    });
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registered.store.update_task_pr(&registered.pr))
+        .unwrap();
+    let populated = Read::TaskDetail {
+        directory: repo.path().into(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert_eq!(populated["current_session"]["id"], session.id.as_str());
+    assert_eq!(populated["checks"]["head_sha"], "head-with-failure");
+    assert_eq!(
+        populated["checks"]["failing_checks"][0]["name"],
+        "rust-test"
+    );
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
@@ -737,6 +945,9 @@ fn server_operations_match_their_lf_commands() {
         | Read::DesktopViewList { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
+        | Read::TaskDetail { .. }
+        | Read::PlanBoard { .. }
+        | Read::SessionCard { .. }
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
@@ -779,6 +990,19 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(true),
                 task_pane(),
+                Read::TaskDetail {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
+                Read::PlanBoard {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    task: None,
+                    all: false,
+                },
+                Read::SessionCard {
+                    id: session["id"].as_str().unwrap().into(),
+                },
                 Read::TaskChanges {
                     head: None,
                     issue: "INF-123".into(),

@@ -101,6 +101,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | API kind | CLI | Engine |
 | --- | --- | --- |
 | `task.get` | `lf task show <issue>` | read |
+| `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
@@ -117,6 +118,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
+| `session.card` | `lf session card <id>` | read |
 | `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -129,6 +131,7 @@ Old spellings live in `lf/aliases.rs` for one release.
 | `wave.sync` | `lf wave sync <wave>` | write |
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
+| `plan.board` | `lf plan board` | read |
 | `repo.plan` | `lf repo plan` | read |
 | `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
 | `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
@@ -158,6 +161,12 @@ Old spellings live in `lf/aliases.rs` for one release.
 
 "CLI handler; not served" is an operation only the CLI dispatcher runs today;
 its kind fixes the name a served version keeps.
+
+For a board, Task detail or Session card, use the
+[screen reads](../../rust/loopflow/src/server/README.md#read-a-screens-data).
+Each returns its own complete DTO in both the CLI and API. Swift clients send
+`select: null`; field selection is for clients that consume arbitrary JSON.
+Desktop's outline keeps `plan.list` for its runtime data.
 
 ## Installation owns registration
 

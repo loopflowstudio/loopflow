@@ -1017,6 +1017,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Detail { issue, .. } => {
+            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
+                directory: repo.to_owned(),
+                issue: issue.clone(),
+            })
+        }
         TaskCommand::Show {
             issue, subscribe, ..
         } => loopflow::lf::commands::desktop::task_pane(issue, *subscribe),
@@ -2465,14 +2471,14 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 | WaveCommand::List { .. }
                 | WaveCommand::Show { .. }
                 | WaveCommand::Plan { cmd: None, .. }
-        }) | Some(Commands::Plan { .. })
-            | Some(Commands::Session {
-                cmd: loopflow::lf::SessionCommand::History {
-                    cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-                    ..
-                },
-            })
-            | Some(Commands::Process { .. })
+        }) | Some(Commands::Plan {
+            cmd: loopflow::lf::PlanCommand::List { .. }
+        }) | Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::History {
+                cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
+                ..
+            },
+        }) | Some(Commands::Process { .. })
     ) {
         loopflow::ops::recovery::recover();
     }
@@ -2972,6 +2978,19 @@ fn execute_command(
         }) => loopflow::lf::commands::waves::status(wave.as_deref(), true, false),
         Some(Commands::Plan {
             cmd:
+                loopflow::lf::PlanCommand::Board {
+                    wave, task, all, ..
+                },
+        }) => {
+            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::PlanBoard {
+                directory: std::env::current_dir()?,
+                wave: wave.clone(),
+                task: task.clone(),
+                all: *all,
+            })
+        }
+        Some(Commands::Plan {
+            cmd:
                 loopflow::lf::PlanCommand::List {
                     wave,
                     task,
@@ -3058,6 +3077,7 @@ fn execute_command(
                 cmd @ (TaskCommand::Diff { .. }
                 | TaskCommand::Changes { .. }
                 | TaskCommand::Show { .. }
+                | TaskCommand::Detail { .. }
                 | TaskCommand::Context { .. }
                 | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }

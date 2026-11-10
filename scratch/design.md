@@ -27,9 +27,11 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 06:23 UTC, GitHub reports PR #1812 open and unmerged at the same
-head. Freshly fetched main is
+At November 10 07:01 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
+`lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
+with PR #1812 open and settlement not armed.
 Implementation and remote acceptance remain blocked on LOO-718 landing.
 Landing that separate PR is outside this Task's scope. No product decision is
 missing.
@@ -69,9 +71,9 @@ satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
 
-Compression keeps the wire examples and separates authentication from ticket
-lifetime and redemption. The UID-only store remains a deletion target, not a
-refactoring target before the transport lands.
+Compression keeps the client-slot rule beside the bridge exchange and shortens
+the remote identity rule. The UID-only store remains a deletion target, pending
+the transport; no predecessor refactor is needed.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

@@ -366,6 +366,7 @@ part of what a phone or bot client is offered.
   to the requesting client's Unix peer UID. Presenting a ticket consumes it
   even when the UID does not match. An unknown, spent, expired or foreign ticket
   is `not_found` with a null `id` and closes the connection.
+  Bridges do not occupy the 64 client slots.
   The owner is the LfProcess holding the Session's terminal (`lf session
   serve`), never the provider's AgentProcess beneath it. The server resolves the
   Session's current owner when it issues the ticket; resolution never starts a
@@ -604,11 +605,10 @@ endpoint and send `attach` first, without `hello`:
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
-Both connections must authenticate with the same Tailscale node stable ID and
-user ID; another device on the same account does not match. Tickets and
-client-supplied identity (`hello` name, `client_id`, login text) cannot replace
-authentication, nor can a proxy's Unix UID. Local and remote tickets are not
-interchangeable.
+Both connections must authenticate as the same Tailscale node stable ID and
+user ID; another device on the same account does not match. Neither the ticket,
+client-supplied identity nor a proxy's Unix UID substitutes for authentication.
+Local and remote tickets are not interchangeable.
 
 Each ticket opens one bridge within 60 seconds of issue, including host sleep;
 expiry does not close an open bridge. Every terminal redemption attempt consumes

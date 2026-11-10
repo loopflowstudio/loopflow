@@ -230,8 +230,8 @@ lf set machine.tasks '<machine-id>'
 ```
 
 Work initiated on your laptop uses the laptop's personal preferences on the remote.
-A phone connecting through the laptop uses those preferences too. Work initiated
-directly on the remote uses its saved preferences. The executor supplies its own
+Work initiated directly on the remote uses its saved preferences. Remote phone
+access is planned separately; it is not available through the local socket. The executor supplies its own
 tools and credentials. See [Remote work](#remote-work) for retaining preferences
 there for later use.
 
@@ -363,8 +363,7 @@ and Graph topology still come from the selected or captured definitions.
 | Start work from | Personal preferences used |
 | --- | --- |
 | Laptop, targeting a remote machine | Laptop's |
-| Phone through the laptop's LF server | Laptop's |
-| Shell or phone directly on the remote | Remote's saved preferences |
+| Shell directly on the remote | Remote's saved preferences |
 
 Forward authored declarations with their scope, target and choice/fallback
 meaning. Do not turn the effective result into command-line overrides or combine

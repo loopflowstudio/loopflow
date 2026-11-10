@@ -1322,11 +1322,13 @@ final class SessionsStore {
         guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         let previous = sessions[index]
         // The same Session continues on a new thread; its old terminal ends.
+        let requestID = UUID().uuidString
         let restarted = try await query(for: previous.record).resetSession(
-            previous.record, agent: previous.record.provider, cwd: repoPath)
+            previous.record, agent: previous.record.provider, cwd: repoPath, requestID: requestID)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = restarted
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .session(restarted.id))
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
         startTerminal(id)
@@ -1619,7 +1621,11 @@ struct SessionsContentView: View {
                     if let task = model.breadcrumb?.task?.task {
                         TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
                     }
+                    if let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
+                        ProviderTransitionRow(transition: transition)
+                    }
                     mainPane
+                    CreationRecoveryView()
                 }
             }
         }
@@ -1807,6 +1813,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
         .accessibilityIdentifier("work-workspace-\(key.id)")
+        .modifier(CreationPresentation(recovery: .shared, resource: .task(key.id), visible: active && task != nil))
         .onChange(of: task.map { $0.task.isCompleted }, initial: true) { _, completed in
             if let completed { workspaces.updateCompletion(key, completed: completed) }
         }
@@ -2143,5 +2150,18 @@ private extension WorkPaneIntent {
         case .shell: .shell
         case .browser: .browser
         }
+    }
+}
+
+struct ProviderTransitionRow: View {
+    let transition: ProviderTransition
+    var body: some View {
+        Text(transition.explanation)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
     }
 }

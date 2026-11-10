@@ -15,7 +15,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         let server = LocalServerFixture(fixture.lf)
         let location = server.location()
@@ -66,7 +66,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
         let query = fixture.lf.query
@@ -124,7 +124,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
+        let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])["task"] as! [String: Any]
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "show", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
@@ -149,7 +149,7 @@ struct WorkCLISubscriptionTests {
         originalDraft.editor.string = "retain original draft"
 
         // The reader and selected workspace are already open before either CLI mutation.
-        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
@@ -253,7 +253,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
         let query = fixture.lf.query
@@ -300,7 +300,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Mixed case", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Mixed case", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         let current = try await fixture.run(["task", "location", id, "--json"])
         let reading = try #require(try JSONDecoder().decode([TaskLocationObservation].self, from: Data(current.utf8)).first)

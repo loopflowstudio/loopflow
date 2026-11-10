@@ -80,21 +80,7 @@ impl SqliteStore {
             }
             match (boundary, selected.as_deref()) {
                 (_, Some(current)) if current == thread => {}
-                (NativeBoundary::Select { source }, previous)
-                | (NativeBoundary::Activate { source }, previous @ None) => {
-                    tx.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-                         SELECT s.id,'observed',?2,p.attached_lf_process_id,unixepoch(),json_object('type','agent_session_selected',
-                            'agent_process_id',p.id,'provider_thread',?3,'next_provider_thread',?4,'source',?5),s.current_capture
-                         FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
-                        params![
-                            adapter.session,
-                            format!("agent-session:{}:selected:{}", adapter.agent_process_id, uuid::Uuid::new_v4()),
-                            previous,
-                            thread,
-                            source
-                        ],
-                    )?;
+                (NativeBoundary::Select { .. }, _) | (NativeBoundary::Activate { .. }, None) => {
                     tx.execute(
                         "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
                         params![adapter.session, thread],
@@ -111,6 +97,11 @@ impl SqliteStore {
                     )));
                 }
             }
+            let source = match boundary {
+                NativeBoundary::Select { source } | NativeBoundary::Activate { source } => source,
+                _ => "observed",
+            };
+            super::provider_transitions::observe_in(&tx, &adapter.session, thread, source)?;
             if let Some((session, input, reference)) =
                 resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
             {

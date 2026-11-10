@@ -28,7 +28,8 @@
       "updated_at": "2026-10-28T00:00:00Z"
     },
     "graph": "code",
-    "session_id": "0123456789abcdef0123456789abcdef"
+    "session_id": "0123456789abcdef0123456789abcdef",
+    "milestone": "admitted"
   },
   {
     "task": {
@@ -59,6 +60,7 @@
       "updated_at": "2026-10-28T00:00:00Z"
     },
     "graph": null,
-    "session_id": null
+    "session_id": null,
+    "milestone": "filed"
   }
 ]

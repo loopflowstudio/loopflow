@@ -91,6 +91,24 @@ change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
 
+## A creation has no confirmed answer
+
+Desktop retains submitted Task creations and new Session threads across app
+restart. Reconnect to the original Machine and let it look up the receipt;
+changing repositories does not change the saved destination. An unavailable
+receipt lookup leaves the submission unresolved.
+
+For a CLI submission with a saved request ID:
+
+```bash
+lf server receipt REQUEST_ID --json  # read the recorded creation; starts nothing
+lf task status TASK_ID --json        # inspect any Task the receipt identifies
+```
+
+A `run_requested` receipt means launch is unconfirmed. Inspect the Task's Graphs
+and processes before starting anything; a lost answer does not establish a failed
+launch. See [creation recovery](server.md#recover-a-submitted-creation).
+
 ## A launch reports `outcome_unknown`
 
 After starting a Task from a connected client, check whether its Graph started

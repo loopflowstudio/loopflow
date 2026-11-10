@@ -923,12 +923,13 @@ fn claude_opens_a_task_checkout_already_trusted() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let script = "cp \"$CLAUDE_CONFIG_DIR/.claude.json\" \"$HOME/seen.json\"";
-    let created: serde_json::Value = serde_json::from_str(&succeed(
+    let created: serde_json::Value = serde_json::from_str::<serde_json::Value>(&succeed(
         claude_launch(home.path(), script)
             .current_dir(repo.path())
             .args(["task", "create", "--title", "Trust", "--json"]),
     ))
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let placed: serde_json::Value = serde_json::from_str(&succeed(
         claude_launch(home.path(), script)
@@ -1035,7 +1036,7 @@ fn assert_background_conversation(run_graph: bool) {
             ]),
     ))
     .unwrap();
-    let id = created["id"].as_str().unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
     let worktree = if run_graph {
         succeed(
@@ -1144,7 +1145,7 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
             .args(["task", "create", "--title", "Checkout alone", "--json"]),
     ))
     .unwrap();
-    let id = created["id"].as_str().unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
     // A Machine with no provider installed has nothing to start. A real
     // Machine always has its logs directory, where the skip is recorded.
     fs::create_dir_all(home.path().join("machine/logs")).unwrap();

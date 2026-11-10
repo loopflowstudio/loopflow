@@ -852,7 +852,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
             .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
@@ -952,7 +952,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let (home, store, detached) = resume_fixture();
         let attached = store
-            .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), false)
+            .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), false)
             .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);

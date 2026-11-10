@@ -25,6 +25,11 @@ enum ServerClient {
         String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
+    static func submittedCreation(_ payload: Data) async throws -> String {
+        let value = try JSONDecoder().decode(JSONValue.self, from: payload)
+        return String(decoding: try JSONEncoder().encode(await request(.submittedCreation(value), location: .shared)), as: UTF8.self)
+    }
+
     static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
         try JSONEncoder().encode(await request(.config(operation), location: location))
     }
@@ -223,9 +228,28 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    /// One request and its answer. Cancelling the task sends `cancel` and
-    /// releases the wait; a command already dispatched may still complete.
+    /// Admission refusals ran nothing. Give ordinary concurrent Work loading
+    /// time to drain without replaying a dispatched or disconnected command.
     func request(_ operation: ServerOperation) async throws -> JSONValue {
+        let deadline = ContinuousClock.now + ServerClient.readDeadline
+        var delay = Duration.milliseconds(100)
+        while true {
+            do { return try await requestOnce(operation) }
+            catch let error as ServerError {
+                guard ContinuousClock.now < deadline, error.code == .busy,
+                      case .object(let data) = error.data,
+                      case .integer = data["max"],
+                      case .string(let limit) = data["limit"],
+                      ["open", "writes", "retained_bytes"].contains(limit) else { throw error }
+                try await Task.sleep(for: min(delay, ContinuousClock.now.duration(to: deadline)))
+                delay = min(delay * 2, .milliseconds(1600))
+            }
+        }
+    }
+
+    /// Cancelling sends `cancel` and releases the wait; a command already
+    /// dispatched may still complete.
+    private func requestOnce(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

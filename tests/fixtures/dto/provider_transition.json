@@ -1,0 +1,10 @@
+{
+  "kind": "forked",
+  "from_provider_session": "earlier",
+  "to_provider_session": "fork",
+  "from_agent_process": "44444444-4444-4444-8444-444444444444",
+  "to_agent_process": "55555555-5555-4555-8555-555555555555",
+  "original_running": true,
+  "seed": "log",
+  "observed_at": 1794100000
+}

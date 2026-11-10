@@ -301,7 +301,9 @@ uv run pytest python/tests/test_loopflow_skill_alignment.py
 
 ## Third-party inventory
 
-After changing `Cargo.lock`, including a release version bump, run
+After changing `Cargo.lock` (including a release version bump),
+`swift/Package.swift`, `swift/Package.resolved`, or the bundled resources tracked
+by `third_party.py`, run
 `uv run python scripts/third_party.py refresh` and
 `uv run pytest python/tests/test_third_party.py`. Release preparation refreshes
 the inventory after bumping versions. Gate must check the resulting release

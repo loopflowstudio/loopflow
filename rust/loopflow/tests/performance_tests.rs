@@ -166,7 +166,9 @@ fn planning_statements_do_not_grow_with_its_tasks() {
             if index % 2 == 1 {
                 continue;
             }
-            let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            let created = serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+                ["task"]
+                .clone();
             let checkout = checkouts.path().join(created["id"].as_str().unwrap());
             std::fs::create_dir_all(&checkout).unwrap();
             rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -212,7 +214,8 @@ fn task_status_statements_do_not_grow_with_its_graphs() {
     .output()
     .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let created =
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["task"].clone();
     let id = created["id"].as_str().unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()

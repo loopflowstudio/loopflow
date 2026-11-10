@@ -25,13 +25,13 @@ use crate::config::parse_agent;
 use crate::error::CoreError;
 use crate::os_process::wait_for_exit;
 use crate::platform::kill_process;
+use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
     resolve_provider_account_exact_blocking, resolve_recorded_provider_account_blocking,
     ProviderAccountRoute,
 };
 use crate::provider_auth::Provider;
-use crate::session_record::CaptureHandle;
 use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -493,30 +493,11 @@ pub struct ProcessConfig {
     pub context_file: Option<std::path::PathBuf>,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
-    /// Durable local capture for this harness launch.
-    pub capture: Option<AgentCapture>,
+    /// Live resources for this lf invocation, retained across provider retries.
+    pub runtime: Option<LfProcessRuntime>,
     /// A Graph step goes on after a limit resets. Everything else headless
     /// (commit messages, PR text) has someone waiting on it and fails now.
     pub wait_for_capacity: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentCapture(CaptureHandle);
-
-impl From<CaptureHandle> for AgentCapture {
-    fn from(capture: CaptureHandle) -> Self {
-        Self(capture)
-    }
-}
-
-impl AgentCapture {
-    pub(crate) fn prepare_agent_process(
-        &self,
-        session: &str,
-        expected: &crate::process::SessionAttachment,
-    ) -> crate::store::StoreResult<crate::process::SessionAttachment> {
-        self.0.prepare_agent_process(session, expected)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1010,16 +991,16 @@ fn run_admitted_agent(
         }
     }
     if launch.resume_token.is_none() {
-        if let Some(capture) = &process.capture {
-            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+        if let Some(runtime) = &process.runtime {
+            launch.resume_token = runtime.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
             })?;
         }
     }
     _pin_provider_account_waiting(&mut launch, process)?;
     let (harness, model) = parse_agent(launch.agent()?);
-    let implicit_capture = if process.capture.is_none() {
-        Some(_begin_implicit_capture(&launch, process, &harness, model)?)
+    let implicit_runtime = if process.runtime.is_none() {
+        Some(_begin_process_runtime(&launch, process, &harness, model)?)
     } else {
         None
     };
@@ -1027,21 +1008,21 @@ fn run_admitted_agent(
     for name in EXECUTION_IDENTITY_ENV {
         launch.env.remove(name);
     }
-    if let Some(capture) = &implicit_capture {
-        process.capture = Some(capture.clone());
+    if let Some(runtime) = &implicit_runtime {
+        process.runtime = Some(runtime.clone());
     }
-    if let Some(capture) = &process.capture {
-        capture.0.claim_session_attachment().map_err(|error| {
+    if let Some(runtime) = &process.runtime {
+        runtime.claim_session_attachment().map_err(|error| {
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
-        launch.session_attachment = capture.0.session_attachment();
+        launch.session_attachment = runtime.session_attachment();
         if launch.resume_token.is_none() {
-            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+            launch.resume_token = runtime.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
             })?;
         }
-        launch.env.extend(capture.0.environment());
-        capture.0.mark_spawn_requested();
+        launch.env.extend(runtime.environment());
+        runtime.mark_spawn_requested();
     }
     let directory = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -1061,13 +1042,12 @@ fn run_admitted_agent(
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
         tracing::debug!(%error, "end-of-turn planning check pending");
     }
-    if let Some(capture) = implicit_capture {
+    if let Some(runtime) = implicit_runtime {
         let outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",
             Ok(_) | Err(_) => "failed",
         };
-        capture
-            .0
+        runtime
             .finish(outcome)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
@@ -1299,7 +1279,7 @@ fn _climb(
 /// import `lf session new -a` uses. None when the step has no Session or its
 /// transcript cannot be read yet; the task then starts over on the checkout.
 fn _history_import(process: &ProcessConfig) -> Option<String> {
-    let (session_id, _) = process.capture.as_ref()?.0.session_attachment()?;
+    let (session_id, _) = process.runtime.as_ref()?.session_attachment()?;
     let imported = (|| -> anyhow::Result<String> {
         let store =
             crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -1446,12 +1426,12 @@ fn _limited_model(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn _begin_implicit_capture(
+fn _begin_process_runtime(
     launch: &AgentConfig,
     process: &ProcessConfig,
     harness: &str,
     model: Option<String>,
-) -> Result<AgentCapture, CoreError> {
+) -> Result<LfProcessRuntime, CoreError> {
     let cwd = launch
         .cwd
         .clone()
@@ -1471,25 +1451,27 @@ fn _begin_implicit_capture(
         graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
-    let capture = if process.auto {
-        CaptureHandle::begin_with_request(
+    let runtime = if process.auto {
+        crate::session_record::SessionRecorder::begin_with_request(
             spec,
             crate::session_record::AgentProcessRequest::from_prepared(launch)?,
         )
+        .map(crate::process::LfProcessRuntime::new)
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
             &system_prompt_with_structured_replies(launch),
             &launch.task_prompt,
         );
-        CaptureHandle::begin_with_context(
+        crate::session_record::SessionRecorder::begin_with_context(
             spec,
             &context,
             Some(crate::session_record::AgentProcessRequest::from_prepared(
                 launch,
             )?),
         )
+        .map(crate::process::LfProcessRuntime::new)
     };
-    capture.map(Into::into).map_err(|error| {
+    runtime.map_err(|error| {
         CoreError::ExecutionFailed(format!(
             "failed to publish Session capture manifest before agent launch: {error}"
         ))
@@ -1518,7 +1500,7 @@ fn _run_harness_once(
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::harness::ApprovalPolicy;
 
-    let capture = process.capture.as_ref().map(|capture| &capture.0);
+    let runtime = process.runtime.as_ref();
     let (provider, _) = parse_agent(launch.agent()?);
     let account_route = match match provider.as_str() {
         "codex" => resolve_account_route_blocking(Provider::Codex, launch),
@@ -1534,8 +1516,8 @@ fn _run_harness_once(
     };
     _note_limit_recovery(|store, process| store.end_agent_limit_wait(process));
     if retry {
-        if let Some(capture) = capture {
-            capture
+        if let Some(runtime) = runtime {
+            runtime
                 .retry_agent_process(
                     provider.clone(),
                     model,
@@ -1549,11 +1531,11 @@ fn _run_harness_once(
     }
 
     let mut config = launch.clone();
-    if let Some(capture) = capture {
+    if let Some(runtime) = runtime {
         // A new harness gets the invocation owner's current snapshot. Existing
-        // dispatch/history operations never refresh theirs from the capture.
-        config.session_attachment = capture.session_attachment();
-        config.env.extend(capture.environment());
+        // dispatch/history operations never refresh theirs from the runtime.
+        config.session_attachment = runtime.session_attachment();
+        config.env.extend(runtime.environment());
     }
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
@@ -1561,11 +1543,11 @@ fn _run_harness_once(
         crate::ops::git_operation::prepare_agent_process(cwd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let result = runtime.block_on(async {
+    let result = executor.block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut harness = crate::harness::default_create_harness(
             &provider,
@@ -1579,14 +1561,14 @@ fn _run_harness_once(
                 .map(|route| route.account_id().clone()),
         );
         harness.set_agent_session(launch.resume_token.clone());
-        harness.set_capture(process.capture.clone());
+        harness.set_runtime(process.runtime.clone());
         harness
             .start(&config)
             .await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         let agent_session = harness.agent_session();
-        if let Some(capture) = capture {
-            capture.observe_provider(agent_session.clone(), harness.provider_account_id());
+        if let Some(runtime) = runtime {
+            runtime.observe_provider(agent_session.clone(), harness.provider_account_id());
         }
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
@@ -1611,8 +1593,8 @@ fn _run_harness_once(
                             .poll(harness.as_mut()).await
                             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
                     }
-                    _ = activity_tick.tick(), if capture.is_some() => {
-                        if let Some(capture) = capture { capture.observe_activity(harness.pid()).await; }
+                    _ = activity_tick.tick(), if runtime.is_some() => {
+                        if let Some(runtime) = runtime { runtime.observe_activity(harness.pid()).await; }
                     }
                     event = event_rx.recv() => {
                         let Some(event) = event else {
@@ -1620,9 +1602,9 @@ fn _run_harness_once(
                             exit_code = Some(1);
                             continue;
                         };
-                        if let Some(capture) = capture {
-                            capture.observe_provider(harness.agent_session(), harness.provider_account_id());
-                            capture.record_conversation(event.clone());
+                        if let Some(runtime) = runtime {
+                            runtime.observe_provider(harness.agent_session(), harness.provider_account_id());
+                            runtime.record_conversation(event.clone());
                         }
                         match event {
                             ConversationEvent::TextDelta { content, .. } => {
@@ -1654,7 +1636,7 @@ fn _run_harness_once(
                 }
             }
             while let Ok(event) = event_rx.try_recv() {
-                if let Some(capture) = capture { capture.record_conversation(event.clone()); }
+                if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
                 if let ConversationEvent::Error { code, message, .. } = event {
                     stderr.push_str(&format!("{code}: {message}\n"));
                 }
@@ -1828,10 +1810,10 @@ fn _run_agent_once(
         crate::harness::claude_trust::accept_created_worktree(&cmd);
     }
     cmd.args(hooks).args(&command.args);
-    let capture = process.capture.as_ref().map(|capture| &capture.0);
+    let runtime = process.runtime.as_ref();
     if retry {
-        if let Some(capture) = capture {
-            capture
+        if let Some(runtime) = runtime {
+            runtime
                 .retry_agent_process(
                     harness.clone(),
                     model.clone(),
@@ -1844,8 +1826,8 @@ fn _run_agent_once(
         }
     }
 
-    if let Some(capture) = capture {
-        capture.observe_provider(
+    if let Some(runtime) = runtime {
+        runtime.observe_provider(
             None,
             account_route
                 .as_ref()
@@ -1853,10 +1835,10 @@ fn _run_agent_once(
         );
     }
 
-    let admitted_capture = capture.ok_or_else(|| {
-        CoreError::ExecutionFailed("AgentProcess launch has no admitted capture".into())
+    let admitted_runtime = runtime.ok_or_else(|| {
+        CoreError::ExecutionFailed("AgentProcess launch has no admitted runtime".into())
     })?;
-    let result = run_interactive(cmd, process.timeout, admitted_capture, activation, title);
+    let result = run_interactive(cmd, process.timeout, admitted_runtime, activation, title);
     result.map(|result| AgentAttempt::Finished {
         result,
         can_failover: false,
@@ -1867,10 +1849,10 @@ fn _run_agent_once(
 /// released once the provider process exists.
 fn spawn_agent_child(
     cmd: Command,
-    capture: &CaptureHandle,
+    runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
 ) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
-    let child = capture
+    let child = runtime
         .spawn_native_agent(cmd)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
@@ -1880,12 +1862,12 @@ fn spawn_agent_child(
 fn run_interactive(
     cmd: Command,
     timeout: Option<Duration>,
-    capture: &CaptureHandle,
+    runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
     mut title: Option<crate::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
-    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -1896,7 +1878,7 @@ fn run_interactive(
             title.refresh();
         }
     })?;
-    capture
+    runtime
         .record_native_agent_exit(&attachment)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     tracing::debug!(

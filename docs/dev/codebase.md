@@ -8,29 +8,25 @@ Start from a behavior, not a directory. Follow its request until it crosses a
 named domain boundary; then switch to the next area's owner.
 
 ```bash
-rg "CaptureHandle" rust/loopflow/src
+rg "LfProcessRuntime" rust/loopflow/src
 rg "WorkRef" rust/loopflow/src
 uv run python scripts/check_architecture.py
 ```
 
 ## Source territories
 
-Physical line counts are rounded to the nearest hundred. They include inline
-tests and comments, so use them to judge territory—not quality or production
-complexity.
-
-| Territory | Main paths | Approx. LOC | Owns |
-| --- | --- | ---: | --- |
-| CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | command grammar, dispatch, status/read models, terminal output |
-| Operational workflows | `rust/loopflow/src/ops/` | 25,800 | Task/Wave operations, sessions, PR, Git, release, metrics, planning |
-| Prompt assembly, Graph runner and provider processes | `rust/loopflow/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocess streams |
-| Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task PR identity, planning-provider models |
-| Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
-| Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes and routes |
-| Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifacts, repository identity, subscriptions |
-| Migration SQL | `store/migrations/*.sql` | 4,900 | immutable released batches and merged slug migrations |
-| Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
-| External tests | Rust, Python, and Swift test roots | 27,100 | cross-module, wire, migration, CLI, and app proofs |
+| Territory | Main paths | Owns |
+| --- | --- | --- |
+| CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | Command grammar, dispatch and text/JSON output |
+| Shared operations | `engine/`, `ops/` | Typed Work operations, execution launches, delivery and planning |
+| Client access | `server/` | Protocol admission, multiplexing, subscriptions and terminal bridges |
+| Execution | `agent/`, `graph/`, `prompt/`, `skills/`, `harness/` | Skill/Graph discovery, prompts, provider processes and streams |
+| Tracked Work | `work/`, `pm/` | Wave, Project and Task facts, delivery identity and planning-provider models |
+| Persistence | `store/`, `journal/` | SQLite, migrations, domain rows and command/conversation history |
+| Provider accounts | `provider_auth/`, `provider_account/` | Login, encrypted tokens, account homes and routes |
+| Installation | `installation/`, `installation.rs` | Selected artifacts, server registration, update and rollback |
+| Native app | `swift/Loopflow/`, `swift/LoopflowMac/` | Shared DTOs/services and macOS presentation |
+| Tests | Rust, Python and Swift test roots | Cross-module, wire, migration, CLI and app checks |
 
 The table is intentionally broad. The checked
 [Architecture Reference](reference.md) maps every top-level CLI
@@ -45,16 +41,18 @@ subprocess edge to one concept.
 | Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow/src/definition/mod.rs) | selected Skill or Graph |
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
+| invocation resources | [`process/runtime.rs`](../../rust/loopflow/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
 | Wave operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Graph process | [`lf/commands/graph.rs`](../../rust/loopflow/src/lf/commands/graph.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave) | identity, config, memory, repository scope |
-| Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store) | domain rows and transactions |
 | installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
-| Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow) | required-field DTOs from `lf --json` |
+| Client server | [`server/`](../../rust/loopflow/src/server) | Typed requests and responses shared with CLI operations |
+| Creation recovery | [`engine/creation.rs`](../../rust/loopflow/src/engine/creation.rs) | Exact submitted request and server-owned receipt |
+| Mac Work surfaces | [`swift/Loopflow/`](../../swift/Loopflow) | Required-field DTOs over the shared server protocol |
 
 ## Public process surfaces
 

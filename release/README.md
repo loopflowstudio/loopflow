@@ -55,7 +55,7 @@ bundled `lf` processes; renamed bundles remain while they are in use. A supersed
 owner ends itself once its Sessions hold no work or input, and `lf process rollover`
 moves every eligible owner at once. Installed files and already-running processes
 can therefore report different builds during an update. Promotion retains the
-prior published artifacts, which are [not a rollback path](../docs/architecture/machines.md#one-main-machine),
+prior published artifacts, which are [not a rollback path](../docs/dev/machines.md#one-main-machine),
 and does not restart Tasks or Graphs.
 
 Use `release/` to keep the rationale and notes for each shipped version close

@@ -141,6 +141,7 @@ pub fn run(
     directory: &Path,
     issue: &str,
     from: Option<&str>,
+    graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
 ) -> Result<TaskRun> {
@@ -153,6 +154,7 @@ pub fn run(
             args.extend(["--agent".to_owned(), agent.to_owned()]);
         }
         args.extend(["task", "run", task].map(str::to_owned));
+        args.extend(graph.map(str::to_owned));
         if let Some(from) = from {
             args.extend(["--from".to_owned(), from.to_owned()]);
         }

@@ -1,35 +1,20 @@
-//! `lf task create REQUEST --run`: file the Task, start it exactly as
-//! `lf task run` does, then open its conversation with the request as its
-//! first turn. Desktop's New Task calls this same command.
-
+//! Creation prints the same receipt as the shared protocol. A retry keeps its ID.
 use std::io::IsTerminal;
-use std::os::fd::AsFd;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
-use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
-
-use crate::lf::{Cli, TaskCommand};
-use crate::ops::human_session::primary;
-use crate::store::{open_store, storage_config_from_env};
-use crate::work::task::Task;
+use anyhow::{bail, Result};
 
 use super::mutation::CommandIo;
+use crate::engine::creation::{self, TaskCreation};
+use crate::lf::TaskCommand;
 
-/// What `lf task create --run --json` prints whenever the Task was filed: the
-/// Task, the graph it took up and the conversation to open. A headless (`-b`)
-/// caller opens no conversation; a run that failed leaves both absent and the
-/// command still exits non-zero, so callers never file the request twice.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskCreateReceipt {
-    pub task: Task,
-    pub graph: Option<String>,
-    pub session_id: Option<crate::id::LfSessionId>,
-}
-
-/// File or adopt a Task with the caller's streams; execution remains separate.
-pub fn create(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<Task> {
+pub fn create(
+    repo: &Path,
+    command: &TaskCommand,
+    io: &mut CommandIo<'_>,
+    approve: bool,
+    agent: Option<&str>,
+) -> Result<()> {
     let TaskCommand::Create {
         session,
         worktree,
@@ -40,153 +25,117 @@ pub fn create(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Res
         notes,
         run,
         graph,
+        request_id,
         json,
     } = command
     else {
         bail!("expected task create");
     };
-    if let Some(graph) = graph {
-        // Validate before creation so a typo leaves no Task behind.
-        crate::ops::task::load_graph(graph, "", repo)?;
-    }
     let report = match request.as_ref().or(notes.as_ref()) {
         Some(text) => Some(text.clone()),
         None => read_report(io.input)?,
     };
-    let task = crate::ops::task::task_create(
-        repo,
-        if *no_wave { None } else { wave.as_deref() },
-        title.clone(),
-        report,
-        crate::ops::task::TaskAdoptionOptions {
+    let id = request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let created = creation::create(
+        &id,
+        TaskCreation {
+            directory: repo.into(),
+            title: title.clone(),
+            request: report,
+            wave: if *no_wave { None } else { wave.clone() },
+            graph: graph.clone(),
             session: session.clone(),
             worktree: worktree.clone(),
+            run: *run,
+            agent: agent.map(str::to_owned),
+            approve,
         },
-    )?;
-    match (*json, *run) {
-        (false, _) => writeln!(io.output, "{} · {}", task.title, task.identifier)?,
-        (true, false) => writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?,
-        // The launch prints one receipt once the run settles.
-        (true, true) => {}
-    }
+    );
+    let receipt = match created {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            if *json {
+                if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
+                    writeln!(io.output, "{}", serde_json::to_string_pretty(&result)?)?;
+                }
+            }
+            return Err(error);
+        }
+    };
     if let Some(provider) = crate::config::load_config_or_default(Some(repo))
         .planning_transport()
         .remote_name()
-        .filter(|_| task.linear_id.is_none())
+        .filter(|_| receipt.task.linear_id.is_none())
     {
         writeln!(
             io.error,
             "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
-            task.identifier
+            receipt.task.identifier
         )?;
     }
-    Ok(task)
+    if *json {
+        writeln!(io.output, "{}", serde_json::to_string_pretty(&receipt)?)?;
+    } else {
+        writeln!(
+            io.output,
+            "{} · {}",
+            receipt.task.title, receipt.task.identifier
+        )?;
+    }
+    if *run && approve {
+        // Batch callers wait for this exact launch, never whichever Graph is current later.
+        if let Some(launch) = creation::lookup(&id)?.and_then(|r| r.launch) {
+            if let crate::engine::task::TaskRun::Running { graph_process, .. } =
+                serde_json::from_value(launch)?
+            {
+                let store = crate::store::read_existing_registry()?
+                    .ok_or_else(|| anyhow::anyhow!("Machine registry is unavailable"))?;
+                loop {
+                    let process = store.sqlite.lf_process(&graph_process)?.ok_or_else(|| {
+                        anyhow::anyhow!("creation Graph {} is unavailable", graph_process)
+                    })?;
+                    if process.completed_at.is_some() {
+                        if process.exit_code != Some(0) {
+                            bail!(
+                                "Task Graph {} ended with {:?}",
+                                graph_process,
+                                process.exit_code
+                            );
+                        }
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    if *run && !approve && receipt.session_id.is_some() {
+        if !*json && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+            let status = std::process::Command::new(std::env::current_exe()?)
+                .args(["resume", "--task", &receipt.task.identifier])
+                .current_dir(repo)
+                .status()?;
+            if !status.success() {
+                bail!(
+                    "open its conversation with `lf resume --task {}`",
+                    receipt.task.identifier
+                );
+            }
+        } else if !*json {
+            writeln!(
+                io.output,
+                "Open its conversation: lf resume --task {}",
+                receipt.task.identifier
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub fn read_report(input: &mut dyn std::io::Read) -> Result<Option<String>> {
     let mut report = String::new();
     input.read_to_string(&mut report)?;
     Ok((!report.trim().is_empty()).then_some(report))
-}
-
-/// Start the created Task and open its conversation.
-pub fn start(
-    cli: &Cli,
-    repo: &Path,
-    task: &Task,
-    graph: Option<&str>,
-    request: Option<&str>,
-    json: bool,
-) -> Result<()> {
-    let issue = &task.identifier;
-    // Save the first turn before `task run` can start the conversation beside
-    // its Graph. Preparing a conversation does not launch it.
-    let session_id = prepare_conversation(cli, repo, task, request)?;
-    // `lf task run` places the Task and returns once its Graph registers;
-    // `-b` waits for `end`. Its lines go to stderr when stdout is the receipt.
-    let mut run = Command::new(std::env::current_exe()?);
-    run.args(cli.step_args());
-    if let Some(agent) = &cli.agent {
-        run.args(["--agent", agent]);
-    }
-    run.args(["task", "run", issue])
-        .args(graph)
-        .current_dir(repo);
-    if json {
-        run.stdout(Stdio::from(std::io::stderr().as_fd().try_clone_to_owned()?));
-    }
-    let status = run.status().context("start `lf task run`")?;
-    let receipt = |graph, session_id| -> Result<()> {
-        let receipt = TaskCreateReceipt {
-            task: task.clone(),
-            graph,
-            session_id,
-        };
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
-        Ok(())
-    };
-    if !status.success() {
-        if json {
-            receipt(None, None)?;
-        }
-        eprintln!("{issue} was created; start it again with `lf task run {issue}`");
-        return Err(crate::process::CommandExit(
-            status
-                .code()
-                .and_then(|code| u8::try_from(code).ok())
-                .unwrap_or(1),
-        )
-        .into());
-    }
-    let graph = tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_store(&storage_config_from_env()?).await?;
-        Ok::<_, anyhow::Error>(
-            store
-                .sqlite
-                .task_graph(&task.id)?
-                .context("the run did not take up a graph")?
-                .name,
-        )
-    })?;
-    if json {
-        return receipt(Some(graph), session_id);
-    }
-    // A headless caller does not open the background conversation.
-    if session_id.is_none() {
-        return Ok(());
-    }
-    if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
-        println!("Open its conversation: lf resume --task {issue}");
-        return Ok(());
-    }
-    let status = Command::new(std::env::current_exe()?)
-        .args(["resume", "--task", issue])
-        .current_dir(repo)
-        .status()
-        .context("open the Task's conversation")?;
-    if !status.success() {
-        bail!("its conversation did not open; open it with `lf resume --task {issue}`");
-    }
-    Ok(())
-}
-
-/// Unless headless, prepare the Task's primary conversation with its first turn.
-fn prepare_conversation(
-    cli: &Cli,
-    repo: &Path,
-    task: &Task,
-    request: Option<&str>,
-) -> Result<Option<crate::id::LfSessionId>> {
-    if cli.batch {
-        return Ok(None);
-    }
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
-        Ok(Some(
-            primary::ensure_task(&store, repo, &task.identifier, request.map(str::to_owned))
-                .await?
-                .0
-                .id,
-        ))
-    })
 }

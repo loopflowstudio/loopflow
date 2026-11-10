@@ -14,7 +14,7 @@ let package = Package(
         .executable(name: "LoopflowMac", targets: ["LoopflowMac"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
+        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.5"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
     ],
     targets: [

@@ -8,6 +8,11 @@ use crate::ghostty_vt::{Error, Terminal};
 pub(super) const RESET_MODES: &[u8] =
     b"\x1b[<65535u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
 
+/// Origin and scroll-margin resets home the cursor. Keep its position so the
+/// next shell prompt follows the command's output instead of overwriting it.
+pub(super) const RESET_DRAWING: &[u8] =
+    b"\x1b[s\x1b[?6l\x1b[?7h\x1b[r\x1b[u\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\";
+
 /// Scrollback rows a repaint carries at most. The whole repaint travels in one
 /// transport response, so the byte bound below wins when rows are wide or styled.
 const HISTORY_ROWS: usize = 2000;
@@ -22,6 +27,12 @@ pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
         // Nothing to redraw: the owner's first output flows from the viewer's cursor.
         return Ok(bytes);
     }
+    // The formatter emits enabled modes, not every disabled mode. Leave the old
+    // screen without 1049's saved-cursor restore, which also moves a viewer
+    // already on its primary screen above its existing output.
+    bytes.extend(b"\x1b[?1047l\x1b[?47l");
+    bytes.extend(RESET_MODES);
+    bytes.extend(RESET_DRAWING);
     let retained_primary = if terminal.alternate_screen() {
         // Switching only a disposable copy preserves the owner's parser,
         // continuation and replies. Paint primary first so a bare screen switch
@@ -91,13 +102,39 @@ impl AlternateScreen {
 
 #[cfg(test)]
 mod tests {
-    use super::{repaint, AlternateScreen, RESET_MODES};
+    use super::{repaint, AlternateScreen, RESET_DRAWING, RESET_MODES};
     use crate::ghostty_vt::Terminal;
 
     fn viewer_showing(bytes: &[u8]) -> Terminal {
         let mut viewer = Terminal::new(80, 24).unwrap();
         viewer.write(bytes);
         viewer
+    }
+
+    #[test]
+    fn drawing_cleanup_keeps_output_and_cursor_when_returning_to_the_shell() {
+        for modes in [b"".as_slice(), b"\x1b[3;20r\x1b[?6h"] {
+            let mut terminal = viewer_showing(b"earlier command output\r\n");
+            terminal.write(modes);
+            terminal.write(b"\x1b[7;21Hlast line");
+            let text = terminal.text().unwrap();
+            let cursor = terminal.cursor();
+            terminal.write(RESET_MODES);
+            terminal.write(RESET_DRAWING);
+            assert_eq!(terminal.text().unwrap(), text);
+            assert_eq!(terminal.cursor(), cursor);
+            // Origin and margins must also be reset, not restored with the cursor.
+            terminal.write(b"\x1b[Htop\x1b[24;1Hbottom");
+            let lines = terminal.text().unwrap();
+            assert!(
+                lines.lines().next().unwrap().starts_with("top"),
+                "modes={modes:?}, screen={lines:?}"
+            );
+            assert!(
+                lines.lines().nth(23).unwrap().starts_with("bottom"),
+                "modes={modes:?}, screen={lines:?}"
+            );
+        }
     }
 
     #[test]
@@ -158,6 +195,31 @@ mod tests {
         assert!(screen.entered);
         screen.observe(b"\x1b[?1049lbye\x1b[?1049h\x1b[?1049l");
         assert!(!screen.entered);
+    }
+
+    #[test]
+    fn reattachment_restores_default_modes_over_a_dirty_viewer() {
+        for saved in [false, true] {
+            let mut owner = viewer_showing(b"ready\r\n> ");
+            if saved {
+                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+            }
+            let mut viewer = viewer_showing(
+                b"\x1b[?1049h\x1b[?25l\x1b[?2004h\x1b[?1h\x1b[?1004h\x1b[?1003h\x1b[?1006h\x1b[>5uold screen",
+            );
+            viewer.write(&repaint(&owner).unwrap());
+            let queries =
+                b"\x1b[?25$p\x1b[?2004$p\x1b[?1$p\x1b[?1004$p\x1b[?1003$p\x1b[?1006$p\x1b[?u";
+            owner.write(queries);
+            viewer.write(queries);
+            assert_eq!(viewer.take_replies(), owner.take_replies());
+            assert!(!viewer.alternate_screen());
+            assert_eq!(viewer.cursor(), owner.cursor());
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            owner.write(b"typed after return");
+            viewer.write(b"typed after return");
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        }
     }
 
     #[test]

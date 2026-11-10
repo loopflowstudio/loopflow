@@ -273,7 +273,7 @@ struct DesktopHeadlessTests {
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.graphProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
         #expect(await calls.calls == [
-            ["task", "run", task.task.identifier, "--from", "demo"],
+            ["task", "run", task.task.identifier, "--from", "demo", "--json"],
         ])
         feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
         try await eventually { model.taskWork[task.id].errorMessage == "offline" }
@@ -389,14 +389,14 @@ struct DesktopHeadlessTests {
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
         #expect(try next.labelView().text().string() == "Continue")
         try next.tap()
-        #expect(try await tapped(1) == ["task", "run", task.task.identifier])
+        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
         }
         let control = TaskShipControl(model: model, task: task)
         try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
-        #expect(try await tapped(2) == ["--task", task.task.identifier, "ship"])
+        #expect(try await tapped(2) == ["--task", task.task.identifier, "ship", "--json"])
 
         // At its end nothing remains to run.
         let ended = try view(position: ["kind": "at", "step": "end"])
@@ -407,14 +407,14 @@ struct DesktopHeadlessTests {
         let unstarted = TaskWorkflowHeader(model: model, task: task, work: .available(
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
         try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
-        #expect(try await tapped(3) == ["task", "run", task.task.identifier])
+        #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
 
         // Going back is the same command a person would type; Start from… lists `start` and each interactive step.
         for step in ["start", "review-design", "demo"] {
             _ = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(step)")
         }
         try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
-        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design"])
+        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task)
@@ -559,7 +559,7 @@ struct DesktopHeadlessTests {
         let next = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1").button()
         try next.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["task", "run", task.task.identifier]])
+        #expect(await started.calls == [["task", "run", task.task.identifier, "--json"]])
 
         // A definition: a step that returns to an earlier one draws a loop over
         // the interactive step it comes back to.

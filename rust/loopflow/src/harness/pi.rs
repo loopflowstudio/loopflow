@@ -22,7 +22,6 @@ use super::{Harness, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
-use crate::process::SessionAttachment;
 use crate::steer::NativeBoundary;
 
 #[derive(Debug)]
@@ -62,7 +61,7 @@ impl State {
 pub struct PiHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     state: Arc<Mutex<State>>,
-    attachment: Option<(String, SessionAttachment)>,
+    owner: Option<AttachmentOwner>,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -110,7 +109,7 @@ impl PiHarness {
         Self {
             events,
             state: Arc::default(),
-            attachment: None,
+            owner: None,
             session: None,
             child: None,
             stdin: None,
@@ -121,7 +120,9 @@ impl PiHarness {
     }
 
     fn owner(&self) -> Result<AttachmentOwner> {
-        super::agent_process::open_owner(self.attachment.as_ref())
+        self.owner
+            .clone()
+            .ok_or_else(|| anyhow!("Pi has not started"))
     }
 
     async fn write(&mut self, value: &Value) -> Result<()> {
@@ -329,7 +330,9 @@ impl Harness for PiHarness {
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
-        self.attachment = config.session_attachment.clone();
+        self.owner = Some(super::agent_process::open_owner(
+            config.session_attachment.as_ref(),
+        )?);
         self.seed = Some(match &config.skill_invocation {
             Some(skill) => skill.terminal_input("pi", config)?.1,
             None => config.task_prompt.clone(),

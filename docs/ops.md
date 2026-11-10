@@ -366,7 +366,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
-[`lf repo`](lf-reference.md#lf-repository), [`lf wt`](lf-reference.md#lf-wt),
+[`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),
 [`lf machine`](lf-reference.md#lf-machine), [`lf account`](lf-reference.md#lf-account).
 
 Next: [Surfaces](surfaces.md): see this work in Desktop, cmux, Herdr or tmux.

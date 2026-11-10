@@ -9,7 +9,8 @@ use serde_json::Value;
 use tokio::sync::{watch, Notify};
 use tokio::task::AbortHandle;
 
-use super::service::{deliver, lock, unavailable, Outgoing};
+use super::outbox::{Materializing, Outbox, Retained};
+use super::service::{deliver, lock, reading_checkpoint, unavailable};
 use super::wire::ServerMessage;
 use crate::engine::Error;
 use crate::lf::commands::{read::Read, subscribe::Subscription};
@@ -52,6 +53,7 @@ struct Reading {
     generation: u64,
     frame: Value,
     identity: [u8; 32],
+    _retained: Retained,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,7 +189,13 @@ impl Drop for Member {
 }
 
 impl Delivery {
-    pub(super) async fn run(mut self, id: String, outgoing: Outgoing) {
+    pub(super) async fn run(
+        mut self,
+        id: String,
+        outgoing: Outbox,
+        scope: Vec<u8>,
+        resume: Option<String>,
+    ) {
         #[cfg(test)]
         if let Some(mut pause) =
             super::service::subscription_measurement::take_pause(&id, "terminal-delivery")
@@ -200,7 +208,7 @@ impl Delivery {
                 .await
                 .unwrap();
         }
-        let result = self.deliver(&id, &outgoing).await;
+        let result = self.deliver(&id, &outgoing, &scope, resume).await;
         if let Err(failure) = result {
             let _ = deliver(
                 &outgoing,
@@ -210,7 +218,13 @@ impl Delivery {
         }
     }
 
-    async fn deliver(&mut self, id: &str, outgoing: &Outgoing) -> Result<()> {
+    async fn deliver(
+        &mut self,
+        id: &str,
+        outgoing: &Outbox,
+        scope: &[u8],
+        mut resume: Option<String>,
+    ) -> Result<()> {
         let mut acknowledged = false;
         let mut sent = None;
         let mut answered = 0;
@@ -238,20 +252,29 @@ impl Delivery {
                 if (fresh && (answered < pending.generation || sent != Some(reading.identity)))
                     || unseen_failure
                 {
+                    let reservation = outgoing.wait().await?;
                     let mut frame = reading.frame.clone();
                     frame["answers"] = if fresh {
                         pending.checkpoint.map(Value::from).unwrap_or(Value::Null)
                     } else {
                         Value::Null
                     };
-                    deliver(
-                        outgoing,
-                        ServerMessage::Reading {
-                            id: id.into(),
-                            frame,
-                        },
-                    )
-                    .await?;
+                    let checkpoint = reading_checkpoint(scope, &frame)?;
+                    let unchanged = resume.take().as_ref() == Some(&checkpoint)
+                        && frame["answers"].is_null()
+                        && frame["unavailable"].is_null();
+                    if !unchanged {
+                        outgoing
+                            .deliver(
+                                ServerMessage::Reading {
+                                    id: id.into(),
+                                    checkpoint,
+                                    frame,
+                                },
+                                reservation,
+                            )
+                            .await?;
+                    }
                     answered = pending.generation;
                     sent = Some(reading.identity);
                 }
@@ -368,7 +391,9 @@ impl Producer {
         let mut pause = super::service::subscription_measurement::take_pause(_id, "setup");
         let notify = wake.clone();
         let cancel = cancelled.clone();
+        let headroom = Materializing::reserve().await?;
         let setup = tokio::task::spawn_blocking(move || {
+            let _headroom = headroom;
             if cancel.load(Ordering::Acquire) {
                 return Ok(None);
             }
@@ -401,23 +426,25 @@ impl Producer {
             let cancel = cancelled.clone();
             #[cfg(test)]
             let mut pause = super::service::subscription_measurement::take_pause(_id, "pull");
+            let headroom = Materializing::reserve().await?;
             let job = tokio::task::spawn_blocking(move || {
                 if cancel.load(Ordering::Acquire) {
-                    return None;
+                    return (None, headroom);
                 }
                 #[cfg(test)]
                 if let Some(pause) = &mut pause {
                     pause.wait();
                 }
-                crate::journal::request::isolate(|| {
+                let frame = crate::journal::request::isolate(|| {
                     if force {
                         pull.checkpoint(generation);
                     }
                     pull.pull()
-                })
+                });
+                (frame, headroom)
             });
             let queued = Queued(job.abort_handle());
-            let frame = job.await?;
+            let (frame, headroom) = job.await?;
             drop(queued);
             applied = generation;
             if cancelled.load(Ordering::Acquire) {
@@ -426,20 +453,20 @@ impl Producer {
             let mut reason = None;
             let mut last = false;
             if let Some(frame) = frame {
+                let retained = headroom.retain(frame.len())?;
                 let mut frame: Value = serde_json::from_slice(&frame)?;
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
                 // Internal generations never appear in a consumer's envelope.
-                let identity = crate::lf::commands::subscribe::identity(
-                    &reason,
-                    &Some(frame["body"].clone()),
-                )?;
+                let identity =
+                    crate::lf::commands::subscribe::identity(reason.as_deref(), frame.get("body"))?;
                 frame["answers"] = Value::Null;
                 latest.send_modify(|latest| {
                     latest.reading = Some(Arc::new(Reading {
                         generation,
                         frame,
                         identity,
+                        _retained: retained,
                     }))
                 });
             }
@@ -468,13 +495,22 @@ mod tests {
     use super::{Delivery, Member, Subscriptions};
     use crate::lf::commands::read::Read;
     use crate::performance::subscription_measurement as meter;
+    use crate::server::outbox::Outbox;
     use crate::server::service::subscription_measurement::pause;
     use crate::server::wire::ServerMessage;
     use crate::store::sqlite::SqliteStore;
 
+    async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
+        let frame = messages.recv().await.unwrap();
+        let message = serde_json::from_str(&frame.line).unwrap();
+        drop(frame.reservation);
+        let _ = frame.delivered.send(());
+        message
+    }
+
     struct Consumer {
         member: Member,
-        messages: mpsc::Receiver<(tokio::task::Id, ServerMessage)>,
+        messages: mpsc::Receiver<super::super::outbox::Frame>,
         delivery: JoinHandle<()>,
     }
     impl Consumer {
@@ -488,8 +524,8 @@ mod tests {
             Self::from_join(member, delivery, id)
         }
         fn from_join(member: Member, delivery: Delivery, id: &str) -> Self {
-            let (outgoing, messages) = mpsc::channel(1);
-            let delivery = tokio::spawn(delivery.run(id.into(), outgoing));
+            let (outgoing, messages) = Outbox::new();
+            let delivery = tokio::spawn(delivery.run(id.into(), outgoing, Vec::new(), None));
             Self {
                 member,
                 messages,
@@ -497,11 +533,9 @@ mod tests {
             }
         }
         async fn next(&mut self) -> ServerMessage {
-            tokio::time::timeout(Duration::from_secs(10), self.messages.recv())
+            tokio::time::timeout(Duration::from_secs(10), receive(&mut self.messages))
                 .await
                 .unwrap()
-                .unwrap()
-                .1
         }
         async fn initial(&mut self) -> Value {
             assert!(matches!(self.next().await, ServerMessage::Response { .. }));
@@ -562,7 +596,7 @@ mod tests {
         use super::{Latest, Pending, Reading};
         use std::sync::Mutex;
         let (latest, receiver) = tokio::sync::watch::channel(Latest::default());
-        let (outgoing, mut messages) = mpsc::channel(1);
+        let (outgoing, mut messages) = Outbox::new();
         let delivery = Delivery {
             latest: receiver,
             pending: Arc::new(Mutex::new(Pending {
@@ -570,19 +604,19 @@ mod tests {
                 checkpoint: None,
             })),
         };
-        let task = tokio::spawn(delivery.run("quiet".into(), outgoing));
+        let task = tokio::spawn(delivery.run("quiet".into(), outgoing, Vec::new(), None));
         let reading = |generation, at| {
             let frame = serde_json::json!({"answers": null, "unavailable": null, "body": {
                 "generated_at": at, "evidence_age_secs": at,
                 "condition": { "observed_at": at, "state": "ready" }, "title": "same"
             }});
             let identity =
-                crate::lf::commands::subscribe::identity(&None, &Some(frame["body"].clone()))
-                    .unwrap();
+                crate::lf::commands::subscribe::identity(None, frame.get("body")).unwrap();
             Arc::new(Reading {
                 generation,
                 frame,
                 identity,
+                _retained: super::Retained::empty(),
             })
         };
         latest.send_replace(Latest {
@@ -591,11 +625,11 @@ mod tests {
             ended: None,
         });
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Response { .. }
         ));
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Reading { .. }
         ));
         latest.send_replace(Latest {
@@ -605,7 +639,7 @@ mod tests {
         });
         // End is an ordered barrier proving the changed timestamp was processed.
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Ended { .. }
         ));
         task.await.unwrap();
@@ -618,21 +652,21 @@ mod tests {
         let frame =
             serde_json::json!({"answers": null, "unavailable": "snapshot failed", "body": null});
         let identity =
-            crate::lf::commands::subscribe::identity(&Some("snapshot failed".into()), &None)
-                .unwrap();
+            crate::lf::commands::subscribe::identity(Some("snapshot failed"), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             reading: Some(Arc::new(Reading {
                 generation: 1,
                 frame,
                 identity,
+                _retained: super::Retained::empty(),
             })),
             ended: Some(Err(Arc::new(crate::engine::Error::new(
                 crate::engine::ErrorCode::Unavailable,
                 "snapshot failed",
             )))),
         });
-        let (outgoing, mut messages) = mpsc::channel(4);
+        let (outgoing, mut messages) = Outbox::new();
         let delivery = Delivery {
             latest: receiver,
             pending: Arc::new(Mutex::new(Pending {
@@ -640,18 +674,18 @@ mod tests {
                 checkpoint: Some(9),
             })),
         };
-        let task = tokio::spawn(delivery.run("failed".into(), outgoing));
+        let task = tokio::spawn(delivery.run("failed".into(), outgoing, Vec::new(), None));
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Response { .. }
         ));
-        let ServerMessage::Reading { frame, .. } = messages.recv().await.unwrap().1 else {
+        let ServerMessage::Reading { frame, .. } = receive(&mut messages).await else {
             panic!("missing final failure reading")
         };
         assert!(frame["answers"].is_null());
         assert_eq!(frame["unavailable"], "snapshot failed");
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Error { .. }
         ));
         task.await.unwrap();
@@ -664,7 +698,7 @@ mod tests {
         use std::sync::Mutex;
 
         let reason = Some("snapshot failed".to_owned());
-        let identity = crate::lf::commands::subscribe::identity(&reason, &None).unwrap();
+        let identity = crate::lf::commands::subscribe::identity(reason.as_deref(), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
             reading: Some(Arc::new(Reading {
@@ -673,6 +707,7 @@ mod tests {
                     "answers": null, "unavailable": reason, "body": null
                 }),
                 identity,
+                _retained: super::Retained::empty(),
             })),
             ended: None,
         });
@@ -680,20 +715,20 @@ mod tests {
             generation: 1,
             checkpoint: None,
         }));
-        let (outgoing, mut messages) = mpsc::channel(4);
+        let (outgoing, mut messages) = Outbox::new();
         let task = tokio::spawn(
             Delivery {
                 latest: receiver,
                 pending: pending.clone(),
             }
-            .run("failed".into(), outgoing),
+            .run("failed".into(), outgoing, Vec::new(), None),
         );
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Response { .. }
         ));
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Reading { .. }
         ));
 
@@ -709,7 +744,7 @@ mod tests {
             ))));
         });
         assert!(matches!(
-            messages.recv().await.unwrap().1,
+            receive(&mut messages).await,
             ServerMessage::Error { .. }
         ));
         task.await.unwrap();
@@ -784,12 +819,11 @@ mod tests {
                 // nested run_sqlite on Reader's independent execution capacity.
                 pull.release.send(()).unwrap();
                 let progressed =
-                    tokio::time::timeout(Duration::from_secs(5), first.messages.recv()).await;
+                    tokio::time::timeout(Duration::from_secs(5), receive(&mut first.messages))
+                        .await;
                 release.send(()).unwrap();
                 held.await.unwrap();
-                let (_, message) = progressed
-                    .expect("production pull deadlocked on the outer pool")
-                    .unwrap();
+                let message = progressed.expect("production pull deadlocked on the outer pool");
                 let ServerMessage::Reading { frame, .. } = message else {
                     panic!("expected reading")
                 };

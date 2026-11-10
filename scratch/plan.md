@@ -12,7 +12,7 @@ server default for `/new` and `/fork`; headless launches need no duplicate
 config override. Native reconnection to a live server omits the tier. Observer
 subscriptions send only the thread ID. No schema migration or replaced path.
 
-Remaining: gate's affected suites and static checks. Affected owners: config
+Publication checks passed after syncing main. Affected owners: config
 settings/files/remote forwarding; prompt preparation; agent Session/replay/capture;
 Codex harness/observer; context_launch_tests, settings_launch_tests,
 session_launch_contract, session_cli_tests and agent_startup_tests.
@@ -86,3 +86,10 @@ the configured Doppler project has no OpenAI credential. API probes do not
 establish those terminal commands. `scratch/qa.html` holds transcripts and limits.
 All private probe processes and groups were stopped; affected suites and static
 checks remain with gate. `.lf/skills/qa.md` now records the working probe route.
+
+2026-11-09 publication: `lf sync` merged main at `7cf2d25b3` without conflicts.
+`uv run python scripts/test.py --reuse-passing --rust-filter` over config, prompt,
+agent, captures/replay, Codex/Claude/OpenCode harnesses, commit/PR launch, context
+launch, settings launch, Session CLI/startup and session_launch_contract passed:
+448 Rust tests; architecture, fmt, Clippy with warnings denied, and website checks.
+Total 602s. Rust 1.99.1; log `/tmp/loo-816-publish-checks.log`. No feature repair.

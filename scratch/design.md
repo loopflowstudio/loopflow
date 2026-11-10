@@ -6,18 +6,29 @@ and bulk protocol are outside this Task.
 
 ## Transport dependency — November 10, 2026 UTC
 
-Inspected PR #1812 at `e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`: both
+Inspected PR #1812 at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
 Terminal consume-on-attempt coverage is missing.
 
-At November 10 20:49 UTC, PR #1812 remains
+At November 10 21:25 UTC, GitHub reports PR #1812 open and unmerged at
+`23b48c659d574d32c0a2356deaec37a9be43cb22`, with no auto-merge. Freshly fetched
+main remains `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
+or `server/ticket.rs`. The new PR head has not been inspected; the code findings
+below describe the previously inspected revision. Implementation remains blocked
+on LOO-718 landing, not on a product decision or Desktop visual inspection.
+
+At November 10 20:51 UTC, PR #1812 remains
 open and unmerged at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`, still mergeable
 with no auto-merge. Freshly fetched main is
 `454f768944fb4b4aa4ee572beb1ca5418b18df6d`; `server/mobile.rs` and
 `server/ticket.rs` remain absent. The fresh `lf task status LOO-718 --json`
 read still places the transport Task at `feature/demo`, with PR #1812 open and
-settlement not armed. The newer PR head has not been inspected for code changes.
+settlement not armed. `mobile.rs` and `ticket.rs` are unchanged from the previously
+inspected `e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`. The shared store still
+checks identity before removal for every purpose; only bulk tickets have direct
+store coverage. Its background expiry sweep already releases abandoned bulk
+reservations, so retain that behavior while replacing the expiry clock.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;

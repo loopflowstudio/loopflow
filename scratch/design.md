@@ -23,16 +23,16 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 09:33 UTC, GitHub reports PR #1812 open and unmerged at the same
+At November 10 10:11 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeable: false`. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 `lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
 with PR #1812 open and settlement not armed.
 
-Graph decision: stop until LOO-718 lands, then recheck its shared store and resume
-implementation and remote acceptance. Landing that separate PR is outside this
-Task's scope. No product decision is missing. Publication, merge and Task
-completion remain outstanding.
+Implementation and remote acceptance depend on LOO-718's authenticated transport
+landing, followed by a recheck of its shared store. Landing that separate PR is
+outside this Task's scope. No product decision is missing. Publication, merge
+and Task completion remain outstanding.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
@@ -57,7 +57,9 @@ deadline includes host sleep; leave unrelated throttles on `Instant`. Retain the
 transport's watch resumption.
 
 After integration, update the docs' planned/local-only wording to match the
-implemented endpoint.
+implemented endpoint. Read both shipping docs from this checkout:
+`docs/server.md` (Phone access) and `rust/loopflow/src/server/README.md`
+(Remote attach contract).
 
 ## Remaining acceptance
 
@@ -69,6 +71,10 @@ and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
+
+Keep the remote exchange self-contained; link to the existing owner protocol
+instead of repeating it. The UID-only store stays untouched until its replacement
+lands, so this compression changes prose only.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

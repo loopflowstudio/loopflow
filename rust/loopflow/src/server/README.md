@@ -358,9 +358,8 @@ part of what a phone or bot client is offered.
   `task.create` and `session.new` have the creation retry contract below.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
   `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
-  connection, which stays a client. A separate bridge connection sends
-  `{"type":"attach","ticket":"<ticket>"}` as its only JSON message; the server answers
-  `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
+  connection. A separate bridge sends `{"type":"attach","ticket":"<ticket>"}`
+  as its only JSON message. After `bridged {owner_lf_process_id}`, it speaks the
   [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
   as 22 base64url characters, opens one bridge, lasts 60 seconds and is bound
   to the requesting client's Unix peer UID. Presenting a ticket consumes it
@@ -585,8 +584,8 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 ## Remote attach contract
 
 Planned for [Phone access](../../../../docs/server.md#phone-access); this build
-supports local attachment only. Owner selection, terminal control and the binary
-owner protocol follow `session.attach` above.
+supports local attachment only. Owner selection and terminal control follow
+`session.attach` above.
 
 Connect to the host's authenticated `/v1/machine` WebSocket, complete
 `hello`/`welcome`, and request `session.attach` with a Session ID from
@@ -605,6 +604,10 @@ endpoint and send `attach` first, without `hello`:
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
+After `bridged`, use the [binary owner protocol](../transport/README.md).
+Keep `/v1/machine` for requests and live Work updates; each terminal has its
+own bridge.
+
 Both connections must authenticate as the same Tailscale node stable ID and
 user ID; another device on the same account does not match. Neither the ticket,
 client-supplied identity nor a proxy's Unix UID substitutes for authentication.
@@ -612,9 +615,9 @@ Local and remote tickets are not interchangeable.
 
 Each ticket opens one bridge within 60 seconds of issue, including host sleep;
 expiry does not close an open bridge. Every terminal redemption attempt consumes
-the ticket. An unknown, spent, expired or identity-mismatched ticket returns
-`not_found` with a null `id` and closes the bridge connection. Retry or reconnect
-with a fresh ticket and bridge from the same authenticated device and account.
+the ticket. Unknown, spent, expired or identity-mismatched tickets return
+`not_found` with a null `id` and close the bridge connection. Retry with a fresh
+ticket and bridge from the same authenticated device and account.
 
 ## Subscription cost experiment
 

@@ -476,6 +476,29 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
+    @Test("A Wave named after another Wave's ID keeps its own primary without repeated preparation")
+    func collidingWaveNameSettlesBothPrimaries() async throws {
+        let source = try Source()
+        try await source.addWaveNamedAfterExistingID()
+        let repository = "repo_" + UUID().uuidString
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        defer { registry.prepareForQuit() }
+        await spin(for: .seconds(5)) {
+            let count = await source.preparedPrimaries.count
+            return registry.preparationCount > 0 && count < 8
+        }
+        let first = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-1")
+        let second = WorkWorkspaceKey(repository: repository, kind: .wave, id: "wave-2")
+        #expect(registry.retained(first)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-1")
+        #expect(registry.retained(second)?.multiplexer.sessionPane?.sessionId == "primary-wave:wave-2")
+        #expect(await source.preparedPrimaries == ["repository", "wave:wave-1", "wave:wave-2"])
+        // Repeated fresh frames cannot displace either pane and reopen it.
+        for _ in 0..<3 { await model.refresh() }
+        #expect(await source.preparedPrimaries.count == 3)
+        #expect(registry.preparationCount == 0)
+    }
+
     @Test("Repository and Wave primaries open on load beside the Task bound, before any selection")
     func loadOpensRepositoryAndWavePrimaries() async throws {
         let source = try Source()
@@ -488,9 +511,9 @@ struct WorkCacheTests {
         #expect(registry.warmPrimaries == [repositoryKey, wave])
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         await spin { await source.preparedPrimaries.count < 2 }
-        #expect(await source.preparedPrimaries == ["repository", "wave:product"]) // The selected repository leads.
+        #expect(await source.preparedPrimaries == ["repository", "wave:wave-1"]) // The selected repository leads.
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
-        let primaries = ["primary-repository", "primary-wave:product"]
+        let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
         #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments.contains("--start-if-free") })
         for key in [repositoryKey, wave] {
@@ -499,7 +522,6 @@ struct WorkCacheTests {
             #expect(workspace.conversationError == nil)
             #expect(workspace.multiplexer.sessionPane?.sessionId?.hasPrefix("primary-") == true)
         }
-        #expect(registry.retained(wave)?.wave == "product")
         #expect(model.selection == nil)
         registry.prepareForQuit()
     }
@@ -849,7 +871,7 @@ private actor Source {
     private var failsOnce = false
     private(set) var preparedTasks: [String] = []
     private(set) var preparedFlags: [String: String] = [:]
-    /// Repository and Wave primaries prepared on load: "repository" or "wave:<name>".
+    /// Repository and Wave primaries prepared on load: "repository" or "wave:<id>".
     private(set) var preparedPrimaries: [String] = []
     private var holding: [String]?
     private(set) var reads = 0
@@ -874,6 +896,19 @@ private actor Source {
         let waiters = preparationWaiters
         preparationWaiters = []
         for waiter in waiters { waiter.resume() }
+    }
+
+    func addWaveNamedAfterExistingID() throws {
+        var wire = try JSONSerialization.jsonObject(with: Data(roadmap.utf8)) as! [String: Any]
+        var waves = wire["waves"] as! [[String: Any]]
+        var duplicate = waves[0]
+        var wave = duplicate["wave"] as! [String: Any]
+        wave["name"] = wave["id"]
+        wave["id"] = "wave-2"
+        duplicate["wave"] = wave
+        waves.append(duplicate)
+        wire["waves"] = waves
+        roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
     }
 
     func populateWorkingTasks(owned: Int) throws {
@@ -990,8 +1025,8 @@ private actor Source {
             // A repository or Wave primary: Rust places it in the scope's own checkout.
             let wave = command.firstIndex(of: "--wave").map { command[$0 + 1] }
             let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
-            let waveId = try wave.map { name in try #require(snapshot.waves.first { $0.wave.name == name }).wave.id }
-            let scope = wave.map { "wave:" + $0 } ?? "repository"
+            let waveId = try wave.map { name in try #require(snapshot.waves.first { $0.wave.id == name } ?? snapshot.waves.first { $0.wave.name == name }).wave.id }
+            let scope = waveId.map { "wave:" + $0 } ?? "repository"
             let page = try JSONSerialization.jsonObject(with: Data(sessions.utf8)) as! [String: Any]
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "primary-" + scope

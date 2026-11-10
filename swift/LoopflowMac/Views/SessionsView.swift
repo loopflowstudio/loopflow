@@ -118,8 +118,6 @@ final class SessionsWorkspace {
     /// What automatic opening and Retry may do; only Take back replaces input.
     /// Repository and Wave primaries always start; a Task's intent follows its state.
     var conversationIntent: SessionOpenIntent
-    /// The Wave's name as `--wave` takes it; nil outside Wave Work.
-    var wave: String?
     private var didPrepareTaskPanes = false
     var lastVisit = Date.distantPast
     var conversationClosed = false
@@ -536,10 +534,10 @@ final class SessionsWorkspaceRegistry {
 
     /// A repository or Wave primary opens on load like any working Task and stays
     /// warm beside the Task bound; only Close leaves it unopened. Each load
-    /// refreshes its location and the Wave's `--wave` name.
-    func prefetchPrimary(_ key: WorkWorkspaceKey, title: String, wave: String? = nil, location: WorkspaceIdentity) {
+    /// refreshes its location. Wave preparation uses the Work identity.
+    func prefetchPrimary(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity) {
         guard !presentationClosed, !quitting, !closedConversations.contains(key) else { return }
-        workspace(for: key, title: title, location: location).wave = wave
+        _ = workspace(for: key, title: title, location: location)
         guard !warmPrimaries.contains(key) else { return }
         warmPrimaries.append(key)
         reconcileWarmth()
@@ -618,8 +616,6 @@ final class SessionsWorkspaceRegistry {
                         || (workspace.requiresLocationValidation && existing.record.launchRetry != nil) else { continue }
             } else {
                 guard workspace.location != nil else { continue }
-                // A Wave's `--wave` name arrives with the roadmap; the next pass opens it.
-                guard key.kind != .wave || id != nil || workspace.wave != nil else { continue }
                 // A tile with nothing to reveal keeps its own offer; visiting it may still refuse.
                 guard id != nil || workspace.conversationIntent == .start || key == selectedWork
                         || recentTasks.contains(key) else { continue }
@@ -705,7 +701,7 @@ final class SessionsWorkspaceRegistry {
         else if let id = workspace.multiplexer.sessionPane?.sessionId {
             record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: intent)
         } else if key.kind != .task {
-            record = try await query.ensurePrimarySession(wave: workspace.wave, cwd: store.repoPath)
+            record = try await query.ensurePrimarySession(wave: key.kind == .wave ? key.id : nil, cwd: store.repoPath)
         } else {
             do {
                 record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath, intent: intent)

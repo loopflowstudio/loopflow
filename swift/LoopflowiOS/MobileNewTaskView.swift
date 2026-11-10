@@ -5,12 +5,12 @@ struct MobileNewTaskView: View {
     @State private var model: MobileTaskCreation
     @State private var action: Task<Void, Never>?
     let theme: ThemeDefinition
-    let onOpen: (WorkViewPlan.Content) -> Void
+    let onOpen: (MobileTaskOpening) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var editing: Bool
 
-    init(model: MobileTaskCreation, theme: ThemeDefinition, onOpen: @escaping (WorkViewPlan.Content) -> Void) {
+    init(model: MobileTaskCreation, theme: ThemeDefinition, onOpen: @escaping (MobileTaskOpening) -> Void) {
         _model = State(initialValue: model)
         self.theme = theme
         self.onOpen = onOpen
@@ -22,7 +22,7 @@ struct MobileNewTaskView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if !model.draft.savedRequests.isEmpty {
                         NavigationLink {
-                            MobileSavedRequestsView(model: model, theme: theme) { task in onOpen(task); dismiss() }
+                            MobileSavedRequestsView(model: model, theme: theme, onOpen: onOpen)
                         } label: {
                             Label("Saved requests (\(model.draft.savedRequests.count))", systemImage: "tray")
                                 .font(Typography.strong(15))
@@ -73,7 +73,12 @@ struct MobileNewTaskView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { if model.saveDraft() || model.storageUnavailable { dismiss() } }
+                    Button("Close") {
+                        if model.saveDraft() || model.storageUnavailable {
+                            action?.cancel()
+                            dismiss()
+                        }
+                    }
                 }
             }
         }
@@ -134,7 +139,7 @@ struct MobileNewTaskView: View {
                 ProgressView(model.draft.submission == nil ? "Loading destinations…" : "Checking your Task…")
                     .frame(minHeight: 44)
             } else if model.settled {
-                Button("Open Task") { action = Task { if let task = await model.openTask() { onOpen(task); dismiss() } } }
+                Button("Open Task") { action = Task { if let task = await model.openTask() { onOpen(task) } } }
                     .buttonStyle(.borderedProminent).controlSize(.large)
                     .tint(theme.palette.accent).foregroundStyle(theme.palette.accentText)
             } else if model.draft.submission != nil {
@@ -163,7 +168,6 @@ struct MobileNewTaskView: View {
         await model.submit()
         if model.draft.outcome?.state == .started, let task = await model.openTask() {
             onOpen(task)
-            dismiss()
         }
     }
 }
@@ -195,7 +199,7 @@ private struct MobileCreationResult: View {
 struct MobileSavedRequestsView: View {
     let model: MobileTaskCreation
     let theme: ThemeDefinition
-    let onOpen: (WorkViewPlan.Content) -> Void
+    let onOpen: (MobileTaskOpening) -> Void
 
     var body: some View {
         List {
@@ -233,7 +237,7 @@ struct MobileSavedTaskRequestView: View {
     let id: UUID
     let model: MobileTaskCreation
     let theme: ThemeDefinition
-    let onOpen: (WorkViewPlan.Content) -> Void
+    let onOpen: (MobileTaskOpening) -> Void
     @State private var action: Task<Void, Never>?
 
     var body: some View {

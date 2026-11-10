@@ -43,6 +43,12 @@ struct MobileCreationContext {
     let repositories: [PortfolioRepo]
 }
 
+@MainActor
+struct MobileTaskOpening {
+    let task: WorkViewPlan.Content
+    let presented: () -> Void
+}
+
 /// Local recovery state, not another Machine wire type. Credentials stay in Keychain.
 struct MobileTaskSubmission: Codable, Equatable {
     let id: UUID
@@ -116,7 +122,7 @@ struct MobileTaskDraftStore {
 
 @MainActor
 @Observable
-final class MobileTaskCreation {
+final class MobileTaskCreation: Identifiable {
     private let client: any MobileTaskCreationClient
     private let store: MobileTaskDraftStore
     private(set) var draft = MobileTaskDraft()
@@ -260,7 +266,7 @@ final class MobileTaskCreation {
         }
     }
 
-    func openTask(savedRequestID: UUID? = nil) async -> WorkViewPlan.Content? {
+    func openTask(savedRequestID: UUID? = nil) async -> MobileTaskOpening? {
         guard !busy, !storageUnavailable else { return nil }
         let saved = savedRequestID.flatMap { savedRequest($0) }
         if savedRequestID != nil && saved == nil { return nil }
@@ -273,22 +279,34 @@ final class MobileTaskCreation {
             let task = try await client.createdTask(submission, taskID: outcome.taskId)
             try Task.checkCancellation()
             guard task.work.id == outcome.taskId else { throw RegistryQueryError("The Machine returned a different Task") }
-            // Clear recovery only after a successful read; the list then opens this recorded Session.
-            var next = draft
-            if let savedRequestID {
-                next.savedRequests.removeAll { $0.id == savedRequestID }
-            } else {
-                next.text = ""
-                next.submission = nil
-                next.outcome = nil
-                next.directory = submission.directory
-                next.machineID = submission.machineID
+            return MobileTaskOpening(task: task) {
+                self.didPresentTask(submission, taskID: outcome.taskId)
             }
-            guard persist(next) else { return nil }
-            return task
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
             return nil
+        }
+    }
+
+    private func didPresentTask(_ submission: MobileTaskSubmission, taskID: String) {
+        do {
+            // Another sheet may already own a newer draft. Retire only the
+            // request whose destination appeared, using the current saved file.
+            var next = try store.load()
+            if next.submission == submission, next.outcome?.taskId == taskID {
+                next.text = ""
+                next.submission = nil
+                next.outcome = nil
+            } else if let index = next.savedRequests.firstIndex(where: {
+                $0.submission == submission && $0.outcome?.taskId == taskID
+            }) {
+                next.savedRequests.remove(at: index)
+            } else {
+                return
+            }
+            _ = persist(next)
+        } catch {
+            self.error = "Couldn’t update your saved request. It remains available for recovery. \(error.localizedDescription)"
         }
     }
 }

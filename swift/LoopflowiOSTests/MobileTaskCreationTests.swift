@@ -8,6 +8,68 @@ import XCTest
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    func testTaskReadKeepsRecoveryAcrossRestartUntilPresentation() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Keep this until I can see the Task")
+        await model.submit()
+        let original = try XCTUnwrap(model.draft.submission)
+        let opening = await model.openTask()
+        XCTAssertEqual(opening?.task.work, client.task.work)
+        let restored = MobileTaskCreation(client: client, store: store)
+        XCTAssertEqual(restored.draft.submission, original)
+        XCTAssertEqual(restored.draft.outcome, model.draft.outcome)
+        opening?.presented()
+        XCTAssertNil(try store.load().submission)
+        XCTAssertEqual(client.requests.count, 1)
+    }
+
+    func testLateAndRepeatedPresentationPreserveANewerDraft() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let first = MobileTaskCreation(client: client, store: store)
+        await first.prepare()
+        first.editText("Original work")
+        await first.submit()
+        let read = await first.openTask()
+        let opening = try XCTUnwrap(read)
+        let newer = MobileTaskCreation(client: client, store: store)
+        XCTAssertTrue(newer.saveForLater())
+        newer.editText("Do not replace this newer idea")
+        newer.selectRepository("/work/second")
+        XCTAssertTrue(newer.saveDraft())
+        opening.presented()
+        opening.presented()
+        let saved = try store.load()
+        XCTAssertEqual(saved.text, "Do not replace this newer idea")
+        XCTAssertEqual(saved.directory, "/work/second")
+        XCTAssertTrue(saved.savedRequests.isEmpty)
+        XCTAssertNil(saved.submission)
+    }
+
+    func testCanceledTaskReadCannotOpenOrDiscardRecovery() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Cancel navigation, keep the created Task")
+        await model.submit()
+        let original = model.draft.submission
+        client.delayRead = true
+        let reading = Task { await model.openTask() }
+        while client.readReply == nil { await Task.yield() }
+        reading.cancel()
+        client.readReply?.resume()
+        let opened = await reading.value
+        XCTAssertNil(opened)
+        XCTAssertEqual(try store.load().submission, original)
+    }
+
     func testRepositoryRefreshAndSelectionPreserveInstructionsAndSavedDestination() async throws {
         let client = try await CreationClient()
         client.repositories = []
@@ -98,7 +160,8 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(client.requests, [original, original])
         XCTAssertEqual(restored.savedRequest(original.id)?.outcome?.state, .started)
         let opened = await restored.openTask(savedRequestID: original.id)
-        XCTAssertEqual(opened?.work, client.task.work)
+        XCTAssertEqual(opened?.task.work, client.task.work)
+        opened?.presented()
         let remaining = try store.load()
         XCTAssertTrue(remaining.savedRequests.isEmpty)
         XCTAssertEqual(remaining.text, "A different idea, still being edited")
@@ -130,7 +193,7 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(restored.draft.outcome?.taskId, client.task.work.id)
         XCTAssertNil(restored.draft.outcome?.receipt)
         let opened = await restored.openTask()
-        XCTAssertEqual(opened?.work, client.task.work)
+        XCTAssertEqual(opened?.task.work, client.task.work)
         XCTAssertEqual(client.requests.count, 1, "Opening the existing Task must not repeat creation")
     }
 
@@ -160,6 +223,7 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertNil(model.savedRequest(original.id)?.outcome)
         let opened = await model.openTask()
         XCTAssertNotNil(opened)
+        opened?.presented()
         XCTAssertEqual(try store.load().savedRequests.first?.submission, original)
     }
 
@@ -206,6 +270,7 @@ final class MobileTaskCreationTests: XCTestCase {
         await restored.submit(savedRequestID: original.id)
         let opened = await restored.openTask(savedRequestID: original.id)
         XCTAssertNotNil(opened)
+        opened?.presented()
         client.reply?.resume()
         await checking.value
         XCTAssertTrue(try store.load().savedRequests.isEmpty)
@@ -246,12 +311,14 @@ final class MobileTaskCreationTests: XCTestCase {
         }
         XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
         XCTAssertEqual(client.requests.count, 1, "Opening saved screens must never resend a request")
-        var opened: WorkViewPlan.Content?
+        var opened: MobileTaskOpening?
         let detail = MobileSavedTaskRequestView(id: id, model: model, theme: .light) { opened = $0 }
         try detail.inspect().find(button: "Check status").tap()
         let deadline = Date().addingTimeInterval(2)
         while opened == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(opened?.work, client.task.work)
+        XCTAssertEqual(opened?.task.work, client.task.work)
+        XCTAssertNotNil(model.savedRequest(id), "A read is not presentation")
+        opened?.presented()
         XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
         XCTAssertNil(model.savedRequest(id))
         XCTAssertEqual(client.requests.first, client.requests.last)
@@ -299,7 +366,9 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(try store.load().submission, original)
         client.readUnavailable = false
         let task = await restored.openTask()
-        XCTAssertEqual(task?.primarySession, client.task.primarySession)
+        XCTAssertEqual(task?.task.primarySession, client.task.primarySession)
+        XCTAssertEqual(try store.load().submission, original)
+        task?.presented()
         XCTAssertNil(try store.load().submission)
         XCTAssertEqual(restored.draft.directory, original.directory)
     }
@@ -319,7 +388,7 @@ final class MobileTaskCreationTests: XCTestCase {
             await restored.submit()
             XCTAssertEqual(client.requests.count, 1)
             let opened = await restored.openTask()
-            XCTAssertEqual(opened?.work, client.task.work)
+            XCTAssertEqual(opened?.task.work, client.task.work)
         }
     }
 
@@ -339,6 +408,7 @@ final class MobileTaskCreationTests: XCTestCase {
         await reopened.submit()
         let opened = await reopened.openTask()
         XCTAssertNotNil(opened)
+        opened?.presented()
         client.reply?.resume()
         await sending.value
         XCTAssertNil(try store.load().submission, "A dismissed sheet must not restore its old pending request")
@@ -440,6 +510,8 @@ private final class CreationClient: MobileTaskCreationClient {
     var readUnavailable = false
     var delayReply = false
     var reply: CheckedContinuation<Void, Never>?
+    var delayRead = false
+    var readReply: CheckedContinuation<Void, Never>?
     var outcome: MobileTaskOutcome?
     var repositories = [PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil)]
     var contextFailure: String?
@@ -468,6 +540,10 @@ private final class CreationClient: MobileTaskCreationClient {
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
         guard submission.machineID == machineID else { throw RegistryQueryError("Different Machine") }
         if readUnavailable { throw RegistryQueryError("Workspace not ready") }
+        if delayRead {
+            delayRead = false
+            await withCheckedContinuation { readReply = $0 }
+        }
         return task
     }
 

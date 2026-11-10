@@ -22,8 +22,8 @@ struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
     @State private var search = ""
     @State private var listVisible = false
-    @State private var creating = false
-    @State private var createdTask: WorkViewPlan.Content?
+    @State private var creation: MobileTaskCreation?
+    @State private var createdTask: MobileTaskOpening?
     @State private var showCreatedTask = false
     private let creationClient: (any MobileTaskCreationClient)?
     private let connectionLabel: String
@@ -106,26 +106,32 @@ struct MobileTaskList: View {
             }
             .refreshable { await workspace.refresh() }
             .onAppear { listVisible = true }
-            .onDisappear { listVisible = false; workspace.stopTaskUpdates() }
+            .onDisappear { listVisible = false; creation = nil; workspace.stopTaskUpdates() }
             .searchable(text: $search, prompt: "Find a Task")
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(isPresented: $showCreatedTask) {
                 if let createdTask {
-                    MobileSessionView(task: createdTask, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
+                    MobileSessionView(task: createdTask.task, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
+                        .onAppear(perform: createdTask.presented)
                 }
             }
-            .sheet(isPresented: $creating, onDismiss: {
+            .sheet(item: $creation, onDismiss: {
                 if createdTask != nil { showCreatedTask = true }
-            }) {
-                if let creationClient {
-                    MobileNewTaskView(model: MobileTaskCreation(client: creationClient), theme: theme) { createdTask = $0 }
+            }) { model in
+                MobileNewTaskView(model: model, theme: theme) { opening in
+                    guard creation === model else { return }
+                    createdTask = opening
+                    creation = nil
                 }
             }
             .toolbar {
-                if creationClient != nil {
+                if let creationClient {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { createdTask = nil; creating = true } label: { Image(systemName: "plus") }
+                        Button {
+                            createdTask = nil
+                            creation = MobileTaskCreation(client: creationClient)
+                        } label: { Image(systemName: "plus") }
                             .accessibilityLabel("New Task")
                     }
                 }

@@ -117,6 +117,9 @@ the existing retained owner. A confirmed start opens that Session as an observer
 If the reply is lost, **Check status** recovers the same saved request, including
 after restarting the app. It never files another Task or starts a provider again.
 A failed or uncertain start keeps the created Task available through **Open Task**.
+The saved request remains recoverable until its Task screen appears. Closing the
+sheet during a read keeps it saved, and a reply from an older sheet cannot dismiss
+a newer one or change its destination.
 The request retains its original Machine and repository even after changing connections;
 reconnect that Machine to recover it. A failed local draft save prevents sending.
 Drafts are protected local files excluded from backup; the saved Machine identity stays in Keychain.

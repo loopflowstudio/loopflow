@@ -330,9 +330,10 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let recovered = try await client.createTask(submission)
         XCTAssertEqual(recovered, outcome)
         let opened = await restored.openTask(savedRequestID: submission.id)
-        let task = try XCTUnwrap(opened, restored.error ?? "Task not available")
+        let opening = try XCTUnwrap(opened, restored.error ?? "Task not available")
+        let task = opening.task
         XCTAssertEqual(try store.load().text, "A separate idea that must not be submitted")
-        XCTAssertTrue(try store.load().savedRequests.isEmpty)
+        XCTAssertEqual(try store.load().savedRequests.first?.id, submission.id)
         XCTAssertEqual(task.primarySession, outcome.receipt?.sessionId)
         let createdSessions = try await client.sessions(for: task, after: nil)
         XCTAssertTrue(createdSessions.entries.contains { $0.id == task.primarySession })
@@ -342,6 +343,8 @@ final class MachineConnectionIntegrationTests: XCTestCase {
         let workspace = MobileWorkspace(client: client)
         let controller = SessionTerminalController(workspace: workspace)
         controller.loadViewIfNeeded()
+        opening.presented()
+        XCTAssertTrue(try store.load().savedRequests.isEmpty)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
         window.rootViewController = controller
         window.isHidden = false

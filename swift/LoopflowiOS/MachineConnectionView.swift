@@ -88,7 +88,7 @@ struct MachineAddressView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if replacing == nil {
+                        if replacing == nil && !enteringAddress {
                             HStack(spacing: 12) {
                                 Image(systemName: "desktopcomputer")
                                 Image(systemName: "arrow.left.arrow.right").font(.system(size: 16))
@@ -100,7 +100,9 @@ struct MachineAddressView: View {
                             Text("Your work,\nwithin reach.")
                                 .font(Typography.display)
                         }
-                        Text(replacing == nil
+                        Text(enteringAddress
+                            ? "Enter or paste the Tailscale address shown in Desktop’s Mobile settings."
+                            : replacing == nil
                             ? "Connect to your Loopflow Machine to open Tasks and continue their Sessions."
                             : "Scan the new code in Desktop’s Mobile settings. Your saved connection stays until the new address is verified.")
                             .font(Typography.body(17))
@@ -110,7 +112,7 @@ struct MachineAddressView: View {
                                 .font(Typography.caption(13))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
-                        } else {
+                        } else if !enteringAddress {
                             VStack(alignment: .leading, spacing: 14) {
                                 Label("Sign in to the same Tailscale account on both devices.", systemImage: "1.circle")
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
@@ -118,7 +120,7 @@ struct MachineAddressView: View {
                             }
                             .font(Typography.body(15))
                         }
-                        if let endpoint {
+                        if let endpoint, !enteringAddress {
                             Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
                                 .font(Typography.strong(16))
                             Text(endpoint.absoluteString)
@@ -126,7 +128,7 @@ struct MachineAddressView: View {
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                             Button {
-                                operation = Task { await connect(endpoint) }
+                                connect(endpoint)
                             } label: {
                                 HStack {
                                     if connecting { ProgressView() }
@@ -138,7 +140,7 @@ struct MachineAddressView: View {
                             .foregroundStyle(theme.palette.accentText)
                             .disabled(connecting)
                             Button("Scan another code") { scanning = true }.disabled(connecting)
-                        } else {
+                        } else if !enteringAddress {
                             Button { scanning = true } label: {
                                 Label("Scan QR code", systemImage: "qrcode.viewfinder")
                                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -158,8 +160,6 @@ struct MachineAddressView: View {
                                 .submitLabel(.continue)
                                 .onSubmit { accept(address) }
                                 .accessibilityLabel("Machine address")
-                            Button("Continue") { accept(address) }
-                                .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         } else {
                             Button("Enter address") {
                                 address = endpoint?.absoluteString ?? address
@@ -183,13 +183,32 @@ struct MachineAddressView: View {
                     .padding(28)
                 }
                 .background(theme.palette.background)
+                .safeAreaInset(edge: .bottom) {
+                    if enteringAddress {
+                        VStack(spacing: 8) {
+                            Button { accept(address) } label: {
+                                Text("Continue").frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(theme.palette.accent)
+                            .foregroundStyle(theme.palette.accentText)
+                            .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityIdentifier("machine-address-continue")
+                            Button("Scan QR code instead") { scanning = true }
+                                .frame(minHeight: 44)
+                                .disabled(connecting)
+                        }
+                        .padding(16)
+                        .background(theme.palette.background)
+                    }
+                }
                 .onChange(of: error) { _, value in
                     if value != nil {
                         withAnimation { proxy.scrollTo("machine-connection-error", anchor: .bottom) }
                     }
                 }
             }
-            .navigationTitle(replacing == nil ? "Loopflow" : "Change address")
+            .navigationTitle(enteringAddress ? "Machine address" : replacing == nil ? "Loopflow" : "Change address")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if replacing != nil {
@@ -220,9 +239,9 @@ struct MachineAddressView: View {
 
     private func accept(_ text: String) {
         guard !connecting else { return }
+        addressFocused = false
         do {
             endpoint = try MachineAddress.decode(text)
-            addressFocused = false
             enteringAddress = false
             error = nil
         } catch {
@@ -231,15 +250,18 @@ struct MachineAddressView: View {
         }
     }
 
-    private func connect(_ endpoint: URL) async {
+    private func connect(_ endpoint: URL) {
         guard !connecting else { return }
         connecting = true
         error = nil
-        defer { connecting = false; operation = nil }
-        do {
-            let connected = try await RemoteMobileClient.connect(endpoint: endpoint, replacing: replacing)
-            onConnected(connected)
-        } catch is CancellationError { }
-        catch { self.error = machineConnectionMessage(error) }
+        operation = Task {
+            defer { connecting = false; operation = nil }
+            do {
+                let connected = try await RemoteMobileClient.connect(endpoint: endpoint, replacing: replacing)
+                try Task.checkCancellation()
+                onConnected(connected)
+            } catch is CancellationError { }
+            catch { self.error = machineConnectionMessage(error) }
+        }
     }
 }

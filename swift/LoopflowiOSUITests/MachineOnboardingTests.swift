@@ -18,20 +18,41 @@ final class MachineOnboardingTests: XCTestCase {
         XCTAssertTrue(address.waitForExistence(timeout: 5))
         address.tap()
         address.typeText("example.com")
-        app.buttons["Continue"].firstMatch.tap()
+        let continueAddress = app.buttons["machine-address-continue"]
+        XCTAssertTrue(continueAddress.isHittable)
+        capture("machine-address-keyboard")
+        continueAddress.tap()
         let issue = app.staticTexts["Connection issue: Enter the Tailscale address shown in Desktop’s Mobile settings."]
         XCTAssertTrue(issue.waitForExistence(timeout: 5))
         XCTAssertTrue(issue.isHittable)
         capture("machine-address-validation")
         XCTAssertFalse(app.buttons["Connect Machine"].exists)
         address.tap()
-        address.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "example.com".count))
+        clear(address)
         address.typeText("machine.example.ts.net:8443")
-        app.buttons["Continue"].firstMatch.tap()
+        continueAddress.tap()
         XCTAssertTrue(app.buttons["Connect Machine"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["machine.example.ts.net"].exists)
         XCTAssertFalse(address.exists)
         capture("machine-address-confirmation")
+
+        app.buttons["Enter address"].tap()
+        XCTAssertTrue(address.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Connect Machine"].exists,
+                       "Editing the address must not leave a button that connects to the previous address")
+        address.tap()
+        clear(address)
+        address.typeText("other.example.ts.net:9443")
+        continueAddress.tap()
+        XCTAssertTrue(app.buttons["Connect Machine"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["other.example.ts.net"].exists)
+        XCTAssertFalse(app.staticTexts["machine.example.ts.net"].exists)
+        capture("machine-corrected-address")
+    }
+
+    private func clear(_ field: XCUIElement) {
+        field.typeKey("a", modifierFlags: .command)
+        field.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
     }
 
     private func capture(_ name: String) {

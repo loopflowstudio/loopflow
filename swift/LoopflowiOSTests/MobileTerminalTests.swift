@@ -504,6 +504,21 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertTrue(view.accessibilityPageContent()?.contains("canceled") == true)
     }
 
+    func testMultilineNativeInsertionWaitsForReturnBeforeSubmitting() async throws {
+        let (workspace, client, controller) = try await connected()
+        defer { workspace.leave(); controller.terminal.updateUiClosed() }
+        let view = controller.terminal
+        view.insertText("first line\nsecond line")
+        XCTAssertEqual(client.terminal.draft, "first line\nsecond line")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+        view.deleteBackward()
+        view.insertText("e edited")
+        XCTAssertEqual(client.terminal.draft, "first line\nsecond line edited")
+        XCTAssertTrue(client.terminal.submissions.isEmpty)
+        view.insertText("\n")
+        XCTAssertEqual(client.terminal.submissions, ["first line\nsecond line edited"])
+    }
+
     func testMarkedTextCommitsOnceAndUnicodeSurvives() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }

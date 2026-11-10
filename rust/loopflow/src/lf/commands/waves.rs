@@ -638,18 +638,14 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    super::subscribe::run(
-        (),
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
-        |store, ()| {
-            let wave = wave.clone();
-            async move {
-                let store = super::subscribe::require_store(store)?;
-                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
-            }
-        },
-    )
+    super::subscribe::run((), |store, ()| {
+        let wave = wave.clone();
+        async move {
+            let store = super::subscribe::require_store(store)?;
+            let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+            Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
+        }
+    })
 }
 
 /// One Wave's `lf wave status` reading.
@@ -741,7 +737,6 @@ pub fn subscribe_show(
 ) -> Result<Option<super::subscribe::Subscription>> {
     super::subscribe::start(
         (),
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
             async move {
@@ -904,19 +899,15 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    super::subscribe::run(
-        args,
-        super::subscribe::Wake::following_checkouts(super::subscribe::PLANNING_CLOCK),
-        |store, args| {
-            let repo = repo.to_owned();
-            async move {
-                let Some(store) = store else {
-                    return Ok(Vec::new());
-                };
-                open_tasks(&store, &repo, &args).await
-            }
-        },
-    )
+    super::subscribe::run(args, |store, args| {
+        let repo = repo.to_owned();
+        async move {
+            let Some(store) = store else {
+                return Ok(Vec::new());
+            };
+            open_tasks(&store, &repo, &args).await
+        }
+    })
 }
 
 /// What a `lf task status --subscribe` request can select instead.
@@ -964,7 +955,6 @@ where
     let repo = repo.to_owned();
     super::subscribe::start(
         TaskStatusArgs { issue },
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK),
         move |store, args| {
             let repo = repo.to_owned();
             let reading = reading.clone();
@@ -1330,48 +1320,12 @@ impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
         let checkouts = store.task_checkouts().await?;
         let local_machine = store.local_machine().await?.id;
-        ask_checkouts_ahead(&checkouts, &local_machine);
         Ok(Self {
             checkouts,
             machines: store.machines().await?,
             local_machine,
         })
     }
-}
-
-/// Git is asked about each existing checkout in turn by the Task details. A
-/// subscription reading asks about several checkouts at once first,
-/// so the details find them waiting; an ordinary read would only ask twice.
-fn ask_checkouts_ahead(
-    checkouts: &[crate::store::sqlite::TaskCheckout],
-    local_machine: &crate::durable::MachineId,
-) {
-    const AT_ONCE: usize = 8;
-    if !crate::git::retains_reads() {
-        return;
-    }
-    let existing = checkouts
-        .iter()
-        .filter(|checkout| checkout.machine_id.as_ref() == Some(local_machine))
-        .map(|checkout| checkout.worktree.as_path())
-        .filter(|worktree| worktree.is_dir())
-        .collect::<Vec<_>>();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for _ in 0..AT_ONCE.min(existing.len()) {
-            scope.spawn(crate::git::inherit_reads(|| {
-                while let Some(worktree) =
-                    existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-                {
-                    // The answers are kept by Git's reader; failures are the details' to report.
-                    let _ = crate::git::is_clean(worktree);
-                    let _ = crate::git::rev_parse(worktree, "HEAD");
-                    let _ = crate::git::worktree_root(worktree);
-                    let _ = crate::git::worktrees::git_common_dir(worktree);
-                }
-            }));
-        }
-    });
 }
 
 #[derive(Debug)]
@@ -1651,7 +1605,7 @@ fn snapshot_task_details(
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
-                let read = crate::config::observation::inherit(|| {
+                let read = crate::observe::inherit(|| {
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
@@ -1667,7 +1621,7 @@ fn snapshot_task_details(
                         details.push((index, detail));
                     }
                 });
-                scope.spawn(crate::git::inherit_reads(read))
+                scope.spawn(read)
             })
             .collect();
         handles
@@ -2068,7 +2022,7 @@ fn inspect_task_local_progress(
             reason: Some(blocker.reason.clone()),
         };
     }
-    if !worktree.exists() {
+    if !crate::observe::exists(worktree) {
         if work_status_is_terminal(status) && active_pr_base.is_none() {
             return LocalProgressEvidence {
                 state: LocalProgressEvidenceState::NotApplicable,
@@ -2249,7 +2203,7 @@ fn task_reference(
         let branch = Some(task.branch.clone());
         let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
-        let worktree = if local && task_worktree.is_dir() {
+        let worktree = if local && crate::observe::is_dir(task_worktree) {
             crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -2267,7 +2221,9 @@ fn task_reference(
             branch,
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
-            local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
+            local_exists: local
+                .then(|| crate::observe::try_exists(&worktree).ok())
+                .flatten(),
         })
     });
     TaskReferenceSnapshot {
@@ -2278,7 +2234,7 @@ fn task_reference(
 
 fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
     let worktree = task.worktree.as_ref()?;
-    if !worktree.exists() {
+    if !crate::observe::exists(worktree) {
         return None;
     }
     let clean = crate::git::is_clean(worktree).ok()?;

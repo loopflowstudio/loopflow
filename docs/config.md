@@ -693,8 +693,6 @@ choice win, even if it is general. `-a` explicitly selects the invocation's agen
 Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
-Loopflow sends Codex no service tier; the user's Codex config decides speed.
-
 Bare harness names use the model selected by that provider account. Add
 `harness:model` only when the invocation must pin a specific model. OpenCode
 model strings use `provider/model` form:
@@ -704,6 +702,36 @@ agent: opencode                          # user's OpenCode default
 agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
+
+### Codex service tier
+
+```bash
+lf set --global codex.service_tier default  # standard speed across your repositories
+lf unset --global codex.service_tier        # remove that global preference
+```
+
+`codex.service_tier` sets the tier when Loopflow launches Codex. Use `default`
+(or `standard`) for standard speed, and `priority` (or `fast`) for fast mode.
+There is no Loopflow default: when no applicable preference is set, Codex's own
+configuration decides the tier. Loopflow never rewrites `~/.codex/config.toml`.
+
+Omit `--global` to set or unset your repository preference. For one invocation:
+
+```bash
+lf --setting codex.service_tier=priority -a codex implement
+```
+
+The setting follows [normal precedence](#which-value-wins). Unsetting it reveals
+any lower-precedence value; Codex configuration applies when none remains.
+Use `lf config settings --explain` to see which value wins. Other tier values
+are rejected before saving.
+
+The preference applies to interactive Sessions and headless Graph/Task runs,
+including resume paths that launch Codex again. Native Codex `/new` and `/fork`
+inherit the launch configuration. Saving a preference or reattaching does not
+reset a running conversation's tier, including changes made in Codex.
+`lf replay` retains the launch preference recorded in its capture. Other
+harnesses ignore this setting.
 
 ### Pi
 

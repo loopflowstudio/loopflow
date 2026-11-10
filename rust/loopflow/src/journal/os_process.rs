@@ -45,13 +45,17 @@ impl OsProcess {
         }
     }
 
-    #[cfg(target_os = "macos")]
     pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
+        crate::observe::process(pid)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn observe(pid: u32) -> io::Result<Option<Self>> {
         macos::read(pid)
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub(crate) fn read(pid: u32) -> io::Result<Option<Self>> {
+    pub(crate) fn observe(pid: u32) -> io::Result<Option<Self>> {
         let mut rows = query(
             &["-p", &pid.to_string()],
             time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -67,12 +71,18 @@ impl OsProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn read_each(pids: &[u32], _now: i64) -> io::Result<Vec<Self>> {
         pids.iter()
-            .filter_map(|pid| macos::read(*pid).transpose())
+            .filter_map(|pid| Self::read(*pid).transpose())
             .collect()
     }
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn read_each(pids: &[u32], now: i64) -> io::Result<Vec<Self>> {
+        if crate::observe::active() {
+            return pids
+                .iter()
+                .filter_map(|pid| Self::read(*pid).transpose())
+                .collect();
+        }
         if pids.is_empty() {
             return Ok(Vec::new());
         }

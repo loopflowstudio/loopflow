@@ -699,6 +699,7 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
     let home = tempfile::tempdir().unwrap();
     let config = AgentConfig {
         chrome: Some(true),
+        codex_service_tier: Some(crate::config::CodexServiceTier::Default),
         system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
         task_prompt: "authored task\n\nwith trailing space ".to_string(),
         agent: Some("codex:gpt-5.6".to_string()),

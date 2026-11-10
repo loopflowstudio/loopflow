@@ -202,7 +202,12 @@ final class SessionLifecycleTests: XCTestCase {
         terminal.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
             .withOffset(CGVector(dx: 25, dy: 10)).tap()
         let close = app.buttons["Close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        // Safari starts a separate view service; its controls can arrive
+        // after our app's presentation animation has finished.
+        guard close.waitForExistence(timeout: 10) else {
+            XCTFail("Safari did not expose its Close control")
+            return
+        }
         capture(app, "observer-terminal-link")
         // Safari is a remote view service; element.tap() used the wrong
         // transform on iOS 26.2. Its reported frame is in app coordinates.

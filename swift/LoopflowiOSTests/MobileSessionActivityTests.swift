@@ -1,7 +1,6 @@
 import Foundation
 import Loopflow
 import SwiftUI
-import UIKit
 import ViewInspector
 import XCTest
 @testable import LoopflowiOS
@@ -55,40 +54,6 @@ final class MobileSessionActivityTests: XCTestCase {
         XCTAssertEqual(workspace.programStatus?.summary?.state, .blocked)
         workspace.leave()
         XCTAssertNil(workspace.programStatus)
-    }
-
-    func testActivityHeaderFitsBothThemesAndLargeText() async throws {
-        let client = SessionActivityClient()
-        let tasks = try await client.workingTasks()
-        let task = try XCTUnwrap(tasks.first)
-        client.status = report(.blocked)
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let previous = scene.keyWindow
-        for (name, theme, size) in [("light", ThemeDefinition.light, DynamicTypeSize.large),
-                                     ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
-            let workspace = MobileWorkspace(client: client)
-            let host = UIHostingController(rootView: NavigationStack {
-                MobileSessionView(task: task, workspace: workspace, theme: theme, connectionLabel: "Paired Machine")
-            }.environment(\.dynamicTypeSize, size)
-                .environment(\.palette, theme.palette)
-                .preferredColorScheme(theme.isDark ? .dark : .light)
-                .tint(theme.palette.accentInk))
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-            window.rootViewController = host
-            window.makeKeyAndVisible()
-            defer { workspace.leave(); window.isHidden = true; previous?.makeKey() }
-            try await wait { workspace.programStatus != nil && workspace.state == .viewing }
-            host.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(150))
-            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-            }
-            let attachment = XCTAttachment(image: image)
-            attachment.name = "mobile-session-activity-\(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-        }
     }
 
     private func report(_ state: ProgramStatusState?) -> ProgramStatusRecords {

@@ -303,20 +303,10 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
-        if matches!(
-            &self.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Create { terminal: true, .. }
-            })
-        ) && (self.batch || self.interactive)
-        {
-            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
-                "task create --terminal acknowledges interactive startup without a viewer; omit -b and -i\n"));
-        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }
-                | SessionCommand::New { id, connection } => Some((id.as_deref(), connection)),
+                | SessionCommand::New { id, connection, .. } => Some((id.as_deref(), connection)),
                 _ => None,
             };
             if let Some((id, connection)) = selected {
@@ -1200,7 +1190,8 @@ impl Commands {
 impl TaskCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. }
+            Self::Detail { .. }
+            | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
             | Self::WatchFiles { .. }
@@ -1255,7 +1246,7 @@ impl WaveCommand {
 impl PlanCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. } => false,
+            Self::Board { .. } | Self::List { .. } => false,
         }
     }
 }
@@ -1264,6 +1255,7 @@ impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::ObserveStatus { .. }
+            | Self::Card { .. }
             | Self::List { .. }
             | Self::Usage(_)
             | Self::Retention { .. } => false,
@@ -1429,6 +1421,12 @@ impl WtCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
+    /// Look up a submitted creation without retrying it
+    Receipt {
+        request_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
     /// Report local readiness without registering or starting anything.
@@ -1844,6 +1842,14 @@ pub enum SessionCommand {
         #[command(subcommand)]
         cmd: Option<commands::history::HistoryCommand>,
     },
+    /// Read a recorded Session's card without attaching or taking input control
+    Card {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// List Sessions
     List(SessionListArgs),
     /// Show direct provider-authored usage from recorded Session inputs
@@ -1876,6 +1882,9 @@ pub enum SessionCommand {
         after_help = "The conversation keeps its name, Work and history; the old thread stays in `lf session history`.\n  lf session new -a claude      continue this scope's conversation on Claude"
     )]
     New {
+        /// Retry a submitted new thread with the same identity and content
+        #[arg(long)]
+        request_id: Option<String>,
         /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
@@ -2129,6 +2138,14 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Read one Task, its PR, checks, Graphs, comments and current Session
+    Detail {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// List the open Tasks in the selected repository
     List {
         /// Only Tasks whose title or identifier contains this text
@@ -2261,9 +2278,12 @@ until `lf ship`."
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine.\n\nWith --request-id, repeat identical arguments to recover the original Task. JSON state is in_progress, started, failed, or unknown; admitted results exit zero. Unknown means launch was interrupted: inspect the Task before explicitly starting it again. Retries never advance its Graph. A changed request must use a new ID."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
     )]
     Create {
+        /// Retry a submitted creation with the same identity and content
+        #[arg(long)]
+        request_id: Option<String>,
         /// Existing conversation to promote without replaying its input
         #[arg(long, id = "create_session")]
         session: Option<String>,
@@ -2292,12 +2312,6 @@ until `lf ship`."
         /// The graph it takes up in place of the default
         #[arg(long, requires = "run")]
         graph: Option<String>,
-        /// Recover the same create/start request after a lost reply; reuse with identical arguments
-        #[arg(long, requires_all = ["run", "json"])]
-        request_id: Option<crate::id::TaskCreateRequestId>,
-        /// Start the primary Session's terminal and acknowledge its owner without attaching a viewer
-        #[arg(long, requires = "request_id")]
-        terminal: bool,
         #[arg(long)]
         json: bool,
     },
@@ -2550,7 +2564,8 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Show { issue, .. }
+            Self::Detail { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2585,7 +2600,8 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Show { issue, .. }
+            Self::Detail { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2824,6 +2840,18 @@ pub enum PrCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PlanCommand {
+    /// Print compact Task rows for a board
+    Board {
+        wave: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// Print each Wave's plan as Desktop shows it: every Task's section, condition and controls
     List {
         /// One Wave; omitted reads the repository's Waves

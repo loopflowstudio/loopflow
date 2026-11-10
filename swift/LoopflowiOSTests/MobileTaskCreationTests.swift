@@ -108,6 +108,32 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(client.requests.count, 2, "A removed request cannot fall back to submitting the new draft")
     }
 
+    func testOlderSavedReceiptKeepsItsSubmissionAndTaskWithoutInventingAMilestone() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Keep my original request")
+        await model.submit()
+        let submission = try XCTUnwrap(model.draft.submission)
+        var saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.url)) as? [String: Any])
+        var outcome = try XCTUnwrap(saved["outcome"] as? [String: Any])
+        var receipt = try XCTUnwrap(outcome["receipt"] as? [String: Any])
+        receipt.removeValue(forKey: "milestone")
+        outcome["receipt"] = receipt
+        saved["outcome"] = outcome
+        try JSONSerialization.data(withJSONObject: saved).write(to: store.url)
+        let restored = MobileTaskCreation(client: client, store: store)
+        XCTAssertFalse(restored.storageUnavailable)
+        XCTAssertEqual(restored.draft.submission, submission)
+        XCTAssertEqual(restored.draft.outcome?.taskId, client.task.work.id)
+        XCTAssertNil(restored.draft.outcome?.receipt)
+        let opened = await restored.openTask()
+        XCTAssertEqual(opened?.work, client.task.work)
+        XCTAssertEqual(client.requests.count, 1, "Opening the existing Task must not repeat creation")
+    }
+
     func testSavingOriginalMachineRequestAllowsNewWorkWithoutRetargetingRecovery() async throws {
         let client = try await CreationClient()
         let store = temporaryStore()
@@ -414,7 +440,7 @@ private final class CreationClient: MobileTaskCreationClient {
     var readUnavailable = false
     var delayReply = false
     var reply: CheckedContinuation<Void, Never>?
-    var outcome: TaskCreateOutcome?
+    var outcome: MobileTaskOutcome?
     var repositories = [PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil)]
     var contextFailure: String?
 
@@ -428,7 +454,7 @@ private final class CreationClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: "Development Mac", repositories: repositories)
     }
 
-    func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
+    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
         guard submission.machineID == machineID else { throw RegistryQueryError("Different Machine") }
         requests.append(submission)
         if delayReply {
@@ -445,11 +471,11 @@ private final class CreationClient: MobileTaskCreationClient {
         return task
     }
 
-    func result(_ state: String) throws -> TaskCreateOutcome {
+    func result(_ state: String) throws -> MobileTaskOutcome {
         let object: [String: Any] = ["task_id": task.work.id, "state": state,
             "receipt": ["task": ["id": task.work.id, "identifier": "LOO-TEST", "title": "Keyboard"],
-                        "graph": "code", "session_id": task.primarySession as Any],
-            "message": NSNull(), "owner_lf_process_id": "owner-test"]
-        return try JSONDecoder().decode(TaskCreateOutcome.self, from: JSONSerialization.data(withJSONObject: object))
+                        "milestone": "admitted", "graph": "code", "session_id": task.primarySession as Any],
+            "message": NSNull()]
+        return try JSONDecoder().decode(MobileTaskOutcome.self, from: JSONSerialization.data(withJSONObject: object))
     }
 }

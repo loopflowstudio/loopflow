@@ -60,7 +60,8 @@ pub(super) fn run_with_io(
     let resident_operation = matches!(
         &cli.command,
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::List(_)
+            cmd: crate::lf::SessionCommand::Card { .. }
+                | crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Resume { .. }
                 | crate::lf::SessionCommand::New { .. }
                 | crate::lf::SessionCommand::Bind { .. }
@@ -74,8 +75,11 @@ pub(super) fn run_with_io(
                 | crate::lf::TaskCommand::Diff { .. }
                 | crate::lf::TaskCommand::Changes { .. }
                 | crate::lf::TaskCommand::Show { .. }
+                | crate::lf::TaskCommand::Detail { .. }
                 | crate::lf::TaskCommand::Save { .. }
                 | crate::lf::TaskCommand::Create { run: false, .. }
+        }) | Some(crate::lf::Commands::Plan {
+            cmd: crate::lf::PlanCommand::Board { .. }
         }) | Some(crate::lf::Commands::Desktop {
             cmd: crate::lf::DesktopCommand::Shell { .. }
         }) | Some(crate::lf::Commands::Wave {

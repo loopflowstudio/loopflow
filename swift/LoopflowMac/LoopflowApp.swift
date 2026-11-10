@@ -82,6 +82,7 @@ struct LoopflowApp: App {
         if AppTestMode.current() == nil {
             _desktopServer = State(initialValue: DesktopServer.start())
             AppUpdater.shared.start()
+            CreationRecovery.shared.start()
         }
     }
 

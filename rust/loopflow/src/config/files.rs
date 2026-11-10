@@ -226,7 +226,8 @@ fn git(repo: &Path, args: &[&str]) -> Result<std::process::Output> {
         .output()?)
 }
 
-pub fn diagnose_private_file(path: &Path) -> Result<()> {
+// Check Git protection when writing, never in a polling settings read.
+fn diagnose_private_file(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
@@ -238,7 +239,7 @@ pub fn diagnose_private_file(path: &Path) -> Result<()> {
         !git(repo, &["ls-files", "--error-unmatch", PRIVATE_FILE])?
             .status
             .success(),
-        "{} is tracked; remove it from the index explicitly before using private settings",
+        "{} is tracked; remove it from the index explicitly before writing private settings",
         path.display()
     );
     if !git(repo, &["check-ignore", "-q", PRIVATE_FILE])?
@@ -286,7 +287,7 @@ pub(crate) fn lock(path: &Path) -> Result<File> {
 }
 
 pub(crate) fn read_text(path: &Path) -> Result<String> {
-    match super::observation::read_to_string(path) {
+    match crate::observe::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
@@ -658,6 +659,117 @@ pub(crate) fn finish_wave_move(
 #[cfg(test)]
 mod tests {
     use super::{private_path, update};
+
+    #[cfg(unix)]
+    #[test]
+    fn settings_polling_counts_git_children_in_main_and_linked_checkouts() {
+        use crate::lf::commands::graph::EnvVarGuard;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let linked = home.path().join("linked");
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "linked"])
+            .arg(&linked)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let private = repo.path().join(super::PRIVATE_FILE);
+        std::fs::write(&private, "agent: codex\n").unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let log = home.path().join("git-calls");
+        std::fs::write(bin.join("git"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LOOPFLOW_TEST_GIT_LOG\"\nexec /usr/bin/git \"$@\"\n").unwrap();
+        std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _log = EnvVarGuard::set("LOOPFLOW_TEST_GIT_LOG", log.to_str().unwrap());
+        let _path = EnvVarGuard::set(
+            "PATH",
+            &format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+        );
+        for checkout in [repo.path(), linked.as_path()] {
+            std::fs::write(&log, "").unwrap();
+            for n in 0..10 {
+                let agent = if n % 2 == 0 { "claude" } else { "codex" };
+                std::fs::write(&private, format!("agent: {agent}\n")).unwrap();
+                assert_eq!(
+                    crate::config::load_config(Some(checkout))
+                        .unwrap()
+                        .unwrap()
+                        .agent()
+                        .unwrap(),
+                    agent
+                );
+            }
+            let calls = std::fs::read_to_string(&log).unwrap();
+            eprintln!(
+                "settings polling {}: {} Git children",
+                checkout.display(),
+                calls.lines().count()
+            );
+            assert_eq!(
+                calls.lines().count(),
+                if checkout == repo.path() { 0 } else { 10 },
+                "{calls}"
+            );
+            assert!(
+                !calls.contains("ls-files") && !calls.contains("check-ignore"),
+                "{calls}"
+            );
+        }
+    }
+
+    #[test]
+    fn polling_settings_needs_no_git_and_sees_edits_while_writes_check_tracking() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let path = repo.path().join(super::PRIVATE_FILE);
+        std::fs::write(&path, "agent: codex\n").unwrap();
+        {
+            // Missing Git makes any subprocess attempt fail. Ordinary reads
+            // still resolve private preferences, including a subsequent edit.
+            let _path =
+                crate::lf::commands::graph::EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+            for _ in 0..60 {
+                assert_eq!(
+                    crate::config::load_config(Some(repo.path()))
+                        .unwrap()
+                        .unwrap()
+                        .agent()
+                        .unwrap(),
+                    "codex"
+                );
+            }
+            std::fs::write(&path, "agent: claude\n").unwrap();
+            assert_eq!(
+                crate::config::load_config(Some(repo.path()))
+                    .unwrap()
+                    .unwrap()
+                    .agent()
+                    .unwrap(),
+                "claude"
+            );
+        }
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["add", "-f", super::PRIVATE_FILE])
+            .status()
+            .unwrap()
+            .success());
+        let before = std::fs::read(&path).unwrap();
+        let error = set(repo.path(), None, false, false, "agent", Some("codex")).unwrap_err();
+        assert!(error.to_string().contains("is tracked"), "{error}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
 
     fn set(
         repo: &std::path::Path,

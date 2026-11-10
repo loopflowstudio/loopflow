@@ -141,8 +141,8 @@ struct ServerProtocolTests {
     }
 
     @Test func mobileOperationsUseTheSharedFixtures() throws {
-        let task = ServedWrite.taskStart(directory: "/repo", requestID: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!, request: "Fix the retry test", wave: nil, graph: nil, terminal: false)
-        #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil)) == value("task_start"))
+        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, graph: nil, session: nil, run: true)
+        #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil)) == value("task_create"))
         #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil)) == value("session_page"))
         let session = try value("session_start")
@@ -185,14 +185,13 @@ struct ServerProtocolTests {
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskCreate(directory: "/repo", id: "session_5e55105e000040008000000000000001",
-                             title: "Keep the conversation")), select: nil)
+            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
-            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", from: "implement", agent: "claude", approve: false)),
+            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
             ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
             ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
@@ -248,7 +247,7 @@ struct ServerProtocolTests {
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
         }
-        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", from: nil, agent: nil, approve: true).argv
+        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
         guard case .response(_, _, .object(let running)) = try message("task_running") else {
             Issue.record("Missing task.run result"); return
@@ -378,10 +377,33 @@ struct ServerProtocolTests {
             #expect(groups[1] == name, "\(kind) must be named \(name) in Swift")
             #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
         }
+        let events = try arms("SubscriptionEvent", tag: "kind", of: schema)
         for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: protocolSource) {
             let kind = try #require(groups[1])
-            #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
+            #expect(described[kind] != nil || events[kind] != nil, "\(kind) is not in `lf server describe --json`")
         }
+    }
+
+    @Test func typedEventsCarryTheirPayloadAndUnknownKindsStayLocal() throws {
+        guard case .event(let id, let seq, .taskShipped(let task, _, let number, _, _)) = try message("event_shipped") else {
+            Issue.record("Missing ship event"); return
+        }
+        #expect(id == "task" && seq == 1 && number == 42)
+        #expect(task == "task_11111111111111111111111111111111")
+        guard case .event(_, _, .taskSteer(_, let steer, let comment)) = try message("event_steer") else {
+            Issue.record("Missing steer event"); return
+        }
+        #expect(steer.text == "Keep the examples.")
+        #expect(comment?.body == "Keep the examples.")
+        guard case .event(_, _, .graphStepFinished(_, _, let step)) = try message("event_step_finished") else {
+            Issue.record("Missing step event"); return
+        }
+        #expect(step.label == "implement" && step.outcome == "succeeded")
+        let unknown = Data(#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.occurrence","extra":true}}"#.utf8)
+        guard case .event(let unknownID, 2, .unknown(let kind)) = try JSONDecoder().decode(ServerMessage.self, from: unknown) else {
+            Issue.record("Unknown event closed the connection"); return
+        }
+        #expect(unknownID == "task" && kind == "future.occurrence")
     }
 
     /// A fixture the mirror neither encodes nor decodes is one it can drift from.
@@ -409,7 +431,7 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":3}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))

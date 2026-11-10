@@ -2,8 +2,9 @@
 //! carry: a terminal's bytes, or one message larger than the control limit.
 //! A ticket is single use, bound to the admission that requested it, and
 //! expires unused. It grants nothing the control connection did not already have.
+use super::outbox::Reservation;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use base64::Engine as _;
@@ -30,10 +31,17 @@ pub(super) enum Purpose {
     /// The existing owner protocol, copied byte for byte.
     Terminal(LfProcessId),
     /// One server message too large for the control connection.
-    Download(String),
+    Download {
+        message: String,
+        reservation: Arc<Reservation>,
+    },
     /// One client request too large for the control connection; it joins the
     /// issuing session's requests.
-    Upload(mpsc::Sender<ClientMessage>),
+    Upload {
+        requests: mpsc::Sender<(ClientMessage, Arc<Reservation>)>,
+        bytes: usize,
+        reservation: Arc<Reservation>,
+    },
 }
 
 #[derive(Debug)]
@@ -65,6 +73,16 @@ impl Tickets {
         ticket
     }
 
+    pub(super) async fn expiring(&self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            self.0
+                .lock()
+                .expect("ticket store is never poisoned")
+                .retain(|_, ticket| ticket.expires > Instant::now());
+        }
+    }
+
     /// The ticket's purpose, once; `None` for an unknown, expired, or foreign ticket.
     pub(super) fn redeem(&self, ticket: &str, admission: &Admission) -> Option<Purpose> {
         let mut issued = self.0.lock().expect("ticket store is never poisoned");
@@ -82,14 +100,48 @@ impl Tickets {
 mod tests {
     use super::{Admission, Purpose, Tickets};
 
+    fn download(text: &str) -> Purpose {
+        let (outbox, _queue) = super::super::outbox::Outbox::new();
+        Purpose::Download {
+            message: text.into(),
+            reservation: outbox.reserve().unwrap(),
+        }
+    }
+
     #[test]
     fn expired_tickets_cannot_be_redeemed() {
         let tickets = Tickets::default();
-        let ticket = tickets.issue(Admission::Local, Purpose::Download("body".into()));
+        let ticket = tickets.issue(Admission::Local, download("body"));
         tickets.0.lock().unwrap().get_mut(&ticket).unwrap().expires = std::time::Instant::now();
         assert!(tickets.redeem(&ticket, &Admission::Local).is_none());
-        tickets.issue(Admission::Local, Purpose::Download("next".into()));
+        tickets.issue(Admission::Local, download("next"));
         assert!(!tickets.0.lock().unwrap().contains_key(&ticket));
+    }
+
+    #[tokio::test]
+    async fn abandoned_download_releases_capacity_without_another_request() {
+        let tickets = std::sync::Arc::new(Tickets::default());
+        let (outbox, _queue) = super::super::outbox::Outbox::new();
+        let ticket = tickets.issue(
+            Admission::Local,
+            Purpose::Download {
+                message: "held".into(),
+                reservation: outbox.reserve().unwrap(),
+            },
+        );
+        assert!(outbox.retained() > 0);
+        tickets.0.lock().unwrap().get_mut(&ticket).unwrap().expires = std::time::Instant::now();
+        let expire = tickets.clone();
+        let task = tokio::spawn(async move { expire.expiring().await });
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while outbox.retained() != 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(outbox.reserve().is_some());
     }
 
     #[test]
@@ -99,7 +151,7 @@ mod tests {
             node: "n1".into(),
             user: 7,
         };
-        let ticket = tickets.issue(phone.clone(), Purpose::Download("body".into()));
+        let ticket = tickets.issue(phone.clone(), download("body"));
         assert!(tickets.redeem(&ticket, &Admission::Local).is_none());
         let other = Admission::Remote {
             node: "n2".into(),
@@ -108,7 +160,7 @@ mod tests {
         assert!(tickets.redeem(&ticket, &other).is_none());
         assert!(matches!(
             tickets.redeem(&ticket, &phone),
-            Some(Purpose::Download(body)) if body == "body"
+            Some(Purpose::Download { message, .. }) if message == "body"
         ));
         assert!(tickets.redeem(&ticket, &phone).is_none(), "single use");
         assert!(tickets.redeem("unknown", &phone).is_none());

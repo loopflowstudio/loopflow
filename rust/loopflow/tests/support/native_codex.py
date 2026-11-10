@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import select
 import socket
 import struct
 import sys
@@ -127,6 +128,27 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
                         assert terminal.readline().strip() == "decline"
                 _send(stream, {"id": rpc["id"], "result": {"decision": "decline"}}, True)
             if rpc.get("method") == "turn/completed":
+                if (home / "reattach-service-tier").exists():
+                    initial = _request(stream, "thread/resume", {"threadId": thread})
+                    _request(stream, "thread/settings/update", {
+                        "threadId": thread, "serviceTier": "priority",
+                    })
+                    (home / "native-tier-before.json").write_text(json.dumps(initial))
+                    with open("/dev/tty") as terminal:
+                        deadline = time.monotonic() + 30
+                        while not select.select([terminal], [], [], .1)[0]:
+                            if (home / "release").exists():
+                                return
+                            assert time.monotonic() < deadline, "no reattached input"
+                        assert terminal.readline().strip() == "inspect tier"
+                    retained = _request(stream, "thread/resume", {"threadId": thread})
+                    (home / "native-tier-after.json").write_text(json.dumps(retained))
+                    deadline = time.monotonic() + 30
+                    while not (home / "release").exists():
+                        assert time.monotonic() < deadline, "reattached terminal not released"
+                        time.sleep(.02)
+                if (home / "check-child-tiers").exists():
+                    _check_child_tiers(stream, home)
                 if "TITLE_HOST" in os.environ:
                     (home / "args").write_text("\n".join(sys.argv[1:]))
                     (home / "ready").touch()
@@ -142,6 +164,23 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
                 return
 
 
+def _request(stream: socket.socket, method: str, params: dict) -> dict:
+    _send(stream, {"id": "tier-check", "method": method, "params": params}, True)
+    while True:
+        reply = json.loads(_message(stream))
+        if reply.get("id") == "tier-check":
+            assert "error" not in reply, reply
+            return reply["result"]
+
+
+def _check_child_tiers(stream: socket.socket, home: Path) -> None:
+    fresh = _request(stream, "thread/start", {})
+    forked = _request(stream, "thread/fork", {"threadId": fresh["thread"]["id"]})
+    (home / "native-child-tiers.json").write_text(json.dumps({
+        "new": fresh["serviceTier"], "fork": forked["serviceTier"],
+    }))
+
+
 def _inherited(home: Path) -> dict:
     """What a host wrapper and the user's config give every app-server."""
     return {
@@ -151,6 +190,7 @@ def _inherited(home: Path) -> dict:
             ]}], "state": {"host-trust": {"trusted_hash": "unchanged"}}}
         }}],
         "config": {
+            "service_tier": "priority",
             "sandbox_workspace_write": {"writable_roots": [str(home / "configured-root")]}
         },
     }
@@ -192,6 +232,9 @@ def _overrides(args: list[str]) -> dict:
 
 
 def _server(endpoint: str, home: Path) -> None:
+    server_config = json.loads((home / "native-server-config.json").read_text())
+    tier_file = home / "native-tier.json"
+    service_tier = json.loads(tier_file.read_text()) if tier_file.exists() else None
     turns_file = home / "native-turns.json"
     turns = json.loads(turns_file.read_text()) if turns_file.exists() else []
     # A server that stopped mid-turn loads that turn as interrupted.
@@ -217,7 +260,7 @@ def _server(endpoint: str, home: Path) -> None:
                     subscribers.remove(subscriber)
 
     def serve(stream: socket.socket) -> None:
-        nonlocal thread, turns, named, pending
+        nonlocal thread, turns, named, pending, service_tier
         with stream:
             header = _header(stream)
             key = next(
@@ -255,11 +298,14 @@ def _server(endpoint: str, home: Path) -> None:
                     if "id" not in rpc:
                         continue
                     result = {}
-                    if method in ("thread/start", "thread/resume"):
-                        if method == "thread/start":
+                    if method in ("thread/start", "thread/resume", "thread/fork"):
+                        if method in ("thread/start", "thread/fork"):
                             thread = "thread-" + uuid.uuid4().hex
                             turns = []
                             thread_file.write_text(thread)
+                            service_tier = server_config.get(
+                                "service_tier", _inherited(home)["config"]["service_tier"]
+                            )
                         elif not (turns or named) or params.get("threadId") != thread:
                             _send(
                                 stream,
@@ -269,7 +315,9 @@ def _server(endpoint: str, home: Path) -> None:
                                 },
                             )
                             continue
-                        result = {"thread": {"id": thread, "turns": turns}}
+                        service_tier = params.get("serviceTier", service_tier)
+                        tier_file.write_text(json.dumps(service_tier))
+                        result = {"thread": {"id": thread, "turns": turns}, "serviceTier": service_tier}
                         if "cwd" in params:  # lf's own request, not a client's
                             (home / "native-config.json").write_text(json.dumps(params))
                         with lock:
@@ -278,6 +326,10 @@ def _server(endpoint: str, home: Path) -> None:
                             if pending:
                                 _send(stream, pending)
                         continue
+                    elif method == "thread/settings/update":
+                        service_tier = params["serviceTier"]
+                        tier_file.write_text(json.dumps(service_tier))
+                        result = {"serviceTier": service_tier}
                     elif method == "thread/name/set":
                         named = True
                     elif method == "thread/turns/list":

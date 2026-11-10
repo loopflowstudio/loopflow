@@ -40,6 +40,15 @@ pub struct StoreRevisions {
 }
 
 impl SqliteStore {
+    /// Workflow observation excludes transcript, usage and ordinary tool traffic.
+    pub(crate) fn task_update_revision(&self) -> StoreResult<i64> {
+        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT revision FROM store_revisions WHERE domain='task_updates'",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn read_snapshot(&self) -> StoreResult<ReadSnapshot<'_>> {
         self.conn
             .lock()
@@ -84,6 +93,7 @@ mod tests {
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
+        "creation_receipts",
         "access_profiles",
         "pm_project_name_cutover",
         "planning_user",
@@ -116,8 +126,6 @@ mod tests {
         "steer_batches",
         "steer_deliveries",
         "store_revisions",
-        // Creation receipts are recovered by request ID, not Work subscriptions.
-        "task_create_requests",
         "task_linear_ingested_comments",
         "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
@@ -190,38 +198,6 @@ mod tests {
         };
         assert!(failed().is_err());
         assert!(reader.read_snapshot().is_ok());
-    }
-
-    /// A watch rereads Session summaries on its clock only when what they
-    /// observe outside their rows moved.
-    #[test]
-    fn session_observations_move_when_a_session_goes_quiet_or_an_agent_lives() {
-        let (_dir, store) = store();
-        store.test_session("quiet", &crate::session_record::new_artifact_key());
-        let pid = std::process::id();
-        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded) VALUES('quiet',1000,0,0,0)", []).unwrap();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,kind,started_at,pid,os_started_at) VALUES(?1,?1,'agent',1,?2,?3)",
-                params![crate::id::LfProcessId::new(), pid, started + 3600],
-            )
-            .unwrap();
-        }
-        let at = |now| store.session_observations(now).unwrap();
-        let quiet = crate::session::AVAILABILITY_QUIET_SECONDS;
-        assert_eq!(at(1000), at(1000 + quiet - 1));
-        assert_ne!(at(1000 + quiet - 1), at(1000 + quiet));
-
-        let before = at(1000);
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE processes SET os_started_at=?1", [started])
-            .unwrap();
-        assert_ne!(at(1000), before);
     }
 
     #[test]

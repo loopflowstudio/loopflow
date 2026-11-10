@@ -197,6 +197,7 @@ fn prepare_prompt(
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
         session_attachment: None,
         system_prompt,
         conversation_context,

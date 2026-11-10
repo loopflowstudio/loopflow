@@ -289,7 +289,6 @@ macro_rules! uuid_id {
 
 uuid_id!(WaveId);
 uuid_id!(TraceId);
-uuid_id!(TaskCreateRequestId);
 uuid_id!(LfProcessId);
 uuid_id!(AgentProcessId);
 uuid_id!(SteerId);

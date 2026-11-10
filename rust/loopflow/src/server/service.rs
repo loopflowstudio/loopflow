@@ -13,11 +13,13 @@ use fs2::FileExt;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Notify, Semaphore};
+use tokio::sync::{mpsc, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
+use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
 use super::remote::Control;
+use super::subscriptions::{Member, Subscriptions};
 use super::ticket::{Admission, Purpose, Tickets};
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
@@ -25,7 +27,7 @@ use super::wire::{
     MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
 use crate::engine::{Error, ErrorCode};
-use crate::lf::commands::{read::Read, subscribe::Subscription, write::Write};
+use crate::lf::commands::read::Read;
 
 /// How long a connection has to send its first message.
 pub(super) const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -35,13 +37,10 @@ const SEND: Duration = Duration::from_secs(5);
 const BULK: Duration = Duration::from_secs(120);
 /// Answers waiting for one connection's socket.
 const QUEUE: usize = 64;
-/// Checkpoints one subscription may have waiting.
-const CHECKPOINTS: usize = 64;
 /// How long the listener rests after `accept` fails, as it does out of descriptors.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
 type Lines = Framed<UnixStream, LinesCodec>;
-type Outgoing = mpsc::Sender<(tokio::task::Id, ServerMessage)>;
 
 /// A connection as its carrier delimits it: one protocol message per item.
 pub(super) trait Carrier:
@@ -58,14 +57,21 @@ impl Carrier for Lines {
 }
 
 /// Welcomed connections by client ID, as `lf server status` lists them.
-pub(super) type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
+pub(super) type Clients = Arc<Mutex<HashMap<String, ClientState>>>;
 
-/// A welcomed connection's row in `lf server status`, removed when the
-/// connection ends.
+pub(super) struct ClientState {
+    row: ConnectedClient,
+    outbox: Outbox,
+    open: Arc<Semaphore>,
+}
+
+/// A welcomed connection's row, removed when the connection ends.
 pub(super) struct Listed {
     clients: Clients,
     id: String,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    outbox: Outbox,
+    open: Arc<Semaphore>,
 }
 
 impl Listed {
@@ -73,6 +79,8 @@ impl Listed {
         clients: &Clients,
         client: ClientIdentity,
         permit: tokio::sync::OwnedSemaphorePermit,
+        outbox: Outbox,
+        open: Arc<Semaphore>,
     ) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let connected_at = time::OffsetDateTime::now_utc()
@@ -80,23 +88,31 @@ impl Listed {
             .expect("the current time formats as RFC 3339");
         lock(clients).insert(
             id.clone(),
-            ConnectedClient {
-                id: id.clone(),
-                client,
-                connected_at,
-                requests: 0,
+            ClientState {
+                row: ConnectedClient {
+                    id: id.clone(),
+                    client,
+                    connected_at,
+                    requests: 0,
+                    open: 0,
+                    retained_bytes: 0,
+                },
+                outbox: outbox.clone(),
+                open: open.clone(),
             },
         );
         Self {
             clients: clients.clone(),
             id,
             _permit: permit,
+            outbox,
+            open,
         }
     }
 
     fn requested(&self) {
         if let Some(row) = lock(&self.clients).get_mut(&self.id) {
-            row.requests += 1;
+            row.row.requests += 1;
         }
     }
 }
@@ -107,18 +123,27 @@ impl Drop for Listed {
     }
 }
 
-fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(super) fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     shared.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 /// Oldest connection first.
 fn connected(clients: &Clients) -> Vec<ConnectedClient> {
-    let mut rows: Vec<_> = lock(clients).values().cloned().collect();
+    let mut rows: Vec<_> = lock(clients)
+        .values()
+        .map(|state| {
+            let mut row = state.row.clone();
+            row.open = MAX_OPEN - state.open.available_permits();
+            row.retained_bytes = state.outbox.retained();
+            row
+        })
+        .collect();
     rows.sort_by(|a, b| (&a.connected_at, &a.id).cmp(&(&b.connected_at, &b.id)));
     rows
 }
 
 pub(super) async fn run() -> Result<()> {
+    let _observations = crate::observe::Cache::shared();
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -147,6 +172,7 @@ pub(super) async fn run() -> Result<()> {
     // One ticket store: a terminal or bulk connection on either carrier
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
+    let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),
@@ -156,14 +182,17 @@ pub(super) async fn run() -> Result<()> {
         slots.clone(),
         clients.clone(),
         tickets.clone(),
+        subscriptions.clone(),
     );
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
-        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets) => result,
+        _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
+        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions) => result,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn local(
     listener: UnixListener,
     instance: Arc<str>,
@@ -172,6 +201,7 @@ async fn local(
     clients: Clients,
     remote_control: mpsc::Sender<Control>,
     tickets: Arc<Tickets>,
+    subscriptions: Arc<Subscriptions>,
 ) -> Result<()> {
     loop {
         let (socket, _) = match listener.accept().await {
@@ -202,6 +232,7 @@ async fn local(
         let clients = clients.clone();
         let remote_control = remote_control.clone();
         let tickets = tickets.clone();
+        let subscriptions = subscriptions.clone();
         tokio::spawn(async move {
             if let Err(error) = connection(
                 socket,
@@ -211,6 +242,7 @@ async fn local(
                 Some(remote_control),
                 tickets,
                 &slots,
+                &subscriptions,
             )
             .await
             {
@@ -222,6 +254,7 @@ async fn local(
 
 /// Local connections may configure mobile access; `remote_control` is absent
 /// on the remote carrier.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn connection(
     mut socket: UnixStream,
     instance: &str,
@@ -230,6 +263,7 @@ pub(super) async fn connection(
     remote_control: Option<mpsc::Sender<Control>>,
     tickets: Arc<Tickets>,
     slots: &Arc<Semaphore>,
+    subscriptions: &Arc<Subscriptions>,
 ) -> Result<()> {
     let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
         .await
@@ -263,7 +297,7 @@ pub(super) async fn connection(
             drain(&mut socket).await;
             Ok(())
         }
-        Greeting::Session(listed) => {
+        Greeting::Session(listed, queue) => {
             session(
                 &mut lines,
                 instance.into(),
@@ -271,6 +305,8 @@ pub(super) async fn connection(
                 remote_control,
                 Admission::Local,
                 tickets,
+                subscriptions,
+                queue,
             )
             .await
         }
@@ -286,7 +322,7 @@ pub(super) async fn connection(
 /// What a connection's first message made it.
 pub(super) enum Greeting {
     /// `welcome` was sent; the session follows for this listed client.
-    Session(Listed),
+    Session(Listed, mpsc::Receiver<super::outbox::Frame>),
     /// A ticket to redeem; `admitted` or an error follows.
     Ticket(String),
     /// The connection's last message was sent.
@@ -372,7 +408,14 @@ pub(super) async fn welcome<C: Carrier>(
         .await?;
         return Ok(Greeting::Ended);
     };
-    let listed = Listed::new(clients, hello.client, permit);
+    let (outbox, queue) = Outbox::new();
+    let listed = Listed::new(
+        clients,
+        hello.client,
+        permit,
+        outbox,
+        Arc::new(Semaphore::new(MAX_OPEN)),
+    );
     tracing::debug!(%instance, client = %listed.id, revision, "Server connection welcomed");
     // A Machine registry that is unavailable or uninitialized leaves `machine`
     // null; file settings stay reachable through the same connection.
@@ -401,11 +444,13 @@ pub(super) async fn welcome<C: Carrier>(
             limits: Limits {
                 max_message: MAX_MESSAGE,
                 max_connections: MAX_CONNECTIONS,
+                max_open: MAX_OPEN,
+                max_retained_bytes: MAX_RETAINED,
             },
         }),
     )
     .await?;
-    Ok(Greeting::Session(listed))
+    Ok(Greeting::Session(listed, queue))
 }
 
 /// The newest revision both sides speak.
@@ -440,7 +485,7 @@ async fn refuse_revision_one(mut socket: UnixStream, instance: &str) -> Result<(
 /// A request's task and, for a subscription, where its checkpoints go.
 struct Inflight {
     task: AbortHandle,
-    checkpoints: Option<mpsc::Sender<u64>>,
+    checkpoints: Option<Member>,
 }
 
 /// What a request or subscription asks the session to start.
@@ -452,6 +497,7 @@ enum Start {
 /// Requests until the client closes. Terminal bytes and messages over the
 /// control limit never travel here: `session.attach` and `request.upload`
 /// answer with tickets for connections of their own.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn session<C: Carrier>(
     lines: &mut C,
     instance: Arc<str>,
@@ -459,16 +505,21 @@ pub(super) async fn session<C: Carrier>(
     remote_control: Option<mpsc::Sender<Control>>,
     admission: Admission,
     tickets: Arc<Tickets>,
+    subscriptions: &Arc<Subscriptions>,
+    mut queue: mpsc::Receiver<super::outbox::Frame>,
 ) -> Result<()> {
-    let (outgoing, mut queue) = mpsc::channel(QUEUE);
+    let outgoing = listed.outbox.clone();
+    let open = listed.open.clone();
+    let writes = Arc::new(Semaphore::new(MAX_WRITES));
+    let mut event_seq = 0u64;
     // Requests that arrived on a ticketed connection join this session's.
-    let (uploads, mut uploaded) = mpsc::channel::<ClientMessage>(QUEUE);
+    let (uploads, mut uploaded) = mpsc::channel::<(ClientMessage, Arc<Reservation>)>(QUEUE);
     // Dropping the set aborts every answer still pending; admitted blocking
     // work finishes on its worker. IDs stay reserved until final delivery.
     let mut tasks: JoinSet<()> = JoinSet::new();
     let mut inflight: HashMap<String, Inflight> = HashMap::new();
     loop {
-        let message = tokio::select! {
+        let (message, mut uploaded_reservation) = tokio::select! {
             incoming = lines.next() => {
                 let Some(line) = incoming else { return Ok(()) };
                 let line = line.map_err(Into::into)?;
@@ -480,7 +531,7 @@ pub(super) async fn session<C: Carrier>(
                     return Ok(());
                 }
                 match serde_json::from_str::<ClientMessage>(&line) {
-                    Ok(message) => message,
+                    Ok(message) => (message, None),
                     Err(parse) => match refused_operation(&line) {
                         // A well-formed request this build cannot run fails alone,
                         // so a newer client keeps its other requests and subscriptions.
@@ -496,28 +547,16 @@ pub(super) async fn session<C: Carrier>(
                     },
                 }
             }
-            Some(message) = uploaded.recv() => message,
-            Some((task, message)) = queue.recv() => {
-                let id = match &message {
-                    ServerMessage::Response { id, .. }
-                    | ServerMessage::Reading { id, .. }
-                    | ServerMessage::Ended { id }
-                    | ServerMessage::Error { id: Some(id), .. } => id,
-                    _ => unreachable!("workers send only request or subscription messages"),
-                };
-                // Cancellation may have discarded this answer or reused its ID.
-                let Some(entry) = inflight.get(id).filter(|entry| entry.task.id() == task) else {
-                    continue;
-                };
-                let ends = matches!(message, ServerMessage::Error { .. } | ServerMessage::Ended { .. })
-                    || (matches!(message, ServerMessage::Response { .. }) && entry.checkpoints.is_none());
-                if ends {
-                    // The client may reuse this ID as soon as it sees the answer.
-                    inflight.remove(id);
-                }
-                deliver_or_spill(lines, message, &admission, &tickets).await?;
+            Some((message, reservation)) = uploaded.recv() => (message, Some(reservation)),
+            Some(frame) = queue.recv() => {
+                let Some(entry) = inflight.get(&frame.id).filter(|entry| Some(entry.task.id()) == frame.task) else { continue; };
+                let complete = frame.complete || (frame.response && entry.checkpoints.is_none());
+                let line = frame.payload.into_line(&mut event_seq)?;
+                deliver_or_spill(lines, &frame.id, line, &admission, &tickets, frame.reservation).await?;
+                let _ = frame.delivered.send(());
+                if complete { inflight.remove(&frame.id); }
                 continue;
-            }
+            },
             Some(finished) = tasks.join_next() => {
                 if let Err(join) = finished {
                     if !join.is_cancelled() {
@@ -545,22 +584,7 @@ pub(super) async fn session<C: Carrier>(
                     .and_then(|entry| entry.checkpoints.as_ref())
                 {
                     Some(checkpoints) => {
-                        if checkpoints.try_send(checkpoint).is_err() {
-                            // Ending the subscription tells the client to reopen it
-                            // for a complete reading rather than drop a checkpoint.
-                            if let Some(entry) = inflight.remove(&id) {
-                                entry.task.abort();
-                            }
-                            send(
-                                lines,
-                                &error(
-                                    Some(id),
-                                    ErrorCode::Busy,
-                                    "subscription fell behind its checkpoints; subscribe again",
-                                ),
-                            )
-                            .await?;
-                        }
+                        checkpoints.checkpoint(checkpoint);
                     }
                     None => {
                         send(
@@ -617,6 +641,14 @@ pub(super) async fn session<C: Carrier>(
             .await?;
             continue;
         }
+        if inflight.len() >= MAX_OPEN {
+            send(lines, &busy(&id, "open", MAX_OPEN)).await?;
+            continue;
+        }
+        let Ok(slot) = open.clone().try_acquire_owned() else {
+            send(lines, &busy(&id, "open", MAX_OPEN)).await?;
+            continue;
+        };
         let entry = match start {
             Start::Request(ref operation, Some(_)) if !matches!(operation, Operation::Read(_)) => {
                 send(
@@ -682,35 +714,82 @@ pub(super) async fn session<C: Carrier>(
                     .await?;
                     continue;
                 }
-                let ticket = tickets.issue(admission.clone(), Purpose::Upload(uploads.clone()));
+                let Some(reservation) = outgoing.reserve() else {
+                    send(lines, &busy(&id, "retained_bytes", MAX_RETAINED)).await?;
+                    continue;
+                };
+                let ticket = tickets.issue(
+                    admission.clone(),
+                    Purpose::Upload {
+                        requests: uploads.clone(),
+                        bytes,
+                        reservation,
+                    },
+                );
                 send(lines, &ticket_response(id, ticket)).await?;
                 continue;
             }
             Start::Subscribe(query, select, resume) => {
-                let (checkpoints, inbox) = mpsc::channel(CHECKPOINTS);
-                let task = tasks.spawn(subscribing(
-                    id.clone(),
-                    query,
-                    select,
-                    resume,
-                    instance.clone(),
-                    outgoing.clone(),
-                    inbox,
-                ));
+                let (member, delivery) =
+                    match subscriptions.join(&id, query.clone(), select.clone()) {
+                        Ok(joined) => joined,
+                        Err(failure) => {
+                            send(lines, &ServerMessage::error(Some(id), unavailable(failure)))
+                                .await?;
+                            continue;
+                        }
+                    };
+                let scope = serde_json::to_vec(&(&*instance, &query, &select))?;
+                let (delivery_id, output) = (id.clone(), outgoing.clone());
+                let task = tasks.spawn(async move {
+                    let _slot = slot;
+                    delivery.run(delivery_id, output, scope, resume).await;
+                });
                 Inflight {
                     task,
-                    checkpoints: Some(checkpoints),
+                    checkpoints: Some(member),
                 }
             }
             Start::Request(operation, select) => {
-                let task = tasks.spawn(request(
+                let write = if matches!(operation, Operation::Write(_)) {
+                    let Ok(write) = writes.clone().try_acquire_owned() else {
+                        send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
+                        continue;
+                    };
+                    Some(write)
+                } else {
+                    None
+                };
+                let (request_id, instance, outgoing, remote_control) = (
                     id.clone(),
-                    operation,
-                    select,
                     instance.clone(),
                     outgoing.clone(),
                     remote_control.clone(),
-                ));
+                );
+                let uploaded_reservation = uploaded_reservation.take();
+                let task = tasks.spawn(async move {
+                    // Keep admission bounded while waiting for producer headroom.
+                    // Cancellation before capacity is available performs no work.
+                    let slots = (slot, write);
+                    let reservation = match uploaded_reservation {
+                        Some(reservation) => reservation,
+                        None => match outgoing.wait().await {
+                            Ok(reservation) => reservation,
+                            Err(_) => return,
+                        },
+                    };
+                    reservation.hold(slots);
+                    request(
+                        request_id,
+                        operation,
+                        select,
+                        instance,
+                        outgoing,
+                        reservation,
+                        remote_control,
+                    )
+                    .await;
+                });
                 Inflight {
                     task,
                     checkpoints: None,
@@ -775,25 +854,37 @@ pub(super) async fn ticketed<C: Carrier>(
             .await?;
             Ok(Some(destination))
         }
-        Purpose::Download(message) => {
+        Purpose::Download {
+            message,
+            reservation,
+        } => {
             send(carrier, &ServerMessage::Admitted).await?;
             tokio::time::timeout(BULK, carrier.send(message))
                 .await
                 .context("client did not take the bulk message in time")?
                 .map_err(Into::into)?;
+            drop(reservation);
             Ok(None)
         }
-        Purpose::Upload(requests) => {
+        Purpose::Upload {
+            requests,
+            bytes,
+            reservation,
+        } => {
             send(carrier, &ServerMessage::Admitted).await?;
             let line = tokio::time::timeout(BULK, carrier.next())
                 .await
                 .context("no uploaded request in time")?
                 .context("closed before its uploaded request")?
                 .map_err(Into::into)?;
+            anyhow::ensure!(
+                line.len() <= bytes,
+                "uploaded request exceeds its reserved size"
+            );
             match serde_json::from_str::<ClientMessage>(&line) {
                 Ok(message @ ClientMessage::Request { .. }) => {
                     // The issuing session may have ended; its answer then has no reader.
-                    let _ = requests.send(message).await;
+                    let _ = requests.send((message, reservation)).await;
                 }
                 Ok(_) => {
                     send(
@@ -815,39 +906,36 @@ pub(super) async fn ticketed<C: Carrier>(
     }
 }
 
-/// Send an answer on the control connection, or a ticket for it when it
-/// exceeds the control limit, so other readings never wait behind it.
+/// Large snapshots use a separate connection; keep their memory charged until delivered.
 async fn deliver_or_spill<C: Carrier>(
     carrier: &mut C,
-    message: ServerMessage,
+    id: &str,
+    text: String,
     admission: &Admission,
     tickets: &Tickets,
+    reservation: Arc<Reservation>,
 ) -> Result<()> {
-    let text = line(&message);
     if text.len() <= MAX_MESSAGE {
         return send_line(carrier, text).await;
     }
-    let id = match message {
-        ServerMessage::Response { id, .. } | ServerMessage::Reading { id, .. } => id,
-        other => anyhow::bail!("connection message exceeds {MAX_MESSAGE} bytes: {other:?}"),
-    };
-    if text.len() > MAX_BULK {
-        return send(
-            carrier,
-            &ServerMessage::error(
-                Some(id),
-                Error::new(
-                    ErrorCode::Unavailable,
-                    format!("answer exceeds {MAX_BULK} bytes"),
-                )
-                .with(serde_json::json!({ "max_bulk": MAX_BULK })),
-            ),
-        )
-        .await;
-    }
+    anyhow::ensure!(text.len() <= MAX_BULK, "answer exceeds max_bulk");
     let bytes = text.len();
-    let ticket = tickets.issue(admission.clone(), Purpose::Download(text));
-    send(carrier, &ServerMessage::Bulk { id, ticket, bytes }).await
+    let ticket = tickets.issue(
+        admission.clone(),
+        Purpose::Download {
+            message: text,
+            reservation,
+        },
+    );
+    send(
+        carrier,
+        &ServerMessage::Bulk {
+            id: id.into(),
+            ticket,
+            bytes,
+        },
+    )
+    .await
 }
 
 /// The owner `session.attach` reaches: the Session's current owner Process,
@@ -958,7 +1046,7 @@ async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
 }
 
 /// A read that failed without naming a code depends on something unavailable.
-fn unavailable(error: impl Into<anyhow::Error>) -> Error {
+pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
@@ -967,14 +1055,24 @@ async fn request(
     operation: Operation,
     select: Option<Vec<String>>,
     instance: Arc<str>,
-    outgoing: Outgoing,
+    outgoing: Outbox,
+    reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
+    let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
-    let result = operate(operation, &id, &instance, &trace_id, remote_control).await;
+    let result = operate(
+        operation,
+        &id,
+        &instance,
+        &trace_id,
+        reservation.clone(),
+        remote_control,
+    )
+    .await;
     tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
@@ -991,7 +1089,24 @@ async fn request(
         }
     };
     // A closed connection drops the answer; the effect stands.
-    let _ = deliver(&outgoing, message).await;
+    if let Err(failure) = outgoing.deliver(message, reservation).await {
+        let _ = deliver(
+            &outgoing,
+            ServerMessage::error(
+                Some(id.clone()),
+                Error::new(
+                    if write {
+                        ErrorCode::OutcomeUnknown
+                    } else {
+                        ErrorCode::Busy
+                    },
+                    failure.to_string(),
+                )
+                .with(serde_json::json!({"limit":"retained_bytes"})),
+            ),
+        )
+        .await;
+    }
     #[cfg(test)]
     if let Some(completion) = completion {
         let _ = completion.await;
@@ -1003,6 +1118,7 @@ async fn operate(
     id: &str,
     instance: &str,
     trace_id: &crate::id::TraceId,
+    reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
 ) -> Result<serde_json::Value, Error> {
     match operation {
@@ -1027,26 +1143,24 @@ async fn operate(
                 .map_err(|message| Error::new(ErrorCode::Unavailable, message))?;
             Ok(serde_json::json!({ "configuration": configuration }))
         }
-        Operation::Read(query) => {
-            tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| query.read()))
-                .await
-                .map_err(unavailable)?
-                .map_err(unavailable)
-        }
+
+        Operation::Read(query) => tokio::task::spawn_blocking(move || {
+            let _held = reservation;
+            crate::journal::request::isolate(|| {
+                crate::observe::Cache::shared().capture(|| query.read()).0
+            })
+        })
+        .await
+        .map_err(unavailable)?
+        .map_err(unavailable),
         Operation::Write(change) => {
-            if let Some(argv) = change.delegated() {
-                let recovery = change_recovery(&change);
-                return delegate(argv, &change, id, instance, trace_id)
-                    .await
-                    .map_err(|error| {
-                        Error::new(ErrorCode::OutcomeUnknown, format!("{error:#}; {recovery}"))
-                    });
-            }
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
                 // Setting values and authored text stay out of request telemetry.
                 for field in [
                     "content",
+                    "request",
+                    "title",
                     "notes",
                     "plan",
                     "layout",
@@ -1058,7 +1172,8 @@ async fn operate(
                 }
             }
             effect(target, id, instance, trace_id, move || {
-                crate::lf::commands::account::served(|| change.run())
+                let _held = reservation;
+                crate::lf::commands::account::served(|| Ok(serde_json::to_value(change.run()?)?))
             })
             .await
         }
@@ -1088,89 +1203,6 @@ async fn mobile_control(
     Ok(())
 }
 
-fn change_recovery(change: &Write) -> &'static str {
-    if matches!(change, Write::TaskStart { .. }) {
-        "retry with the same creation request ID to recover its result"
-    } else {
-        "inspect Session state before retrying"
-    }
-}
-
-/// The whole CLI operation in an `lf` child: Graph launch and Session owner
-/// startup stay with their existing owners, never with the server process.
-/// Its `--json` output is the value; a failed exit is its diagnostics.
-async fn delegate(
-    argv: Vec<String>,
-    change: &Write,
-    id: &str,
-    instance: &str,
-    trace_id: &crate::id::TraceId,
-) -> Result<serde_json::Value> {
-    let executable = crate::os_process::resolve_lf_binary()?;
-    let mut command = tokio::process::Command::new(&executable);
-    // A service has no caller Session/Task. Never lend its launcher's identity
-    // to requests, or change process-global environment while serving clients.
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("LF_") {
-            command.env_remove(key);
-        }
-    }
-    command.env("LF_TRACE_ID", trace_id.as_str());
-    command.env("LF_HOME", crate::store::lf_home_dir());
-    command.env("LF_BIN", executable);
-    command
-        .args(argv)
-        .current_dir(change.directory())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = command.spawn()?;
-    tracing::info!(request = %id, %instance, pid = child.id(), %trace_id, "Server command started");
-    let stdout = child.stdout.take().expect("stdout is piped");
-    let stderr = child.stderr.take().expect("stderr is piped");
-    // The child is supervised on its own task: a connection that ends drops
-    // the answer, never the command's pipes or its exit record.
-    let (request_id, instance_name, trace) = (id.to_owned(), instance.to_owned(), trace_id.clone());
-    let (output, errors, status) = tokio::spawn(async move {
-        let (output, errors, status) = tokio::join!(
-            read_command_output(stdout),
-            read_command_output(stderr),
-            child.wait()
-        );
-        let code = status.as_ref().map(|status| status.code().unwrap_or(1));
-        tracing::info!(request = %request_id, instance = %instance_name, ?code, trace_id = %trace, "Server command exited");
-        (output, errors, status)
-    })
-    .await?;
-    let status = status?;
-    let errors = errors?;
-    for line in errors.lines() {
-        tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
-    }
-    anyhow::ensure!(
-        status.success(),
-        "{}",
-        match errors.trim() {
-            "" => format!("lf exited with {status}"),
-            said => said.to_owned(),
-        }
-    );
-    Ok(serde_json::from_str(&output?)?)
-}
-
-async fn read_command_output(stream: impl tokio::io::AsyncRead + Unpin) -> Result<String> {
-    let mut bytes = Vec::new();
-    stream
-        .take((MAX_BULK / 2) as u64)
-        .read_to_end(&mut bytes)
-        .await?;
-    anyhow::ensure!(
-        bytes.len() < MAX_BULK / 2,
-        "command output exceeded its limit"
-    );
-    Ok(String::from_utf8(bytes)?)
-}
-
 /// Run a write on a request worker under `trace_id`. Once admitted,
 /// disconnection releases the client; the effect finishes without replay.
 /// Diagnostics the shared functions print go to the request's log.
@@ -1197,120 +1229,17 @@ async fn effect(
     .map_err(|join| Error::outcome_unknown(&join.into()))?
 }
 
-async fn subscribing(
-    id: String,
-    query: Read,
-    select: Option<Vec<String>>,
-    resume: Option<String>,
-    instance: Arc<str>,
-    outgoing: Outgoing,
-    checkpoints: mpsc::Receiver<u64>,
-) {
-    if let Err(failure) = subscribe(
-        &id,
-        query,
-        select,
-        resume,
-        &instance,
-        &outgoing,
-        checkpoints,
+fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
+    ServerMessage::error(
+        Some(id.into()),
+        Error::new(ErrorCode::Busy, "server capacity reached; retry shortly")
+            .with(serde_json::json!({ "limit": limit, "max": max })),
     )
-    .await
-    {
-        // The error ends the subscription for the client; a subscription that
-        // started sent its failure as its last reading.
-        let _ = deliver(
-            &outgoing,
-            ServerMessage::error(Some(id), unavailable(failure)),
-        )
-        .await;
-    }
-}
-
-/// The shared subscription owns a blocking runtime, which cannot be dropped on an
-/// async worker. However its task ends, the subscription leaves through a blocking one.
-struct Held(Option<Arc<Subscription>>);
-
-impl std::ops::Deref for Held {
-    type Target = Arc<Subscription>;
-
-    fn deref(&self) -> &Arc<Subscription> {
-        self.0
-            .as_ref()
-            .expect("the subscription is held until drop")
-    }
-}
-
-impl Drop for Held {
-    fn drop(&mut self) {
-        let subscription = self.0.take();
-        tokio::task::spawn_blocking(move || drop(subscription));
-    }
-}
-
-async fn subscribe(
-    id: &str,
-    query: Read,
-    select: Option<Vec<String>>,
-    mut resume: Option<String>,
-    instance: &str,
-    outgoing: &Outgoing,
-    mut checkpoints: mpsc::Receiver<u64>,
-) -> Result<()> {
-    let notify = Arc::new(Notify::new());
-    let wake = notify.clone();
-    let ends = query.clone();
-    let scope = serde_json::to_vec(&(instance, &query, &select))?;
-    let subscription = Held(Some(Arc::new(
-        tokio::task::spawn_blocking(move || {
-            crate::journal::request::isolate(|| query.subscribe(select, move || wake.notify_one()))
-        })
-        .await??,
-    )));
-    deliver(
-        outgoing,
-        ServerMessage::Response {
-            id: id.into(),
-            trace_id: crate::id::TraceId::default(),
-            result: serde_json::Value::Null,
-        },
-    )
-    .await?;
-    loop {
-        tokio::select! {
-            checkpoint = checkpoints.recv() => {
-                let Some(checkpoint) = checkpoint else { return Ok(()) };
-                subscription.checkpoint(checkpoint);
-            }
-            () = notify.notified() => {
-                let pull = Arc::clone(&subscription);
-                let frame = tokio::task::spawn_blocking(move || crate::journal::request::isolate(|| pull.pull())).await?;
-                let mut reason = None;
-                if let Some(frame) = frame {
-                    let frame: serde_json::Value = serde_json::from_slice(&frame)?;
-                    reason = frame["unavailable"].as_str().map(str::to_owned);
-                    let last = ends.ends_after(&frame["body"]);
-                    let checkpoint = reading_checkpoint(&scope, &frame)?;
-                    let unchanged = resume.take().as_ref() == Some(&checkpoint)
-                        && frame["answers"].is_null() && reason.is_none();
-                    if !unchanged {
-                        deliver(outgoing, ServerMessage::Reading { id: id.into(), checkpoint, frame }).await?;
-                    }
-                    if last {
-                        return deliver(outgoing, ServerMessage::Ended { id: id.into() }).await;
-                    }
-                }
-                if subscription.ended() {
-                    anyhow::bail!("{}", reason.unwrap_or_else(|| "the subscription ended".into()));
-                }
-            }
-        }
-    }
 }
 
 /// A checkpoint identifies the selected reading in this server incarnation.
 /// Recomputing it needs no retained payloads or disconnected subscriptions.
-fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
+pub(super) fn reading_checkpoint(scope: &[u8], frame: &serde_json::Value) -> Result<String> {
     use sha2::{Digest, Sha256};
     let reading =
         crate::lf::commands::subscribe::identity(frame["unavailable"].as_str(), frame.get("body"))?;
@@ -1329,14 +1258,11 @@ fn line(message: &ServerMessage) -> String {
     serde_json::to_string(message).expect("server messages serialize")
 }
 
-async fn deliver(outgoing: &Outgoing, message: ServerMessage) -> Result<()> {
-    outgoing
-        .send((tokio::task::id(), message))
-        .await
-        .map_err(|_| anyhow::anyhow!("connection closed"))
+pub(super) async fn deliver(outgoing: &Outbox, message: ServerMessage) -> Result<()> {
+    outgoing.deliver(message, outgoing.wait().await?).await
 }
 
-pub(super) async fn send<C: Carrier>(carrier: &mut C, message: &ServerMessage) -> Result<()> {
+async fn send<C: Carrier>(carrier: &mut C, message: &ServerMessage) -> Result<()> {
     let line = line(message);
     anyhow::ensure!(
         line.len() <= MAX_MESSAGE,
@@ -1372,6 +1298,7 @@ mod tests {
     use crate::engine::ErrorCode;
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
+    use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
     use crate::server::wire::MAX_CONNECTIONS;
     use crate::server::wire::{
@@ -1406,6 +1333,19 @@ mod tests {
 
         /// A connection listed in `clients` whose tickets another connection can redeem.
         fn connect_with(clients: &Clients, tickets: Arc<Tickets>) -> Self {
+            Self::connect_shared(clients, tickets, &Arc::new(Subscriptions::default()))
+        }
+
+        fn connect_to(clients: &Clients) -> Self {
+            Self::connect_with(clients, Default::default())
+        }
+
+        fn connect_shared(
+            clients: &Clients,
+            tickets: Arc<Tickets>,
+            subscriptions: &Arc<Subscriptions>,
+        ) -> Self {
+            let subscriptions = subscriptions.clone();
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
             let server = tokio::spawn(async move {
@@ -1417,6 +1357,7 @@ mod tests {
                     None,
                     tickets,
                     &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                    &subscriptions,
                 )
                 .await
             });
@@ -1557,13 +1498,16 @@ mod tests {
             let value = serde_json::Value::String("x".repeat(2 * MAX_MESSAGE));
             deliver_or_spill(
                 &mut carrier,
-                ServerMessage::Response {
+                "big",
+                serde_json::to_string(&ServerMessage::Response {
                     id: "big".into(),
                     trace_id: crate::id::TraceId::default(),
                     result: value.clone(),
-                },
+                })
+                .unwrap(),
                 &Admission::Local,
                 &tickets,
+                super::Outbox::new().0.reserve().unwrap(),
             )
             .await
             .unwrap();
@@ -1793,6 +1737,7 @@ mod tests {
                 None,
                 Default::default(),
                 &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                &Arc::new(Subscriptions::default()),
             )
             .await
         });
@@ -2266,4 +2211,615 @@ mod tests {
         assert_eq!(data.unwrap()["max_message"], MAX_MESSAGE);
         client.ended().await;
     }
+
+    #[test]
+    fn typed_events_share_connection_order_survive_selection_and_stop_on_cancel() {
+        with_empty_home(async {
+            use crate::durable::{Author, WorkRef};
+            use crate::work::task::TaskId;
+            let path = crate::store::database_path_from_env().unwrap();
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute_batch(include_str!(
+                    "../../tests/fixtures/saved_selection_work.sql"
+                ))
+                .unwrap();
+            rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute_batch(
+                    "UPDATE tasks SET project_id=NULL;
+                 INSERT OR IGNORE INTO machines(id,is_local,created_at,observed_at)
+                 VALUES('home_11111111111111111111111111111111',1,1,1);",
+                )
+                .unwrap();
+            let task = TaskId::parse("task_11111111111111111111111111111111").unwrap();
+            let work = WorkRef::Task(task);
+            store
+                .save_steer(&work, &Author::User, "historical")
+                .unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            for id in ["a", "b"] {
+                client
+                    .send(&ClientMessage::Subscribe {
+                        id: id.into(),
+                        operation: Read::TaskWait {
+                            issue: "FIX-1".into(),
+                            until: crate::ops::task::TaskWaitUntil::Terminal,
+                        },
+                        select: Some(vec!["reached".into()]),
+                        resume: None,
+                    })
+                    .await;
+                assert!(matches!(
+                    client.receive().await.unwrap(),
+                    ServerMessage::Response { .. }
+                ));
+                let ServerMessage::Reading { frame, .. } = client.receive().await.unwrap() else {
+                    panic!("missing baseline")
+                };
+                assert_eq!(
+                    frame["body"],
+                    serde_json::json!({"reached":false}),
+                    "{frame}"
+                );
+            }
+            store
+                .save_steer(&work, &Author::User, "first occurrence")
+                .unwrap();
+            for id in ["a", "b"] {
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: id.into(),
+                        checkpoint: 1,
+                    })
+                    .await;
+            }
+            let mut ids = Vec::new();
+            while ids.len() < 2 {
+                let message = tokio::time::timeout(Duration::from_secs(10), client.receive())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                match message {
+                    ServerMessage::Event {
+                        id,
+                        seq,
+                        event: crate::server::wire::SubscriptionEvent::TaskSteer { steer, .. },
+                    } => {
+                        assert_eq!(seq, ids.len() as u64 + 1);
+                        assert_eq!(steer.text, "first occurrence");
+                        ids.push(id);
+                    }
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            ids.sort();
+            assert_eq!(ids, ["a", "b"]);
+            client.send(&ClientMessage::Cancel { id: "a".into() }).await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "a".into(),
+                    checkpoint: 2,
+                })
+                .await;
+            loop {
+                match client.receive().await.unwrap() {
+                    ServerMessage::Error {
+                        id: Some(id),
+                        code: ErrorCode::NotFound,
+                        ..
+                    } if id == "a" => break,
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            store
+                .save_steer(&work, &Author::User, "after cancellation")
+                .unwrap();
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "b".into(),
+                    checkpoint: 2,
+                })
+                .await;
+            loop {
+                match tokio::time::timeout(Duration::from_secs(10), client.receive())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                {
+                    ServerMessage::Event { id, seq, .. } => {
+                        assert_eq!(id, "b");
+                        assert_eq!(seq, 3);
+                        break;
+                    }
+                    ServerMessage::Reading { .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            client.send(&ClientMessage::Cancel { id: "b".into() }).await;
+            client
+                .send(&ClientMessage::Request {
+                    id: "sibling".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "sibling")
+            );
+            drop(client.writer);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn flooded_requests_and_subscriptions_refuse_by_id_and_recover_checkpoints() {
+        with_empty_home(async {
+            let clients = Clients::default();
+            let mut client = Client::connect_to(&clients);
+            assert!(matches!(
+                client.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            let writer = tokio::spawn(async move {
+                for n in 0..1300 {
+                    let message = if n < 1000 {
+                        ClientMessage::Request {
+                            id: n.to_string(),
+                            operation: catalog(),
+                            select: None,
+                        }
+                    } else {
+                        ClientMessage::Subscribe {
+                            id: n.to_string(),
+                            operation: Read::ProcessList,
+                            select: None,
+                            resume: None,
+                        }
+                    };
+                    let mut line = serde_json::to_vec(&message).unwrap();
+                    line.push(b'\n');
+                    client.writer.write_all(&line).await.unwrap();
+                }
+                client.writer
+            });
+            let mut answered = std::collections::HashSet::new();
+            let mut subscription = None;
+            let mut refused = 0;
+            while answered.len() < 1300 {
+                for reading in super::connected(&clients) {
+                    assert!(reading.open <= super::MAX_OPEN);
+                    assert!(reading.retained_bytes <= super::MAX_RETAINED);
+                }
+                let mut line = String::new();
+                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                match serde_json::from_str::<ServerMessage>(&line).unwrap() {
+                    ServerMessage::Response { id, result, .. } => {
+                        if result.is_null() {
+                            subscription = Some(id.clone());
+                        }
+                        assert!(answered.insert(id));
+                    }
+                    ServerMessage::Error {
+                        id: Some(id),
+                        code,
+                        data,
+                        ..
+                    } => {
+                        assert_eq!(code, ErrorCode::Busy);
+                        assert!(matches!(
+                            data.unwrap()["limit"].as_str(),
+                            Some("open" | "retained_bytes")
+                        ));
+                        refused += 1;
+                        assert!(answered.insert(id));
+                    }
+                    ServerMessage::Reading { .. } => {}
+                    message => panic!("unexpected {message:?}"),
+                }
+            }
+            assert!(refused > 0);
+            let mut writer = writer.await.unwrap();
+            let id = subscription.expect("at least one subscription was admitted");
+            let line = serde_json::to_string(&ClientMessage::Checkpoint {
+                id: id.clone(),
+                checkpoint: 42,
+            })
+            .unwrap()
+                + "\n";
+            writer.write_all(line.as_bytes()).await.unwrap();
+            loop {
+                let mut line = String::new();
+                tokio::time::timeout(Duration::from_secs(10), client.reader.read_line(&mut line))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if let ServerMessage::Reading {
+                    id: actual, frame, ..
+                } = serde_json::from_str(&line).unwrap()
+                {
+                    if actual == id && frame["answers"] == 42 {
+                        break;
+                    }
+                }
+            }
+            drop(writer);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn late_checkpoint_preserves_terminal_reading_and_end() {
+        with_empty_home(async {
+            let path =
+                std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            let repo = loopflow_test_support::TestRepo::new();
+            let task = crate::durable::TaskId::new();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: store
+                        .ensure_repository(repo.path().to_str().unwrap())
+                        .unwrap(),
+                    id: task.clone(),
+                    project_id: None,
+                    title: "Completed wait".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    [task.as_str()],
+                )
+                .unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let pause = super::subscription_measurement::pause("terminal", "terminal-delivery");
+            client
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "terminal".into(),
+                    operation: Read::TaskWait {
+                        issue: task.to_string(),
+                        until: crate::ops::task::TaskWaitUntil::Terminal,
+                    },
+                    select: None,
+                })
+                .await;
+            pause.entered.await.unwrap();
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 9,
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "barrier".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            let barrier = client.receive().await.unwrap();
+            pause.release.send(()).unwrap();
+            assert!(
+                matches!(barrier, ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "barrier")
+            );
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "terminal")
+            );
+            let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap() else {
+                panic!("final reading was lost")
+            };
+            assert_eq!(id, "terminal");
+            assert_eq!(frame["body"]["reached"], true);
+            assert!(frame["answers"].is_null());
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Ended { id } if id == "terminal")
+            );
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 10,
+                })
+                .await;
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "terminal")
+            );
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn cancellation_during_setup_and_pull_preserves_sibling_and_reused_id() {
+        for stage in ["setup", "pull"] {
+            with_empty_home(async {
+                let mut client = Client::connect();
+                client.hello(REVISION, REVISION).await;
+                let pause = super::subscription_measurement::pause("slow", stage);
+                client
+                    .send(&ClientMessage::Subscribe {
+                        resume: None,
+                        id: "slow".into(),
+                        operation: Read::ProcessList,
+                        select: None,
+                    })
+                    .await;
+                pause.queued.await.unwrap();
+                pause.entered.await.unwrap();
+                if stage == "pull" {
+                    assert!(
+                        matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "slow")
+                    );
+                }
+                client
+                    .send(&ClientMessage::Subscribe {
+                        resume: None,
+                        id: "peer".into(),
+                        operation: Read::ProcessList,
+                        select: Some(vec!["id".into()]),
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "peer")
+                );
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Reading { id, .. } if id == "peer")
+                );
+                client
+                    .send(&ClientMessage::Cancel { id: "slow".into() })
+                    .await;
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 7,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap()
+                else {
+                    panic!("sibling did not answer")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 7);
+                client
+                    .send(&ClientMessage::Request {
+                        id: "slow".into(),
+                        operation: catalog(),
+                        select: None,
+                    })
+                    .await;
+                assert!(
+                    matches!(client.receive().await.unwrap(), ServerMessage::Response { id, result: serde_json::Value::Array(_), .. } if id == "slow")
+                );
+                pause.release.send(()).unwrap();
+                pause.finished.await.unwrap();
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "peer".into(),
+                        checkpoint: 8,
+                    })
+                    .await;
+                let ServerMessage::Reading { id, frame, .. } = client.receive().await.unwrap()
+                else {
+                    panic!("old work escaped cancellation")
+                };
+                assert_eq!(id, "peer");
+                assert_eq!(frame["answers"], 8);
+                drop(client.writer);
+                drop(client.reader);
+                client.server.await.unwrap().unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn identical_subscriptions_share_one_reader_across_connections() {
+        use crate::performance::subscription_measurement as meter;
+        with_empty_home(async {
+            let registry = Arc::new(Subscriptions::default());
+            let clients = Clients::default();
+            let mut first = Client::connect_shared(&clients, Default::default(), &registry);
+            let mut second = Client::connect_shared(&clients, Default::default(), &registry);
+            first.hello(REVISION, REVISION).await;
+            second.hello(REVISION, REVISION).await;
+            meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+            let before = meter::snapshot();
+            let setup = super::subscription_measurement::pause("shared", "setup");
+            first
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            setup.entered.await.unwrap();
+            first
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "same-socket".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            second
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "shared".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            for client in [&mut first, &mut second] {
+                client
+                    .send(&ClientMessage::Checkpoint {
+                        id: "admission-barrier".into(),
+                        checkpoint: 0,
+                    })
+                    .await;
+                assert!(matches!(
+                    client.receive().await.unwrap(),
+                    ServerMessage::Error {
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+            }
+            setup.release.send(()).unwrap();
+            let mut bodies = Vec::new();
+            for (client, count) in [(&mut first, 4), (&mut second, 2)] {
+                for _ in 0..count {
+                    match client.receive().await.unwrap() {
+                        ServerMessage::Response { .. } => {}
+                        ServerMessage::Reading { frame, .. } => bodies.push(frame),
+                        message => panic!("unexpected {message:?}"),
+                    }
+                }
+            }
+            assert_eq!(bodies.len(), 3);
+            assert!(bodies.iter().all(|body| *body == bodies[0]));
+            let work = meter::snapshot().since(before);
+            meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+            assert_eq!(work.stages["runtime_build"].count, 1);
+            assert_eq!(work.stages["projection"].count, 1);
+            drop(first.writer);
+            first.server.await.unwrap().unwrap();
+            second
+                .send(&ClientMessage::Checkpoint {
+                    id: "shared".into(),
+                    checkpoint: 3,
+                })
+                .await;
+            let ServerMessage::Reading { frame, .. } = second.receive().await.unwrap() else {
+                panic!("sibling lost its reader")
+            };
+            assert_eq!(frame["answers"], 3);
+            drop(second.writer);
+            second.server.await.unwrap().unwrap();
+        });
+    }
+
+    #[test]
+    fn queued_subscription_cancellation_skips_construction() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .max_blocking_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        use crate::performance::subscription_measurement as meter;
+        meter::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let before = meter::snapshot();
+        runtime.block_on(async {
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let mut workers = Vec::new();
+            let mut releases = Vec::new();
+            for _ in 0..2 {
+                let (entered, began) = tokio::sync::oneshot::channel();
+                let (release, wait) = std::sync::mpsc::channel();
+                releases.push(release);
+                workers.push(tokio::task::spawn_blocking(move || {
+                    entered.send(()).unwrap();
+                    wait.recv_timeout(Duration::from_secs(30)).unwrap();
+                }));
+                began.await.unwrap();
+            }
+            let pause = super::subscription_measurement::pause("queued", "setup");
+            client
+                .send(&ClientMessage::Subscribe {
+                    resume: None,
+                    id: "queued".into(),
+                    operation: Read::ProcessList,
+                    select: None,
+                })
+                .await;
+            pause.queued.await.unwrap();
+            client
+                .send(&ClientMessage::Cancel {
+                    id: "queued".into(),
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "queued".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            ));
+            // Wake the canceled job if it runs, then drain everything before the assertion.
+            let _ = pause.release.send(());
+            for release in releases {
+                release.send(()).unwrap();
+            }
+            for worker in workers {
+                worker.await.unwrap();
+            }
+            let _entered = pause.entered.await;
+            pause.finished.await.unwrap();
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
+        drop(runtime);
+        let work = meter::snapshot().since(before);
+        meter::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            work.stages
+                .get("runtime_build")
+                .map_or(0, |count| count.count),
+            0,
+            "canceled queued subscription constructed a runtime"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_overlong_line_ends_the_connection() {
+        let mut client = Client::connect();
+        assert!(matches!(
+            client.hello(REVISION, REVISION).await,
+            ServerMessage::Welcome(_)
+        ));
+        let chunk = vec![b'x'; 1024 * 1024];
+        let writer = tokio::spawn(async move {
+            let mut writer = client.writer;
+            for _ in 0..=MAX_BULK / chunk.len() {
+                if writer.write_all(&chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let mut rest = Vec::new();
+        client.reader.read_to_end(&mut rest).await.unwrap();
+        assert!(rest.is_empty());
+        writer.await.unwrap();
+        assert!(client.server.await.unwrap().is_err());
+    }
 }
+
+#[cfg(test)]
+#[path = "subscription_measurement.rs"]
+pub(super) mod subscription_measurement;

@@ -31,7 +31,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 4
+## Local protocol, revision 5
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -58,7 +58,15 @@ rather than the connection. The root accepts any message either side sends;
 `$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
-on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
+on the wire, and `x-result` beside it names what `response.result` carries.
+For a write, that schema derives from the Rust type the operation returns.
+For example, `task.ship` returns `TaskShip`: its `state` is `shipping`,
+`already_shipping` or `at_end`, with the fields described by that variant.
+`lf --task <issue> ship --json` prints the same result. Use the operation's
+`x-result` to decode it; `response.result` adds no extra result-type tag.
+
+Where a recorded exchange exists, `examples` holds the request's operation and
+`x-result-example` what it answered, from the same fixtures the tests check. A
 subscription frame's `body` refers to `$defs/Untyped`, because its shape is the
 `x-result` of the read that opened it. The serialize contract keeps a nullable
 field required, as both sides send it.
@@ -77,18 +85,18 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":4,"server_revision":4,"min_revision":4,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true}}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":null,"resume":null}
+→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":null,"agent":null,"approve":false},"select":null}
-← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
@@ -102,24 +110,27 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 4 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 5 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
-Revision 3 adds bulk/upload tickets and mobile operations, with 1 MiB control
-messages and 64 MiB ticketed transfers. Revision-2 clients cannot decode `bulk` or `admitted`; they must
-update before connecting. Install the matching Desktop/CLI/server together and
-update the phone app. A revision-4 phone reaching a revision-2 server receives
-the instruction to update the selected installation before any Work request runs.
+Revision 5 combines bulk/upload tickets, mobile access, shared subscription
+readers and typed events. Control messages are limited to 1 MiB; ticketed
+messages retain the shared engine's 32 MiB response limit and 64 MiB per-client
+budget, leaving headroom for other reads during one large transfer. Older
+clients must update. Install the matching Desktop/CLI/server together and
+update the phone app before connecting.
 
 `status` before `hello` is the readiness probe: `status {revision, min_revision,
 instance, executable_sha256, clients}`, then the server closes. `lf server status` and
 installation use it so readiness never opens Work or speaks the full protocol;
 `lf server status` also reports `listening` (a server accepted the connection),
 `revision` and `clients`: each welcomed connection still open, oldest first, as
-`{id, client, connected_at, requests}`, where `client` is the identity its
+`{id, client, connected_at, requests, open, retained_bytes}`, where `client` is the identity its
 `hello` gave and `requests` counts its requests, subscriptions included. The
+`open` and `retained_bytes` fields report current admitted work and retained-byte
+accounting, including pending producers. The
 identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
 installation, an installation check that never applies to a remote client.
 
@@ -143,17 +154,17 @@ repeated `hello`/`status`. A well-formed `request` or `subscribe` whose
 operation this build does not accept fails alone: `invalid` with its own `id`
 and `data.kind`, and the connection stays open, so a newer client loses only
 that request. `data` is structured detail or null. Clients branch
-on `code`; only `outcome_unknown` means the request may have taken effect:
+on `code`; `outcome_unknown` means the request may have taken effect:
 
 | `code` | Meaning | `data` |
 | --- | --- | --- |
 | `incompatible` | No revision in common | `{server: {revision, min_revision}, update}` |
 | `invalid` | Malformed message, an operation this build does not have, or refused arguments, such as subscribing to a read with no subscription | `{kind}` for a refused operation, else null |
 | `not_found` | The named owner, subscription, repository checkout, view member or record does not exist | what was named: `{owner_lf_process_id}`, `{id}`, `{repo_id}`, `{expression}` |
-| `conflict` | The request contradicts current state: a still-unanswered request ID | `{id}` |
+| `conflict` | The request contradicts current state: a still-unanswered transport ID or a creation ID reused with different content | `{id}` or `{request_id}` |
 | `unavailable` | A dependency is missing or failed: the Machine registry, a subscription, a read | `{resource}` when one is named |
-| `outcome_unknown` | The operation may have run; inspect state before retrying | null |
-| `busy` | Capacity reached, or a subscription fell behind its checkpoints; retry shortly | `{max_connections}` at capacity |
+| `outcome_unknown` | The operation may have run; inspect its creation receipt when available, otherwise the resource | creation details when known, otherwise null |
+| `busy` | Admission capacity reached, an oversized read answer, or retained subscription capacity is exhausted | `{max_connections}` at connection capacity; `{limit, max}` for request admission; `{limit: "retained_bytes"}` for an answer that exceeds the message limit |
 
 A shared operation names its code by returning `engine::Error` inside its
 error; anything else a read returns is `unavailable`.
@@ -164,11 +175,28 @@ After editing a Task's checkout, request its changed files on the same connectio
 {"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null}
 ```
 
-The response reflects Git state read for this request, even while subscriptions
-are active. One-shot reads and served writes consult Git afresh. Only subscription
-readings reuse retained Git answers, shared across subscriptions so listing
-checkouts side by side stays fast. Git observations are not an atomic snapshot
-of a checkout being edited.
+The response uses the server's latest observed Git state. Served requests and
+subscriptions share observations of process liveness, checkout Git state, PR/CI
+status and repository files. The server refreshes these facts on a loop, so an
+external change appears after it is observed. Ordinary CLI reads call the same
+observation functions directly and need no running server. Served writes still
+consult Git afresh. Git observations are not an atomic snapshot of a checkout
+being edited.
+
+`observe.rs` owns the fact observers and in-memory cache. Bounded workers inherit
+the reading scope; a mutation runs outside it. File and process observations,
+Git commands and GitHub requests refresh independently, so a slow provider does
+not hold up local observations. Facts no longer read expire from memory.
+
+Observed answers and their revisions live only in process memory, never in
+SQLite; server replacement starts with new observations. CLI `--subscribe`
+readings use the same cache in their own process. A subscription follows the
+observed facts it reads alongside the existing store revisions (all domains
+except usage). Changes to those facts or revisions wake it; an unchanged
+selected answer sends no new reading. External dependencies come from the read
+itself, without a separate clock, checkout or probe policy for each operation.
+Database-derived joins retain their transactional snapshot; external
+observations do not share that transaction.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
@@ -181,13 +209,15 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | API kind | CLI | Engine |
 | --- | --- | --- |
 | `task.get` | `lf task show <issue>` | read |
+| `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
-| `task.create` | `lf task create --session <id>` | write |
+| `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
+| `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |
@@ -197,6 +227,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
+| `session.card` | `lf session card <id>` | read |
 | `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -206,9 +237,12 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
+| `wave.rename`, `.remove` | `lf wave rename`, `lf wave remove` | write |
+| `wave.machine` | `lf --wave <wave> set machine <machine>` | write |
 | `wave.sync` | `lf wave sync <wave>` | write |
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
+| `plan.board` | `lf plan board` | read |
 | `repo.plan` | `lf repo plan` | read |
 | `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
 | `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
@@ -216,6 +250,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `process.get` | `lf process show <id>` | read |
+| `process.history` | `lf history show <process-id>` | read; rendered history |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `process.list` | `lf process list` | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
@@ -236,10 +271,17 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 | `view.select` | `lf desktop view list --all` | read |
-| `task.start` | `lf task create --run --request-id <id>` | delegated, recoverable create/start |
-| `session.start` | `lf session resume --start-only <id>` | delegated |
+| `session.start` | `lf session resume --start-only <id>` | shared retained-owner launch |
 | `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
 | `request.upload` | none | upload ticket for an oversized request |
+
+"CLI handler; not served" is an operation only the CLI dispatcher runs today;
+its kind fixes the name a served version keeps.
+
+The nouns are Loopflow's primitives (Wave, Task, Graph, Session, Process,
+Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
+settings, `desktop` for the app and `plan` for every Wave's plan at once;
+nothing gets a namespace of its own for a client.
 
 `desktop.*` is Desktop's own arrangement state: saved pane layouts and
 Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
@@ -276,9 +318,18 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
-  the existing complete `answers/unavailable/body` subscription frame. `checkpoint
+  the existing complete `answers/unavailable/body` subscription frame. Typed
+  [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
-  that number, changed or not. A subscription's arguments are fixed: new
+  that consumer's newest requested number, changed or not; numbers need not
+  increase. Concurrent checkpoints coalesce. The answer comes from a read begun
+  after the request. Identical operation, arguments, selection and server context
+  share one reader across connections. Each consumer has its own acknowledgement,
+  checkpoints and latest delivery; a slow consumer does not hold up siblings.
+  Cancelling the last consumer removes the demand, including queued setup or
+  pulls. Already admitted reads may finish and release their resources. Reader
+  execution remains independent of the server's blocking pool. These readers
+  own no provider or terminal lifetime. A subscription's arguments are fixed: new
   arguments are a new subscription with a complete first reading. A subscription that
   fails sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
@@ -286,15 +337,15 @@ the phone's `view.select` Task list and its creation destinations all read it.
   same read without receiving an unchanged complete reading; see
   [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
-  changes; after the reading whose `reached` is true the server sends `ended
-  {id}` and nothing more for it. Requested once, it is that reading now, as
+  changes; after the reading whose `reached` is true and its events, the server
+  sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
 - The core loop is `engine::task`, which the CLI handlers call too.
-  `task.run {directory, issue, from, agent, approve}` and `task.ship
+  `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   detached under its own execution owner and answers what that process
-  reports once it knows: `{state: running, graph_process, log}` when the
+  reports once it knows: `{state: running, ships, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
   {process, log}`, or the refusal it printed. The connection never waits on
   the run. `approve` is `-b`: every step headless to `end`, approving
@@ -307,8 +358,10 @@ the phone's `view.select` Task list and its creation destinations all read it.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
-  standard output. `task.create {directory,id,title}` adopts the selected
-  conversation and returns the Task without launching work. A write whose Work
+  standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
+  files a Task or adopts the named Session; `run` requests its Graph launch.
+  A null `wave` selects the repository. Both paths return the same creation
+  receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
   `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
   spelling there over SSH and returns what that prints, which is the
@@ -317,9 +370,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
   `outcome_unknown`, since the write may have taken partial effect. A lost
-  response means outcome unknown; inspect state before retrying. IDs correlate
-  diagnostics and are **not** durable deduplication receipts. No automatic
-  resubmission.
+  response means outcome unknown; inspect state before retrying. Transport IDs
+  correlate diagnostics and are **not** durable deduplication receipts. Only
+  `task.create` and `session.new` have the creation retry contract below.
 - `session.attach {session, owner_lf_process_id?}` resolves the Session's current
   owner and answers `{ticket, owner_lf_process_id, expires_in_ms}`. Resolution
   never starts a provider. An optional owner ID requires that exact owner;
@@ -350,15 +403,149 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `request.upload {bytes}`, receives `{ticket}`, and sends its one `request`
   line on the ticketed connection;
   the answer arrives on the control connection under the request's id. Ticketed
-  connections carry up to 64 MiB and a transfer has two minutes; larger messages
+  connections carry up to 32 MiB and a transfer has two minutes; larger messages
   are refused with `unavailable`. Clients fetch spills off their reader so other
   request IDs never wait. Within one ID, the ticket keeps its place: deliver its
   payload before later readings, errors or `ended`, and advance the resume
   checkpoint only with the delivered reading. Swift clients bound deferred
-  messages to 64 frames and 64 MiB; falling behind requires reconnecting.
+  messages to 64 frames and 32 MiB; falling behind requires reconnecting.
   A control line over the limit is answered
   `error {id: null, invalid}` whose data names `max_message`, and the connection
   closes. Nothing is paged.
+
+## Events alongside readings
+
+Watch a Task to keep its current state visible and react when something happens.
+After the `hello`/`welcome` exchange above, subscribe with `resume: null`:
+
+```text
+→ {"type":"subscribe","id":"task","operation":{"kind":"task.get","directory":"/repo","issue":"LOO-1"},"select":null,"resume":null}
+← {"type":"response","id":"task","trace_id":"…","result":null}
+← {"type":"reading","id":"task","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
+```
+
+The reading supplies the current Task. An `event {id,seq,event}` on that
+subscription describes an occurrence with a typed payload: a Task shipped, a
+steer arrived, or a Graph step finished. A board can animate the ship; a Task
+thread can append the arriving entry from its payload without requesting the
+whole reading again. A reading remains a complete state replacement, and an
+event is neither a replacement reading nor a patch to one. Loading an already
+shipped Task does not mean it just shipped.
+
+`task.get`, `task.wait`, `plan.list` and `desktop.view.list` deliver events for
+Tasks in their complete reading, even when `select` hides those fields. A Task
+leaving a plan still delivers its final observed occurrences; a newly included
+Task starts with a baseline. Other subscription kinds currently carry readings
+only.
+
+| `event.kind` | Payload |
+| --- | --- |
+| `task.shipped` | `task_id`, `pr_id`, `number`, `url`, `merge_commit`: a recorded PR merge |
+| `task.steer` | `task_id`, `steer {id,sequence,source,revision,author,text}`, `comment`: immutable direction and the original `TaskComment` when present (`null` for other direction) |
+| `graph.step_finished` | `task_id`, `graph_process_id`, `step`: the same `GraphStepProcess` as a Task reading, including its recorded outcome |
+
+`task.shipped` means a PR merge was recorded, not that Auto-Ship was enabled or
+the Task was completed. `graph.step_finished` includes failed and interrupted
+steps; inspect `step.outcome` before presenting a successful finish.
+
+```json
+{"type":"event","id":"task","seq":1,"event":{"kind":"task.steer","task_id":"task_11111111111111111111111111111111","steer":{"id":"11111111-1111-1111-1111-111111111111","sequence":7,"source":"comment-7","revision":"1","author":{"kind":"user"},"text":"Keep the examples."},"comment":null}}
+```
+
+A changed reading precedes the occurrences observed with it. Use the PR, steer
+or step identity to avoid appending content already present in that reading.
+For a comment steer, append `comment` by its own ID; its body is the original
+thread text, while `steer.text` includes the context sent to providers.
+Overlapping subscriptions can deliver the same occurrence with different
+`seq` values. Deduplicate by occurrence identity if they feed the same view;
+the delivery sequence is not an occurrence ID.
+Events are never coalesced. A subscription that exceeds the bounded pending
+batch ends with an error; reopen it for a fresh reading.
+
+`id` identifies the subscription. `seq` orders event frames across the whole
+connection, starting at 1 and increasing once per delivered event, including
+events for other subscriptions; track it before routing
+frames by `id`. Readings, confirmation checkpoints and opaque reading tokens
+have separate meanings. Never use an event sequence as a reading checkpoint or
+compare it across connections. A single subscription's sequence numbers need
+not be consecutive because other subscriptions share the connection.
+
+Keep the last complete reading as the recovery baseline. If event delivery has
+a gap, stop applying incremental event updates and request a fresh reading for
+every event-consuming subscription on that connection. After a disconnect,
+subscribe with `resume: null` to obtain a complete current reading before
+continuing event-driven updates.
+Replace state from that reading without replaying animations or appending its
+entries again. There is no event replay cursor: events missed while disconnected
+are recovered as current state, not delivered as historical notifications.
+
+Clients that only display readings can continue using reading checkpoint
+resumption below. A checkpoint can suppress an unchanged reading; it cannot
+establish that no events were missed. Event frames belong to the subscription's
+lifetime and stop when it ends or is cancelled. Unknown event kinds must not
+break unrelated subscriptions; recover the affected state with a fresh reading
+if the client cannot apply an event.
+
+Swift's `ServerClient.subscribeEvents` delivers readings and typed occurrences
+in one ordered stream and reconnects event consumers with `resume: null`. A gap
+ends all event-consuming streams on that connection; an unknown kind ends only
+its event-consuming subscription. Reopen the ended stream to get current state.
+Reading-only consumers ignore event frames and retain checkpoint resumption.
+
+## Read a screen's data
+
+```sh
+lf plan board --json             # compact Task rows for a board
+lf task detail LOO-1 --json       # the selected Task and its supporting detail
+lf session card session_123 --json # a recorded Session's current card
+```
+
+Run these in the repository's checkout, replacing the Task and Session IDs
+with ones from your Work. Each command prints the same JSON value its API
+operation returns in `response.result`.
+
+| Read | Contents |
+| --- | --- |
+| `plan.board` | `tasks` evidence with each Task's `id`, `identifier`, `title`, `section`, `state`, `pr.url` and nullable `waiting_on` actor/reason; `generated_at` |
+| `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
+| `session.card` | Session, liveness, control holder and last line |
+
+Use `section` to place a Task in Backlog, Working, Autonomous, Done or
+Abandoned; `state` describes its progress within that grouping. To populate a
+board row's detail, request `task.detail`; for its Session, request `session.card`.
+A card observes the Session: reading it does not resume a provider, attach a
+terminal or claim input control. Its `liveness` is `live`, `dead` or `unknown`;
+`control_holder` is the recorded occupied terminal ID, never an input token.
+`last_line` is the final nonempty line of the current provider preview, or null
+when there is none; the Session's preview retains its source and observation time.
+
+These are one-shot reads. `plan board` takes the same optional Wave, `--task`
+and `--all` filters as `plan list`. Unreadable planning remains unavailable
+rather than an empty board. `waiting_on` is null outside waiting or blocked
+conditions. `task.detail` includes the planning `task`, derived `state` and
+`section`, nullable `pr`, `checks`, `comments` and `current_session`, plus
+`graph_processes`. Checks are the recorded required-check observation, pinned
+by `head_sha` and `observed_at`, with aggregate state and named failing checks;
+null means checks have not been observed. `current_session` is the Task's
+recorded primary conversation, not whichever run started most recently.
+
+Each read has its own Rust DTO mirrored in Swift. Typed clients send
+`select: null` and decode the read's complete DTO, with no field defaults.
+Use the host's `lf server describe --json` for operation arguments and the
+`x-result` schema. Missing optional data, such as a Task with no PR or current
+Session, is represented by the DTO's optional fields; do not manufacture a PR,
+Session or live owner.
+
+`select` remains useful for scripts and agents that consume arbitrary JSON.
+A selected `plan.list` response cannot be decoded as the board DTO, and
+selecting fields out of any typed response can make it undecodable. Request
+the screen read when a typed client needs a smaller payload. Desktop's
+outline continues to use `plan.list` for its richer runtime data.
+
+Handle failures through the [protocol error codes](#local-protocol-revision-5).
+Check the named Task or Session when it cannot be found. If the host cannot
+answer, retain any previous display as stale and retry the read after recovery;
+an unavailable Session card does not establish that the Session ended.
 
 ## Reconnect a watch
 
@@ -392,8 +579,8 @@ Desktop holds one connection per server location for the app's lifetime, opened
 on first use and reopened on the next request after a loss with bounded backoff
 (100 ms doubling to 3.2 s). Its subscriptions share that connection. Losing it
 fails every pending request as outcome unknown. A watch with a received reading
-keeps its stream and queued frames, reconnects, and resumes from that reading's
-token. A complete reading replaces it when the token is unknown. The newest
+keeps its stream and queued frames and reconnects. Reading-only watches resume
+from that reading's token; event consumers request a fresh baseline. A complete reading replaces it when the token is unknown. The newest
 unanswered confirmation retries and covers earlier requests; writes never retry.
 Cancelling the watch cancels recovery. A watch without a baseline, a server refusal, or a slow
 consumer that overflows its frame queue ends the stream; the window then opens a
@@ -424,3 +611,223 @@ arrangement, observations and reconnects add no Process or usage records.
 A connection error alone proves no command failure.
 Service startup, command outcomes and failures use the existing `logs/lf.log`
 diagnostics. Individual reads and subscription frames are not logged by default.
+
+## Subscription cost experiment
+
+`scripts/benchmarks/subscription_baseline.py` drives an isolated test server
+through the production connection handler. Copy the optimized library test
+executable out of `target/` before comparing builds:
+
+```sh
+cargo test --release -p loopflow --lib subscription_ --no-run
+uv run python scripts/benchmarks/subscription_baseline.py /tmp/frozen-subscription-server --output /tmp/subscription-samples
+```
+
+The runner uses 1/16/64 unpaged Session subscriptions, multiplexed and physical
+connections, real checkpoints, ten-second quiet/active windows, 32/128 single
+cycles and five cohort cycles. A separate writer records capture facts and
+attachment-valid activity. Server CPU excludes that writer and the driver;
+writer CPU and reaped-child CPU are separate. `--profile` produces a separate
+macOS stack sample; exclude that run from timing comparisons. The fixture pins
+two Tokio async workers per runtime and four server blocking workers to bound
+resource creation. This does not measure installed defaults, Task resolution,
+Process projections or kernel wakeups.
+
+Counters are test-only and opt-in. SQL tracing resets VM status after each
+execution so cached statements are counted once. Caller-thread CPU for runtime
+construction/destruction excludes work on the runtime's worker threads; whole
+phase CPU includes all server threads. Identical server demand shares completed
+projections; distinct demand remains independent. Cancellation and saturation
+regressions exercise production subscription creation and SQLite pulls with
+deterministic pauses. Frozen pre-sharing measurements retain their original
+per-consumer work counts and cancellation failure; candidate results are separate.
+
+`--default-config --counts 1,16 --multiplexed-only --rounds 1` is a separate
+bounded pilot with the ordinary runtime defaults. It removes
+`TOKIO_WORKER_THREADS` and the fixture server's worker/blocking caps; it never
+runs a 64-subscriber cohort. Keep its results separate from the capped matrix.
+Resource inventories run outside timing phases. Their `ps` child CPU appears
+separately in resource readings; cumulative child totals also include setup,
+so use phase deltas when discussing application child work.
+The pilot also measures 32 sequential runtime-only create/drop cycles, with no
+SQL or subscribers and at most one extra runtime alive. That phase's process
+CPU includes its workers through shutdown; it is separate from reader counters
+and complete subscription cycles.
+
+## Client contract
+
+Submit a Task, lose the connection before its answer, then restart the client.
+Recover by looking up the saved creation request on its original destination.
+The receipt identifies the original Task; opening new subscriptions refreshes
+its Work; attaching to the exact terminal owner recovers its display. These are
+separate operations. None grants permission to repeat an uncertain launch.
+
+Desktop, CLI and other Work clients use the shared operation kinds and result
+types. Desktop sends Task creation, run, ship and Machine moves, Wave Machine
+changes, rename and removal, and process history through this protocol. Client
+code must not substitute CLI stdout parsing for a shared Work operation.
+Ordinary CLI use can call the shared Rust functions without a running server.
+Remote authentication and pairing are separate from this same-user socket.
+
+### Cache and reconnect
+
+Negotiate a revision on each new connection and use that revision's schema.
+Keep `welcome.instance` and limits for that connection; an instance change
+means the server restarted. Transport request IDs, subscription IDs and numeric
+confirmation checkpoints belong to one connection. Opaque reading checkpoints
+can resume a watch within the same server incarnation.
+
+Last Work readings may remain visible as stale data. Resubscribe to every needed
+read with its retained reading and opaque checkpoint, as described in
+[Reconnect a watch](#reconnect-a-watch). An unchanged reading needs no replacement;
+a changed reading or invalid checkpoint yields a complete current reading.
+For subscriptions that consume typed events, follow
+[event recovery](#events-alongside-readings) and request a fresh baseline after a
+gap or reconnect. There is no missed-event replay or universal event log.
+Coalescing replaces only complete
+readings of the same subscription; checkpoint answers, errors and the final
+reading before `ended` retain their ordering.
+
+| Failure | Client recovery |
+|---|---|
+| Connection lost | Reconnect with bounded backoff, renegotiate and resubscribe. Recover creations by receipt; inspect other uncertain writes. |
+| Request admission `busy` | Delay that operation; it was not dispatched. Keep the healthy connection. |
+| Checkpoint overflow `busy` | Open a replacement subscription; the old subscription ended. Keep the connection. |
+| Connection-level `busy` | Reconnect after a delay; no operation was admitted on that connection. |
+| `incompatible` | Update the side named by `data.update`. |
+| `invalid`, `not_found`, `conflict` | Correct the arguments, target or conflicting state; reconnecting alone cannot fix it. |
+| `unavailable` | Retry the affected read when its dependency returns. A failed receipt lookup is not absence. |
+| `outcome_unknown` | Look up the creation receipt, or inspect the resource for other writes. Never replay an arbitrary mutation. |
+
+Desktop retries request-admission refusals (`busy` with `limit` and `max`) for
+up to 60 seconds, keeping the connection. Backoff starts at 100 ms and caps at
+1600 ms so initial subscription readings can drain before another attempt. It does not retry oversized
+answers, disconnected commands or unknown outcomes. Reads keep their overall
+deadline; cancellation also stops the backoff.
+
+### Admission and retained work
+
+`welcome.limits.max_open` bounds open requests plus subscriptions;
+`max_retained_bytes` bounds per-connection producer reservations and serialized
+answers through socket delivery. Reserve before dispatch or subscription
+materialization, and include pending producers. A process-wide budget also
+bounds retention across clients. This accounting is not a process-RSS limit.
+Clients use advertised limits rather than hardcoding server defaults.
+
+The initial limits are 256 open requests/subscriptions, 16 concurrent writes,
+64 MiB retained per connection and 256 MiB process-wide. A producer reserves
+one maximum-size ticketed message (32 MiB) before work starts, then holds the serialized
+answer through delivery or ticket expiry. Admitted requests wait for producer
+headroom before executing; cancellation during that wait runs nothing. Upload
+tickets reserve their headroom before accepting a body. These provisional limits bound retained output, not
+the size of the store or total process memory.
+
+Shared readers reserve from that same process budget before constructing a
+reading. Their retained latest values remain charged until the last reader or
+delivery releases them, with a 128 MiB aggregate ceiling so refreshes and output
+retain headroom. Each consumer reserves connection and process capacity before
+cloning and encoding its frame. Reconnect tokens suppress unchanged initial
+delivery independently for each consumer; they never suppress an explicit
+checkpoint response.
+
+Writes have a separate admission cap. A refused write has not run; an admitted
+write finishes even if its answer can no longer be delivered. Backpressure
+cannot turn an admitted effect into an unrun `busy` refusal. Subscriptions wait
+for room and re-read current state, retaining checkpoint obligations. Bounded
+control headroom keeps refusals and acknowledgments deliverable; a peer that
+does not drain still reaches the five-second send deadline.
+
+### Creation receipts
+
+`task.create` and `session.new` require a client-chosen `request_id` of 1–128
+bytes. This is the durable creation identity, distinct from the outer request's
+connection-local `id`. Use a fresh identity per submission and retain the exact
+payload and destination for recovery. `lf task create` generates one unless
+`--request-id` is supplied.
+
+Before provisioning, the shared creation operation records the request identity,
+content fingerprint and reserved resource identities. Concurrent retries and
+server restarts reuse those identities. The same ID with different operation
+content returns `conflict` without running that content. Receipts are retained
+without age-based pruning; an old ID never becomes a new creation because time
+passed or its resource was removed.
+
+Task creation returns `{task, graph, session_id, milestone}` with or without
+`run`. Milestones distinguish filing, admission and confirmed start. If a launch
+was requested but its registration cannot be confirmed, the result is
+`outcome_unknown` with the Task and `run_requested` milestone. Only a launch
+correlated to this creation can settle that outcome; another current Graph is
+insufficient. Recovery never launches again across that uncertainty.
+
+`session.new` records its stop and new-thread admission against the same request.
+A completed retry returns the current record for the same Session without
+stopping anything again. An interrupted stop or input append must be reconciled
+against that attempt; it cannot stop a newer process or append duplicate input.
+
+`creation.get` is read-only. It returns the receipt with a derived `disposition`
+and human-readable `explanation`, or `null` for confirmed absence. `complete`
+means present the result; `continue` means the identical submitted request can
+finish local preparation or proceed to its first launch; `inspect` means retain
+it without resubmitting. The creation handler checks again under its request
+lock, so a lookup cannot authorize repeating an uncertain effect. The receipt
+retains original `run` intent; disposition is computed from the receipt and
+current resource, never persisted as another outcome.
+
+After reconnect or cold startup, look up the receipt first. Send the saved bytes
+only for confirmed absence or `continue`. Unavailable lookup stays unavailable.
+An interrupted launch says “Task created; start unconfirmed”; an interrupted
+Session stop says “Conversation change unconfirmed”. Removed resources remain
+identifiable through receipts and cannot be recreated. Newer Session input
+prevents continuation of an unpublished older change.
+
+Desktop persists only `{request_id, destination, payload, submitted_at}` before
+first send, with a versioned record and exact payload. The destination pins the
+original Machine and repository. Server receipts own outcomes; client records
+contain no milestone ledger. A single app recovery owner serves all windows.
+Storage failure keeps the form and reports an error before sending. A mounted
+Task or Session result retires its submission, including Session promotion;
+a socket reply or navigation request alone does not. Cold recovery offers
+Show result and retires the request after displaying the recovered resource.
+Failed removal repeats lookup and presentation safely. Inspect retains unresolved
+outcomes and exposes the raw receipt. This is neither an editable
+outbox nor offline creation, cross-device submission sync or generic replay.
+
+### Terminal and provider recovery
+
+Terminal continuation addresses the exact owner, separately from Work reads.
+Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+reconnect grace; expired continuation falls back to a fresh screen from that
+owner. Terminal-mode viewers request a fresh screen. Uncertain input is
+never replayed. Recovery takes only free claims or those held by the viewer's
+own stale connection; a newer viewer keeps input and geometry. Replacing that
+stale socket cannot let its later close revoke the replacement's claims.
+A stalled bridge cannot block another viewer or Work control traffic.
+
+If the Session has a new owner, exact-owner attachment returns `not_found` with
+`owner_lf_process_id` and `current_lf_process_id`. Attaching by Session can reach
+the current owner; neither attachment starts or resumes a provider. A lost
+connection alone does not establish process death.
+
+The Loopflow Session, provider conversation, serving AgentProcess and viewer's
+control claims are distinct. `SessionRecord.transition` reports the latest
+observed provider change, or null when none is known; `session.history` keeps
+the changes. Reserving a process is not a successful transition.
+
+| Transition | Meaning |
+|---|---|
+| `retained` | The same AgentProcess continues serving. Attachment may report this without replacing the latest provider-change event. |
+| `resumed` | A replacement AgentProcess serves the same provider conversation. |
+| `forked` | A new provider conversation carries source history, seeded natively or from the log. |
+| `started` | A new provider conversation starts without the earlier history. If a source is recorded, that conversation was left behind. |
+
+Transitions identify source and destination provider conversations and processes
+when known. Missing lineage remains unknown. A fork's `original_running`
+describes liveness at the transition; current liveness requires a fresh reading.
+Desktop shows the short explanation beside the terminal and keeps the detail in
+history. Reading either grants no authority to drive the provider.
+
+Large answers retain their connection and process memory reservations until the
+ticket is downloaded or expires. Expiry releases abandoned downloads without
+waiting for another request. Events remain within the control-message limit;
+clients check connection-wide sequence before deferring delivery behind a bulk
+reading.

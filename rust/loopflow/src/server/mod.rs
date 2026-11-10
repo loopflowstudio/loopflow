@@ -1,9 +1,12 @@
 //! Standalone transport for shared reads and commands; owns no execution.
 pub mod client;
+pub(crate) mod events;
 pub mod mobile;
+mod outbox;
 mod remote;
 pub mod schema;
 mod service;
+mod subscriptions;
 mod ticket;
 pub mod wire;
 

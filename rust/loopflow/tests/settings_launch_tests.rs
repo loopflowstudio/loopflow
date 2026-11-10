@@ -832,7 +832,7 @@ def worker(task):
 
 worker(os.environ['SETTINGS_TASK'])
 receipt = json.loads(run('task', 'create', '--title', 'Child created by selected Session', '--json'))
-child = receipt['id']
+child = receipt['task']['id']
 worker(child)
 with (home / 'session-children.jsonl').open('a') as output:
     output.write(json.dumps({'args': args, 'child': child}) + '\n')
@@ -881,7 +881,7 @@ with (home / 'session-children.jsonl').open('a') as output:
         "agent: claude\nskills: {implement: {agent: codex}}\n",
     )
     .unwrap();
-    let task: serde_json::Value = serde_json::from_slice(
+    let task: serde_json::Value = serde_json::from_slice::<serde_json::Value>(
         &success(command(
             repo.path(),
             home.path(),
@@ -895,7 +895,8 @@ with (home / 'session-children.jsonl').open('a') as output:
         ))
         .stdout,
     )
-    .unwrap();
+    .unwrap()["task"]
+        .clone();
     let task = task["id"].as_str().unwrap();
     success(command(
         repo.path(),
@@ -1403,7 +1404,8 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let task: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task =
+        serde_json::from_slice::<serde_json::Value>(&created.stdout).unwrap()["task"].clone();
     let status = run(&["task", "status", task["id"].as_str().unwrap(), "--json"]);
     assert!(
         status.status.success(),

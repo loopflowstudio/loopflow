@@ -295,14 +295,20 @@ final class MachineConnection {
                 let message = try await bulk.receiveText()
                 guard let self, let (answer, queued) = try order.complete(id, payload: message) else { return }
                 try deliver(answer)
-                for line in queued { try dispatch(line) }
+                for (message, size) in queued {
+                    if let next = try order.resume(message, bytes: size) { try deliver(next) }
+                }
             } catch { self?.forget(id, throwing: error) }
         }
     }
 
     private func dispatch(_ line: Data) throws {
-        guard failure == nil, let message = try order.receive(line) else { return }
-        try deliver(message)
+        guard failure == nil else { return }
+        do {
+            if let message = try order.receive(line) { try deliver(message) }
+        } catch is ServerEventSequenceGap {
+            // Mobile currently consumes complete readings, never occurrence events.
+        }
     }
 
     private func deliver(_ message: ServerMessage) throws {
@@ -315,6 +321,7 @@ final class MachineConnection {
             // A null result confirms a registered subscription; anything else is a late answer.
         case .reading(let id, _, let frame):
             subscriptions[id]?.receive(frame)
+        case .event: break // Complete readings drive the mobile views.
         case .bulk(let id, let ticket, _):
             fetch(id, ticket: ticket)
         case .ended(let id):

@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use super::mobile::{Configuration, Host, Status};
 use super::service::{self, Carrier, Clients, Greeting};
+use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
 use anyhow::{Context, Result};
@@ -41,6 +42,7 @@ pub(super) enum Control {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn manage(
     initial: Result<Option<Configuration>>,
     mut requests: mpsc::Receiver<Control>,
@@ -49,6 +51,7 @@ pub(super) async fn manage(
     slots: Arc<Semaphore>,
     clients: Clients,
     tickets: Arc<Tickets>,
+    subscriptions: Arc<Subscriptions>,
 ) -> Result<()> {
     let mut status = match initial {
         Ok(configuration) => Status {
@@ -98,7 +101,7 @@ pub(super) async fn manage(
                         .context("Could not save mobile access; no listener was enabled")?;
                     status.configuration = Some(bound.config.clone());
                     status.ready = true;
-                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone()));
+                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone()));
                     Ok(status.configuration.clone())
                 }.await;
                 status.error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -123,7 +126,7 @@ pub(super) async fn manage(
                             status.ready = true;
                             status.error = None;
                             reported_failure = false;
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone()));
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone()));
                         }
                         Err(error) => {
                             if !reported_failure {
@@ -248,6 +251,7 @@ async fn run(
     slots: Arc<Semaphore>,
     clients: Clients,
     tickets: Arc<Tickets>,
+    subscriptions: Arc<Subscriptions>,
 ) -> Result<()> {
     tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
     let mut connections = JoinSet::new();
@@ -266,6 +270,7 @@ async fn run(
             Some(certificate) = renewals.recv() => { tls = certificate; continue; }
         };
         let slots = slots.clone();
+        let subscriptions = subscriptions.clone();
         let (host, owner, tls, instance, executable, clients, tickets) = (
             bound.host.clone(),
             bound.config.owner.clone(),
@@ -289,6 +294,7 @@ async fn run(
                     &clients,
                     tickets,
                     &slots,
+                    &subscriptions,
                 )
                 .await
             }
@@ -312,7 +318,7 @@ fn reject(status: StatusCode) -> ErrorResponse {
 /// `/v1/machine` is the control connection; `/v1/ticket` carries what a ticket
 /// names: a terminal's bytes or one bulk message.
 // Tungstenite's handshake callback requires an unboxed HTTP ErrorResponse.
-#[allow(clippy::result_large_err)]
+#[allow(clippy::result_large_err, clippy::too_many_arguments)]
 async fn connection<S>(
     socket: S,
     admission: Option<Admission>,
@@ -321,6 +327,7 @@ async fn connection<S>(
     clients: &Clients,
     tickets: Arc<Tickets>,
     slots: &Arc<Semaphore>,
+    subscriptions: &Arc<Subscriptions>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
@@ -370,9 +377,9 @@ where
         }
         // A ticket belongs on `/v1/ticket` and a session on `/v1/machine`.
         Greeting::Ticket(_) => Ok(()),
-        Greeting::Session(_) if ticket_path => Ok(()),
+        Greeting::Session(..) if ticket_path => Ok(()),
         // Remote connections never configure mobile access.
-        Greeting::Session(listed) => {
+        Greeting::Session(listed, queue) => {
             service::session(
                 &mut messages,
                 instance.into(),
@@ -380,6 +387,8 @@ where
                 None,
                 admission,
                 tickets,
+                subscriptions,
+                queue,
             )
             .await
         }
@@ -578,10 +587,19 @@ mod tests {
                 &Arc::new(tokio::sync::Semaphore::new(
                     crate::server::wire::MAX_CONNECTIONS,
                 )),
+                &Arc::new(super::Subscriptions::default()),
             )
             .await;
         });
         Ok(tokio_tungstenite::client_async(request, client).await?.0)
+    }
+
+    fn download(message: String) -> Purpose {
+        let (outbox, _queue) = crate::server::outbox::Outbox::new();
+        Purpose::Download {
+            message,
+            reservation: outbox.reserve().unwrap(),
+        }
     }
 
     fn text(message: &ClientMessage) -> Message {
@@ -710,7 +728,7 @@ mod tests {
             result: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
         })
         .unwrap();
-        let ticket = tickets.issue(phone.clone(), Purpose::Download(big.clone()));
+        let ticket = tickets.issue(phone.clone(), download(big.clone()));
         // A ticket presented on the control endpoint admits nothing.
         let mut wrong = connect(&tickets, true, "/v1/machine", false).await.unwrap();
         wrong
@@ -742,7 +760,7 @@ mod tests {
                 node: "laptop".into(),
                 user: 1,
             },
-            Purpose::Download(big),
+            download(big),
         );
         let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
         refused

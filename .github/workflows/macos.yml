@@ -73,7 +73,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/swift-tests"
           swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
-          /usr/bin/time -l scripts/test_desktop.sh -Xswiftc -gnone \
+          /usr/bin/time -l scripts/test_desktop.sh --skip-build -Xswiftc -gnone \
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"

@@ -226,6 +226,9 @@ Wire types (anything `lf --json` emits and Rust and Swift mirror) get no
 defaults. Every field is required or explicitly optional: no
 `#[serde(default)]`, no `Default` derive, no Swift init defaults, no `?? value`
 fallbacks. Defaults at different layers drift into silent disagreement.
+For a required nullable key, Rust uses `#[serde(deserialize_with = "Option::deserialize")]`
+and Swift uses `decode(Type?.self, forKey:)`; implicit optional decoding accepts
+an absent key and cannot distinguish a complete DTO from selected JSON.
 Round-trip fixtures under `tests/fixtures/dto/` cover the wire shape; a new
 field goes into the fixture and each language's fixture test. UI state types
 that carry DTO values are not DTOs.
@@ -289,6 +292,7 @@ them.
 - Every `unsafe` block gets a `// SAFETY:` comment. Keyword clashes use `r#type` or `type_`.
 - `#[non_exhaustive]` on public enums that may grow.
 - SQLite read helpers that join statements use savepoints so they work inside the Work reader's pinned snapshot and standalone. Write transactions stay at their command boundaries.
+- External facts in shared reads go through `observe`: bare reads observe inline, served reads capture cached answers and their revisions. Bounded threads inherit the reading with `observe::inherit`; `journal::request::spawn_blocking` carries it automatically.
 - Served mutations take a directory and `CommandIo`; never redirect process cwd, env or file descriptors. Nested blocking operations use `journal::request::spawn_blocking` to keep request attribution and diagnostics. A request trace is not an OS Process; execution launches keep their owners.
 - Forward stdin only to commands that consume it; a mutation with no body must finish while terminal stdin stays open.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.

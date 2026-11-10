@@ -26,11 +26,11 @@ struct ServerMessageOrderTests {
         guard case .reading(_, let checkpoint, _) = first else { Issue.record("Missing first reading"); return }
         #expect(checkpoint == "first")
         #expect(queued.count == 2)
-        guard case .bulk = try order.receive(queued[0]) else { Issue.record("Missing second ticket"); return }
-        #expect(try order.receive(queued[1]) == nil)
+        guard case .bulk = try order.resume(queued[0].0, bytes: queued[0].1) else { Issue.record("Missing second ticket"); return }
+        #expect(try order.resume(queued[1].0, bytes: queued[1].1) == nil)
         let completedSecond = try order.complete("watch", payload: reading("watch", "second"))
         let (_, remaining) = try #require(completedSecond)
-        guard case .reading(_, let last, _) = try order.receive(remaining[0]) else { Issue.record("Missing last reading"); return }
+        guard case .reading(_, let last, _) = try order.resume(remaining[0].0, bytes: remaining[0].1) else { Issue.record("Missing last reading"); return }
         #expect(last == "third")
     }
 
@@ -59,4 +59,23 @@ struct ServerMessageOrderTests {
         _ = try order.receive(bulk("again"))
         #expect(try order.receive(reading("again", "room")) == nil)
     }
+    @Test func eventsAreSequencedBeforeLargeReadingsDeferTheirDelivery() throws {
+        var order = ServerMessageOrder()
+        _ = try order.receive(bulk("slow"))
+        let event: (String, Int) throws -> Data = { id, seq in
+            try line(["type": "event", "id": id, "seq": seq, "event": ["kind": "future-event"]])
+        }
+        #expect(try order.receive(event("slow", 1)) == nil)
+        guard case .event("fast", 2, _) = try order.receive(event("fast", 2)) else {
+            Issue.record("Unrelated events must keep flowing"); return
+        }
+        let completed = try order.complete("slow", payload: reading("slow", "baseline"))
+        let (_, queued) = try #require(completed)
+        guard case .event("slow", 1, _) = try order.resume(queued[0].0, bytes: queued[0].1) else {
+            Issue.record("Deferred event lost its baseline order"); return
+        }
+        #expect(try order.receive(event("fast", 3)) != nil)
+        #expect(throws: ServerEventSequenceGap.self) { try order.receive(event("fast", 5)) }
+    }
+
 }

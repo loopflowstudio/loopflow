@@ -9,14 +9,14 @@
 //! spelling there over SSH; nothing falls back to local execution.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
 use crate::durable::TaskOwnership;
 use crate::id::LfProcessId;
-use crate::lf::commands::subscribe::{Subscription, Transport, Wake, ACTIVITY_CLOCK};
+use crate::lf::commands::subscribe::{Subscription, Transport};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
 use crate::work::task::comment::TaskComments;
@@ -30,6 +30,9 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
+        /// No interactive step is left ahead: Auto-Ship is approved and the
+        /// run may merge the PR.
+        ships: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
         /// terminal (`-b`, `-i`) keeps it.
@@ -48,10 +51,16 @@ impl TaskRun {
             Self::Running {
                 issue,
                 run,
+                ships,
                 graph_process,
                 log: Some(log),
             } => Some(format!(
-                "{issue} · {run} running as Graph process {graph_process}\n  follow: lf task status {issue}\n  log:    {}",
+                "{issue} · {run} running as Graph process {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
+                if *ships {
+                    format!("\n  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {issue}` withdraws")
+                } else {
+                    String::new()
+                },
                 log.display()
             )),
             Self::Running { log: None, .. } => None,
@@ -141,24 +150,11 @@ pub fn run(
     directory: &Path,
     issue: &str,
     from: Option<&str>,
+    graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
 ) -> Result<TaskRun> {
-    let spell = |task: &str| {
-        let mut args = Vec::new();
-        if approve {
-            args.push("--batch".to_owned());
-        }
-        if let Some(agent) = agent {
-            args.extend(["--agent".to_owned(), agent.to_owned()]);
-        }
-        args.extend(["task", "run", task].map(str::to_owned));
-        if let Some(from) = from {
-            args.extend(["--from".to_owned(), from.to_owned()]);
-        }
-        args.push("--json".to_owned());
-        args
-    };
+    let spell = |task: &str| spell_run(task, from, graph, agent, approve);
     if let Some(run) = remote(directory, issue, spell)? {
         return Ok(run);
     }
@@ -169,11 +165,7 @@ pub fn run(
 /// <issue> ship` does: every remaining step headless, an interactive step
 /// standing in for the person, until the PR lands.
 pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
-    let spell = |task: &str| {
-        ["--task", task, "ship", "--json"]
-            .map(str::to_owned)
-            .to_vec()
-    };
+    let spell = |task: &str| spell_task(task, "ship");
     if let Some(shipping) = remote(directory, issue, spell)? {
         return Ok(shipping);
     }
@@ -183,7 +175,7 @@ pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
 /// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
 /// ship --stop` does, until the next `task.ship`.
 pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let spell = |task: &str| ["task", "hold", task, "--json"].map(str::to_owned).to_vec();
+    let spell = |task: &str| spell_task(task, "hold");
     if let Some(held) = remote(directory, issue, spell)? {
         return Ok(held);
     }
@@ -256,7 +248,7 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
         OwnershipChange::Claim => "claim",
         _ => "unassign",
     };
-    let spell = |task: &str| ["task", verb, task, "--json"].map(str::to_owned).to_vec();
+    let spell = |task: &str| spell_task(task, verb);
     if let Some(ownership) = remote(directory, issue, spell)? {
         return Ok(ownership);
     }
@@ -276,13 +268,10 @@ pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
 /// `lf task wait`: read until the Task reaches `until` or `timeout` passes,
 /// and return the last reading.
 pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Result<Waited> {
-    let started = Instant::now();
-    loop {
-        let reading = waited(issue, until)?;
-        if reading.reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
-            return Ok(reading);
-        }
-        std::thread::sleep(Duration::from_secs(1));
+    match crate::ops::task::task_wait(issue, until, timeout) {
+        Ok(Some((task, reached))) => Ok(Waited { reached, task }),
+        Ok(None) => Err(missing(issue)),
+        Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
     }
 }
 
@@ -295,7 +284,6 @@ pub fn subscribe_wait(
 ) -> anyhow::Result<Option<Subscription>> {
     crate::lf::commands::subscribe::start(
         (issue, until),
-        Wake::every(ACTIVITY_CLOCK),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::lf::commands::subscribe::require_store(store)?;
             match crate::ops::task::task_wait_reading(&store, &issue, until).await? {
@@ -336,6 +324,39 @@ fn missing(issue: &str) -> Error {
         .with(serde_json::json!({ "task": issue }))
 }
 
+pub(super) fn spell_run(
+    issue: &str,
+    from: Option<&str>,
+    graph: Option<&str>,
+    agent: Option<&str>,
+    approve: bool,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if approve {
+        args.push("--batch".to_owned());
+    }
+    if let Some(agent) = agent {
+        args.extend(["--agent".to_owned(), agent.to_owned()]);
+    }
+    args.extend(["task", "run", issue].map(str::to_owned));
+    args.extend(graph.map(str::to_owned));
+    if let Some(from) = from {
+        args.extend(["--from".to_owned(), from.to_owned()]);
+    }
+    args.push("--json".to_owned());
+    args
+}
+
+pub(super) fn spell_task(issue: &str, verb: &str) -> Vec<String> {
+    if verb == "ship" {
+        ["--task", issue, "ship", "--json"]
+    } else {
+        ["task", verb, issue, "--json"]
+    }
+    .map(str::to_owned)
+    .to_vec()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Hold, TaskRun, TaskShip};
@@ -354,10 +375,30 @@ mod tests {
         let running: TaskRun = result(include_str!(
             "../../../../tests/fixtures/dto/server/task_running.json"
         ));
-        assert!(running
+        let text = running.render().unwrap();
+        assert!(text.contains("running as Graph process"));
+        assert!(!text.contains("may merge the PR"));
+        let TaskRun::Running {
+            issue,
+            run,
+            graph_process,
+            log,
+            ..
+        } = running
+        else {
+            panic!("the fixture is a running Task")
+        };
+        let ships = TaskRun::Running {
+            issue,
+            run,
+            ships: true,
+            graph_process,
+            log,
+        };
+        assert!(ships
             .render()
             .unwrap()
-            .contains("running as Graph process"));
+            .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
         let shipping: TaskShip = result(include_str!(
             "../../../../tests/fixtures/dto/server/task_shipping.json"
         ));

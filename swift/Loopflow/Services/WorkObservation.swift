@@ -196,12 +196,12 @@ public struct WorkFrame: Sendable {
         }
     }
 
-    private struct TaskStatusReading: Decodable {
-        let overview: TaskOverview?
-        let graphProcesses: [GraphProcessDetail]
-        let comments: TaskComments?
-        let execution: TaskExecution?
-        let row: RoadmapTask?
+    public struct TaskStatusReading: Decodable {
+        public let overview: TaskOverview?
+        public let graphProcesses: [GraphProcessDetail]
+        public let comments: TaskComments?
+        public let execution: TaskExecution?
+        public let row: RoadmapTask?
 
         enum CodingKeys: String, CodingKey {
             case overview, comments, execution, row

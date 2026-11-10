@@ -558,8 +558,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`.
-    Run(String),
+    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
+    /// interactive step is left ahead, and the run may merge the PR.
+    Run { step: String, ships: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -836,7 +837,7 @@ async fn start_task_run(
             graph.name
         )));
     }
-    Ok(TaskRunStart::Run(label))
+    Ok(TaskRunStart::Run { step: label, ships })
 }
 
 /// The run this process carried ended; settle a completion its arrival at
@@ -1515,36 +1516,12 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-) -> OpsResult<Task> {
-    task_create_with_id(
-        repo,
-        wave,
-        title,
-        report,
-        adoption,
-        crate::durable::TaskId::new(),
-    )
-}
-
-/// Creation under a reserved Task ID: a repeated request returns the Task it
-/// already filed instead of a second one.
-pub(crate) fn task_create_with_id(
-    repo: &Path,
-    wave: Option<&str>,
-    title: Option<String>,
-    report: Option<String>,
-    adoption: TaskAdoptionOptions,
-    id: crate::durable::TaskId,
+    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        // A shared command reservation already checked the full request. Keep
-        // its original Task and Project even if defaults changed after filing.
-        if let Some(task) = store.get_task(&id).await.map_err(task_error)? {
-            return Ok(task);
-        }
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
@@ -1561,8 +1538,17 @@ pub(crate) fn task_create_with_id(
                     )));
                 }
             }
-            let task =
-                adoption::save(&store, &main, task.id.clone(), None, source, None, false).await?;
+            let task = adoption::save(
+                &store,
+                &main,
+                task.id.clone(),
+                None,
+                source,
+                None,
+                false,
+                receipt.clone(),
+            )
+            .await?;
             super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)
@@ -1597,7 +1583,7 @@ pub(crate) fn task_create_with_id(
             .map_err(task_error)?;
         let creation = crate::work::task::NewTask {
             due_date: None,
-            id,
+            id: crate::durable::TaskId::new(),
             repository_id,
             project_id: creation_project,
             title: input.title,
@@ -1611,6 +1597,7 @@ pub(crate) fn task_create_with_id(
             source,
             acquisition,
             false,
+            receipt,
         )
         .await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
@@ -1926,12 +1913,13 @@ pub async fn read_task_status(
         .map_err(task_error)?
         .flatten()
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    let mut result = registered_task_status(store, task).await?;
-    result.planning_stale = planning_stale(&result);
-    Ok(result)
+    registered_task_status(store, task).await
 }
 
-async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+pub(crate) async fn registered_task_status(
+    store: &SharedStore,
+    task: Task,
+) -> OpsResult<TaskStatus> {
     let acquisition = store
         .sqlite
         .task_acquisition(&task.id)
@@ -1965,10 +1953,9 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
 
 fn planning_stale(status: &TaskStatus) -> bool {
     status.planning_state != crate::store::PlanningState::Available
-        || status.observed_at.is_some_and(|at| {
-            time::OffsetDateTime::now_utc().unix_timestamp() - at
-                >= super::linear::LINEAR_SOFT_STALE_SECS
-        })
+        || status
+            .observed_at
+            .is_some_and(|at| crate::observe::deadline(at + super::linear::LINEAR_SOFT_STALE_SECS))
 }
 
 /// Sessions copied here from rented Machines this Task ran on.
@@ -2646,6 +2633,27 @@ pub fn task_wait_now(issue: &str, until: TaskWaitUntil) -> OpsResult<Option<(Tas
     })
 }
 
+/// Poll only the wait condition; construct the full status once on return.
+pub fn task_wait(
+    issue: &str,
+    until: TaskWaitUntil,
+    timeout: Option<std::time::Duration>,
+) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let started = std::time::Instant::now();
+        loop {
+            let Some((task, reached)) = task_wait_condition(&store, issue, until).await? else {
+                return Ok(None);
+            };
+            if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
+                return Ok(Some((read_task_snapshot(&store, task).await?, reached)));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    })
+}
+
 /// The Task `issue` names as it stands in `store`, and whether it has reached
 /// `until`; `None` when no Task has that name.
 pub async fn task_wait_reading(
@@ -2653,6 +2661,17 @@ pub async fn task_wait_reading(
     issue: &str,
     until: TaskWaitUntil,
 ) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    let Some((task, reached)) = task_wait_condition(store, issue, until).await? else {
+        return Ok(None);
+    };
+    Ok(Some((read_task_snapshot(store, task).await?, reached)))
+}
+
+async fn task_wait_condition(
+    store: &SharedStore,
+    issue: &str,
+    until: TaskWaitUntil,
+) -> OpsResult<Option<(Task, bool)>> {
     let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
         return Ok(None);
     };
@@ -2672,7 +2691,7 @@ pub async fn task_wait_reading(
         }
         TaskWaitUntil::Terminal => finished,
     };
-    Ok(Some((read_task_snapshot(store, task).await?, reached)))
+    Ok(Some((task, reached)))
 }
 
 /// Read the saved Task thread or save a comment without allocating execution state.

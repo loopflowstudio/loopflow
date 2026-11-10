@@ -230,8 +230,8 @@ lf set machine.tasks '<machine-id>'
 ```
 
 Work initiated on your laptop uses the laptop's personal preferences on the remote.
-A phone connecting through the laptop uses those preferences too. Work initiated
-directly on the remote uses its saved preferences. The executor supplies its own
+Work initiated directly on the remote uses its saved preferences. Remote phone
+access is planned separately; it is not available through the local socket. The executor supplies its own
 tools and credentials. See [Remote work](#remote-work) for retaining preferences
 there for later use.
 
@@ -363,8 +363,7 @@ and Graph topology still come from the selected or captured definitions.
 | Start work from | Personal preferences used |
 | --- | --- |
 | Laptop, targeting a remote machine | Laptop's |
-| Phone through the laptop's LF server | Laptop's |
-| Shell or phone directly on the remote | Remote's saved preferences |
+| Shell directly on the remote | Remote's saved preferences |
 
 Forward authored declarations with their scope, target and choice/fallback
 meaning. Do not turn the effective result into command-line overrides or combine
@@ -694,8 +693,6 @@ choice win, even if it is general. `-a` explicitly selects the invocation's agen
 Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
-Loopflow sends Codex no service tier; the user's Codex config decides speed.
-
 Bare harness names use the model selected by that provider account. Add
 `harness:model` only when the invocation must pin a specific model. OpenCode
 model strings use `provider/model` form:
@@ -705,6 +702,36 @@ agent: opencode                          # user's OpenCode default
 agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
+
+### Codex service tier
+
+```bash
+lf set --global codex.service_tier default  # standard speed across your repositories
+lf unset --global codex.service_tier        # remove that global preference
+```
+
+`codex.service_tier` sets the tier when Loopflow launches Codex. Use `default`
+(or `standard`) for standard speed, and `priority` (or `fast`) for fast mode.
+There is no Loopflow default: when no applicable preference is set, Codex's own
+configuration decides the tier. Loopflow never rewrites `~/.codex/config.toml`.
+
+Omit `--global` to set or unset your repository preference. For one invocation:
+
+```bash
+lf --setting codex.service_tier=priority -a codex implement
+```
+
+The setting follows [normal precedence](#which-value-wins). Unsetting it reveals
+any lower-precedence value; Codex configuration applies when none remains.
+Use `lf config settings --explain` to see which value wins. Other tier values
+are rejected before saving.
+
+The preference applies to interactive Sessions and headless Graph/Task runs,
+including resume paths that launch Codex again. Native Codex `/new` and `/fork`
+inherit the launch configuration. Saving a preference or reattaching does not
+reset a running conversation's tier, including changes made in Codex.
+`lf replay` retains the launch preference recorded in its capture. Other
+harnesses ignore this setting.
 
 ### Pi
 
@@ -1017,6 +1044,11 @@ another private preference file. The first LF write adds `/lf.config.local.yaml`
 to the repository's private Git exclude file if needed. It preserves existing
 ignore rules and does not edit the committed `.gitignore`. An already tracked
 file needs to be removed from tracking before Git can ignore it.
+LF checks tracking before writing private settings. Reads load the current file
+without running Git protection diagnostics on each polling tick, and see edits
+on the next read. A tracked private file remains readable, but LF refuses to
+write it until it is removed from the index. Worktree path resolution can still
+use Git; this does not make every settings operation Git-free.
 
 ### What happens when a Wave is renamed?
 

@@ -79,6 +79,14 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
+    /// The CLI's retained process or Session history, as display text.
+    #[serde(rename = "process.history")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
+    ProcessHistory { id: String },
+    /// Look up a creation without starting or retrying it. Null confirms absence.
+    #[serde(rename = "creation.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -106,6 +114,23 @@ pub enum Read {
         /// Only the Sessions of this Task, as `--task <task>` filters them.
         task: Option<String>,
     },
+    /// `lf plan board`: compact Task rows for a board.
+    #[serde(rename = "plan.board")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::PlanBoard>()))]
+    PlanBoard {
+        directory: PathBuf,
+        wave: Option<String>,
+        task: Option<String>,
+        all: bool,
+    },
+    /// `lf task detail <issue>`: one Task and its supporting detail.
+    #[serde(rename = "task.detail")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::TaskDetail>()))]
+    TaskDetail { directory: PathBuf, issue: String },
+    /// `lf session card <id>`: a passive reading of one recorded Session.
+    #[serde(rename = "session.card")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::screens::SessionCard>()))]
+    SessionCard { id: String },
     /// `lf --cwd <directory> task show <issue>`: the Task pane.
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
@@ -358,6 +383,8 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
+            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
             Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -384,6 +411,25 @@ impl Read {
                     argv.extend(words(&["--limit", "0"]));
                 }
                 argv.extend(optional("--task", task.as_ref()));
+                argv
+            }
+            Self::TaskDetail { directory, issue } => {
+                at(directory, &["task", "detail", issue, "--json"])
+            }
+            Self::SessionCard { id } => words(&["session", "card", id, "--json"]),
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => {
+                let mut argv = at(directory, &["plan", "board"]);
+                argv.extend(wave.clone());
+                argv.extend(optional("--task", task.as_ref()));
+                if *all {
+                    argv.push("--all".into());
+                }
+                argv.push("--json".into());
                 argv
             }
             Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
@@ -613,6 +659,30 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
+            Self::ProcessHistory { id } => value(&super::history::render(
+                id,
+                false,
+                None,
+                super::session_history::SessionView::Summary,
+            )?),
+            Self::CreationGet { request_id } => {
+                value(&crate::engine::creation::lookup(request_id)?)
+            }
+            Self::PlanBoard {
+                directory,
+                wave,
+                task,
+                all,
+            } => value(&super::screens::board(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+            )?),
+            Self::TaskDetail { directory, issue } => {
+                value(&super::screens::task_detail(directory, issue)?)
+            }
+            Self::SessionCard { id } => value(&super::screens::session_card(id)?),
             Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
@@ -760,7 +830,13 @@ impl Read {
                 wave,
                 task,
                 all,
-            } => super::waves::show_json(directory, wave.as_deref(), task.as_deref(), *all, false),
+            } => value(&super::waves::show_snapshot(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+                false,
+            )?),
             Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
             Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
@@ -826,7 +902,7 @@ impl Read {
 
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
     /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
-    /// [`Subscription::pull`] may find a frame; dropping the subscription ends
+    /// [`Subscription::pull`] may find a reading or occurrences; dropping the subscription ends
     /// it. A read whose command takes no `--subscribe` is an error.
     pub fn subscribe(
         self,
@@ -838,9 +914,17 @@ impl Read {
             paths.extend(self.ending_paths().iter().map(|path| path.to_string()));
             paths
         });
+        let events = matches!(
+            self,
+            Self::TaskGet { .. }
+                | Self::TaskWait { .. }
+                | Self::PlanList { .. }
+                | Self::DesktopViewList { .. }
+        );
         let transport = Transport::Pull {
             wake: Box::new(wake),
             select,
+            events,
         };
         let subscription = match self {
             Self::ProcessList => super::top::subscribe_ps(transport),

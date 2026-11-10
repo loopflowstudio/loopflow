@@ -488,6 +488,7 @@ impl World {
             Some(title.to_string()),
             Some(report.to_string()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            None,
         )?)
     }
 

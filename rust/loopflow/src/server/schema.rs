@@ -120,7 +120,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../../tests/fixtures/dto/server/mobile_status_request.json"),
     include_str!("../../../../tests/fixtures/dto/server/session_page.json"),
     include_str!("../../../../tests/fixtures/dto/server/session_start.json"),
-    include_str!("../../../../tests/fixtures/dto/server/task_start.json"),
+    include_str!("../../../../tests/fixtures/dto/server/task_create.json"),
     include_str!("../../../../tests/fixtures/dto/server/upload.json"),
 ];
 

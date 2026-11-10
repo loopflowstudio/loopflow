@@ -354,6 +354,7 @@ fn read_summary(
             .transpose()?
             .flatten();
         Ok(crate::session::SessionSummary {
+            transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
             has_provider_history: row.get(40)?,
             preview: row
                 .get::<_, Option<String>>(36)?
@@ -451,12 +452,29 @@ pub(super) fn primary_session_in(
     }
 }
 
+fn observe_availability(conn: &Connection, mut now: i64) -> StoreResult<i64> {
+    while crate::observe::active() {
+        // Availability changes once at the next quiet deadline, not on every tick.
+        let next: Option<i64> = conn.query_row(
+            "SELECT MIN(observed_at + ?1) FROM session_activity WHERE observed_at + ?1 > ?2",
+            rusqlite::params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            |row| row.get(0),
+        )?;
+        match next {
+            Some(next) if crate::observe::deadline(next) => now = next,
+            _ => break,
+        }
+    }
+    Ok(now)
+}
+
 pub(super) fn session_summaries_in(
     conn: &Connection,
     filter: &crate::session::SessionFilter,
     now: i64,
     live_agents: &str,
 ) -> StoreResult<Vec<crate::session::SessionSummary>> {
+    let now = observe_availability(conn, now)?;
     let mut labels = std::collections::HashMap::new();
     let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
     let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
@@ -886,47 +904,6 @@ impl SqliteStore {
         Ok(serde_json::to_string(&live)?)
     }
 
-    /// What Session summaries read at `now` besides committed rows: each
-    /// unfinished AgentProcess's OS evidence, how many activity rows are quiet
-    /// enough to make a Session available, and which persistent checkouts
-    /// exist. Without a commit, summaries change only when this does.
-    pub(crate) fn session_observations(&self, now: i64) -> StoreResult<Vec<u8>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // The agent-only index: ordering by id in SQL would walk every row.
-        let mut agents = conn
-            .prepare(
-                "SELECT id,pid,os_started_at,started_at FROM processes INDEXED BY agent_process_session
-                 WHERE kind='agent' AND completed_at IS NULL",
-            )?
-            .query_map([], |row| {
-                let evidence = crate::journal::agent_process_evidence(
-                    None,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    crate::journal::process_identity_evidence,
-                );
-                Ok(format!("{}:{evidence:?}\n", row.get::<_, String>(0)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        agents.sort_unstable();
-        let mut observed = agents.concat();
-        let quiet: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM session_activity WHERE observed_at<=?1",
-            [now - crate::session::AVAILABILITY_QUIET_SECONDS],
-            |row| row.get(0),
-        )?;
-        observed.push_str(&format!("quiet:{quiet}\n"));
-        let mut checkouts = conn.prepare(
-            "SELECT DISTINCT cwd FROM agent_sessions WHERE primary_scope IS NOT NULL ORDER BY cwd",
-        )?;
-        for cwd in checkouts.query_map([], |row| row.get::<_, String>(0))? {
-            let cwd = cwd?;
-            observed.push_str(&format!("{}:{cwd}\n", Path::new(&cwd).exists()));
-        }
-        Ok(observed.into_bytes())
-    }
-
     /// Each row's Available is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
@@ -948,6 +925,7 @@ impl SqliteStore {
         let id = canonical.as_str();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
+        let now = observe_availability(&conn, now)?;
         let mut labels = std::collections::HashMap::new();
         conn.query_row(
             &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
@@ -1510,6 +1488,7 @@ impl SqliteStore {
         &self,
         expected_input: Option<i64>,
         mut session: LfSession,
+        creation: Option<&str>,
     ) -> StoreResult<LfSession> {
         let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
         let _admission = self.lock_session_checkouts(&stored)?;
@@ -1534,6 +1513,15 @@ impl SqliteStore {
             crate::journal::current_lf_process_id().as_ref(),
         )?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+        if let Some(id) = creation {
+            let changed = tx.execute("UPDATE creation_receipts SET milestone='admitted',updated_at=?3 WHERE request_id=?1 AND artifact_key=?2 AND milestone='stopping'",
+                params![id,session.artifact_key,crate::store::rows::now_unix()])?;
+            if changed != 1 {
+                return Err(StoreError::InvalidData(
+                    "new thread receipt does not match its reserved input".into(),
+                ));
+            }
+        }
         tx.commit()?;
         Ok(session)
     }
@@ -1840,6 +1828,11 @@ pub(super) fn retain_history_in(
         let (captured, owner) = captured.ok_or(StoreError::NotFound)?;
         if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
+        }
+        if Some(captured) == session.captured {
+            if let Some(thread) = observation.payload["evidence"]["provider_session_id"].as_str() {
+                super::provider_transitions::observe_in(conn, &session.id, thread, "observed")?;
+            }
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
@@ -2173,7 +2166,7 @@ mod metadata_tests {
         next.cwd = home.path().join("destination");
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         assert!(store
-            .replace_session_input(session.captured, next.clone())
+            .replace_session_input(session.captured, next.clone(), None)
             .is_err());
         let retained = store.task_work(&task).unwrap().sessions;
         drop(exclusion);
@@ -2182,7 +2175,9 @@ mod metadata_tests {
             1,
             "input replacement removed Task work while its source checkout was excluded"
         );
-        let replacement = store.replace_session_input(session.captured, next).unwrap();
+        let replacement = store
+            .replace_session_input(session.captured, next, None)
+            .unwrap();
         assert_eq!(replacement.cwd, session.cwd);
         assert_eq!(replacement.task_id, None);
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
@@ -2247,12 +2242,14 @@ mod metadata_tests {
             .unwrap();
         let before = store.session_history("retired", 0, 100).unwrap();
         assert!(store
-            .replace_session_input(first.captured, next.clone())
+            .replace_session_input(first.captured, next.clone(), None)
             .is_err());
         assert_eq!(store.session_history("retired", 0, 100).unwrap(), before);
 
         next.completed_at = Some(10);
-        let next = store.replace_session_input(first.captured, next).unwrap();
+        let next = store
+            .replace_session_input(first.captured, next, None)
+            .unwrap();
         store.publish_capture(&next.id, next.captured).unwrap();
         let retained = store.session("retired").unwrap().unwrap();
         assert_eq!(retained.completed_at, Some(10));
@@ -2276,7 +2273,9 @@ mod metadata_tests {
         let mut next = first.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
-        let next = store.replace_session_input(first.captured, next).unwrap();
+        let next = store
+            .replace_session_input(first.captured, next, None)
+            .unwrap();
         assert_ne!(next.captured, first.captured);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -2290,7 +2289,7 @@ mod metadata_tests {
         );
         assert!(store.publish_capture(&first.id, first.captured).is_err());
         assert!(store
-            .replace_session_input(first.captured, first.clone())
+            .replace_session_input(first.captured, first.clone(), None)
             .is_err());
         store
             .publish_capture(&retained.id, retained.captured)

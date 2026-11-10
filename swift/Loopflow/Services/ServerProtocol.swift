@@ -1,15 +1,15 @@
 import Foundation
 
-/// Revision 4 of the server protocol: one connection per client, a negotiated
+/// Revision 5 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 4
-    public static let minRevision = 4
+    public static let revision = 5
+    public static let minRevision = 5
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.
-    public static let maxBulk = 64 * 1024 * 1024
+    public static let maxBulk = 32 * 1024 * 1024
     /// The remote control connection; a ticketed connection opens the ticket path.
     public static let machinePath = "/v1/machine"
     public static let ticketPath = "/v1/ticket"
@@ -152,6 +152,8 @@ public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
     case command(ServedWrite)
     case config(ConfigOperation)
+    /// The unchanged payload of a submitted creation; never arbitrary command replay.
+    case submittedCreation(JSONValue)
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
@@ -166,6 +168,7 @@ public enum ServerOperation: Encodable, Sendable {
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("request.upload", forKey: .kind)
             try box.encode(bytes, forKey: .bytes)
+        case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session, let owner):
             var box = encoder.container(keyedBy: Keys.self)
@@ -210,6 +213,50 @@ public enum ConfigOperation: Encodable, Sendable {
     }
 }
 
+/// An occurrence beside a complete reading. Unknown kinds stay subscription-local.
+public enum SubscriptionEvent: Decodable, Sendable {
+    case taskShipped(taskID: String, prID: String, number: UInt32, url: String, mergeCommit: String)
+    case taskSteer(taskID: String, steer: Steer, comment: TaskComment?)
+    case graphStepFinished(taskID: String, graphProcessID: String, step: GraphStepProcess)
+    case unknown(kind: String)
+
+    private enum Keys: String, CodingKey {
+        case kind, number, url, steer, step, comment
+        case taskID = "task_id", prID = "pr_id", mergeCommit = "merge_commit", graphProcessID = "graph_process_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: Keys.self)
+        let kind = try box.decode(String.self, forKey: .kind)
+        switch kind {
+        case "task.shipped":
+            self = .taskShipped(taskID: try box.decode(String.self, forKey: .taskID),
+                                prID: try box.decode(String.self, forKey: .prID),
+                                number: try box.decode(UInt32.self, forKey: .number),
+                                url: try box.decode(String.self, forKey: .url),
+                                mergeCommit: try box.decode(String.self, forKey: .mergeCommit))
+        case "task.steer":
+            self = .taskSteer(taskID: try box.decode(String.self, forKey: .taskID),
+                              steer: try box.decode(Steer.self, forKey: .steer),
+                              comment: try box.decode(TaskComment?.self, forKey: .comment))
+        case "graph.step_finished":
+            self = .graphStepFinished(taskID: try box.decode(String.self, forKey: .taskID),
+                                      graphProcessID: try box.decode(String.self, forKey: .graphProcessID),
+                                      step: try box.decode(GraphStepProcess.self, forKey: .step))
+        default: self = .unknown(kind: kind)
+        }
+    }
+}
+
+public struct Steer: Decodable, Sendable {
+    public let id: String
+    public let sequence: Int64
+    public let source: String
+    public let revision: String
+    public let author: WorkAuthor
+    public let text: String
+}
+
 /// One message from the server.
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
@@ -224,6 +271,7 @@ public enum ServerMessage: Decodable, Sendable {
     case bulk(id: String, ticket: String, bytes: Int)
     /// A ticketed connection's answer; what follows is what the ticket names.
     case admitted
+    case event(id: String, seq: UInt64, event: SubscriptionEvent)
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     case ended(id: String)
@@ -234,7 +282,7 @@ public enum ServerMessage: Decodable, Sendable {
     case error(id: String?, code: String, message: String, data: JSONValue)
 
     private enum Keys: String, CodingKey {
-        case type, ticket, bytes, id, result, frame, checkpoint, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+        case type, ticket, bytes, id, result, frame, checkpoint, code, message, data, seq, event, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -251,6 +299,9 @@ public enum ServerMessage: Decodable, Sendable {
             self = .bulk(id: try box.decode(String.self, forKey: .id), ticket: try box.decode(String.self, forKey: .ticket),
                          bytes: try box.decode(Int.self, forKey: .bytes))
         case "admitted": self = .admitted
+        case "event":
+            self = .event(id: try box.decode(String.self, forKey: .id), seq: try box.decode(UInt64.self, forKey: .seq),
+                          event: try box.decode(SubscriptionEvent.self, forKey: .event))
         case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
@@ -293,8 +344,10 @@ public struct ServerWelcome: Decodable, Sendable {
 public struct ServerLimits: Decodable, Sendable {
     public let maxMessage: Int
     public let maxConnections: Int
+    public let maxOpen: Int
+    public let maxRetainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections" }
+    private enum CodingKeys: String, CodingKey { case maxMessage = "max_message", maxConnections = "max_connections", maxOpen = "max_open", maxRetainedBytes = "max_retained_bytes" }
 }
 
 public struct ServerStatus: Decodable, Sendable {
@@ -318,6 +371,8 @@ public struct ServerConnectedClient: Decodable, Equatable, Sendable {
     public let connectedAt: String
     /// Requests the connection has sent, subscriptions included.
     public let requests: UInt64
+    public let open: Int
+    public let retainedBytes: Int
 
-    private enum CodingKeys: String, CodingKey { case id, client, requests, connectedAt = "connected_at" }
+    private enum CodingKeys: String, CodingKey { case id, client, requests, open, retainedBytes = "retained_bytes", connectedAt = "connected_at" }
 }

@@ -1017,6 +1017,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Detail { issue, .. } => {
+            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
+                directory: repo.to_owned(),
+                issue: issue.clone(),
+            })
+        }
         TaskCommand::Show {
             issue, subscribe, ..
         } => loopflow::lf::commands::desktop::task_pane(issue, *subscribe),
@@ -1035,54 +1041,24 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Reopen { .. } | TaskCommand::Complete { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Create {
-            request,
-            notes,
-            run,
-            graph,
-            request_id,
-            terminal: _,
-            json,
-            ..
-        } => {
+        TaskCommand::Create { .. } => {
             let mut stdin = std::io::stdin();
             let mut empty = std::io::empty();
-            let input: &mut dyn std::io::Read = if stdin.is_terminal() {
-                &mut empty
-            } else {
-                &mut stdin
-            };
-            if let Some(id) = request_id {
-                // Admission survives a lost reply: the request ID names the
-                // reserved Task and the one launch it may make.
-                let report = match request.as_ref().or(notes.as_ref()) {
-                    Some(text) => Some(text.clone()),
-                    None => loopflow::lf::commands::task_create::read_report(input)?,
-                };
-                let outcome =
-                    loopflow::lf::commands::task_create::recoverable(cli, repo, id, report)?;
-                println!("{}", serde_json::to_string_pretty(&outcome)?);
-                return Ok(());
-            }
-            let issue = loopflow::lf::commands::task_create::create(
+            loopflow::lf::commands::task_create::create(
                 repo,
                 command,
                 &mut loopflow::lf::commands::mutation::CommandIo {
-                    input,
+                    input: if stdin.is_terminal() {
+                        &mut empty
+                    } else {
+                        &mut stdin
+                    },
                     output: &mut std::io::stdout(),
                     error: &mut std::io::stderr(),
                 },
+                cli.batch,
+                cli.agent.as_deref(),
             )?;
-            if *run {
-                loopflow::lf::commands::task_create::start(
-                    cli,
-                    repo,
-                    &issue,
-                    graph.as_deref(),
-                    request.as_deref(),
-                    *json,
-                )?;
-            }
             Ok(())
         }
         TaskCommand::View { issue, once } => {
@@ -2483,14 +2459,14 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 | WaveCommand::List { .. }
                 | WaveCommand::Show { .. }
                 | WaveCommand::Plan { cmd: None, .. }
-        }) | Some(Commands::Plan { .. })
-            | Some(Commands::Session {
-                cmd: loopflow::lf::SessionCommand::History {
-                    cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-                    ..
-                },
-            })
-            | Some(Commands::Process { .. })
+        }) | Some(Commands::Plan {
+            cmd: loopflow::lf::PlanCommand::List { .. }
+        }) | Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::History {
+                cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
+                ..
+            },
+        }) | Some(Commands::Process { .. })
     ) {
         loopflow::ops::recovery::recover();
     }
@@ -2990,6 +2966,19 @@ fn execute_command(
         }) => loopflow::lf::commands::waves::status(wave.as_deref(), true, false),
         Some(Commands::Plan {
             cmd:
+                loopflow::lf::PlanCommand::Board {
+                    wave, task, all, ..
+                },
+        }) => {
+            loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::PlanBoard {
+                directory: std::env::current_dir()?,
+                wave: wave.clone(),
+                task: task.clone(),
+                all: *all,
+            })
+        }
+        Some(Commands::Plan {
+            cmd:
                 loopflow::lf::PlanCommand::List {
                     wave,
                     task,
@@ -3076,6 +3065,7 @@ fn execute_command(
                 cmd @ (TaskCommand::Diff { .. }
                 | TaskCommand::Changes { .. }
                 | TaskCommand::Show { .. }
+                | TaskCommand::Detail { .. }
                 | TaskCommand::Context { .. }
                 | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }

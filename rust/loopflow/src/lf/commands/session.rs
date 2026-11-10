@@ -17,6 +17,9 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     if let SessionCommand::Serve { terminal, argv } = command {
         return crate::transport::serve(argv, *terminal);
     }
+    if let SessionCommand::Card { id, .. } = command {
+        return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
+    }
     if let SessionCommand::List(args) = command {
         return list_sessions(args);
     }
@@ -47,6 +50,57 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     } else {
         runtime.block_on(run_async(command, cli))
     }
+}
+
+/// Start an exact Session under its retained terminal owner; the server is only a caller.
+pub(super) async fn started(
+    id: &str,
+    directory: &Path,
+    agent: Option<String>,
+    step_args: Vec<String>,
+) -> anyhow::Result<SessionRecord> {
+    let store = open_shared_store().await?;
+    let session = crate::ops::human_session::session_by_id(&store, id)
+        .await?
+        .context("Session is unavailable")?;
+    if let Some(reason) = crate::ops::human_session::run_refusal(&store.sqlite, &session)? {
+        bail!(reason);
+    }
+    // Pin the selected conversation: do not resolve a Task/scope
+    // again in the child after its primary may have changed.
+    let context = crate::os_process::execution_context()?;
+    let mut argv = vec![context.lf_bin.to_string_lossy().into_owned()];
+    argv.extend(step_args);
+    if let Some(agent) = &agent {
+        argv.extend(["--agent".into(), agent.clone()]);
+    }
+    argv.extend([
+        "session".into(),
+        "resume".into(),
+        "--".into(),
+        id.to_owned(),
+    ]);
+    let starting = id.to_owned();
+    let cwd = directory.to_path_buf();
+    crate::journal::request::spawn_blocking(move || {
+        crate::transport::start_session(&starting, &argv, true, &cwd, &|command| {
+            // This exact Session owns its child, not the service's launcher or
+            // a different Session that invoked the CLI.
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("LF_") {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .env("LF_HOME", &context.lf_home)
+                .env("LF_BIN", &context.lf_bin);
+        })
+    })
+    .await??;
+    let session = crate::ops::human_session::session_by_id(&store, id)
+        .await?
+        .context("Session is unavailable")?;
+    crate::ops::human_session::surface(&store, &session).await
 }
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
@@ -159,7 +213,10 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+        SessionCommand::Card { .. }
+        | SessionCommand::List(_)
+        | SessionCommand::Usage(_)
+        | SessionCommand::Retention { .. } => {
             unreachable!("reads return before any runtime")
         }
         SessionCommand::Move {
@@ -204,31 +261,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 let store = open_shared_store().await?;
                 let cwd = std::env::current_dir()?;
                 let id = select(&store, &cwd, connection.target(cli, id.as_deref())?).await?;
-                let session = crate::ops::human_session::session_by_id(&store, &id)
-                    .await?
-                    .context("Session is unavailable")?;
-                if let Some(reason) =
-                    crate::ops::human_session::run_refusal(&store.sqlite, &session)?
-                {
-                    bail!(reason);
-                }
-                // Pin the selected conversation: do not resolve a Task/scope
-                // again in the child after its primary may have changed.
-                let mut argv = vec![std::env::current_exe()?.to_string_lossy().into_owned()];
-                argv.extend(cli.step_args());
-                if let Some(agent) = &cli.agent {
-                    argv.extend(["--agent".into(), agent.clone()]);
-                }
-                argv.extend(["session".into(), "resume".into(), "--".into(), id.clone()]);
-                let starting = id.clone();
-                tokio::task::spawn_blocking(move || {
-                    crate::transport::start_session(&starting, &argv, true, &cwd, &|_| {})
-                })
-                .await??;
-                let session = crate::ops::human_session::session_by_id(&store, &id)
-                    .await?
-                    .context("Session is unavailable")?;
-                let record = crate::ops::human_session::surface(&store, &session).await?;
+                let record = started(&id, &cwd, cli.agent.clone(), cli.step_args()).await?;
                 if !connection.json && !cli.json {
                     println!("{}", record.id);
                 }
@@ -242,8 +275,18 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             )
             .await
         }
-        SessionCommand::New { id, connection } => {
-            new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
+        SessionCommand::New {
+            id,
+            connection,
+            request_id,
+        } => {
+            new_thread(
+                cli,
+                connection,
+                connection.target(cli, id.as_deref())?,
+                request_id.as_deref(),
+            )
+            .await
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send { id, task, to } => {
@@ -394,16 +437,8 @@ pub(crate) fn subscribe_list(
         search: filter.search.clone(),
         interactive: filter.interactive,
     };
-    // A clock tick rereads every summary only when an AgentProcess lived or
-    // died, a Session went quiet long enough to become available, or a
-    // persistent checkout appeared or vanished.
-    let subscribed =
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK).probing(|store| {
-            Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
-        });
     super::subscribe::start(
         args,
-        subscribed,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,
@@ -442,17 +477,28 @@ pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
     ))
 }
 
+// The bound Session, or the Task a preview would assign.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+#[schemars(inline)]
+pub(crate) enum SessionBinding {
+    Bound(Box<crate::ops::human_session::SessionRecord>),
+    Preview(Box<crate::ops::human_session::SessionBindingPreview>),
+}
+
 /// `lf session bind <id> --task <task> --json`: the bound Session, or with
 /// `preview` (`--dry-run`) the Task a bind would assign, assigning nothing.
-pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn bound(id: &str, task: &str, preview: bool) -> anyhow::Result<SessionBinding> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         Ok(if preview {
-            serde_json::to_value(
+            SessionBinding::Preview(Box::new(
                 crate::ops::human_session::preview_binding(&store, id, task).await?,
-            )?
+            ))
         } else {
-            serde_json::to_value(crate::ops::human_session::bind(&store, id, task).await?)?
+            SessionBinding::Bound(Box::new(
+                crate::ops::human_session::bind(&store, id, task).await?,
+            ))
         })
     })
 }
@@ -735,9 +781,22 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 let target = connection.target(cli, id.as_deref())?;
                 reopen(&store, directory, target, connection, *fork, false).await
             }
-            SessionCommand::New { id, connection } if connection.prepare => {
+            SessionCommand::New {
+                id,
+                connection,
+                request_id,
+            } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                restarted(&store, directory, target, false, false).await
+                restarted(
+                    &store,
+                    directory,
+                    target,
+                    false,
+                    false,
+                    request_id.as_deref(),
+                    cli.agent.as_deref(),
+                )
+                .await
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -750,6 +809,7 @@ async fn new_thread(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
     target: crate::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         connection.message.is_none(),
@@ -762,6 +822,8 @@ async fn new_thread(
         target,
         true,
         connection.json || cli.json,
+        request_id,
+        cli.agent.as_deref(),
     )
     .await?;
     print_opened(connection.json || cli.json, &record)
@@ -775,6 +837,8 @@ async fn restarted(
     target: crate::ops::human_session::SessionTarget<'_>,
     launch: bool,
     json: bool,
+    request_id: Option<&str>,
+    agent: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
     let selected = crate::ops::human_session::select_connection(
         store,
@@ -783,34 +847,25 @@ async fn restarted(
         SessionOpenIntent::Resume,
     )
     .await?;
-    let session = crate::ops::human_session::session_by_id(store, &selected.id)
-        .await?
-        .context("Session not found")?;
-    let threaded = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
-        None => false,
-    };
-    if !threaded {
-        // No earlier thread to hand off from: opening starts the first one.
-        if selected.started {
-            crate::journal::request::diagnostic(format_args!(
-                "Nothing to restart here; starting a new conversation."
-            ));
-        }
-        return crate::ops::human_session::open(
-            store,
-            directory,
-            &selected.id,
-            false,
-            launch,
-            json,
-        )
-        .await;
+    let request_id = request_id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let next = crate::ops::human_session::new_thread(
+        store,
+        &selected.id,
+        agent,
+        launch,
+        json,
+        &request_id,
+    )
+    .await?;
+    if let Some(result) = store
+        .sqlite
+        .creation_receipt(&request_id)?
+        .and_then(|r| r.result)
+    {
+        return Ok(serde_json::from_value(result)?);
     }
-    let agent = crate::config::agent_override();
-    let next =
-        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json)
-            .await?;
     crate::ops::human_session::surface(store, &next).await
 }
 

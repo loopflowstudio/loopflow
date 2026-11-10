@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 4: one connection per client,
+//! Carrier-independent server protocol, revision 5: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,14 +11,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 4;
+pub const REVISION: u32 = 5;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 4;
+pub const MIN_REVISION: u32 = 5;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
 /// The largest message a ticketed connection carries in either direction.
-pub const MAX_BULK: usize = 64 * 1024 * 1024;
+pub const MAX_BULK: usize = 32 * 1024 * 1024;
 pub const MAX_CONNECTIONS: usize = 64;
 /// How long a `session.attach` ticket opens a bridge.
 pub const TICKET_LIFETIME: std::time::Duration = std::time::Duration::from_secs(60);
@@ -139,6 +139,38 @@ pub struct SessionAttached {
     pub expires_in_ms: u64,
 }
 
+/// An occurrence within the Tasks included in a subscription reading.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum SubscriptionEvent {
+    #[serde(rename = "task.shipped")]
+    TaskShipped {
+        task_id: crate::work::task::TaskId,
+        pr_id: crate::work::task::TaskPrId,
+        number: u32,
+        url: String,
+        merge_commit: String,
+    },
+    #[serde(rename = "task.steer")]
+    TaskSteer {
+        task_id: crate::work::task::TaskId,
+        steer: crate::steer::Steer,
+        /// The thread entry when this direction came from a retained comment.
+        comment: Option<crate::work::task::comment::TaskComment>,
+    },
+    #[serde(rename = "graph.step_finished")]
+    GraphStepFinished {
+        task_id: crate::work::task::TaskId,
+        graph_process_id: LfProcessId,
+        step: crate::durable::GraphStepProcess,
+    },
+    /// Newer event kinds can be ignored or resynced without losing the connection.
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
+}
+
 /// One message from the server.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -175,6 +207,12 @@ pub enum ServerMessage {
     },
     /// A ticketed connection's answer; what follows is what the ticket names.
     Admitted,
+    /// Connection-local ordering; never a replay or reading checkpoint.
+    Event {
+        id: String,
+        seq: u64,
+        event: SubscriptionEvent,
+    },
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     Ended {
@@ -230,6 +268,8 @@ pub struct ConnectedClient {
     pub connected_at: String,
     /// Requests the connection has sent, subscriptions included.
     pub requests: u64,
+    pub open: usize,
+    pub retained_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -237,6 +277,8 @@ pub struct ConnectedClient {
 pub struct Limits {
     pub max_message: usize,
     pub max_connections: usize,
+    pub max_open: usize,
+    pub max_retained_bytes: usize,
 }
 
 impl ServerMessage {
@@ -256,6 +298,14 @@ mod tests {
     use super::{ClientMessage, ServerMessage};
 
     #[test]
+    fn unknown_events_keep_their_subscription_envelope() {
+        let message: ServerMessage = serde_json::from_str(r#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.event","payload":true}}"#).unwrap();
+        assert!(
+            matches!(message, ServerMessage::Event { id, seq:2, event: super::SubscriptionEvent::Unknown } if id == "task")
+        );
+    }
+
+    #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
         for raw in [
             include_str!("../../../../tests/fixtures/dto/server/hello.json"),
@@ -268,7 +318,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
-            include_str!("../../../../tests/fixtures/dto/server/task_start.json"),
+            include_str!("../../../../tests/fixtures/dto/server/task_create.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_start.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_page.json"),
             include_str!("../../../../tests/fixtures/dto/server/view_select.json"),
@@ -328,6 +378,9 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../../../tests/fixtures/dto/server/bridged.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_shipped.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_steer.json"),
+            include_str!("../../../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../../../tests/fixtures/dto/server/error.json"),
             include_str!("../../../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../../../tests/fixtures/dto/server/remote.json"),

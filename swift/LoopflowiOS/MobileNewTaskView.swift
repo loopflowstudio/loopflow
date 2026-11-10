@@ -169,7 +169,7 @@ struct MobileNewTaskView: View {
 }
 
 private struct MobileCreationResult: View {
-    let outcome: TaskCreateOutcome
+    let outcome: MobileTaskOutcome
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -182,7 +182,7 @@ private struct MobileCreationResult: View {
         }
     }
 
-    static func title(_ outcome: TaskCreateOutcome) -> String {
+    static func title(_ outcome: MobileTaskOutcome) -> String {
         switch outcome.state {
         case .inProgress: "Your Task is starting"
         case .started: "Your Task is ready"

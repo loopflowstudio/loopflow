@@ -56,6 +56,15 @@ fn planning_statements(home: &std::path::Path, repo: &std::path::Path) -> (u64, 
 
 /// Statements one read runs, and what it printed.
 fn statements(home: &std::path::Path, repo: &std::path::Path, args: &[&str]) -> (u64, String) {
+    let (volume, output) = volume(home, repo, args);
+    (volume["statements"].as_u64().unwrap(), output)
+}
+
+fn volume(
+    home: &std::path::Path,
+    repo: &std::path::Path,
+    args: &[&str],
+) -> (serde_json::Value, String) {
     let receipts = tempfile::tempdir().unwrap();
     let output = lf(home, repo, args)
         .env("LF_PERF_OUTPUT", receipts.path())
@@ -70,10 +79,54 @@ fn statements(home: &std::path::Path, repo: &std::path::Path, args: &[&str]) -> 
     let text = std::fs::read_to_string(file.path()).unwrap();
     let end: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
     assert_eq!(end["event"], "end");
-    (
-        end["statements"].as_u64().unwrap(),
-        String::from_utf8(output.stdout).unwrap(),
+    (end, String::from_utf8(output.stdout).unwrap())
+}
+
+#[test]
+fn task_wait_reuses_its_store_and_builds_status_only_on_return() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let output = lf(
+        home.path(),
+        repo.path(),
+        &["task", "create", "--title", "Wait", "--json"],
     )
+    .output()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
+    let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    connection.execute("UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", rusqlite::params![id, repo.path().to_string_lossy()]).unwrap();
+    for _ in 0..16 {
+        crate::support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
+    }
+    let args = |timeout| ["task", "wait", id, "--timeout", timeout, "--json"];
+    let (immediate, body) = volume(home.path(), repo.path(), &args("0s"));
+    let initial: loopflow::engine::task::Waited = serde_json::from_str(&body).unwrap();
+    assert!(!initial.reached);
+    assert_eq!(initial.task.task_id, id);
+    let (waited, body) = volume(home.path(), repo.path(), &args("2s"));
+    let last: loopflow::engine::task::Waited = serde_json::from_str(&body).unwrap();
+    assert!(!last.reached);
+    assert_eq!(last.task.task_id, initial.task.task_id);
+    assert_eq!(last.task.work.graph_processes.len(), 16);
+    eprintln!("task wait: immediate={immediate}, waited={waited}");
+    for field in ["statements", "rows"] {
+        assert!(
+            waited[field].as_u64().unwrap() <= immediate[field].as_u64().unwrap() + 20,
+            "{field}: {immediate} -> {waited}"
+        );
+    }
+    assert_eq!(waited["connections"], immediate["connections"]);
+    connection
+        .execute("UPDATE tasks SET planning_completed=1 WHERE id=?1", [id])
+        .unwrap();
+    let (_, body) = volume(home.path(), repo.path(), &args("2s"));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap()["reached"],
+        true
+    );
 }
 
 fn lf(home: &std::path::Path, repo: &std::path::Path, args: &[&str]) -> Command {
@@ -113,7 +166,9 @@ fn planning_statements_do_not_grow_with_its_tasks() {
             if index % 2 == 1 {
                 continue;
             }
-            let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            let created = serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+                ["task"]
+                .clone();
             let checkout = checkouts.path().join(created["id"].as_str().unwrap());
             std::fs::create_dir_all(&checkout).unwrap();
             rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -159,7 +214,8 @@ fn task_status_statements_do_not_grow_with_its_graphs() {
     .output()
     .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let created =
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["task"].clone();
     let id = created["id"].as_str().unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()

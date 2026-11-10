@@ -2,6 +2,41 @@ import Foundation
 import Loopflow
 import Observation
 
+/// Phone-owned presentation of a shared creation receipt, not a server response.
+struct MobileTaskOutcome: Codable, Hashable {
+    enum State: String, Codable { case inProgress = "in_progress", started, failed, unknown }
+    let taskId: String
+    let state: State
+    let receipt: TaskCreateReceipt?
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case taskId = "task_id", state, receipt, message
+    }
+
+    init(taskId: String, state: State, receipt: TaskCreateReceipt?, message: String?) {
+        self.taskId = taskId
+        self.state = state
+        self.receipt = receipt
+        self.message = message
+    }
+
+    init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        taskId = try fields.decode(String.self, forKey: .taskId)
+        state = try fields.decode(State.self, forKey: .state)
+        message = try fields.decodeIfPresent(String.self, forKey: .message)
+        let saved = try fields.decodeIfPresent(JSONValue.self, forKey: .receipt)
+        if let saved, saved["milestone"] != .null {
+            receipt = try fields.decode(TaskCreateReceipt.self, forKey: .receipt)
+        } else {
+            // Older phone drafts keep their submission and Task identity. Read a
+            // current receipt from the Machine instead of inventing a milestone.
+            receipt = nil
+        }
+    }
+}
+
 struct MobileCreationContext {
     let machineID: String
     let name: String
@@ -20,13 +55,13 @@ struct MobileTaskSubmission: Codable, Equatable {
 @MainActor
 protocol MobileTaskCreationClient {
     func creationContext() async throws -> MobileCreationContext
-    func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome
+    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
 }
 
 struct MobileSavedTaskRequest: Codable, Identifiable {
     let submission: MobileTaskSubmission
-    var outcome: TaskCreateOutcome?
+    var outcome: MobileTaskOutcome?
     var id: UUID { submission.id }
 }
 
@@ -35,7 +70,7 @@ struct MobileTaskDraft: Codable {
     var directory = ""
     var machineID: String?
     var submission: MobileTaskSubmission?
-    var outcome: TaskCreateOutcome?
+    var outcome: MobileTaskOutcome?
     var savedRequests: [MobileSavedTaskRequest] = []
 
     init() {}
@@ -50,7 +85,7 @@ struct MobileTaskDraft: Codable {
         directory = try values.decode(String.self, forKey: .directory)
         machineID = try values.decodeIfPresent(String.self, forKey: .machineID)
         submission = try values.decodeIfPresent(MobileTaskSubmission.self, forKey: .submission)
-        outcome = try values.decodeIfPresent(TaskCreateOutcome.self, forKey: .outcome)
+        outcome = try values.decodeIfPresent(MobileTaskOutcome.self, forKey: .outcome)
         // Preserve drafts saved before the local recovery list was introduced.
         // This file is phone-owned UI state, not a Machine wire DTO.
         savedRequests = try values.decodeIfPresent([MobileSavedTaskRequest].self, forKey: .savedRequests) ?? []

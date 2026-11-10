@@ -94,7 +94,7 @@ pub(super) fn ingest_task_comment(
     Ok(true)
 }
 
-fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
+pub(super) fn read_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskComment> {
     let author: String = row.get(2)?;
     let body: String = row.get(1)?;
     let author = serde_json::from_str::<TaskCommentAuthor>(&author).map_err(|error| {
@@ -147,6 +147,19 @@ pub(super) fn insert_authored_comment(
 }
 
 impl SqliteStore {
+    /// Saved conversation content, independent of planning configuration and delivery badges.
+    pub(crate) fn task_comment_content(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id,body,author,created_at FROM task_comments
+             WHERE task_id=?1 ORDER BY created_at,id",
+        )?;
+        let comments = query
+            .query_map([task.as_str()], read_comment)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(comments)
+    }
+
     /// Comments and delivery badges come from one SQLite snapshot, even when
     /// another foreground connection acknowledges or resolves a delivery.
     pub fn task_comments(&self, task: &TaskId) -> StoreResult<TaskComments> {

@@ -29,6 +29,7 @@ pub mod rental;
 pub mod replay;
 pub mod rollover;
 pub mod run;
+pub mod screens;
 pub mod server;
 pub mod session;
 pub mod session_history;

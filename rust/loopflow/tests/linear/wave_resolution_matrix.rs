@@ -115,6 +115,13 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
+        id: "planning board",
+        path: &["plan", "board"],
+        base_args: &["plan", "board", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: true,
+    },
+    Cmd {
         id: "wave edit-plan",
         path: &["wave", "edit-plan"],
         base_args: &["wave", "edit-plan", "--summary", "Fixture"],

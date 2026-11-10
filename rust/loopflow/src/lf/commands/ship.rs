@@ -78,7 +78,7 @@ pub fn run(
         )?;
         // A Task that already has a conversation keeps it; this starts one only once.
         crate::ops::task::start_conversation_beside(&task);
-        if let TaskRunStart::Run(step) = start {
+        if let TaskRunStart::Run { step, .. } = start {
             // This ship has already let its launcher go, or keeps it to the end.
             if let Err(error) =
                 super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))

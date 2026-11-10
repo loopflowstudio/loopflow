@@ -19,7 +19,6 @@ mod definitions;
 pub mod files;
 pub mod keys;
 pub mod migrate;
-pub(crate) mod observation;
 pub(crate) mod placement;
 pub mod remote;
 pub mod settings;
@@ -32,6 +31,25 @@ pub const USER_NAME_ENV: &str = "LF_USER_NAME";
 #[serde(deny_unknown_fields)]
 pub struct UserConfig {
     pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CodexServiceTier {
+    #[serde(alias = "standard")]
+    Default,
+    #[serde(alias = "fast")]
+    Priority,
+}
+
+impl CodexServiceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Priority => "priority",
+        }
+    }
 }
 
 /// Resolve a display name from personal Loopflow configuration or Git's
@@ -549,7 +567,7 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
 
 /// Load YAML file, returning None if not present or empty.
 fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
-    let content = match observation::read_to_string(path) {
+    let content = match crate::observe::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -805,8 +823,6 @@ fn personal_file_layers(
     }
     if let Some(repo) = repo_root {
         let path = files::private_path(repo)
-            .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
-        files::diagnose_private_file(&path)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {
             let waves = private_wave_layers(repo, wave, &path, &value)?;

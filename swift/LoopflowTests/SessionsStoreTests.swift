@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import os
 import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
@@ -123,10 +124,13 @@ struct SessionsStoreTests {
 
     @Test("Reset restarts the same Session with a fresh launch")
     func resetRestartsSameSession() async throws {
+        let submitted = OSAllocatedUnfairLock<String?>(initialState: nil)
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            guard args == ["session", "new", "main", "--prepare", "--json"] else {
+            guard args.count == 7, Array(args.prefix(4)) == ["session", "new", "main", "--request-id"],
+                  Array(args.suffix(2)) == ["--prepare", "--json"] else {
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
+            submitted.withLock { $0 = args[4] }
             return session(id: "main", state: "closed", primary: true)
         })
         store.reconcile(try records([session(id: "main", state: "active", primary: true), session(id: "other", state: "available")]))
@@ -137,6 +141,9 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.launchId != previous.launchId)
         #expect(item(store, "main")?.launchArguments == ["lf", "session", "resume", "main"])
         #expect(item(store, "other")?.state == .pending)
+        let requestID = try #require(submitted.withLock { $0 })
+        #expect(CreationRecovery.shared.requests(for: .session("main")).contains(requestID))
+        await CreationRecovery.shared.presented([requestID])
     }
 
     @Test("Reset leaves the Session live while preparing and keeps updates when it fails", arguments: [false, true])

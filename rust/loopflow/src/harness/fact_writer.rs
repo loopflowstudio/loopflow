@@ -609,6 +609,42 @@ mod tests {
     }
 
     #[test]
+    fn served_availability_follows_the_quiet_deadline_without_a_store_write() {
+        let mut session = Driven::new(true);
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        session.now = now - QUIET + 1;
+        session.hear(claude(
+            &mut ClaudeDecoder::default(),
+            &json!({"type":"result","subtype":"error_during_execution","is_error":true}),
+        ));
+        let cache = crate::observe::Cache::shared();
+        let read = || {
+            session
+                .store
+                .session_summary(
+                    "conversation",
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                )
+                .unwrap()
+                .unwrap()
+                .available
+        };
+        let (available, dependencies) = cache.capture(read);
+        assert!(!available);
+        let revisions = session.store.revisions().unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !dependencies.changed() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            dependencies.changed(),
+            "quiet deadline did not wake the read"
+        );
+        assert!(cache.capture(read).0);
+        assert_eq!(session.store.revisions().unwrap(), revisions);
+    }
+
+    #[test]
     fn a_failed_claude_result_waits_only_after_quiet() {
         let mut session = Driven::new(true);
         session.hear(claude(
@@ -883,7 +919,7 @@ mod tests {
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
-            .replace_session_input(original.captured, next)
+            .replace_session_input(original.captured, next, None)
             .unwrap();
         hear(
             &mut decoder,
@@ -1188,7 +1224,7 @@ mod tests {
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
-                .replace_session_input(original.captured, next)
+                .replace_session_input(original.captured, next, None)
                 .unwrap();
             let current = store
                 .claim_session_attachment("conversation", Some(&middle), &a, false)
@@ -1264,6 +1300,14 @@ mod tests {
     #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
+        let turns = || {
+            store
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.provider_turn.is_some())
+                .collect::<Vec<_>>()
+        };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut writer = writer(&store, &attachment);
             let mut decoder = CodexDecoder::default();
@@ -1283,7 +1327,7 @@ mod tests {
             for message in messages {
                 hear(&mut decoder, &mut writer, message);
             }
-            let before = store.session_history("conversation", 0, 0).unwrap();
+            let before = turns();
             assert_eq!(
                 before.last().unwrap().lf_process_id,
                 attachment.lf_process_id.as_ref().map(ToString::to_string)
@@ -1306,7 +1350,7 @@ mod tests {
                 &mut writer,
                 json!({"id":2,"result":{"turn":{"id":turn}}}),
             );
-            assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
+            assert_eq!(turns(), before);
         }
         let mut writer = writer(&store, &attachment);
         let mut current = CodexDecoder::default();
@@ -1358,7 +1402,7 @@ mod tests {
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(previous.captured, next.clone())
+            .replace_session_input(previous.captured, next.clone(), None)
             .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(

@@ -290,27 +290,46 @@ impl Connection {
         }
     }
 
+    /// The next frame in connection order, including typed events. Track event
+    /// sequences before routing by ID; reconnect with fresh subscriptions on a gap.
+    pub fn receive(&mut self) -> Result<Option<ServerMessage>> {
+        match self.pending.pop_front() {
+            Some(message) => Ok(Some(message)),
+            None => self.socket.receive(),
+        }
+    }
+
     /// The next reading of subscription `id`, or `None` once it ended after
     /// its last; an error for it ends the subscription.
     pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
-        match self.wait(|message| {
-            matches!(message, ServerMessage::Reading { id: of, .. } | ServerMessage::Ended { id: of } if of == id)
-                || answers(message, id)
-        })? {
-            ServerMessage::Reading { frame, .. } => Ok(Some(frame)),
-            ServerMessage::Ended { .. } => Ok(None),
-            ServerMessage::Error {
-                code,
-                message,
-                data,
-                ..
-            } => Err(Error {
-                code,
-                message,
-                data,
+        loop {
+            let message = self.wait(|message| {
+                matches!(message,
+                    ServerMessage::Event { id: of, .. }
+                    | ServerMessage::Reading { id: of, .. }
+                    | ServerMessage::Ended { id: of } if of == id
+                ) || answers(message, id)
+            })?;
+            match message {
+                // Reading-only consumers must not accumulate an unused event queue.
+                ServerMessage::Event { .. } => continue,
+                ServerMessage::Reading { frame, .. } => return Ok(Some(frame)),
+                ServerMessage::Ended { .. } => return Ok(None),
+                ServerMessage::Error {
+                    code,
+                    message,
+                    data,
+                    ..
+                } => {
+                    return Err(Error {
+                        code,
+                        message,
+                        data,
+                    }
+                    .into());
+                }
+                other => anyhow::bail!("unexpected server message: {other:?}"),
             }
-            .into()),
-            other => anyhow::bail!("unexpected server message: {other:?}"),
         }
     }
 
@@ -591,6 +610,8 @@ mod tests {
                     limits: Limits {
                         max_message: MAX_MESSAGE,
                         max_connections: MAX_CONNECTIONS,
+                        max_open: super::super::outbox::MAX_OPEN,
+                        max_retained_bytes: super::super::outbox::MAX_RETAINED,
                     },
                 });
                 let mut text = serde_json::to_string(&welcome).unwrap();

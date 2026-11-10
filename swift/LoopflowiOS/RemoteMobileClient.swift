@@ -73,11 +73,29 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
-    func createTask(_ submission: MobileTaskSubmission) async throws -> TaskCreateOutcome {
+    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
         try verifySubmission(submission)
-        let outcome = try await request(.command(.taskStart(directory: submission.directory,
-            requestID: submission.id, request: submission.request, wave: nil, graph: nil, terminal: true)))
-        return try decode(TaskCreateOutcome.self, outcome)
+        let id = submission.id.uuidString.lowercased()
+        let previous = try await decode(CreationLookup?.self, read(.creationGet(requestID: id)))
+        if let previous {
+            guard previous.requestId == id, previous.kind == "task.create", previous.run,
+                  let taskID = previous.taskId else {
+                throw RegistryQueryError("The Machine returned a different creation receipt")
+            }
+            let receipt = try previous.result.map { try decode(TaskCreateReceipt.self, $0) }
+            guard receipt == nil || receipt?.task.id == taskID else {
+                throw RegistryQueryError("The creation receipt names a different Task")
+            }
+            if previous.disposition != .continue {
+                return MobileTaskOutcome(taskId: taskID,
+                    state: previous.disposition == .complete ? .started : .unknown,
+                    receipt: receipt, message: previous.disposition == .inspect ? previous.explanation : nil)
+            }
+        }
+        let result = try await request(.command(.taskCreate(directory: submission.directory,
+            requestID: id, title: nil, request: submission.request, wave: nil, graph: nil, session: nil, run: true)))
+        let receipt = try decode(TaskCreateReceipt.self, result)
+        return MobileTaskOutcome(taskId: receipt.task.id, state: .started, receipt: receipt, message: nil)
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {

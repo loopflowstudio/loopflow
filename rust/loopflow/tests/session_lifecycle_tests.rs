@@ -298,7 +298,8 @@ fn task_conversation_starts_at_launch_not_creation() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let task = &receipt["task"];
         let id = task["id"].as_str().unwrap();
         let db = fixture.db();
         let claims = || -> Vec<String> {
@@ -572,7 +573,8 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .status()
         .unwrap()
         .success());
-    let task = fixture.json(&["task", "create", "--title", "Native local work", "--json"]);
+    let task =
+        fixture.json(&["task", "create", "--title", "Native local work", "--json"])["task"].clone();
     let task_id = task["id"].as_str().unwrap();
     assert_eq!(fixture.count("agent_sessions"), 0);
     let placed = fixture.json(&["task", "checkout", task_id, "--json"]);
@@ -1095,7 +1097,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 #[test]
 fn binding_closed_session_preserves_history_and_primary() {
     let fixture = Fixture::new(false);
-    let task = fixture.json(&["task", "create", "--title", "Delivery", "--json"]);
+    let task = fixture.json(&["task", "create", "--title", "Delivery", "--json"])["task"].clone();
     let task_id = task["id"].as_str().unwrap();
     let primary = fixture.json(&["resume", "--task", task_id, "--prepare", "--json"]);
     let output = fixture.run(&LAUNCH);
@@ -2309,7 +2311,8 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
     let identity = fixture.json(&["config", "repository", "--json"]);
-    let task = fixture.json(&["task", "create", "--title", "Retained checkout", "--json"]);
+    let task =
+        fixture.json(&["task", "create", "--title", "Retained checkout", "--json"])["task"].clone();
     let task_id = task["id"].as_str().unwrap();
     fixture.json(&["task", "checkout", task_id, "--json"]);
     let launch = fixture.run(&[
@@ -2559,7 +2562,7 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
                         "owned={owned}, run={run}, invoking={invoking}: {output:?}"
                     );
                     let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
-                    let task = if run { &receipt["task"] } else { &receipt };
+                    let task = &receipt["task"];
                     let task_id = task["id"].as_str().unwrap().to_owned();
                     assert!(!tasks.contains(&task_id), "titles never identify a retry");
                     tasks.push(task_id.clone());
@@ -2680,7 +2683,8 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
                     .output()
                     .unwrap();
                 assert!(output.status.success(), "{output:?}");
-                let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+                let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+                let task = &receipt["task"];
                 assert!(store.session(&id).unwrap().unwrap().task_id.is_none());
                 let primary: Option<String> = fixture
                     .db()
@@ -2741,7 +2745,8 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
                     source.to_vec(),
                 ]
                 .concat(),
-            );
+            )["task"]
+                .clone();
             assert_eq!(retry["id"], receipt["task"]["id"]);
             assert_eq!(fixture.count("tasks"), 1);
         });
@@ -2779,7 +2784,9 @@ fn promotion_preserves_live_conversation_and_existing_work() {
             let history = fixture.run_parents(&capture);
             let created = if existing {
                 let filed =
-                    fixture.json(&["task", "create", "--title", "Research prototype", "--json"]);
+                    fixture.json(&["task", "create", "--title", "Research prototype", "--json"])
+                        ["task"]
+                        .clone();
                 let wrong_identity = fixture.run(&[
                     "session",
                     "bind",
@@ -2832,7 +2839,8 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                     "--title",
                     "Research prototype",
                     "--json",
-                ])
+                ])["task"]
+                    .clone()
             };
             let task = created["id"].as_str().unwrap();
             assert_eq!(created["worktree"], path);
@@ -2861,7 +2869,8 @@ fn promotion_preserves_live_conversation_and_existing_work() {
                 "--title",
                 "Research prototype",
                 "--json",
-            ]);
+            ])["task"]
+                .clone();
             assert_eq!(repeated["id"], task);
             let bound = fixture.json(&["session", "bind", &id, "--task", task, "--json"]);
             assert_eq!(bound["id"], id);
@@ -2932,7 +2941,7 @@ fn promotion_binding_done_tasks_preserves_live_work_on_retry_and_open() {
         if let Some(path) = &destination {
             args.extend(["--worktree", path.to_str().unwrap()]);
         }
-        let created = fixture.json(&args);
+        let created = fixture.json(&args)["task"].clone();
         let task = created["id"].as_str().unwrap();
         let task_id = task.parse().unwrap();
         let completion = fixture.run(&["task", "complete", task]);
@@ -3050,7 +3059,8 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
         "--title",
         "Delivery",
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     let task_id = task["id"].as_str().unwrap();
     let (child, capture) = fixture.attach(&[
         "--repo",
@@ -3227,7 +3237,8 @@ fn promotion_worktree_only_records_pr_and_recovers_owner() {
         "--worktree",
         root.to_str().unwrap(),
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     assert_eq!(first["worktree"], root.to_str().unwrap());
     assert_eq!(fixture.count("agent_sessions"), 0);
     assert_eq!(fixture.count("task_graphs"), 0);
@@ -3248,7 +3259,8 @@ fn promotion_worktree_only_records_pr_and_recovers_owner() {
         "--worktree",
         root.to_str().unwrap(),
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     assert_eq!(repeated["id"], first["id"]);
     assert_eq!(fixture.count("tasks"), 1);
     let owner: String = fixture
@@ -3281,7 +3293,8 @@ fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
             "--title",
             "Keep conversation",
             "--json",
-        ]);
+        ])["task"]
+            .clone();
         assert!(created["worktree"].is_null());
         let task = created["id"].as_str().unwrap();
         let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
@@ -3295,9 +3308,11 @@ fn promotion_session_only_keeps_main_cwd_and_permanent_binding() {
             "--title",
             "Keep conversation",
             "--json",
-        ]);
+        ])["task"]
+            .clone();
         assert_eq!(repeated["id"], task);
-        let other = fixture.json(&["task", "create", "--title", "Another", "--json"]);
+        let other =
+            fixture.json(&["task", "create", "--title", "Another", "--json"])["task"].clone();
         let refused = fixture.run(&[
             "session",
             "bind",
@@ -3353,9 +3368,9 @@ fn promotion_failed_reservation_leaves_no_task_and_retry_succeeds() {
     assert!(!failed.status.success(), "{failed:?}");
     assert_eq!(fixture.count("tasks"), 0);
     git("test@example.com");
-    let created = fixture.json(&args);
+    let created = fixture.json(&args)["task"].clone();
     assert_eq!(fixture.count("tasks"), 1);
-    let again = fixture.json(&args);
+    let again = fixture.json(&args)["task"].clone();
     assert_eq!(again["id"], created["id"]);
     assert_eq!(fixture.count("tasks"), 1);
     assert_eq!(fixture.count("task_graphs"), 0);
@@ -3389,7 +3404,8 @@ fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
                 "--title",
                 "Existing Task",
                 "--json",
-            ])
+            ])["task"]
+                .clone()
         });
         // Desktop/import admission can record a more specific cwd than the CLI's
         // --repo selector, which normalizes its initial launch to the checkout root.
@@ -3418,7 +3434,8 @@ fn promotion_continuation_keeps_a_recorded_session_subdirectory() {
             "--title",
             "Research",
             "--json",
-        ]);
+        ])["task"]
+            .clone();
         let bound = fixture.json(&[
             "session",
             "bind",
@@ -3467,7 +3484,8 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
         "--worktree",
         other_root.to_str().unwrap(),
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     fixture.json(&[
         "session",
         "bind",
@@ -3488,7 +3506,8 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
         "--title",
         "Prototype",
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     let task = created["id"].as_str().unwrap();
     assert_ne!(created["id"], other["id"]);
     assert_eq!(created["worktree"], root.to_str().unwrap());
@@ -3570,7 +3589,8 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
                 "--session",
                 &ids[0],
                 "--json",
-            ]);
+            ])["task"]
+                .clone();
             let task = created["id"].as_str().unwrap();
             assert_eq!(
                 fixture.json(&["resume", "--task", task, "--prepare", "--json"])["id"],
@@ -3604,8 +3624,13 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
                 output.status.success(),
                 "create={create}, shared={shared}: {output:?}"
             );
+            let result: Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(
-                serde_json::from_slice::<Value>(&output.stdout).unwrap()["id"],
+                if create {
+                    &result["task"]["id"]
+                } else {
+                    &result["id"]
+                },
                 if create { task } else { &ids[1] }
             );
             let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
@@ -3662,7 +3687,8 @@ fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
             "--title",
             "Continue research",
             "--json",
-        ]);
+        ])["task"]
+            .clone();
         let task = created["id"].as_str().unwrap();
         assert!(created["worktree"].is_null());
         let primary = fixture.json(&["resume", "--task", task, "--prepare", "--json"]);
@@ -3690,7 +3716,7 @@ fn promotion_transfers_shared_primary_without_adopting_its_checkout() {
                 "--title",
                 "Continue research",
                 "--json"
-            ])["id"],
+            ])["task"]["id"],
             task
         );
         let replacement = fixture.json(&scope);
@@ -3723,7 +3749,8 @@ fn promotion_background_run_does_not_claim_primary() {
         "--title",
         "Prototype",
         "--json",
-    ]);
+    ])["task"]
+        .clone();
     let task = created["id"].as_str().unwrap();
     fixture.db().execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,repo,interactive,input_published) VALUES('background','Research','human',1,?1,?2,0,0)",

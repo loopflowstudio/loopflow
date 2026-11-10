@@ -31,6 +31,33 @@ Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
 
+### Recover a creation whose reply was lost
+
+```bash
+lf task create --request-id terminal-recovery-42 --no-wave --title "Keep the terminal intact after sleep" --json
+```
+
+Save a unique request ID before sending a creation you may need to recover.
+Inspect `lf server receipt terminal-recovery-42 --json` after a lost reply.
+This read needs no running server and starts no work. A missing receipt is `null`;
+an unavailable lookup is an error, not absence. Repeating the exact creation on
+the same Machine and repository with that ID returns the original creation or
+continues its safe unfinished work rather than filing a second Task.
+Changing the payload while reusing the ID returns `conflict`. A new creation
+needs a new ID. Without `--request-id`, the CLI generates one for that invocation;
+rerunning the command without it is a new submission.
+
+The JSON creation result contains `task`, `graph`, `session_id` and `milestone`,
+including without `--run`. Scripts read the identifier at `.task.identifier`.
+For `--run`, an interrupted launch can return `outcome_unknown` with the created
+Task and `run_requested` milestone. Inspect `lf task status <ID>` before starting
+anything: recovery never launches a second Graph when the first launch is
+unconfirmed. A receipt for a removed Task does not recreate it.
+
+Desktop saves and recovers these submissions automatically, including after it
+quits. Showing the resulting Task clears its saved submission; promotion from a
+conversation follows the same path. See [Recover a submitted creation](server.md#recover-a-submitted-creation).
+
 ## Keep work already in progress
 
 ```bash
@@ -98,7 +125,7 @@ claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
 lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
 lf task changes LOO-12        # what it changed so far
-lf task wait LOO-13                # block until its run ends, with no agent polling
+lf task wait LOO-13                # wait until the Task is done or abandoned
 ```
 
 ```bash

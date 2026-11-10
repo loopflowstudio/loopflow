@@ -60,6 +60,14 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let mut pi = PiHarness::new(tx);
     pi.start(&config).await.unwrap();
     let token = pi.agent_session().unwrap();
+    // Selecting another Machine must not redirect this admitted conversation's
+    // input or shutdown to that Machine's store.
+    let other_home = tempfile::tempdir().unwrap();
+    let other_store =
+        crate::store::sqlite::SqliteStore::open_ephemeral(&other_home.path().join("loopflow.db"))
+            .unwrap();
+    let selection = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+    std::env::set_var("LF_HOME", other_home.path());
     pi.send_input("tool").await.unwrap();
     let events = completed(&mut rx).await;
     assert!(events.iter().any(|e| matches!(
@@ -74,6 +82,8 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     )));
     assert!(events.iter().any(|e| matches!(e, ConversationEvent::UsageCheckpoint { final_receipt: true, usage, .. } if usage.input_tokens == Some(20) && usage.total_input_tokens == Some(26))));
     pi.stop().await.unwrap();
+    assert!(other_store.agent_processes().unwrap().is_empty());
+    drop(selection);
     let (store, session, attachment) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
     let next = store

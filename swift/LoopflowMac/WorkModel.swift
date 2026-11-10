@@ -2378,32 +2378,27 @@ final class WorkModel {
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
     /// repository), starts its workflow and admits its conversation with the
     /// request as the first turn; this window then shows that conversation.
-    /// When nothing was filed, the sheet keeps the request and the error. A Task
-    /// filed before its run failed is selected with the error at its Start control.
+    /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let receipt: TaskCreateReceipt
-        var runError: String?
+        let requestID = UUID().uuidString
+        let owner = navigation
+        let presentation = owner.paletteGeneration
+        let destination = destinationGeneration
         do {
-            receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
-        } catch let failed as TaskCreateRunFailed {
-            (receipt, runError) = (failed.receipt, failed.message)
-        } catch {
+            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
+            if owner.paletteGeneration == presentation {
+                owner.palette = nil
+                if navigation === owner, destinationGeneration == destination {
+                    await openTaskConversation(receipt.task.id)
+                }
+            }
             try? await confirmWorkUpdate()
-            throw error
+        } catch is SubmittedCreationError {
+            // The saved submission owns recovery. Keeping a submit button here
+            // would turn a lost answer into another creation identity.
+            if owner.paletteGeneration == presentation { owner.palette = nil }
         }
-        navigation.palette = nil
-        let id = receipt.task.id
-        guard let runError else {
-            // Open it from its own read now; waiting for every reading to confirm
-            // first left the window unchanged for seconds after Start.
-            await openTaskConversation(id)
-            try? await confirmWorkUpdate()
-            return
-        }
-        try? await confirmWorkUpdate()
-        if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
-        else { select(.task(id: id)) }
-        navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping
@@ -2627,13 +2622,19 @@ final class WorkModel {
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
+            let requestID = UUID().uuidString
             let task = try await query.createTaskFromSession(
-                id: draft.sessionId, title: draft.taskTitle, cwd: repo)
+                id: draft.sessionId, title: draft.taskTitle, cwd: repo, requestID: requestID)
+            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(task.id))
             // Keep the selected Session, its retained terminal and composer.
             // Promotion changes its Work address, never its input attachment.
             supersedeSessions()
             await refreshSessions()
             if owner.selectedSessionId == draft.sessionId { owner.selection = .task(id: task.id) }
+            if owner.binding?.id == draft.id { owner.binding = nil }
+        } catch is SubmittedCreationError {
+            // The saved submission now owns recovery; another form submission
+            // would create a different request for the same conversation.
             if owner.binding?.id == draft.id { owner.binding = nil }
         } catch {
             guard owner.binding?.id == draft.id else { return }

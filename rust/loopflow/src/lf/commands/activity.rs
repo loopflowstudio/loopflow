@@ -100,7 +100,6 @@ pub(crate) fn subscribe(
 ) -> Result<Option<super::subscribe::Subscription>> {
     super::subscribe::start(
         window,
-        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
     )
@@ -138,7 +137,7 @@ pub(crate) fn snapshot(window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
 
 fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
     let limit = window.limit;
-    let since = parse_since(&window.since, OffsetDateTime::now_utc())?.unix_timestamp();
+    let since = parse_since(&window.since, crate::observe::now())?.unix_timestamp();
     if limit == 0 || limit > MAX_LIMIT {
         return Err(anyhow!(
             "--limit must be between 1 and {MAX_LIMIT}; got {}",

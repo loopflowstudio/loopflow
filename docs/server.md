@@ -25,6 +25,13 @@ owns its registration and updates. Desktop's window automation stays with the ap
 Desktop uses this connection for all shared Work reads, changes and live updates.
 Ordinary CLI commands can run without the client server.
 
+Keep a Task open in Desktop while editing its checkout or waiting for CI. Its
+live reading updates when Loopflow observes a relevant change, including changes
+outside Loopflow's database. Connected views share the server's latest
+observations of running processes, Git state, PR/CI status and repository files;
+external changes appear after the next observation. Ordinary CLI reads observe
+those facts directly, so they need no running server or saved server cache.
+
 ## Keep editing through a connection loss
 
 Keep a Task list open while Desktop reconnects: live Work updates resume

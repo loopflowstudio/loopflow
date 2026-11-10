@@ -537,6 +537,7 @@ pub fn generate_pr_copy(
 
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
@@ -1253,7 +1254,7 @@ pub(crate) fn observe_pr_by_number(
         "Accept: application/vnd.github+json",
         endpoint.as_str(),
     ]);
-    let output = match Command::new("gh").current_dir(repo).args(&args).output() {
+    let output = match crate::observe::github(repo, &args) {
         Ok(output) => output,
         Err(error) => {
             return PrObservation::Degraded {
@@ -1279,13 +1280,12 @@ pub(crate) fn observe_pr_by_number(
 }
 
 pub(crate) fn observe_pr_by_branch(repo: &Path, branch: &str) -> PrObservation {
-    let output = match Command::new("gh")
-        .current_dir(repo)
-        .args([
+    let output = match crate::observe::github(
+        repo,
+        &[
             "pr", "list", "--head", branch, "--state", "all", "--limit", "2", "--json", "number",
-        ])
-        .output()
-    {
+        ],
+    ) {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return PrObservation::Degraded {

@@ -93,9 +93,17 @@ pub(crate) fn read(store: &SqliteStore, session: &str, step_started_at: i64) -> 
 }
 
 fn project(liveness: Option<SessionLiveness>, step_started_at: i64, now: i64) -> Activity {
-    let recent = |at: i64| (0..STALL_WINDOW).contains(&(now - at));
+    let recent = |at: i64, window: i64| {
+        if crate::observe::active() {
+            // A silent provider or stale CPU sample can change this reading
+            // without another store write or a process exit.
+            crate::observe::deadline(at) && !crate::observe::deadline(at + window)
+        } else {
+            (0..window).contains(&(now - at))
+        }
+    };
     let Some(liveness) = liveness else {
-        return if recent(step_started_at) {
+        return if recent(step_started_at, STALL_WINDOW) {
             Activity::Running
         } else {
             Activity::Unknown
@@ -103,9 +111,11 @@ fn project(liveness: Option<SessionLiveness>, step_started_at: i64, now: i64) ->
     };
     let fresh_sample = liveness
         .cpu_sampled_at
-        .is_some_and(|at| (0..=MAX_SAMPLE_GAP).contains(&(now - at)));
+        .is_some_and(|at| recent(at, MAX_SAMPLE_GAP + 1));
     let cpu_quiet_since = liveness.cpu_quiet_since.filter(|_| fresh_sample);
-    if recent(liveness.observed_at) || cpu_quiet_since.is_some_and(recent) {
+    if recent(liveness.observed_at, STALL_WINDOW)
+        || cpu_quiet_since.is_some_and(|at| recent(at, STALL_WINDOW))
+    {
         Activity::Running
     } else if cpu_quiet_since.is_some() {
         Activity::Stalled
@@ -305,6 +315,86 @@ mod tests {
         // A Session that has not spoken yet runs only while its step is young.
         assert_eq!(project(None, 800, now), Activity::Running);
         assert_eq!(project(None, 600, now), Activity::Unknown);
+    }
+
+    #[test]
+    fn served_activity_uses_a_deadline_that_passed_during_the_read() {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let cache = crate::observe::Cache::shared();
+        // The caller took its timestamp before the quiet deadline, but the
+        // observation already sees it passed. There will be no later wake.
+        let (activity, _) = cache.capture(|| project(None, now - super::STALL_WINDOW, now - 1));
+        assert_eq!(activity, Activity::Unknown);
+    }
+
+    #[test]
+    fn activity_deadlines_wake_served_reads_without_new_samples() {
+        use std::time::{Duration, Instant};
+
+        let now = || OffsetDateTime::now_utc().unix_timestamp();
+        let expires = now() + 3;
+        let cases = [
+            (
+                None,
+                expires - super::STALL_WINDOW,
+                Activity::Running,
+                Activity::Unknown,
+            ),
+            (
+                Some(SessionLiveness {
+                    observed_at: expires - super::STALL_WINDOW,
+                    cpu_sampled_at: None,
+                    cpu_quiet_since: None,
+                }),
+                0,
+                Activity::Running,
+                Activity::Unknown,
+            ),
+            (
+                Some(SessionLiveness {
+                    observed_at: 0,
+                    cpu_sampled_at: Some(expires - super::MAX_SAMPLE_GAP - 1),
+                    cpu_quiet_since: Some(0),
+                }),
+                0,
+                Activity::Stalled,
+                Activity::Unknown,
+            ),
+            (
+                Some(SessionLiveness {
+                    observed_at: 0,
+                    cpu_sampled_at: Some(now()),
+                    cpu_quiet_since: Some(expires - super::STALL_WINDOW),
+                }),
+                0,
+                Activity::Running,
+                Activity::Stalled,
+            ),
+        ];
+        let cache = crate::observe::Cache::shared();
+        let dependencies: Vec<_> = cases
+            .iter()
+            .map(|(liveness, started, before, _)| {
+                let (reading, dependencies) = cache.capture(|| project(*liveness, *started, now()));
+                assert_eq!(reading, *before);
+                dependencies
+            })
+            .collect();
+        let until = Instant::now() + Duration::from_secs(10);
+        while !dependencies.iter().all(|dependency| dependency.changed()) && Instant::now() < until
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        for ((liveness, started, _, after), dependency) in cases.iter().zip(dependencies) {
+            assert!(
+                dependency.changed(),
+                "activity deadline did not wake {liveness:?}"
+            );
+            assert_eq!(
+                cache.capture(|| project(*liveness, *started, now())).0,
+                *after
+            );
+        }
     }
 
     #[test]

@@ -139,7 +139,7 @@ then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
 For a checkout without launching a Graph, run `lf wt create qa --json`, take
 its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.
-Creation returns the Task directly: use its `id`, not `task.id`.
+Creation returns a receipt containing the Task: use `task.id`.
 
 To exercise external observations, subscribe to `task.get` and inspect
 `row.condition.local_progress.dirty`. Edit a tracked file, add an untracked

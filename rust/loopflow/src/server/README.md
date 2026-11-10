@@ -396,3 +396,15 @@ construction/destruction excludes work on the runtime's worker threads; whole
 phase CPU includes all server threads. Completed projections remain independent
 per subscriber. Cancellation tests use deterministic pauses, including queued
 setup, and keep known baseline failures separate from measured successes.
+
+`--default-config --counts 1,16 --multiplexed-only --rounds 1` is a separate
+bounded pilot with the ordinary runtime defaults. It removes
+`TOKIO_WORKER_THREADS` and the fixture server's worker/blocking caps; it never
+runs a 64-subscriber cohort. Keep its results separate from the capped matrix.
+Resource inventories run outside timing phases. Their `ps` child CPU appears
+separately in resource readings; cumulative child totals also include setup,
+so use phase deltas when discussing application child work.
+The pilot also measures 32 sequential runtime-only create/drop cycles, with no
+SQL or subscribers and at most one extra runtime alive. That phase's process
+CPU includes its workers through shutdown; it is separate from reader counters
+and complete subscription cycles.

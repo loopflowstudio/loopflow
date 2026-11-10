@@ -90,14 +90,26 @@ def _phase(control: Peer, results: dict, name: str, run):
 
 
 def _sample(
-    binary: Path, output: Path, count: int, physical: bool, reverse: bool, profile: bool
+    binary: Path,
+    output: Path,
+    count: int,
+    physical: bool,
+    reverse: bool,
+    profile: bool,
+    defaults: bool,
 ) -> dict:
     peers = []
     control = None
     with tempfile.TemporaryDirectory(prefix="lf-subscription-", dir="/tmp") as directory:
         home = Path(directory)
         env = {k: v for k, v in os.environ.items() if not k.startswith("LF_")}
-        env.update(HOME=directory, SUBSCRIPTION_HOME=directory, TOKIO_WORKER_THREADS="2")
+        env.update(
+            HOME=directory, SUBSCRIPTION_HOME=directory, SUBSCRIPTION_DEFAULT=str(int(defaults))
+        )
+        if defaults:
+            env.pop("TOKIO_WORKER_THREADS", None)
+        else:
+            env["TOKIO_WORKER_THREADS"] = "2"
         command = [
             str(binary),
             "--exact",
@@ -226,6 +238,9 @@ def _sample(
                 _phase(control, phases, "cold_cleanup", lambda: cancel(cold))
                 time.sleep(2.2)  # let the cold observer release its filesystem watch
                 resources = {"warm": _control(control, "resources")}
+                runtime_probe = _phase(
+                    control, phases, "runtime_only32", lambda: _control(control, "runtime_cost")
+                )
                 ids = _phase(control, phases, "admission_checkpoint", lambda: cohort(count))
                 resources["cohort"] = _control(control, "resources")
 
@@ -338,6 +353,7 @@ def _sample(
                     changes_ms=changes,
                     resources=resources,
                     encoded_bytes=encoded_bytes,
+                    runtime_probe=runtime_probe,
                     windows=windows,
                     admission_ms=acknowledgements,
                     checkpoint_ms=checkpoint_latencies,
@@ -370,7 +386,10 @@ def main() -> None:
     parser.add_argument("--counts", default="1,16,64")
     parser.add_argument("--multiplexed-only", action="store_true")
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--default-config", action="store_true")
     args = parser.parse_args()
+    if args.default_config and any(int(n) not in (1, 16) for n in args.counts.split(",")):
+        parser.error("default-configuration pilots are bounded to --counts 1,16")
     binary = args.binary.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     sources = [
@@ -386,8 +405,8 @@ def main() -> None:
         revision=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         host=platform.platform(),
         cpu_count=os.cpu_count(),
-        runtime_workers=2,
-        blocking_workers=4,
+        runtime_workers="platform default" if args.default_config else 2,
+        blocking_workers="Tokio default" if args.default_config else 4,
         sources={str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
         rounds=args.rounds,
         profile=args.profile,
@@ -418,6 +437,7 @@ def main() -> None:
                 physical,
                 repeat % 2 == 1,
                 args.profile,
+                args.default_config,
             )
             p = result["phases"]["admission_checkpoint"]
             print(

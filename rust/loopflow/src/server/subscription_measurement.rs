@@ -188,14 +188,21 @@ fn subscription_writer() {
             .unwrap();
         let delta = meter::snapshot().since(before);
         cpu += delta.user_ms + delta.system_ms;
-        let receipts: i64 = store.conn.lock().unwrap().query_row(
-            "SELECT count(*) FROM session_events WHERE session_id='session-127' AND kind='observed'",
-            [], |row| row.get(0),
+        let (receipts, payload_bytes): (i64, i64) = store.conn.lock().unwrap().query_row(
+            "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) FROM session_events WHERE session_id='session-127' AND kind='observed'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
         assert_eq!(receipts as u64, count);
+        let activity: (i64, String, String) = store.conn.lock().unwrap().query_row(
+            "SELECT open_tools,attachment_token,agent_process_id FROM session_activity WHERE session_id='session-127'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(activity.0, count as i64 % 2);
+        assert_eq!(activity.1, attachments[1].token.to_string());
+        assert_eq!(activity.2, attachments[1].agent_process_id.to_string());
         println!(
             "WRITER {}",
-            json!({"writes":count, "receipts":receipts, "cpu_ms":cpu})
+            json!({"writes":count, "receipts":receipts, "payload_bytes":payload_bytes, "recording_api_cpu_ms":cpu})
         );
     }
 }
@@ -231,12 +238,11 @@ fn subscription_server() {
     let mut writer_input = writer.0.stdin.take().unwrap();
     let mut writer_output = BufReader::new(writer.0.stdout.take().unwrap());
     assert_eq!(read_writer(&mut writer_output)["ready"], true);
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    if std::env::var("SUBSCRIPTION_DEFAULT").as_deref() != Ok("1") {
+        builder.worker_threads(2).max_blocking_threads(4);
+    }
+    let runtime = builder.enable_all().build().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let path = home.join("server.sock");
     let serving = runtime.spawn(async move {
@@ -285,13 +291,25 @@ fn subscription_server() {
             )
             .unwrap(),
             "snapshot" => serde_json::to_value(meter::snapshot()).unwrap(),
+            "runtime_cost" => {
+                // Separate component probe: no subscriptions or SQL, at most one
+                // runtime alive. Process CPU includes its workers through join.
+                for _ in 0..32 {
+                    drop(tokio::runtime::Runtime::new().unwrap());
+                }
+                json!({"cycles":32})
+            }
             "resources" => {
+                let before = meter::snapshot();
                 let threads = Command::new("ps")
                     .args(["-M", "-p", &std::process::id().to_string()])
                     .output()
                     .unwrap();
+                let cost = meter::snapshot().since(before);
                 json!({"fds":std::fs::read_dir("/dev/fd").unwrap().count(),
-                    "threads":String::from_utf8(threads.stdout).unwrap().lines().count() - 1})
+                    "threads":String::from_utf8(threads.stdout).unwrap().lines().count() - 1,
+                    "inventory_child_user_ms":cost.child_user_ms,
+                    "inventory_child_system_ms":cost.child_system_ms})
             }
             "title" => {
                 writeln!(writer_input, "title").unwrap();

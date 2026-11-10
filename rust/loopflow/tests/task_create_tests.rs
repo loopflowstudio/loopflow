@@ -339,14 +339,89 @@ fn task_create_request_preserves_a_filed_task_after_start_failure() {
     let outcome: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(outcome["milestone"], "started");
     assert_eq!(outcome["task"]["title"], "Fails once");
-    let before = support::recorded_graphs(task.home.path()).len();
+    let before = support::recorded_graphs(task.home.path());
+    assert_eq!(
+        before.len(),
+        3,
+        "Batch creation waits for the original run's retry limit"
+    );
+    assert!(before
+        .iter()
+        .all(|(outcome, _)| outcome.as_deref() == Some("failed")));
     let retry = task.run(&args);
     assert!(!retry.status.success());
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&retry.stdout).unwrap(),
         outcome
     );
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), before);
+    assert_eq!(support::recorded_graphs(task.home.path()), before);
+}
+
+#[test]
+fn batch_creation_returns_the_original_runs_success_after_a_failed_attempt() {
+    let task = CreationFixture::new();
+    task.repo.push();
+    let shim = task.home.path().join("bin/lf");
+    fs::write(
+        &shim,
+        format!(
+            r#"#!/bin/sh
+if [ "$*" = 'graph show absent-fixture-graph' ]; then
+  if [ -f "$LF_HOME/first-attempt" ]; then
+    printf -- '- cmd: help task\n' > .lf/graphs/absent-fixture-graph.yaml
+  else
+    touch "$LF_HOME/first-attempt"
+  fi
+fi
+exec {} "$@"
+"#,
+            shlex::try_quote(env!("CARGO_BIN_EXE_lf")).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let args = [
+        "-b",
+        "task",
+        "create",
+        "Recovers",
+        "--run",
+        "--graph",
+        "gate",
+        "--json",
+        "--request-id",
+        &id,
+    ];
+    let run = || {
+        task.command()
+            .env("LF_BIN", &shim)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let before = support::recorded_graphs(task.home.path());
+    assert_eq!(
+        before
+            .iter()
+            .map(|(outcome, _)| outcome.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("failed"), Some("succeeded")]
+    );
+    let retry = run();
+    assert!(
+        retry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retry.stderr)
+    );
+    assert_eq!(retry.stdout, output.stdout);
+    assert_eq!(support::recorded_graphs(task.home.path()), before);
 }
 
 #[test]

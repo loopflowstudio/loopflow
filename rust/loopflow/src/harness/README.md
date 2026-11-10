@@ -87,10 +87,12 @@ A recovery envelope binds the Session, native thread, rejected turn and one-use
 attempt. The recovery-only shell wrapper blocks failures and beats Codex's native
 fail-open timeout; ordinary hooks remain best-effort. Inside native submission,
 the owner checks retained history before asking the existing account broker to
-prepare credentials. A private socket holds admission: close or expiry revokes
-later installation and dispatch. Broker refresh/save-back finishes outside the
-hook's process group so a received rotated grant is retained. A partial native
-write leaves the attempt uncertain.
+prepare credentials. A private socket holds admission: close or expiry stops
+subsequent installation and retry release. An installation already sent to the
+native server can still take effect; a confirmed reply updates the account route
+without releasing cancelled admission. Broker refresh/save-back finishes outside
+the hook's process group so a received rotated grant is retained. A partial native
+write or unconfirmed installation leaves the attempt uncertain.
 
 Codex installs supplied tokens on its existing observer connection and keeps
 native refresh callbacks on that route. Completion requires both the admitted

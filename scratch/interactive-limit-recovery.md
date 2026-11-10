@@ -25,13 +25,115 @@ expanded title/direction and open PR #1862, without delivery status. The earlier
 local candidate build (`cargo build -p loopflow --bin lf`, inherited LF_* unset)
 passed in 1m 45s. No disposable demo was launched.
 
+## Current design and remaining work
+
+The existing Session/native conversation, failed turn and derived recovery reading
+remain the three concepts. Session history retains dispatch and correlated results;
+changing capacity observations cannot erase them. The current-thread reader picks
+the latest failed turn by its first observation, folds its facts and keeps them
+across provider replacement. The account broker owns credentials. The served
+`session.recover` mutation requests checks; Desktop projects the same reading.
+Neither starts another owner nor moves a Graph cursor. Normal Task inbox messages,
+manual account switching, model moves and Graph recovery keep their existing paths.
+
+The concept review's delayed-worker counterexample is repaired: the focused
+Session test covers dispatch → late wait → reopened reader → correlated completion,
+then a separate rejection and late old-worker observation. The Claude test settles
+only a matching inbox UUID → promptId → Stop after reconnect. The served fixture
+uses two Task primary Sessions, retains their memberships and attempts, refuses
+a second request for dispatched work, and starts no Process. Separate native
+fixtures now exercise automatic admission and pending approvals through the served
+protocol. None of these fixtures mounts Desktop.
+
+### Remaining verification
+
+Both providers now use the guarded runtime envelope and broker integration.
+Unsupported cases retain their wait or uncertainty. New input either wins with
+no old retry or follows an admitted recovery. The two-Task served/native bulk,
+held-lock cancellation and approval cases pass; they do not replace gate or demo.
+
+1. Gate: cover distinct models/restricted routes, simultaneous reports, no capacity and
+   later reset. Unsupported or incomplete native history stays waiting/uncertain.
+   Gate owns affected lifecycle, transport, account, decoder/hook, Session/projection,
+   DTO and Swift suites, including lost replies, reconnect, `/new`, repeated limits
+   and earlier effects. Include cancellation after a Codex installation has been
+   sent, lost/late installation replies and retained refresh grants: held-lock
+   cancellation proves no account change only before installation starts.
+   The new ContextMoment also reaches `lf::tests::`,
+   `cli_discovery::` and retained-hook checks; route attribution reaches
+   `process::runtime::tests::`, `harness::{codex_connection,fact_writer}::tests::`
+   and Session metadata tests. `scripts/test.py --list` reaches architecture,
+   Python, Rust, website and headless Swift; use a focused Rust filter at gate.
+2. Demo/review: rendered Desktop, physical keyboard input after reopen and the
+   installed/real-login observations below. No production switch or installation
+   occurred in the disposable checks.
+
+The ordinary-typing incident remains unresolved. The LOO-813 handoff reported
+physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
+revealed xzy, and both affected conversations subsequently worked after Reset.
+Those observations do not establish the cause. A disposable reproduction must
+exercise physical keyboard input after reopen; quota retry/draft fixtures and
+the separate installation inventory do not establish its repair.
+
+Installed/real-login refresh, token rotation, unsuffixed Keychain repair and the
+other observations remain in [live-recovery.md](live-recovery.md). No isolated
+real-login environment was available. Headless checks continue in disposable
+environments; configured observations and judgment of the complete experience
+remain for demo/review. No new product decision is needed for reversible work.
+
+### QA — November 9, merged candidate
+
+[qa.html](qa.html) records the public CLI walkthrough, headless Desktop checks
+and six supplemental native scenarios on `16efb4f8e.dirty`, SHA256
+`473e1d7353201b8a6ca85633c056ac74ee29926fc608eedadb41481ab282f963`.
+No runtime defect surfaced. The first private-Machine walkthrough omitted an
+agent preference; adding `-a codex` corrected the probe. Empty-state/errors,
+reopening a prepared Session created by installed `28b0af568`, and recovery
+reads across a private-server restart passed without provider login or seeded rows.
+
+- `cargo build -p loopflow --bin lf < /dev/null` (inherited LF_* unset) — passed.
+- `uv run python scripts/test_network.py uv run --offline python .lf/tmp/loo-811-qa-expanded/public_cli.py < /dev/null` — passed; prepared metadata only, no native conversation.
+- `scripts/test_desktop.sh -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible|DesktopHeadlessTests' < /dev/null` (inherited LF_* unset) — 17 passed, including recovery-button tap, uncertain state and Work navigation; automated checks, no mounted window.
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --<provider> /Users/jack/.local/bin/<provider> <case flags> --output .lf/tmp/loo-811-qa-expanded/<provider>-<case> < /dev/null` — six passed: both providers with no flag, `--approval`, and `--cancel`. Native versions: Codex 0.167.0 and Claude 2.1.322. Synthetic logins/local responses only; both bulk cases continued each Task Session once, kept drafts and completed later input. Approvals executed once after recovery; held-lock cancellation prevented retries and account changes.
+- `uv run python .lf/tmp/loo-811-qa-expanded/check_receipts.py` — six matching candidate receipts, seven successful-scenario roots removed, zero remaining probe processes, nine scoped Keychain items absent. The failed setup's root is also absent.
+- `git diff --check`, `lf context` — passed after the report and skill edits; both context budgets fit. Broader suites and clippy remain at gate.
+
+The report and QA skill now retain the working setup. Gate still owns its matrix
+above, including cancellation after native installation is sent. Rendered Desktop,
+physical typing after reopen and installed/real-login recovery remain unverified.
+No publication, installation or Graph advancement occurred in QA.
+
+### Concept review — November 9, after runtime integration
+
+No design change or open product choice. Keep the Session, rejected native turn
+and derived recovery reading; the attempt stays in Session history and credential
+ownership stays with the broker. The Desktop action requests a check, while native
+admission orders recovery against newer input. An account installation, RPC reply
+or unrelated completed turn cannot establish continuation. Cancellation after an
+installation was sent can change the login without continuing the request; retain
+that distinction and uncertainty rather than offering another automatic send.
+
+The earlier late-wait and unguarded-input mismatches have implementation and
+focused checks. Remaining failures of acceptance are observations to obtain, not
+new product decisions: gate covers the matrix above; demo covers rendered Desktop,
+ordinary typing after reopen and configured live behavior. Loop-or-next can
+advance. No runtime code changed in this review.
+
+`scratch/concept-review.html` now shows the current interaction and those limits.
+Usage wording in `docs/sessions.md` and the harness/subscription/Desktop docs
+matches the guarded continuation design; no replacement usage or skill workflow
+is proposed. The full preservation matrix remains necessary for acceptance.
+
 ## Runtime integration — November 9
 
 The native submission guards now run through the existing Session owners and
 account broker. A private, one-use socket binds Session/thread/rejected turn/
-attempt. The native hook holds it open; cancellation or expiry prevents later
-installation and dispatch. Broker refresh/save-back runs outside the hook's
-process group and retains rotated credentials. Native credential and Claude
+attempt. The native hook holds it open; cancellation or expiry stops subsequent
+installation and retry release. An installation already sent to Codex can still
+take effect; its confirmed reply updates the route without releasing cancelled
+admission. Partial or unconfirmed installation stays uncertain. Broker
+refresh/save-back runs outside the hook's process group and retains rotated
+credentials. Native credential and Claude
 refresh locks poll cancellation; a partial Keychain write is stopped and remains
 uncertain. Ordinary hooks still fail open. Clients lacking the loaded recovery
 guard wait rather than receiving unguarded input.
@@ -73,9 +175,8 @@ and tool-result IDs, then requires the answer to execute its effect exactly once
 Desktop's served mutation/projection is exercised without claiming a rendered
 Desktop demonstration. The ordinary-typing incident and installed/real-login
 limits stay in `live-recovery.md`. No production accounts, Sessions or installed
-application have changed. Proposed Wave memory update: replace the stale
-“Runtime sends remain removed” paragraph with this integration and its measured
-limits; `.lf/wave/` remains unchanged by this implementation pass.
+application were changed by these checks. Infrastructure memory now reflects the
+integrated guards, measured preservation cases and remaining acceptance limits.
 
 ## Guarded native submission — November 9, mechanism pass
 
@@ -203,27 +304,11 @@ describes async wake on exit 2. Sources read November 9; native behavior above
 was measured, not inferred from documentation. Earlier Ruff, saved-receipt and
 context checks passed; no runtime sends were integrated by those passes.
 
-## Delete — do not maintain
+## Compression checks — November 9
 
-The unguarded Codex login/retry and Claude activation/inbox paths are removed.
-Their replacements admit input through the native submission hook, with bounded
-broker work and cancellation handling. Keep no disabled predecessor or second
-credential owner; outside history reads and lf locks do not reserve native input.
-Historical probes stay as counterexamples, including successful unconditional
-sends that did not protect racing input.
-
-The old Claude `Recovery.detached` mode and duplicate transcript read are gone.
-Detached capacity work remains separate from polling/completion; a capacity wait
-cannot delay observing a dispatched attempt's completion. Retain broker refresh,
-normal Task inbox delivery, manual account switching, Graph recovery and all
-attempt/completion facts.
-
-The remaining implementation has no predecessor deletion targets. The probe
-compression removed duplicate submission-gate drivers in the Claude probe and
-duplicate wait loops in the Codex probe. Codex completion now joins the native
-submission hook's turn to its exact recovery input; a successful RPC reply's turn alone
-cannot establish continuation. Keep one gate driver for inbox and async wake,
-including failure, timeout, cancellation and both input-ordering barriers.
+The unconditional sending paths are removed. Native submission owns admission;
+the existing broker owns credentials. Historical probes retain counterexamples,
+including successful unconditional sends that did not protect racing input.
 
 Runtime compression separates Claude capacity selection from guarded dispatch,
 and Codex broker preparation from its observer loop. One transcript decoder
@@ -245,7 +330,7 @@ Compression checks, November 9 (all native commands below use
 - `python scratch/claude_retry_correlation_probe.py --claude /Users/jack/.local/bin/claude --admit-recovery <case flags> --output .lf/tmp/loo-811-protocol/<receipt>` — five passed: `--async-rewake --guard-recovery --handoff --gate-race preparation` (`compress-guard-preparation`); `--quota --guard-recovery --handoff --gate-race dispatch` (`compress-inbox-dispatch`); `--async-rewake --guard-recovery --gate-cancel` (`compress-guard-cancel`); `--quota --guard-recovery --gate-timeout` (`compress-inbox-timeout`); `--async-rewake --gate-failure --race dispatch` (`compress-unguarded-failure`). The last intentionally reproduced stale execution without a guard. Drafts and later typed input survived all five; both valid handoffs ordered retry before queued input on the second login.
 - `--script scratch/codex_drain_probe.py --codex /Users/jack/.local/bin/codex <case flags> --output .lf/tmp/loo-811-protocol/<receipt>` — three passed: `--submission-gate` (`compress-submit-baseline`); `--submission-gate --guard-recovery --approval` (`compress-submit-approval`); `--conditional-steer` (`compress-conditional-steer`). Baseline completed the hook-correlated retry; approval executed once, kept its login and rejected stale recovery; conditional steer retained its failed-turn counterexample and passing active control.
 - Saved-receipt/cleanup check — eight cases, zero processes referencing their private roots, native clients/servers and HTTP workers reaped; scoped Keychain items removed. The first tally counted `/tmp` and `/private/tmp` aliases twice; normalizing them yielded eight roots. Receipt: `.lf/tmp/loo-811-protocol/compress-probe-checks.json`.
-- `uv run python -m py_compile scratch/{claude_retry_correlation_probe,codex_drain_probe}.py`, Ruff check/format, `git diff --check`, `lf context` — passed. Runtime Rust/Swift is unchanged; broader checks remain at gate. These probe passes do not complete broker integration or Task-bound native/Desktop recovery.
+- `uv run python -m py_compile scratch/{claude_retry_correlation_probe,codex_drain_probe}.py`, Ruff check/format, `git diff --check`, `lf context` — passed. That earlier probe-only pass changed no runtime Rust/Swift; the subsequent integration and runtime compression checks above establish the narrower product results.
 
 ### Retained implementation checks — November 9
 
@@ -257,64 +342,6 @@ All Rust commands ran with inherited LF_* unset.
 - Task-bound `served_bulk_recovery_keeps_task_identity_and_dispatched_attempts`: passed after repairing the missing CLI-spelling match arm; memberships, primary Sessions and Process count stayed unchanged.
 - Two-client native wait probes passed for both providers at `admission-wait-{codex,claude}/` and `compress-watchers-{codex,claude}/` under the protocol directory. Drafts remained editable and typed input completed, with no retry input or credential handoff; clients/owners were reaped and scoped Keychain items removed. These were unbound synthetic Sessions, not automatic or real-login recovery.
 - Formatting, diff and context checks passed; DTO fixtures were unchanged. Gate owns the broader merged-tree suites/clippy.
-
-## Current design and remaining work
-
-The existing Session/native conversation, failed turn and derived recovery reading
-remain the three concepts. Session history retains dispatch and correlated results;
-changing capacity observations cannot erase them. The current-thread reader picks
-the latest failed turn by its first observation, folds its facts and keeps them
-across provider replacement. The account broker owns credentials. The served
-`session.recover` mutation requests checks; Desktop projects the same reading.
-Neither starts another owner nor moves a Graph cursor. Normal Task inbox messages,
-manual account switching, model moves and Graph recovery keep their existing paths.
-
-The concept review's delayed-worker counterexample is repaired: the focused
-Session test covers dispatch → late wait → reopened reader → correlated completion,
-then a separate rejection and late old-worker observation. The Claude test settles
-only a matching inbox UUID → promptId → Stop after reconnect. The served fixture
-uses two Task primary Sessions, retains their memberships and attempts, refuses
-a second request for dispatched work, and starts no Process. These fixtures do
-not exercise native automatic admission or pending approvals through Desktop.
-
-### Remaining verification
-
-Both providers now use the guarded runtime envelope and broker integration.
-Unsupported cases retain their wait or uncertainty. New input either wins with
-no old retry or follows an admitted recovery. The two-Task served/native bulk,
-held-lock cancellation and approval cases pass; they do not replace gate or demo.
-
-1. Gate: cover distinct models/restricted routes, simultaneous reports, no capacity and
-   later reset. Unsupported or incomplete native history stays waiting/uncertain.
-   Gate owns affected lifecycle, transport, account, decoder/hook, Session/projection,
-   DTO and Swift suites, including lost replies, reconnect, `/new`, repeated limits
-   and earlier effects. The new ContextMoment also reaches `lf::tests::`,
-   `cli_discovery::` and retained-hook checks; route attribution reaches
-   `process::runtime::tests::`, `harness::{codex_connection,fact_writer}::tests::`
-   and Session metadata tests. `scripts/test.py --list` reaches architecture,
-   Python, Rust, website and headless Swift; use a focused Rust filter at gate.
-2. Demo/review: rendered Desktop, physical keyboard input after reopen and the
-   installed/real-login observations below. No production switch or installation
-   occurred in the disposable checks.
-
-The ordinary-typing incident remains unresolved. The LOO-813 handoff reported
-physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
-revealed xzy, and both affected conversations subsequently worked after Reset.
-Those observations do not establish the cause. A disposable reproduction must
-exercise physical keyboard input after reopen; quota retry/draft fixtures and
-the separate installation inventory do not establish its repair.
-
-Installed/real-login refresh, token rotation, unsuffixed Keychain repair and the
-other observations remain in [live-recovery.md](live-recovery.md). No isolated
-real-login environment was available. Headless checks continue in disposable
-environments; configured observations and judgment of the complete experience
-remain for demo/review. No new product decision is needed for reversible work.
-
-The review page, `scratch/concept-review.html`, records the pre-repair findings.
-Its proposed usage wording is now in `docs/sessions.md`; those docs and the
-harness/subscription/Desktop docs now describe guarded automatic continuation
-and the waits for unsupported clients. Native acceptance still needs the whole
-preservation matrix; changing documentation does not complete it.
 
 ## Earlier native results and retained counterexamples
 
@@ -375,12 +402,19 @@ Retained observations (synthetic credentials, loopback only):
   plugin/MCP POSTs as inference is invalid; later probes count `/v1/responses` only.
 
 Earlier focused checks covered 43 selected recovery/routing/CLI tests, the DTO
-round trip and Desktop recovery control. Their full commands and limits are in
-the git source above. The later six-test focused run and candidate build in this
-plan cover the retained waiting implementation, not the latest merged tree.
-The November 9 realign read of `git ls-remote origin refs/heads/main` still
-returned `6f7a6c9ca`, already merged at `c5b22af31`: it retains #1863, #1858, #1865 and
-#1854 and adds #1866's Desktop Task launches, #1871's observed live reads and
-#1870's Codex service tiers. Recovery must retain reconnect's current tier and
-use the existing served reads/Session owners. Gate owns checks against this merged
-tree, including Desktop recovery updates through the changed subscriptions.
+round trip and Desktop recovery control; full commands and limits are in the git
+source above. They predate guarded runtime integration. The latest pre-sync
+candidate is `21dd464633268c528d094ca7ef2d3180ff195e56b05d42b9cae6b8cb6aa263b1`;
+its recovery/Keychain tests and two-provider bulk checks are recorded above.
+
+The November 9 realign read of `git ls-remote origin refs/heads/main` returned
+`8155d1fcde597154ee9746ad72280bf6687a7da8`, merged at `da782f592`.
+It adds #1868's observer changes, #1869's typed board/Task/Session-card reads and
+#1872's late Task-creation reply repair to the earlier merged work. Sync repaired
+the observer-measurement fixture's recovery callback; its focused test passed
+(command in `live-recovery.md`). No broader merged-tree check has run. Gate covers
+these changed subscriptions and observer paths alongside the recovery matrix;
+reconnect retains the selected model and service tier.
+
+`git diff --check`, `lf context` — passed after realign; both budgets fit.
+Documentation only; existing results reused, broader checks remain at gate.

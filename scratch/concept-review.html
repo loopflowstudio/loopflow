@@ -3,75 +3,70 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-811 · Recover the conversation</title>
+<title>LOO-811 · Keep the conversation open</title>
 <style>
-:root { color-scheme: light dark; --ink:#202b31; --paper:#faf9f5; --line:#a2acac; --accent:#795718; }
+:root { color-scheme:light dark; --ink:#202b31; --paper:#faf9f5; --line:#a2acac; --accent:#795718; }
 * { box-sizing:border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
-main { max-width:850px; margin:auto; padding:24px 24px 40px; }
+body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 system-ui,sans-serif; }
+main { max-width:850px; margin:auto; padding:24px 24px 36px; }
 header { font-size:12px; overflow-wrap:anywhere; }
-h1 { font-size:clamp(26px,4vw,34px); line-height:1.15; margin:20px 0 12px; }
-h2 { font-size:18px; margin:22px 0 8px; }
-p { margin:9px 0; }
+h1 { font-size:clamp(26px,4vw,34px); line-height:1.15; margin:18px 0 12px; }
+h2 { font-size:18px; margin:20px 0 8px; }
+p { margin:8px 0; }
 .decision { border-left:3px solid var(--accent); padding-left:15px; }
 code { font-size:.88em; overflow-wrap:anywhere; }
-pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
 table { width:100%; border-collapse:collapse; font-size:14px; }
-th,td { text-align:left; vertical-align:top; padding:8px 9px 8px 0; border-bottom:1px solid var(--line); }
+th,td { text-align:left; vertical-align:top; padding:7px 9px 7px 0; border-bottom:1px solid var(--line); }
 ol { padding-left:22px; } li { margin:7px 0; }
+a { color:inherit; text-underline-offset:3px; }
 @media (prefers-color-scheme:dark) { :root { --ink:#e7e9e5; --paper:#182126; --line:#617276; --accent:#e6bd7c; } }
 @media (max-width:560px) { main { padding:20px 16px; } table,tbody,tr,td { display:block; } thead { display:none; } tr { margin-bottom:12px; } td { border:0; padding:3px 0; } td:first-child { font-weight:600; } }
 </style>
 </head>
 <body><main>
 <header>LOO-811 · concept-review · November 9, 2026<br>
-Built from scratch/interactive-limit-recovery.md; scratch/live-recovery.md;
-docs/sessions.md; session_recovery.rs; harness/{codex_recovery,claude_recovery}.rs;
+Sources: scratch/{interactive-limit-recovery,live-recovery}.md; docs/sessions.md;
+session_recovery.rs; harness/{recovery_gate,codex_recovery,claude_recovery}.rs;
 store/sqlite/session_events.rs; WorkspacePanesView.swift; SessionRecoveryView.swift</header>
-<p><strong>Historical review, before the admission repair.</strong> The retained-fact
-projection and Task-bound served checks are now implemented. Unsafe native sends
-were removed; safe automatic admission remains unfinished for both providers.
-Current status and acceptance: <a href="interactive-limit-recovery.md">recovery plan</a>.</p>
-<h1>Keep recovery attached to its failed turn</h1>
-<div class="decision"><p><strong>Next step: iterate to implement.</strong>
-Derive progress and retry eligibility from retained dispatch and completion receipts.
-Establish native admission that preserves newer input. No open product choice;
-these follow the existing preservation requirements.</p></div>
+<h1>Keep the conversation open</h1>
+<div class="decision"><p><strong>Graph decision: advance.</strong> No design change or open product choice.
+The prior review’s retained-progress and native-admission repairs are built.
+The complete Desktop and real-login outcome remains unverified.</p></div>
 <h2>Actions → concepts → APIs</h2>
-<table><thead><tr><th>Action</th><th>Concept</th><th>API / effect</th></tr></thead><tbody>
-<tr><td>Leave rejected conversations open</td><td>Existing Session and native thread</td><td>Observer selects capacity; Codex token handoff or Claude reload precedes continuation.</td></tr>
-<tr><td>Recover affected sessions</td><td>Check eligible failed turns together</td><td><code>session.recover</code> → <code>request_session_recovery</code>; no Graph move or new conversation.</td></tr>
-<tr><td>Read progress; keep typing</td><td>Attempt facts → current reading</td><td><code>session_recovery</code> → Desktop; correlated result settles the attempt, newer input takes precedence.</td></tr>
+<table><thead><tr><th>Action</th><th>Concept</th><th>State change</th></tr></thead><tbody>
+<tr><td>Leave limited Sessions open</td><td>Existing conversation + rejected turn</td><td>Native observer → eligible login → guarded submission → same-thread continuation.</td></tr>
+<tr><td>Recover affected sessions</td><td>Check waiting conversations together</td><td><code>session.recover</code> → <code>request_session_recovery</code>. No new owner or Graph step.</td></tr>
+<tr><td>Keep typing or answer an approval</td><td>Native input order</td><td>Newer work supersedes the old rejection; input after admission follows recovery. Approvals stay native.</td></tr>
+<tr><td>Read progress</td><td>One retained attempt</td><td><code>session_recovery</code> → Desktop: waiting, recovering, review conversation, or continued.</td></tr>
 </tbody></table>
-<h2>The mismatch: a late wait can hide a dispatched retry</h2>
-<pre>Existing projection: dispatch → delayed worker's wait → “retryable”
-Proposed projection: dispatch + later wait → original attempt still pending
-                     + correlated completion → continued</pre>
-<p><strong>Built:</strong> a fixed dispatch key prevents sending that failed turn twice.
-The latest worker snapshot still controls the reading and can lose the request identity.
-<strong>Proposed:</strong> derive the reading from that turn's retained facts;
-keep changing wait information separate. Reuse Session history and the account broker.</p>
-<h2>Typing must take precedence</h2>
-<p>A history read followed by a send leaves a race. Codex also hands off credentials
-before its second read; the earlier native probe showed active-response handoff can
-fail that turn. Claude can queue an old continuation behind newer input.
-<strong>Next implementation:</strong> demonstrate admission at the native operation,
-including credential handoff. Another idle check or a prompt instruction is insufficient.</p>
-<p><strong>Proposed usage text:</strong> “Checking again does not resend a dispatched
-retry. Its progress follows the original attempt, even after a reconnect.
-New input takes precedence over recovery of an older turn.”</p>
-<h2>Checks before demonstration</h2>
+<h2>Before → built now</h2>
+<p><strong>Earlier review:</strong> a delayed wait could hide dispatch; reading history
+before sending left newer input exposed. <strong>Built:</strong> retained facts keep
+one attempt across reconnect, and the native submission hook holds admission through
+credential preparation. Only its correlated completion establishes “Continued”.</p>
+<p><strong>Current usage:</strong> “Checking again does not resend a dispatched retry.
+Its progress follows the original attempt, even after a reconnect.”
+See <a href="../docs/sessions.md#recover-after-a-usage-limit">Session usage</a>.
+No new usage or skill workflow is proposed.</p>
+<h2>Normal, failure, recovery</h2>
+<p>Two limited Task conversations continue on eligible logins, retaining their models,
+history and drafts. No capacity: keep waiting and show a known reset. A client without
+the guard stays open with an explanation. Cancelled or unconfirmed dispatch: keep the
+attempt and show “Review conversation”; a late correlated completion can settle it.
+An already-sent login change may take effect after cancellation without releasing the retry.</p>
+<p><strong>Remaining mismatch:</strong> served native fixtures establish continuation,
+drafts and selected approval/cancellation cases. They do not establish the rendered
+Desktop experience, physical typing after reopen, or installed real-login behavior.
+Neither account adoption nor an unrelated completed turn closes that gap.</p>
+<h2>Questions for the remaining checks</h2>
 <ol>
-<li>Do two rejected Sessions continue, then accept edited drafts? Existing synthetic
-native probes passed; Task-bound served/Desktop coverage remains.</li>
-<li>Does dispatch → late wait → reconnect → completion keep one attempt and truthful
-progress? Add a controlled interleaving check; no native reproduction is claimed.</li>
-<li>Does input arriving during credential work or immediately before dispatch survive,
-with pending approvals and tool effects intact? Demonstrate for both providers before
-claiming the full outcome.</li>
+<li><strong>Gate:</strong> do restricted routes, distinct models, later capacity,
+repeated limits, lost/late installation replies and cancellation after installation
+retain truthful progress and effects? Use the <a href="interactive-limit-recovery.md">working design’s matrix</a>.</li>
+<li><strong>Demo:</strong> do the visible controls explain every wait, and does physical
+keyboard input work after reopen? The ordinary-typing incident remains unresolved.</li>
+<li><strong>Configured review:</strong> do real refresh/rotation and installed two-item
+Keychain behavior match the disposable checks? Retain the limits in
+<a href="live-recovery.md">live recovery</a>.</li>
 </ol>
-<p>The Keychain repair stays in scope. Installed/real-login observations and the
-ordinary-typing incident remain open. No runtime code or production Sessions changed
-in this review. Decisions and full acceptance cases live in
-<code>scratch/interactive-limit-recovery.md</code>.</p>
 </main></body></html>

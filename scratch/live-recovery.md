@@ -16,8 +16,20 @@ answering it executes its effect once. Cancellation/save-back, blocked Keychain
 stdin and partial-install tests pass.
 Exact commands, candidate hashes, initial fixture failures and remaining checks
 are in the design. Earlier unconditional sends establish none of these guarantees.
-Main `6f7a6c9ca`, merged at `c5b22af31`, still needs gate; rendered Desktop,
-installed and real-login checks remain open.
+Main `8155d1fcd`, merged at `da782f592`, still needs gate. Compression reran both
+native bulk cases on candidate `21dd464633268c528d094ca7ef2d3180ff195e56b05d42b9cae6b8cb6aa263b1`;
+approval/cancellation receipts are from earlier candidates. Rendered Desktop,
+installed and real-login checks remain open. Held-lock cancellation precedes
+installation; it does not establish cancellation of an already-sent native login.
+
+November 9 QA reran both providers' bulk, approval and held-lock cancellation
+cases on merged candidate `473e1d7353201b8a6ca85633c056ac74ee29926fc608eedadb41481ab282f963`;
+all six passed, with no probe processes or scoped Keychain items left. Public
+CLI empty/returning-state and private-server restart checks also passed, alongside
+17 headless Desktop checks. [qa.html](qa.html) records transcripts and limits;
+commands and receipts are in the design's “QA — November 9, merged candidate”.
+These synthetic/native and automated view checks do not establish installed
+real-login recovery or physical typing after reopen. Gate's broader matrix remains.
 
 November 9 sync onto `8155d1fcd` kept both harness README sections. The new
 observer measurement fixture needed a no-op recovery tick for `watch`.

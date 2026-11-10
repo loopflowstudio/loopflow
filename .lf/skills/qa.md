@@ -210,6 +210,17 @@ Keychain write. Live refresh, running-client continuity and unsuffixed-service
 checks need disposable or idle provider logins and suitable OS-account isolation.
 Afterward verify the exact temporary service items and child processes are gone.
 
+For interactive recovery, create linked disposable Task checkouts and select each
+bound primary Session before triggering rejection; binding a running conversation
+adds Task input and changes the failed-turn scenario. Drive `session.recover`
+through the shared server and require a correlated native retry, retained draft,
+and later completed input. Check a pending approval in one Session while another
+recovers, then answer it and count its effect. Cancellation with the credential
+lock held covers cancellation before installation only.
+Synthetic logins and local quota responses remain supplemental native checks,
+not real-login acceptance. No provider login is needed to check an empty Machine
+or reopen a Session created by `lf -a codex session resume --prepare --json`.
+
 ## Keep what you learned
 
 How to launch and drive this product belongs in this skill. When you had to work

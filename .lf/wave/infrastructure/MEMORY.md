@@ -31,32 +31,31 @@ Restart is allowed, but idle account adoption proves no preservation: Codex
 replacement loses active work/approvals; SIGHUP drain exits on racing input;
 active-response handoff fails.
 
-Synthetic native probes demonstrate submission ordering.
-Claude 2.1.322's recovery-only wrapper with `onFailure: "block"` rejects gate
-failure/timeout while ordinary context-hook failure permits typing. Cancellation
-requeues async wake: a one-use attempt rejects the duplicate. Guarded inbox retry
-orders credential preparation and retry before later input, joining UUID to
-promptId and Stop. Without the wrapper, hook exit 1 admits stale execution.
+Claude 2.1.322's recovery-only wrapper blocks gate failure/timeout while ordinary
+hook failure permits typing. Cancellation requeues async wake: claim an attempt
+once. Codex 0.167.0's native hook timeout fails open; a shorter recovery-only
+watchdog blocks it. Older work/approvals finish before stale queued recovery is
+rejected without handoff. `turn/start` can return an existing turn ID; completion
+must match the admitted hook and exact retry input. Claude joins inbox UUID,
+admitted prompt ID and Stop. Cache expiry and outside history reads reserve no input.
 
-Codex 0.167.0 `UserPromptSubmit` orders supplied-token login and retry before later
-input. Older work/approvals finish before queued recovery is rejected as stale,
-without handoff. Native hook timeout fails open; a shorter recovery-only watchdog
-blocks its child timeout. `turn/start` can return an existing turn ID: that turn's
-completion proves no recovery. Correlate the admitted hook and exact retry input.
+Guarded sends now use existing Session owners and the account broker. A one-use
+socket holds native submission through preparation. Cancellation stops subsequent
+installation/retry, but cannot undo a native installation already sent: retain
+uncertainty and track confirmed account changes. Refresh/save-back must finish
+outside the cancelled hook so received grants survive. Late waits retain dispatch
+and completion; only recovery depends on its gate, ordinary input stays best-effort.
 
-Runtime sends remain removed. Cache expiry, external history reads and lf locks
-reserve no native input position. Release's entry-point lesson applies: mechanism
-probes do not establish recovery through the broker and Session owners. Bounded
-activation must retain any received refresh grant even after cancellation, without
-allowing a cancelled worker to dispatch or replace native credentials later.
-Ordinary input remains best-effort; only recovery may depend on its gate.
-
-Late waits retain dispatch/completion across reconnect and subsequent rejections.
-Task-bound served fixtures retain memberships/attempts without new owners.
-Broker integration, Task-bound native bulk/approval preservation, model/routes,
-merged-tree gate and ordinary-typing repair remain open. Scoped Keychain checks
-cover USER plus one lexical legacy item; native write rejection, installed/
-unsuffixed repair and real-token observations remain unproved. Sources: `b2fa40d734bd744c00357d266a37ab34bb7a54d8:scratch/`.
+Synthetic native checks now cover two Task primary Sessions per provider through
+Desktop's served protocol: bulk continuation, drafts/later input, held-lock
+cancellation and an approval retained while the other Task recovers, executed
+once when answered. Release's entry-point lesson still applies: these are
+neither rendered Desktop nor installed/real-token acceptance. Model/routes,
+merged-tree gate and the ordinary-typing incident remain open. Scoped Keychain
+checks cover USER plus one lexical legacy item, not native write rejection or
+installed/unsuffixed repair. Sources and candidate hashes:
+`16efb4f8ee531901e8ac707dc5c78067aae72fa2:scratch/interactive-limit-recovery.md`
+and `scratch/live-recovery.md` at that revision.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

@@ -82,7 +82,7 @@ by a test and every server fixture must decode.
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null}
-← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
@@ -308,7 +308,7 @@ part of what a phone or bot client is offered.
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   detached under its own execution owner and answers what that process
-  reports once it knows: `{state: running, graph_process, log}` when the
+  reports once it knows: `{state: running, ships, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
   {process, log}`, or the refusal it printed. The connection never waits on
   the run. `approve` is `-b`: every step headless to `end`, approving

@@ -49,6 +49,11 @@ Run `lf server run` as a child with closed stdin; get its socket from
 `rust/loopflow/src/server/README.md` over that Unix socket. Exercise Swift
 encoding with the built `Loopflow` library's `ServerClientMessage` and
 `ServerOperation`; this checks live interoperability, not Desktop UI behavior.
+After building Desktop, compile a standalone probe importing `Loopflow` with
+`swiftc -I swift/.build/debug/Modules scratch/probe.swift swift/.build/debug/Loopflow.build/*.swift.o -o scratch/probe`.
+Send its encoded messages to the private socket and decode the live results
+with the production DTOs. Plan reads take a positional Wave:
+`lf plan board <wave> --all --json`; global `--wave` is context that `--all` ignores.
 Check the resulting state through the CLI as well as the socket. Dashboard
 queries accept `task:<id>`; hide/show members use that same selector.
 `lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.

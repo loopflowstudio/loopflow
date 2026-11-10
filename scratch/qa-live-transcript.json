@@ -1,0 +1,873 @@
+[
+  {
+    "scenario": "hello",
+    "observed": {
+      "type": "welcome",
+      "client_id": "fdcda2a6-b7d7-45b1-b32d-9248e6fad2e7",
+      "revision": 4,
+      "server_revision": 4,
+      "min_revision": 4,
+      "instance": "a0fe77f9-badb-492f-9a3d-9799a2da81df",
+      "build": "0.15.2+c37818e89",
+      "executable_sha256": "8b4a792c4c83e616ec23ca4e6b91193a2b8a4db838b61d9a838be915cbb9db9c",
+      "machine": {
+        "created_at": "2026-11-10T01:52:43Z",
+        "id": "home_ef7cd80cdd37cfcf3f289662732faeee",
+        "label": null,
+        "observed_at": "2026-11-10T01:52:43Z",
+        "route": "local"
+      },
+      "limits": {
+        "max_message": 33554432,
+        "max_connections": 64,
+        "max_open": 256,
+        "max_retained_bytes": 67108864
+      }
+    }
+  },
+  {
+    "scenario": "missing receipt",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "d2a98e4d-20ef-4e0a-a5ba-1df1d3059917",
+      "result": null
+    }
+  },
+  {
+    "scenario": "CLI retry",
+    "observed": {
+      "task": "task_86877eca1ec54bce946052194a262729",
+      "milestone": "filed"
+    }
+  },
+  {
+    "scenario": "CLI receipt",
+    "observed": {
+      "disposition": "complete",
+      "explanation": "Task created",
+      "run": false,
+      "request_id": "qa-first",
+      "kind": "task.create",
+      "milestone": "filed",
+      "task_id": "task_86877eca1ec54bce946052194a262729",
+      "session_id": null,
+      "artifact_key": null,
+      "result": {
+        "graph": null,
+        "milestone": "filed",
+        "session_id": null,
+        "task": {
+          "assignee": null,
+          "base_commit": "",
+          "branch": "",
+          "completed_at": null,
+          "created_at": "2026-11-10T01:53:58Z",
+          "description": "Keep exactly one report after reconnect.",
+          "due_date": null,
+          "id": "task_86877eca1ec54bce946052194a262729",
+          "identifier": "86877e",
+          "linear_id": null,
+          "parent_pr_id": null,
+          "pm_snapshot_synced_at": null,
+          "pm_writeback": {
+            "state": "current"
+          },
+          "project_id": null,
+          "rank": 1,
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "revision": 1,
+          "state": "unstarted",
+          "title": "Recover a submitted report",
+          "updated_at": "2026-11-10T01:53:58Z",
+          "wave_id": null,
+          "workspace_slug": "",
+          "worktree": null
+        }
+      },
+      "launch": null,
+      "created_at": 1794275638,
+      "updated_at": 1794275638
+    }
+  },
+  {
+    "scenario": "changed content refused",
+    "observed": {
+      "type": "error",
+      "id": "r",
+      "code": "conflict",
+      "message": "creation request qa-first has different content",
+      "data": {
+        "request_id": "qa-first"
+      }
+    }
+  },
+  {
+    "scenario": "unknown operation",
+    "observed": {
+      "type": "error",
+      "id": "r",
+      "code": "invalid",
+      "message": "this server has no operation `qa.unknown`; update the selected installation",
+      "data": {
+        "kind": "qa.unknown"
+      }
+    }
+  },
+  {
+    "scenario": "fresh connection after invalid operation",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "655d9d1d-aac4-497e-8ee5-6714a51ee8b6",
+      "result": {
+        "created_at": "2026-11-10T01:52:43Z",
+        "id": "home_ef7cd80cdd37cfcf3f289662732faeee",
+        "label": null,
+        "observed_at": "2026-11-10T01:52:43Z",
+        "route": "local"
+      }
+    }
+  },
+  {
+    "scenario": "revision 2 rejected",
+    "observed": {
+      "type": "error",
+      "id": null,
+      "code": "incompatible",
+      "message": "Server speaks protocol revisions 4\u20134; the client speaks 2\u20132; update the client",
+      "data": {
+        "server": {
+          "min_revision": 4,
+          "revision": 4
+        },
+        "update": "client"
+      }
+    }
+  },
+  {
+    "scenario": "lost-answer receipt",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "7cf2c8b2-a53d-4f53-b794-60dbbd720a88",
+      "result": {
+        "artifact_key": null,
+        "created_at": 1794275639,
+        "disposition": "complete",
+        "explanation": "Task created",
+        "kind": "task.create",
+        "launch": null,
+        "milestone": "filed",
+        "request_id": "qa-lost",
+        "result": {
+          "graph": null,
+          "milestone": "filed",
+          "session_id": null,
+          "task": {
+            "assignee": null,
+            "base_commit": "",
+            "branch": "",
+            "completed_at": null,
+            "created_at": "2026-11-10T01:53:59Z",
+            "description": "One task survives a lost answer.",
+            "due_date": null,
+            "id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+            "identifier": "30f8a0",
+            "linear_id": null,
+            "parent_pr_id": null,
+            "pm_snapshot_synced_at": null,
+            "pm_writeback": {
+              "state": "current"
+            },
+            "project_id": null,
+            "rank": 2,
+            "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+            "revision": 1,
+            "state": "unstarted",
+            "title": "Recover socket submission",
+            "updated_at": "2026-11-10T01:53:59Z",
+            "wave_id": null,
+            "workspace_slug": "",
+            "worktree": null
+          }
+        },
+        "run": false,
+        "session_id": null,
+        "task_id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+        "updated_at": 1794275639
+      }
+    }
+  },
+  {
+    "scenario": "lost-answer retry",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "700c43a6-c16b-49e3-a120-932ec96e4852",
+      "result": {
+        "graph": null,
+        "milestone": "filed",
+        "session_id": null,
+        "task": {
+          "assignee": null,
+          "base_commit": "",
+          "branch": "",
+          "completed_at": null,
+          "created_at": "2026-11-10T01:53:59Z",
+          "description": "One task survives a lost answer.",
+          "due_date": null,
+          "id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+          "identifier": "30f8a0",
+          "linear_id": null,
+          "parent_pr_id": null,
+          "pm_snapshot_synced_at": null,
+          "pm_writeback": {
+            "state": "current"
+          },
+          "project_id": null,
+          "rank": 2,
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "revision": 1,
+          "state": "unstarted",
+          "title": "Recover socket submission",
+          "updated_at": "2026-11-10T01:53:59Z",
+          "wave_id": null,
+          "workspace_slug": "",
+          "worktree": null
+        }
+      }
+    }
+  },
+  {
+    "scenario": "two simultaneous identical submissions",
+    "observed": [
+      {
+        "type": "response",
+        "id": "r",
+        "trace_id": "ef867c71-9a12-474b-ab57-b8c979f1a8bf",
+        "result": {
+          "graph": null,
+          "milestone": "filed",
+          "session_id": null,
+          "task": {
+            "assignee": null,
+            "base_commit": "",
+            "branch": "",
+            "completed_at": null,
+            "created_at": "2026-11-10T01:54:00Z",
+            "description": "One task survives a lost answer.",
+            "due_date": null,
+            "id": "task_9c40d90b2d8146ad80f381f0cd28b65d",
+            "identifier": "9c40d9",
+            "linear_id": null,
+            "parent_pr_id": null,
+            "pm_snapshot_synced_at": null,
+            "pm_writeback": {
+              "state": "current"
+            },
+            "project_id": null,
+            "rank": 3,
+            "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+            "revision": 1,
+            "state": "unstarted",
+            "title": "Recover socket submission",
+            "updated_at": "2026-11-10T01:54:00Z",
+            "wave_id": null,
+            "workspace_slug": "",
+            "worktree": null
+          }
+        }
+      },
+      {
+        "type": "response",
+        "id": "r",
+        "trace_id": "dcd08a47-806c-4034-a94e-01b98889bf78",
+        "result": {
+          "graph": null,
+          "milestone": "filed",
+          "session_id": null,
+          "task": {
+            "assignee": null,
+            "base_commit": "",
+            "branch": "",
+            "completed_at": null,
+            "created_at": "2026-11-10T01:54:00Z",
+            "description": "One task survives a lost answer.",
+            "due_date": null,
+            "id": "task_9c40d90b2d8146ad80f381f0cd28b65d",
+            "identifier": "9c40d9",
+            "linear_id": null,
+            "parent_pr_id": null,
+            "pm_snapshot_synced_at": null,
+            "pm_writeback": {
+              "state": "current"
+            },
+            "project_id": null,
+            "rank": 3,
+            "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+            "revision": 1,
+            "state": "unstarted",
+            "title": "Recover socket submission",
+            "updated_at": "2026-11-10T01:54:00Z",
+            "wave_id": null,
+            "workspace_slug": "",
+            "worktree": null
+          }
+        }
+      }
+    ]
+  },
+  {
+    "scenario": "restart hello",
+    "observed": {
+      "type": "welcome",
+      "client_id": "9596c782-c324-4f04-b696-0ef0753ca42f",
+      "revision": 4,
+      "server_revision": 4,
+      "min_revision": 4,
+      "instance": "ab95f2b5-4391-49ff-99ed-65beaca8b847",
+      "build": "0.15.2+c37818e89",
+      "executable_sha256": "8b4a792c4c83e616ec23ca4e6b91193a2b8a4db838b61d9a838be915cbb9db9c",
+      "machine": {
+        "created_at": "2026-11-10T01:52:43Z",
+        "id": "home_ef7cd80cdd37cfcf3f289662732faeee",
+        "label": null,
+        "observed_at": "2026-11-10T01:52:43Z",
+        "route": "local"
+      },
+      "limits": {
+        "max_message": 33554432,
+        "max_connections": 64,
+        "max_open": 256,
+        "max_retained_bytes": 67108864
+      }
+    }
+  },
+  {
+    "scenario": "restart receipt",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "c21592be-91c1-48ef-8fc7-222f8287f6c0",
+      "result": {
+        "artifact_key": null,
+        "created_at": 1794275639,
+        "disposition": "complete",
+        "explanation": "Task created",
+        "kind": "task.create",
+        "launch": null,
+        "milestone": "filed",
+        "request_id": "qa-lost",
+        "result": {
+          "graph": null,
+          "milestone": "filed",
+          "session_id": null,
+          "task": {
+            "assignee": null,
+            "base_commit": "",
+            "branch": "",
+            "completed_at": null,
+            "created_at": "2026-11-10T01:53:59Z",
+            "description": "One task survives a lost answer.",
+            "due_date": null,
+            "id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+            "identifier": "30f8a0",
+            "linear_id": null,
+            "parent_pr_id": null,
+            "pm_snapshot_synced_at": null,
+            "pm_writeback": {
+              "state": "current"
+            },
+            "project_id": null,
+            "rank": 2,
+            "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+            "revision": 1,
+            "state": "unstarted",
+            "title": "Recover socket submission",
+            "updated_at": "2026-11-10T01:53:59Z",
+            "wave_id": null,
+            "workspace_slug": "",
+            "worktree": null
+          }
+        },
+        "run": false,
+        "session_id": null,
+        "task_id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+        "updated_at": 1794275639
+      }
+    }
+  },
+  {
+    "scenario": "restart retry",
+    "observed": {
+      "type": "response",
+      "id": "r",
+      "trace_id": "9918a4db-9d9d-4f9f-9c86-5aa5ea519557",
+      "result": {
+        "graph": null,
+        "milestone": "filed",
+        "session_id": null,
+        "task": {
+          "assignee": null,
+          "base_commit": "",
+          "branch": "",
+          "completed_at": null,
+          "created_at": "2026-11-10T01:53:59Z",
+          "description": "One task survives a lost answer.",
+          "due_date": null,
+          "id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+          "identifier": "30f8a0",
+          "linear_id": null,
+          "parent_pr_id": null,
+          "pm_snapshot_synced_at": null,
+          "pm_writeback": {
+            "state": "current"
+          },
+          "project_id": null,
+          "rank": 2,
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "revision": 1,
+          "state": "unstarted",
+          "title": "Recover socket submission",
+          "updated_at": "2026-11-10T01:53:59Z",
+          "wave_id": null,
+          "workspace_slug": "",
+          "worktree": null
+        }
+      }
+    }
+  },
+  {
+    "scenario": "task inventory",
+    "observed": [
+      {
+        "task": {
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "repo": "/private/tmp/l810qa-gvf_roy1/repo",
+          "project_id": null,
+          "wave_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "sync": {
+            "connected": false,
+            "changes": []
+          },
+          "id": "task_af20c00f3f3a435784fb098a32185d00",
+          "linear_id": null,
+          "identifier": "af20c0",
+          "name": "Review the recovery report",
+          "description": "Review the recovery report",
+          "rank": 0,
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "runtime": {
+          "work_id": "task_af20c00f3f3a435784fb098a32185d00",
+          "status": "unstarted",
+          "completion_pending": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "updated_at": "2026-11-10T01:52:45Z",
+          "provider": "codex",
+          "owner": null
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "waiting",
+          "reason": "ready",
+          "observed_at": "2026-11-10T01:54:01.643185Z",
+          "evidence_age_secs": 76,
+          "local_progress": {
+            "state": "not_applicable",
+            "unsettled": false,
+            "dirty": null,
+            "authored_commits": null,
+            "recovery_required": null,
+            "reason": null
+          },
+          "unresolved_execution": false
+        },
+        "actions": {
+          "recommended": "run",
+          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first"
+        },
+        "graph_name": "qa-local",
+        "graph_source": "repository",
+        "latest_graph_process": null,
+        "execution": {
+          "state": "idle",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
+        "pr": null,
+        "section": "backlog"
+      },
+      {
+        "task": {
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "repo": "/private/tmp/l810qa-gvf_roy1/repo",
+          "project_id": null,
+          "wave_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "sync": {
+            "connected": false,
+            "changes": []
+          },
+          "id": "task_86877eca1ec54bce946052194a262729",
+          "linear_id": null,
+          "identifier": "86877e",
+          "name": "Recover a submitted report",
+          "description": "Keep exactly one report after reconnect.",
+          "rank": 1,
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "runtime": {
+          "work_id": "task_86877eca1ec54bce946052194a262729",
+          "status": "unstarted",
+          "completion_pending": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "updated_at": "2026-11-10T01:53:58Z",
+          "provider": "codex",
+          "owner": null
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "waiting",
+          "reason": "ready",
+          "observed_at": "2026-11-10T01:54:01.643186Z",
+          "evidence_age_secs": 3,
+          "local_progress": {
+            "state": "not_applicable",
+            "unsettled": false,
+            "dirty": null,
+            "authored_commits": null,
+            "recovery_required": null,
+            "reason": null
+          },
+          "unresolved_execution": false
+        },
+        "actions": {
+          "recommended": "run",
+          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first"
+        },
+        "graph_name": "qa-local",
+        "graph_source": "repository",
+        "latest_graph_process": null,
+        "execution": {
+          "state": "idle",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
+        "pr": null,
+        "section": "backlog"
+      },
+      {
+        "task": {
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "repo": "/private/tmp/l810qa-gvf_roy1/repo",
+          "project_id": null,
+          "wave_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "sync": {
+            "connected": false,
+            "changes": []
+          },
+          "id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+          "linear_id": null,
+          "identifier": "30f8a0",
+          "name": "Recover socket submission",
+          "description": "One task survives a lost answer.",
+          "rank": 2,
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "runtime": {
+          "work_id": "task_30f8a0b6b58b42609f7cd1fcd4419f3d",
+          "status": "unstarted",
+          "completion_pending": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "updated_at": "2026-11-10T01:53:59Z",
+          "provider": "codex",
+          "owner": null
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "waiting",
+          "reason": "ready",
+          "observed_at": "2026-11-10T01:54:01.643187Z",
+          "evidence_age_secs": 2,
+          "local_progress": {
+            "state": "not_applicable",
+            "unsettled": false,
+            "dirty": null,
+            "authored_commits": null,
+            "recovery_required": null,
+            "reason": null
+          },
+          "unresolved_execution": false
+        },
+        "actions": {
+          "recommended": "run",
+          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first"
+        },
+        "graph_name": "qa-local",
+        "graph_source": "repository",
+        "latest_graph_process": null,
+        "execution": {
+          "state": "idle",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
+        "pr": null,
+        "section": "backlog"
+      },
+      {
+        "task": {
+          "repo_id": "repo_3e133db0758549fca6eb97be30f30395",
+          "repo": "/private/tmp/l810qa-gvf_roy1/repo",
+          "project_id": null,
+          "wave_id": null,
+          "acquisition": {
+            "state": "available",
+            "observed_at": null
+          },
+          "sync": {
+            "connected": false,
+            "changes": []
+          },
+          "id": "task_9c40d90b2d8146ad80f381f0cd28b65d",
+          "linear_id": null,
+          "identifier": "9c40d9",
+          "name": "Recover socket submission",
+          "description": "One task survives a lost answer.",
+          "rank": 3,
+          "state": "unstarted",
+          "completed_at": null,
+          "due_date": null,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "runtime": {
+          "work_id": "task_9c40d90b2d8146ad80f381f0cd28b65d",
+          "status": "unstarted",
+          "completion_pending": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "updated_at": "2026-11-10T01:54:00Z",
+          "provider": "codex",
+          "owner": null
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "waiting",
+          "reason": "ready",
+          "observed_at": "2026-11-10T01:54:01.643185Z",
+          "evidence_age_secs": 1,
+          "local_progress": {
+            "state": "not_applicable",
+            "unsettled": false,
+            "dirty": null,
+            "authored_commits": null,
+            "recovery_required": null,
+            "reason": null
+          },
+          "unresolved_execution": false
+        },
+        "actions": {
+          "recommended": "run",
+          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first"
+        },
+        "graph_name": "qa-local",
+        "graph_source": "repository",
+        "latest_graph_process": null,
+        "execution": {
+          "state": "idle",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "step": null,
+          "captured": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
+        "pr": null,
+        "section": "backlog"
+      }
+    ]
+  },
+  {
+    "scenario": "subscription acknowledgement",
+    "observed": {
+      "type": "response",
+      "id": "sessions",
+      "trace_id": "768584db-4921-4fe6-8e7a-a46254de5f63",
+      "result": null
+    }
+  },
+  {
+    "scenario": "complete reading",
+    "observed": {
+      "type": "reading",
+      "id": "sessions",
+      "checkpoint": "356e8780149e5d9b1f85410d3809e15c4ea5b6b4ce269d8681a521cd6f168a84",
+      "frame": {
+        "answers": null,
+        "body": [],
+        "unavailable": null
+      }
+    }
+  },
+  {
+    "scenario": "checkpoint",
+    "observed": {
+      "type": "reading",
+      "id": "sessions",
+      "checkpoint": "356e8780149e5d9b1f85410d3809e15c4ea5b6b4ce269d8681a521cd6f168a84",
+      "frame": {
+        "answers": 17,
+        "body": [],
+        "unavailable": null
+      }
+    }
+  },
+  {
+    "scenario": "burst admission",
+    "observed": {
+      "responses": 2,
+      "errors": [
+        {
+          "type": "error",
+          "id": "2",
+          "code": "busy",
+          "message": "server capacity reached; retry shortly",
+          "data": {
+            "limit": "retained_bytes",
+            "max": 67108864
+          }
+        },
+        {
+          "type": "error",
+          "id": "3",
+          "code": "busy",
+          "message": "server capacity reached; retry shortly",
+          "data": {
+            "limit": "retained_bytes",
+            "max": 67108864
+          }
+        },
+        {
+          "type": "error",
+          "id": "4",
+          "code": "busy",
+          "message": "server capacity reached; retry shortly",
+          "data": {
+            "limit": "retained_bytes",
+            "max": 67108864
+          }
+        }
+      ],
+      "total": 100
+    }
+  },
+  {
+    "scenario": "status after drain",
+    "observed": {
+      "socket": "/private/tmp/lf-501-49b8faafa41be1b0/machine.sock",
+      "ready": true,
+      "listening": true,
+      "instance": "ab95f2b5-4391-49ff-99ed-65beaca8b847",
+      "revision": 4,
+      "clients": [
+        {
+          "id": "6beab7e6-9965-45f3-91a2-22990829d52d",
+          "client": {
+            "kind": "qa",
+            "platform": "macos",
+            "name": "LOO-810 live QA",
+            "version": "0.15.2"
+          },
+          "connected_at": "2026-11-10T01:54:01.683199Z",
+          "requests": 100,
+          "open": 0,
+          "retained_bytes": 0
+        }
+      ],
+      "error": null
+    }
+  },
+  {
+    "scenario": "cleanup",
+    "observed": {
+      "server_returncode": 130,
+      "private_root": "/tmp/l810qa-gvf_roy1"
+    }
+  }
+]

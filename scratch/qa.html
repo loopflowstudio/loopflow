@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-810 · Recovery QA</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.55 system-ui,sans-serif}body{max-width:880px;margin:3rem auto;padding:0 1.2rem 3rem}h1{font-size:2rem;line-height:1.2}h2{font-size:1.2rem;margin-top:2.2rem}p{max-width:75ch}pre{padding:1rem;background:#8881;border:1px solid #8885;border-radius:8px;overflow:auto;font:12px/1.55 ui-monospace,monospace}table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;border-bottom:1px solid #8885;padding:.7rem .4rem}header,small{color:#888}a{color:inherit}strong{font-weight:650}.gap{border-left:4px solid #d69528;padding-left:1rem}
+</style>
+<header>LOO-810 · QA · 2026-11-09 PST · branch c37818e89</header>
+<h1>Live recovery works; mounted Desktop remains unchecked</h1>
+<p>The built CLI and real local server kept Task and Session identity through lost answers,
+concurrent submissions and server replacement. Real shell viewers recovered output without
+stealing newer input or geometry. No production repair was needed on the paths reached.</p>
+<p class="gap"><strong>The late-reply UI repair is not verified in a mounted window.</strong>
+Two isolated app launches produced no accessible window. Cold-app Show result/Inspect,
+newer-draft retention, and configured-provider sleep/wake remain open acceptance.</p>
+<h2>Build and setup</h2>
+<p><code>cargo build -p loopflow --bin lf --jobs 4</code> and
+<code>swift build --package-path swift --jobs 4</code> passed. Packaged the current
+Swift executable with its frameworks and branch CLI, signed a separate QA bundle,
+and used the signed bundled CLI for its server. Private HOME, LF_HOME and provider
+homes; a fresh Git repository, local bare origin and a one-command <code>qa-local</code>
+Graph (<code>cmd: help</code>). Work was created through ordinary CLI/API calls,
+not injected into the database.</p>
+<h2>What ran and what appeared</h2>
+<table><tr><th>Scenario</th><th>Action and observation</th></tr>
+<tr><td>Fresh server and empty Work</td><td>Negotiated revision 4, read an absent receipt as null, subscribed to an empty Session list and received a complete reading. Checkpoint 17 returned answers=17.</td></tr>
+<tr><td>File and recover a Task</td><td>Filed through CLI; dropped a socket immediately after submitting another creation. Receipt lookup found the Task. Identical retry and retry after a server restart returned the same ID.</td></tr>
+<tr><td>Two submissions at once</td><td>Two independent sockets submitted the same creation ID and payload simultaneously. Both returned one Task ID; inventory contained one record for that request.</td></tr>
+<tr><td>Wrong content and protocol</td><td>Changed Task content under the same ID returned conflict. Unknown operation returned invalid. Revision 2 was told to update its client. A fresh valid connection still worked.</td></tr>
+<tr><td>Capacity and drain</td><td>Sent 100 reads in a burst: 2 completed and 98 returned busy for retained_bytes (64 MiB). After draining, status reported open=0 and retained_bytes=0. This observes admission, not an RSS measurement.</td></tr>
+<tr><td>Lost launch answer and first prompt</td><td>Submitted a real Task with run=true, then disconnected. An early receipt said “Task created; start unconfirmed”; it settled to complete/admitted. Retried before and after server restart: one completed Graph, one primary Session, and one provider user message containing the exact original request. No duplicate launch or prompt.</td></tr>
+<tr><td>Lost Session preparation answer</td><td>Prepared a repository conversation, submitted session.new and dropped its answer. Receipt lookup and identical retries (including after restart) returned the same Session. Changing the agent under that ID returned conflict.</td></tr>
+<tr><td>Newer terminal viewer</td><td>A real shell received input at 24×80. After disconnect, a newer viewer took 31×99. The older viewer resumed without input authority; its “must-not-arrive” input never reached the shell. Geometry stayed 31×99.</td></tr>
+<tr><td>Expired terminal replay</td><td>After 61.4 seconds, resume returned reconnect_required with zero replay bytes before refusal. Fresh attach painted the latest output without input authority. The shell received quit, exited 0, and its endpoint disappeared.</td></tr>
+</table>
+<p>Terminal scenarios used the real owner's binary protocol directly, the path behind
+CLI attachment. They do not substitute for shared-server bridge saturation, owner-replacement,
+or mounted native rendering. Those broader cases have earlier automated coverage in
+<a href="loo-810-verify-recovery.md">the retained verification record</a>.</p>
+<h2>Selected transcripts</h2>
+<h3>One launch and one original prompt after restart</h3>
+<pre>{
+  &quot;graph_processes&quot;: [
+    {
+      &quot;id&quot;: &quot;67ae3024-585a-4e88-851d-9099abc6bf75&quot;,
+      &quot;state&quot;: &quot;completed&quot;,
+      &quot;step&quot;: &quot;help&quot;
+    }
+  ],
+  &quot;session_ids&quot;: [
+    &quot;51c8bab6588d42c6adae49eca5331eae&quot;
+  ],
+  &quot;original_prompt_user_messages&quot;: 1,
+  &quot;task_state&quot;: &quot;done&quot;,
+  &quot;server_restarted_before_retry&quot;: true
+}</pre>
+<p>The original request was <q>Keep this exact first request after reconnect.</q>
+The count above reads the real provider JSONL's user-message records; it does not
+count the provider's second event representation of the same message.</p>
+<h3>Terminal ownership and expired replay</h3>
+<pre>{
+  &quot;inputs&quot;: [
+    &quot;before-disconnect&quot;,
+    &quot;newer-viewer&quot;,
+    &quot;still-newer&quot;
+  ],
+  &quot;size&quot;: &quot;31 99&quot;
+}</pre><pre>{
+  &quot;elapsed_seconds&quot;: 61.4,
+  &quot;resume&quot;: &quot;reconnect_required&quot;,
+  &quot;replayed_bytes_before_refusal&quot;: 0,
+  &quot;fresh_screen_contains_latest&quot;: true,
+  &quot;controls&quot;: false
+}</pre><pre>[
+  &quot;before-disconnect&quot;,
+  &quot;newer-viewer&quot;,
+  &quot;still-newer&quot;,
+  &quot;quit&quot;
+]</pre>
+<h3>Honest overload refusal</h3>
+<pre>{
+  &quot;responses&quot;: 2,
+  &quot;errors&quot;: [
+    {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: &quot;2&quot;,
+      &quot;code&quot;: &quot;busy&quot;,
+      &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+      &quot;data&quot;: {
+        &quot;limit&quot;: &quot;retained_bytes&quot;,
+        &quot;max&quot;: 67108864
+      }
+    },
+    {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: &quot;3&quot;,
+      &quot;code&quot;: &quot;busy&quot;,
+      &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+      &quot;data&quot;: {
+        &quot;limit&quot;: &quot;retained_bytes&quot;,
+        &quot;max&quot;: 67108864
+      }
+    },
+    {
+      &quot;type&quot;: &quot;error&quot;,
+      &quot;id&quot;: &quot;4&quot;,
+      &quot;code&quot;: &quot;busy&quot;,
+      &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+      &quot;data&quot;: {
+        &quot;limit&quot;: &quot;retained_bytes&quot;,
+        &quot;max&quot;: 67108864
+      }
+    }
+  ],
+  &quot;total&quot;: 100
+}</pre>
+<h2>Desktop attempts and limits</h2>
+<p>The first isolated app used macOS's long temporary directory. The Desktop
+inspection socket failed with <code>path must be shorter than SUN_LEN</code>.
+Rebuilt the isolated bundle and Machine under <code>/tmp/l810qa-gvf_roy1</code>.
+The control endpoint then answered:</p>
+<pre>{"observed_at":1794275598,"windows":[],"openings":[]}</pre>
+<p>Computer use returned <code>cgWindowNotFound</code> for both launches. App logs
+also emitted repeated AttributeGraph cycle messages. No screenshot or mounted
+interaction was available; a running app and background provider startup are not
+window verification. Both QA apps and their children were stopped.</p>
+<p>The earlier five focused Swift tests passed, including all 14 late-reply
+cases (saved in the verification record). No tests were rerun here: these live
+checks add different information. Broader affected Swift suites remain with gate.</p>
+<h2>Changes made</h2>
+<p>Updated the repository QA skill with short-path setup and the empty-window
+interpretation. Corrected the walkthrough's early assumption that a provisional
+run_requested receipt was final; polling showed the ordinary admission completed.
+No runtime source was changed.</p>
+<h2>What remains, worst first</h2>
+<ol>
+<li><strong>Mounted creation recovery and newer drafts:</strong> need a usable Desktop window to lose an admitted answer, restart, use Show result/Inspect, and observe submission removal only after presentation. The late-reply repair still needs that real UI pass.</li>
+<li><strong>Configured-provider sleep/wake:</strong> not exercised; no physical sleep or healthy-provider continuity check occurred. Socket reconnect and shell replay do not establish it.</li>
+<li><strong>Long private LF_HOME paths:</strong> Desktop's app-owned socket fails at the Unix path-length limit. The short-path retry made this QA endpoint reachable; the underlying path behavior was not changed in this repair.</li>
+</ol>
+<p>All reached CLI/server/terminal scenarios passed. Temporary app registrations
+were removed; terminal owner exited; remaining QA provider children and foreground
+servers were terminated. Final server status: ready=false, listening=false,
+instance=null, clients=[]. No publishing, landing or Graph transition occurred.</p>
+<p><small>A broad process diagnostic exposed an isolated QA capture token. Its
+Session and descendant processes were terminated; any still-valid copy should be
+rotated. The value is not retained in these artifacts. Later cleanup inspected
+process identities without printing argument bodies.</small></p>
+<p>Full run records: <a href="qa-live-transcript.json">server</a> ·
+<a href="qa-creation-transcript.json">creation</a> ·
+<a href="qa-terminal-transcript.json">terminal</a> ·
+<a href="qa-run-recovery.json">post-restart counts</a> ·
+<a href="qa-cleanup.json">cleanup</a>.</p>
+</html>

@@ -1,0 +1,71 @@
+[
+  {
+    "scenario": "terminal owner launched",
+    "observed": {
+      "owner": "90b38673-3165-485d-9162-02e705929d49",
+      "pid": 24444
+    }
+  },
+  {
+    "scenario": "first viewer",
+    "observed": {
+      "terminal": true,
+      "controls": true,
+      "grace_ms": 60000
+    }
+  },
+  {
+    "scenario": "reconnected older viewer",
+    "observed": {
+      "kind": "attached",
+      "controls": false,
+      "owner": "8c7d5a5c63a4",
+      "viewer": "b6ebb9ff9043"
+    }
+  },
+  {
+    "scenario": "input and geometry",
+    "observed": {
+      "inputs": [
+        "before-disconnect",
+        "newer-viewer",
+        "still-newer"
+      ],
+      "size": "31 99"
+    }
+  },
+  {
+    "scenario": "fresh screen",
+    "observed": {
+      "contains_latest_output": true,
+      "controls": false
+    }
+  },
+  {
+    "scenario": "retention grace expired",
+    "observed": {
+      "elapsed_seconds": 61.4,
+      "resume": "reconnect_required",
+      "replayed_bytes_before_refusal": 0,
+      "fresh_screen_contains_latest": true,
+      "controls": false
+    }
+  },
+  {
+    "scenario": "final input log",
+    "observed": [
+      "before-disconnect",
+      "newer-viewer",
+      "still-newer",
+      "quit"
+    ]
+  },
+  {
+    "scenario": "owner cleanup",
+    "observed": {
+      "exit_requested": true,
+      "owner_exit": 0,
+      "endpoint_present": false
+    }
+  }
+]

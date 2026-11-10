@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-816 · Codex tier QA</title>
+<style>
+:root{color-scheme:light dark;--line:#aab2bd;--muted:#647084;--accent:#b88420}
+body{max-width:940px;margin:0 auto;padding:32px 24px 56px;font:16px/1.55 system-ui,sans-serif}
+h1{font-size:30px;line-height:1.2}h2{font-size:21px;margin-top:30px}header{color:var(--muted);font-size:14px}
+a{color:inherit}pre,code{font-family:ui-monospace,monospace;font-size:13px}pre{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid var(--line);padding:14px}
+.status{border-left:4px solid var(--accent);padding-left:16px}table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}summary{cursor:pointer;margin-top:14px}td:first-child{width:24%}
+</style>
+<header>LOO-816 · 9 November 2026 · branch 5ae4345a6 + existing scratch changes</header>
+<h1>Codex launch tier: real CLI and provider QA</h1>
+<p class="status"><strong>The exercised tier behavior passes.</strong> Authenticated replies and typed Codex slash commands remain unchecked. The disposable home has no login, and the configured Doppler project has no OpenAI credential. No product defect was found in the exercised paths.</p>
+<p>Built with <code>cargo build -p loopflow --bin lf</code> (passed, 1m 22s). Used <code>target/debug/lf</code> and installed Codex 0.167.0, without installing the branch. All product probes used a temporary Git repository, local Git identity, isolated <code>HOME</code>, <code>LF_HOME</code> and <code>CODEX_HOME</code>, and an environment with inherited caller and credential variables removed. No stand-ins, test-only endpoints, direct database writes or automated test suites were used.</p>
+<h2>1. Set, inspect, override, unset</h2>
+<pre>lf set --global codex.service_tier default
+lf set codex.service_tier fast
+lf --setting codex.service_tier=standard config settings --json
+lf config settings --explain
+lf unset codex.service_tier
+lf unset --global codex.service_tier</pre>
+<table><tr><th>Scenario</th><th>Observed</th></tr>
+<tr><td>Fresh settings</td><td>No authored tier; resolution omits the setting.</td></tr>
+<tr><td>Global + repository</td><td>Global <code>default</code>; repository <code>fast</code> wins. Explanations name the winning file and overridden value.</td></tr>
+<tr><td>Invocation</td><td><code>standard</code> wins over repository <code>fast</code> for one command.</td></tr>
+<tr><td>Wrong input</td><td><code>slow</code>, <code>true</code>, <code>null</code>, <code>42</code> and an empty value all fail; the saved preference remains usable. Unknown strings list accepted spellings; null/empty directs removal through unset.</td></tr>
+<tr><td>Unset twice</td><td>Removing the repository preference reveals global <code>default</code>; removing the global preference leaves inheritance. Repeating unset succeeds.</td></tr></table>
+<details><summary>CLI excerpts: authored settings and errors</summary><pre>$ lf set --global codex.service_tier default
+$QA_ROOT/.lf/config.yaml: codex.service_tier saved; NextLaunch
+exit: 0
+
+$ lf set codex.service_tier fast
+$QA_ROOT/repo/lf.config.local.yaml: codex.service_tier saved; NextLaunch
+exit: 0
+
+$ lf config settings --explain
+
+Configuration
+
+  Agents and context
+  SETTING             VALUE  FROM
+  agent               codex  Shared project
+  codex.service_tier  fast   Personal project
+  context.diff        false  Shared project
+  context.diff_files  false  Shared project
+  context.paste       false  Shared project
+
+  19 built-in settings hidden · --all to include them
+
+  agent = codex
+    selected
+      default_agent = codex · Shared project
+      .lf/config.yaml
+
+  codex.service_tier = fast
+    selected
+      codex.service_tier = fast · Personal project
+      lf.config.local.yaml
+    overridden by a higher declaration
+      codex.service_tier = default · Personal global
+      $LF_HOME/config.yaml
+
+  context.diff = false
+    selected
+      context.diff = false · Shared project
+      .lf/config.yaml
+    overridden by a higher declaration
+      context.diff = false · Built-in
+      builtin
+
+  context.diff_files = false
+    selected
+      context.diff_files = false · Shared project
+      .lf/config.yaml
+    overridden by a higher declaration
+      context.diff_files = false · Built-in
+      builtin
+
+  context.paste = false
+    selected
+      context.paste = false · Shared project
+      .lf/config.yaml
+    overridden by a higher declaration
+      context.paste = false · Built-in
+      builtin
+
+exit: 0
+
+$ lf set --global codex.service_tier &#x27;slow&#x27;
+Error: invalid graph: codex.service_tier: unknown variant `slow`, expected one of `default`, `standard`, `fast`, `priority`
+exit: 1
+
+$ lf set --global codex.service_tier &#x27;true&#x27;
+Error: invalid graph: codex.service_tier: invalid type: boolean `true`, expected a Value::Tagged enum
+exit: 1
+
+$ lf set --global codex.service_tier &#x27;null&#x27;
+Error: invalid graph: omit a file value or use unset to remove a preference
+exit: 1
+
+$ lf set --global codex.service_tier &#x27;42&#x27;
+Error: invalid graph: codex.service_tier: invalid type: integer `42`, expected a Value::Tagged enum
+exit: 1
+
+$ lf set --global codex.service_tier &#x27;&#x27;
+Error: invalid graph: omit a file value or use unset to remove a preference
+exit: 1
+
+$ lf unset codex.service_tier
+$QA_ROOT/repo/lf.config.local.yaml: codex.service_tier unset; NextLaunch
+exit: 0
+
+$ lf unset --global codex.service_tier
+$QA_ROOT/.lf/config.yaml: codex.service_tier unset; NextLaunch
+exit: 0
+
+$ lf unset --global codex.service_tier
+$QA_ROOT/.lf/config.yaml: codex.service_tier unset; NextLaunch
+exit: 0
+
+$ lf set --global codex.service_tier standard
+$QA_ROOT/.lf/config.yaml: codex.service_tier saved; NextLaunch
+exit: 0</pre></details><h2>2. Returning Session from the installed release</h2>
+<p>Ran installed <code>lf session resume --prepare --json</code> in the private repository, then opened the same state with the branch after setting <code>standard</code>. Both returned the same Session and worktree. This checks existing local state; it does not represent an authenticated provider conversation from an older release.</p><details><summary>Installed → branch prepare</summary><pre>{
+  &quot;installed&quot;: {
+    &quot;id&quot;: &quot;351d12a25d52410994826a80b1b5e559&quot;,
+    &quot;cwd&quot;: &quot;$QA_ROOT/repo.repo&quot;,
+    &quot;provider&quot;: &quot;codex&quot;,
+    &quot;interactive&quot;: true
+  },
+  &quot;branch&quot;: {
+    &quot;id&quot;: &quot;351d12a25d52410994826a80b1b5e559&quot;,
+    &quot;cwd&quot;: &quot;$QA_ROOT/repo.repo&quot;,
+    &quot;provider&quot;: &quot;codex&quot;,
+    &quot;interactive&quot;: true
+  }
+}</pre></details><h2>3. Native launch and provider child threads</h2>
+<p>Started the branch's native Codex launch with global <code>standard</code> while the disposable provider file selected <code>priority</code>. Connected to that launch's real Unix WebSocket and read its config and thread. Both returned <code>default</code>. Real <code>thread/start</code> and <code>thread/fork</code> without tier arguments also returned <code>default</code>. Changing the original thread through <code>thread/settings/update</code> to <code>priority</code> survived an ID-only resume.</p>
+<p>Separate real app-server runs confirmed no override inherits the file's <code>priority</code>, while launch overrides select <code>default</code> or <code>priority</code> across creation, fork and resume. These are public provider API checks, not typed <code>/new</code> or <code>/fork</code> walkthroughs.</p><details><summary>Branch-launched provider readback</summary><pre>{
+  &quot;session&quot;: &quot;session_682075cd1efb4ac59f066f565baad128&quot;,
+  &quot;thread&quot;: &quot;01a1c2ff-c279-7ca3-bb43-be805cdf07f8&quot;,
+  &quot;config&quot;: &quot;default&quot;,
+  &quot;initial&quot;: &quot;default&quot;,
+  &quot;new&quot;: &quot;default&quot;,
+  &quot;fork&quot;: &quot;default&quot;,
+  &quot;change&quot;: {},
+  &quot;after_change&quot;: &quot;priority&quot;
+}</pre></details><details><summary>Real provider inheritance matrix</summary><pre>[
+  {
+    &quot;override&quot;: null,
+    &quot;config&quot;: &quot;priority&quot;,
+    &quot;start&quot;: &quot;priority&quot;,
+    &quot;thread&quot;: &quot;01a1c2fe-2924-72c2-a857-378d726e1622&quot;,
+    &quot;fork&quot;: &quot;priority&quot;,
+    &quot;resume&quot;: &quot;priority&quot;
+  },
+  {
+    &quot;override&quot;: &quot;default&quot;,
+    &quot;config&quot;: &quot;default&quot;,
+    &quot;start&quot;: &quot;default&quot;,
+    &quot;thread&quot;: &quot;01a1c2fe-2d7c-7ef3-ab52-853d81ea3b22&quot;,
+    &quot;fork&quot;: &quot;default&quot;,
+    &quot;resume&quot;: &quot;default&quot;
+  },
+  {
+    &quot;override&quot;: &quot;priority&quot;,
+    &quot;config&quot;: &quot;priority&quot;,
+    &quot;start&quot;: &quot;priority&quot;,
+    &quot;thread&quot;: &quot;01a1c2fe-3374-77c3-9036-16ff66d2ea38&quot;,
+    &quot;fork&quot;: &quot;priority&quot;,
+    &quot;resume&quot;: &quot;priority&quot;
+  }
+]</pre></details><h2>4. Public reattachment and stopped-Session resume</h2>
+<pre>lf -i -a codex : "Reply only with QA_OK. Do not use tools."
+# Change this private thread to priority through the real provider API.
+lf -i --setting codex.service_tier=default resume SESSION
+# Stop the private provider, then resume retained history.
+lf -i --setting codex.service_tier=standard resume SESSION</pre>
+<p>Reattachment kept <code>priority</code>, the same Session, provider process, socket and thread. The terminal transferred to the new viewer and showed the same Codex sign-in screen. After shutdown, resume started a different provider process on the same saved thread and applied <code>default</code>. This reaches the public resume command with the real provider and terminal, including Loopflow's observer.</p><details><summary>Identity and tier before/after</summary><pre>{
+  &quot;initial_identity&quot;: [
+    &quot;session_4e29df4ff0974705be76612275b4379c&quot;,
+    &quot;2b9ab947-1b54-45df-b507-7051df516e22&quot;,
+    14481,
+    &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp30lGlg/agent.sock&quot;,
+    &quot;01a1c301-0b26-7940-976e-5aeca832087b&quot;
+  ],
+  &quot;initial_tier&quot;: &quot;default&quot;,
+  &quot;changed_tier&quot;: &quot;priority&quot;,
+  &quot;reattached_identity&quot;: [
+    &quot;session_4e29df4ff0974705be76612275b4379c&quot;,
+    &quot;2b9ab947-1b54-45df-b507-7051df516e22&quot;,
+    14481,
+    &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp30lGlg/agent.sock&quot;,
+    &quot;01a1c301-0b26-7940-976e-5aeca832087b&quot;
+  ],
+  &quot;reattached_tier&quot;: &quot;priority&quot;,
+  &quot;resumed_identity&quot;: [
+    &quot;session_4e29df4ff0974705be76612275b4379c&quot;,
+    &quot;2197a8b1-b437-4493-af62-ab1e972c7724&quot;,
+    59342,
+    &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpITAQ8j/agent.sock&quot;,
+    &quot;01a1c301-0b26-7940-976e-5aeca832087b&quot;
+  ],
+  &quot;resumed_tier&quot;: &quot;default&quot;
+}</pre></details><pre>Welcome to Codex, OpenAI's command-line coding agent
+Sign in with ChatGPT to use Codex as part of your paid plan
+or connect an API key for usage-based billing
+&gt; 1. Sign in with ChatGPT
+  2. Sign in with Device Code
+  3. Sign in another way</pre>
+<p>The excerpt above comes from the reattached terminal transcript. No sign-in was performed.</p>
+<h2>5. Headless Graph and headless resume</h2>
+<p>Created a local <code>tier-qa</code> Graph with one <code>tier-prompt</code> skill asking for <code>QA_OK</code>, then ran <code>lf -b -a codex graph tier-qa</code>. Read the tier from each launched real provider. Also ran <code>lf -b resume SESSION --message "Reply only with QA_OK. Do not use tools."</code> against the private native Session with global <code>fast</code>.</p>
+<table><tr><th>Preference / path</th><th>Real provider tier</th><th>Completion</th></tr><tr><td>standard / Graph</td><td>default</td><td>HTTP 401: no credential</td></tr><tr><td>fast / Graph</td><td>priority</td><td>HTTP 401: no credential</td></tr><tr><td>unset / Graph</td><td>priority</td><td>Interrupted after a 15-second completion wait; exit 130</td></tr><tr><td>fast / headless resume</td><td>priority</td><td>HTTP 401: no credential</td></tr></table><details><summary>Headless Graph readbacks and output</summary><pre>[
+  {
+    &quot;preference&quot;: &quot;standard&quot;,
+    &quot;identity&quot;: [
+      &quot;session_ebfdbbc67f444b4c89f203a3173b95c1&quot;,
+      &quot;ff89de34-e0a3-4700-bccf-d0c37ae84d35&quot;,
+      61023,
+      &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpmfkQ12/agent.sock&quot;,
+      &quot;01a1c302-1e57-78e3-856f-bc16f29bf65c&quot;
+    ],
+    &quot;tier&quot;: &quot;default&quot;,
+    &quot;exit&quot;: 1,
+    &quot;output&quot;: &quot;\n\u2500\u2500 graph tier-qa\n  tier-prompt\n\n[1/1] tier-prompt\n\nError: agent exited with code 1: codex_error: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a5812e971cd46ce3-SJC, request id: req_f6e257c8730c4fe88cf183049b7749b8. Check $QA_ROOT/.lf/runs/e4/e466b02e24814bf6b7ac2b502ab091a1 for details.\nError: tier-prompt: codex_error: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a5812e971cd46ce3-SJC, request id: req_f6e257c8730c4fe88cf183049b7749b8\n&quot;
+  },
+  {
+    &quot;preference&quot;: &quot;fast&quot;,
+    &quot;identity&quot;: [
+      &quot;session_69f83ccefcc24b94aa0b44a5dd8c774e&quot;,
+      &quot;39a5806d-b104-44ef-949b-e51b27047ab7&quot;,
+      86734,
+      &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpgLdBLt/agent.sock&quot;,
+      &quot;01a1c302-6681-7840-9223-b9183993ff22&quot;
+    ],
+    &quot;tier&quot;: &quot;priority&quot;,
+    &quot;exit&quot;: 1,
+    &quot;output&quot;: &quot;\n\u2500\u2500 graph tier-qa\n  tier-prompt\n\n[1/1] tier-prompt\n\nError: agent exited with code 1: codex_error: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a5812f0adb97d4f9-SJC, request id: req_07d13e0903d94106a702c08ad54734ce. Check $QA_ROOT/.lf/runs/bd/bde35b21aa5d42ddaf17deb68f6cade4 for details.\nError: tier-prompt: codex_error: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a5812f0adb97d4f9-SJC, request id: req_07d13e0903d94106a702c08ad54734ce\n&quot;
+  },
+  {
+    &quot;preference&quot;: null,
+    &quot;identity&quot;: [
+      &quot;session_742e4be77334406bb44ebfa49ac14f42&quot;,
+      &quot;bb3ef125-ab99-440d-b59a-a61b2f8fe7f0&quot;,
+      38877,
+      &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVCrm8V/agent.sock&quot;,
+      &quot;01a1c302-adff-77c2-8a8a-2d49cfbd85bc&quot;
+    ],
+    &quot;tier&quot;: &quot;priority&quot;,
+    &quot;exit&quot;: 130,
+    &quot;output&quot;: &quot;\n\u2500\u2500 graph tier-qa\n  tier-prompt\n\n[1/1] tier-prompt\n&quot;,
+    &quot;completion_wait_seconds&quot;: 15,
+    &quot;cancelled&quot;: true
+  }
+]</pre></details><details><summary>Headless resume readback and output</summary><pre>[
+  {
+    &quot;preference&quot;: &quot;fast&quot;,
+    &quot;identity&quot;: [
+      &quot;session_4e29df4ff0974705be76612275b4379c&quot;,
+      &quot;496ae804-4303-4c39-99ee-e6d6a949fede&quot;,
+      42028,
+      &quot;/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpkIxjus/agent.sock&quot;,
+      &quot;01a1c301-0b26-7940-976e-5aeca832087b&quot;
+    ],
+    &quot;tier&quot;: &quot;priority&quot;,
+    &quot;exit&quot;: 1,
+    &quot;output&quot;: &quot;\nError: agent exited with code 1: codex_error: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a58130f9de04d3d7-SJC, request id: req_f0dfac06d593494abfc47b1ccec59c88. Check $QA_ROOT/.lf/runs/cf/cfd9e75e0d0d449a92c40941da089c25 for details.\n&quot;
+  }
+]</pre></details><h2>6. Files, shutdown, repairs</h2>
+<p>Set/unset checks left the disposable provider config byte-for-byte unchanged. After native terminal use, Codex added <code>tui.screen_reader_detection_done</code> and a project trust entry. Its saved <code>service_tier = "priority"</code> remained unchanged throughout, including launches that selected <code>default</code>. The original account's provider files and Sessions were not opened for this probe.</p>
+<p>All probe launchers finished or were stopped and reaped; final OS checks found no live PIDs recorded by the private store. Interrupted runs can leave stale active receipts in that disposable store; those are not running processes.</p>
+<p>No feature-code repair was needed. Early probe setup errors were corrected: use distinct Graph and skill names, wait for thread metadata before reading it, ignore stale process rows, and tolerate a PTY that has already exited. Repeated the affected checks. Added the working native-provider procedure to <code>.lf/skills/qa.md</code> with <code>lf skill customize qa</code>. Formatting check: <code>git diff --check</code>.</p>
+<h2>Remaining limits, worst first</h2>
+<ol><li><strong>Authenticated end-to-end reply not reached.</strong> Native Codex requests sign-in; headless calls return HTTP 401. No OpenAI credential is available in the configured Doppler project. No billing-speed or completed-turn tier claim is made.</li>
+<li><strong>Typed <code>/new</code>, <code>/fork</code> and <code>/fast</code> not reached.</strong> Public provider API creation, fork, tier changes and public Loopflow reattachment were exercised; the sign-in screen prevents checking those native commands.</li>
+<li>Replay was not exercised against the real provider in this pass. Desktop was not opened; this change was checked through the CLI and native Codex terminal. Gate owns affected suites and static checks.</li></ol>
+<p>The available local launch, preference, inheritance, reattachment and resume paths work. No remaining product defect was observed in those paths; the credential gap limits the full workflow claim.</p>
+</html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-816 · Codex tier concept review</title>
+<style>
+  :root { color-scheme: light dark; --muted: #565d67; --line: #c7cdd4; --accent: #215abb; }
+  body { margin: 0 auto; padding: 28px 22px 44px; max-width: 800px; font: 16px/1.5 system-ui, sans-serif; }
+  header { color: var(--muted); font-size: 13px; }
+  h1 { font-size: 28px; line-height: 1.2; margin-bottom: 12px; }
+  h2 { font-size: 18px; margin: 24px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, monospace; font-size: .88em; }
+  code { overflow-wrap: anywhere; }
+  pre { padding: 12px; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { padding-left: 0; }
+  .focus { border-left: 3px solid var(--accent); padding-left: 14px; }
+  li { margin: 8px 0; }
+  @media (prefers-color-scheme: dark) { :root { --muted: #afb8c5; --line: #505967; --accent: #91b8ff; } }
+  @media (max-width: 520px) { body { padding: 20px 14px; } h1 { font-size: 24px; } th, td { padding: 8px 4px; font-size: 12px; } }
+</style>
+<header>
+  LOO-816 · concept-review, pass 2 · 2026-11-09<br>
+  Built from <a href="plan.md">scratch/plan.md</a>, <a href="questions.md">scratch/questions.md</a>,
+  <a href="../docs/config.md">docs/config.md</a>, <a href="../docs/sessions.md">docs/sessions.md</a>,
+  <a href="../docs/telemetry.md">docs/telemetry.md</a>, and the branch changes in
+  <code>config/catalog.rs</code>, <code>agent/session.rs</code>, <code>harness/codex.rs</code>,
+  <code>harness/codex_connection.rs</code>, <code>session_record.rs</code>,
+  <code>lf/commands/replay.rs</code> and <code>tests/context_launch_tests.rs</code>
+  under <code>rust/loopflow</code>.
+</header>
+<main>
+  <h1>Keep the launch preference</h1>
+  <p><strong>No product decision remains open.</strong> The implemented design fits the requested
+  experience. No proposed redesign or code change; loop-or-next can advance.</p>
+  <p class="focus"><strong>The easily confused distinction:</strong> <code>default</code> requests
+  standard speed. Unset means Codex decides. A launch preference does not describe the current
+  tier of a running conversation.</p>
+
+  <h2>Before → implemented</h2>
+  <p><strong>Before:</strong> Loopflow always inherits Codex’s tier.<br>
+  <strong>Implemented on this branch:</strong> choose a launch tier, or keep inheriting.</p>
+  <pre>lf set --global codex.service_tier default
+lf unset --global codex.service_tier</pre>
+  <table>
+    <thead><tr><th>Action</th><th>Concept</th><th>API and ownership</th></tr></thead>
+    <tbody>
+      <tr><td>Set, unset, or override once</td><td>Optional launch preference</td><td>Existing settings catalog and precedence → <code>Option&lt;CodexServiceTier&gt;</code> → <code>AgentConfig</code>. Personal/shared settings own persistence.</td></tr>
+      <tr><td>Launch or resume a stopped Session</td><td>Initial conversation tier</td><td><code>thread/start</code> or <code>thread/resume</code> receives <code>serviceTier</code>. Native server config also seeds child conversations. No provider-file rewrite.</td></tr>
+      <tr><td>Change tier, then reattach</td><td>Live conversation</td><td>Codex owns its current tier. Terminal attachment and ID-only observer subscriptions do not reapply the preference.</td></tr>
+      <tr><td>Replay captured work</td><td>Recorded launch input</td><td><code>AgentProcessRequest</code> retains the optional tier. No new Session field or migration.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>One interaction, including recovery</h2>
+  <p>Set <code>default</code> → launch at standard speed → change the conversation to
+  <code>priority</code> → reattach and keep priority. If Codex dies, resume restores native
+  history and applies the current launch preference; it does not replay the interrupted turn.</p>
+  <p><strong>Counterexamples:</strong> unset at repository scope can reveal a global preference.
+  Replay with no captured override still inherits today’s provider configuration.
+  A conflicting invocation override on live attachment must not reset the conversation.</p>
+
+  <h2>What to show next</h2>
+  <p>The plan records passing stand-in launch/resume and live-attachment tests.
+  Real Codex child inheritance and tier retention still need demo validation.
+  These are behavior checks, not unsettled product choices. No provider tests were rerun here.</p>
+  <ol>
+    <li>Do native <code>/new</code> and <code>/fork</code> inherit the launch configuration?
+    <strong>1a.</strong> Yes. <strong>1b.</strong> No — record the provider mismatch.</li>
+    <li>Does a deliberate tier change survive observer activity and reattachment?
+    <strong>2a.</strong> Yes. <strong>2b.</strong> No — record the reset path.</li>
+  </ol>
+</main>
+</html>

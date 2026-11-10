@@ -485,6 +485,7 @@ async fn session(
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
                                 if !checkpoints.checkpoint(checkpoint) {
+                                    if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
                                     send(&mut lines, &error(Some(id), ErrorCode::NotFound, "subscription has ended")).await?;
                                 }
                             }

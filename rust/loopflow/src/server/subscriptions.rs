@@ -219,11 +219,18 @@ impl Delivery {
             }
             let pending = *lock(&self.pending);
             if let Some(reading) = latest.reading {
-                if reading.generation >= pending.generation
-                    && (answered < pending.generation || sent != Some(reading.identity))
+                let fresh = reading.generation >= pending.generation;
+                let failed = latest.ended.as_ref().is_some_and(Result::is_err)
+                    && reading.frame["unavailable"].is_string();
+                if (fresh && (answered < pending.generation || sent != Some(reading.identity)))
+                    || failed
                 {
                     let mut frame = reading.frame.clone();
-                    frame["answers"] = pending.checkpoint.map(Value::from).unwrap_or(Value::Null);
+                    frame["answers"] = if fresh {
+                        pending.checkpoint.map(Value::from).unwrap_or(Value::Null)
+                    } else {
+                        Value::Null
+                    };
                     deliver(
                         outgoing,
                         ServerMessage::Reading {
@@ -270,8 +277,22 @@ impl std::ops::Deref for Held {
 }
 impl Drop for Held {
     fn drop(&mut self) {
-        let subscription = self.0.take();
-        tokio::task::spawn_blocking(move || drop(subscription));
+        let mut release = Release(self.0.take());
+        tokio::task::spawn_blocking(move || drop(release.0.take()));
+    }
+}
+
+// A shutting-down runtime rejects blocking jobs by dropping their closures on
+// the caller's thread. Even that final release must run outside an async worker.
+// Join only on this shutdown path, so service teardown also finishes destruction.
+struct Release(Option<Subscription>);
+impl Drop for Release {
+    fn drop(&mut self) {
+        if let Some(subscription) = self.0.take() {
+            std::thread::spawn(move || drop(subscription))
+                .join()
+                .expect("subscription cleanup thread does not panic");
+        }
     }
 }
 
@@ -577,6 +598,53 @@ mod tests {
         task.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn a_terminal_failure_sends_its_last_reading_without_answering_a_later_checkpoint() {
+        use super::{Latest, Pending, Reading};
+        use std::sync::Mutex;
+        let frame =
+            serde_json::json!({"answers": null, "unavailable": "snapshot failed", "body": null});
+        let identity =
+            crate::lf::commands::subscribe::identity(&Some("snapshot failed".into()), &None)
+                .unwrap();
+        let (latest, receiver) = tokio::sync::watch::channel(Latest {
+            ready: true,
+            reading: Some(Arc::new(Reading {
+                generation: 1,
+                frame,
+                identity,
+            })),
+            ended: Some(Err(Arc::new(crate::engine::Error::new(
+                crate::engine::ErrorCode::Unavailable,
+                "snapshot failed",
+            )))),
+        });
+        let (outgoing, mut messages) = mpsc::channel(4);
+        let delivery = Delivery {
+            latest: receiver,
+            pending: Arc::new(Mutex::new(Pending {
+                generation: 2,
+                checkpoint: Some(9),
+            })),
+        };
+        let task = tokio::spawn(delivery.run("failed".into(), outgoing));
+        assert!(matches!(
+            messages.recv().await.unwrap().1,
+            ServerMessage::Response { .. }
+        ));
+        let ServerMessage::Reading { frame, .. } = messages.recv().await.unwrap().1 else {
+            panic!("missing final failure reading")
+        };
+        assert!(frame["answers"].is_null());
+        assert_eq!(frame["unavailable"], "snapshot failed");
+        assert!(matches!(
+            messages.recv().await.unwrap().1,
+            ServerMessage::Error { .. }
+        ));
+        task.await.unwrap();
+        drop(latest);
+    }
+
     #[test]
     fn identical_demand_shares_setup_and_coalesces_independent_checkpoints() {
         with_store(|_store| {
@@ -670,6 +738,34 @@ mod tests {
                     .unwrap()
                     .len()
                     == 1));
+            })
+        });
+    }
+
+    #[test]
+    fn reader_cleanup_finishes_even_when_the_outer_runtime_rejects_jobs() {
+        with_store(|_store| {
+            Box::pin(async {
+                let before = meter::snapshot();
+                let (held, stopped) = tokio::task::spawn_blocking(|| {
+                    let runtime = tokio::runtime::Runtime::new().unwrap();
+                    let stopped = runtime.handle().clone();
+                    drop(runtime);
+                    let subscription = sessions().subscribe(None, || {}).unwrap();
+                    assert!(subscription.pull().is_some());
+                    (super::Held(Some(subscription)), stopped)
+                })
+                .await
+                .unwrap();
+                // Still inside an async task, but Tokio can no longer admit the
+                // destructor to this pool. Drop must complete without a runtime panic.
+                let entered = stopped.enter();
+                drop(held);
+                drop(entered);
+                let work = meter::snapshot().since(before);
+                assert_eq!(stage(&work, "runtime_build"), 1);
+                assert_eq!(stage(&work, "runtime_drop"), 1);
+                assert_eq!(work.opens, work.closes);
             })
         });
     }

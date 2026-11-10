@@ -20,6 +20,11 @@ combination; renamed enum variants can leave new branch tests uncompilable.
 CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
 aliases are covered separately by the `cli_discovery::` integration suite.
+Commands with an optional positional Wave or `--wave` also run
+`cargo test -p loopflow --lib wave_resolution_matrix::`; register their selection
+there so the matrix covers ambient context, explicit overrides and no Wave.
+Session command changes also run
+`cargo test -p loopflow --test integration session_cli_tests::session_cli_uses_one_truthful_resolution_contract`.
 
 Creation receipt changes also run `test(local_planning::)`,
 `test(context_launch_tests::)`, `test(settings_launch_tests::)` and

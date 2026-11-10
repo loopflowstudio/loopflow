@@ -304,6 +304,7 @@ pub(crate) fn resolve_session_config(
         cwd: Some(session.cwd.clone()),
         skip_permissions: current.yolo,
         chrome: current.chrome,
+        codex_service_tier: current.codex.service_tier,
         output_schema: cli.output_schema.clone(),
         ..Default::default()
     };

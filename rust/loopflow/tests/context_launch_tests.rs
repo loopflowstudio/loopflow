@@ -50,6 +50,113 @@ fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
 }
 
 #[test]
+fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
+    for mode in ["-i", "-b"] {
+        for (setting, expected) in [
+            (None, None),
+            (Some("standard"), Some("default")),
+            (Some("fast"), Some("priority")),
+        ] {
+            let repo = TestRepo::new();
+            repo.create_file(
+                ".lf/config.yaml",
+                "diff: false\ndiff_files: false\npaste: false\n",
+            );
+            repo.create_file(".lf/skills/tier-probe.md", "Tier probe");
+            repo.create_file(".lf/graphs/tier-check.yaml", "- tier-probe\n");
+            let home = tempfile::tempdir().unwrap();
+            support::install_native_codex(&home.path().join("bin"));
+            let run = |args: &[&str]| {
+                let output = native_codex_command(repo.path(), home.path(), args)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{mode}/{setting:?} {args:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            };
+            if let Some(setting) = setting {
+                run(&["set", "--global", "codex.service_tier", setting]);
+            }
+            let native = home.path().join(".codex");
+            fs::create_dir_all(&native).unwrap();
+            let provider_config = "service_tier = \"priority\"\n";
+            fs::write(native.join("config.toml"), provider_config).unwrap();
+            let read = |name: &str| -> serde_json::Value {
+                serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
+            };
+            let args = if mode == "-b" {
+                vec![mode, "-a", "codex", "graph", "tier-check"]
+            } else {
+                vec![mode, "-a", "codex", ":", "Tier probe"]
+            };
+            run(&args);
+            let params = read("native-config.json");
+            assert_eq!(
+                params
+                    .get("serviceTier")
+                    .and_then(serde_json::Value::as_str),
+                expected
+            );
+            if mode == "-i" {
+                let server = read("native-server-config.json");
+                assert_eq!(
+                    server
+                        .get("service_tier")
+                        .and_then(serde_json::Value::as_str),
+                    expected
+                );
+            }
+            assert_eq!(read("native-tier.json"), expected.unwrap_or("priority"));
+            let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            assert_eq!(settled_live_agents(&database), 0);
+            if mode == "-b" {
+                // Graph Runs are finite; headless resume continues an interactive Session.
+                run(&["-i", "-a", "codex", ":", "Resume seed"]);
+                assert_eq!(settled_live_agents(&database), 0);
+            }
+            let session: String = database
+                .query_row(
+                    "SELECT id FROM agent_sessions WHERE interactive=1 LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+
+            if mode == "-i" {
+                fs::write(home.path().join("check-service-tier"), "").unwrap();
+            }
+            let mut args = vec![
+                mode,
+                "--setting",
+                "codex.service_tier=default",
+                "resume",
+                &session,
+            ];
+            if mode == "-b" {
+                args.extend(["--message", "Resume tier probe"]);
+            }
+            run(&args);
+            assert_eq!(read("native-config.json")["serviceTier"], "default");
+            if mode == "-i" {
+                let probe = read("native-tier-check.json");
+                assert_eq!(probe["initial"], "default");
+                assert_eq!(probe["retained"], probe["changed"]);
+                assert_eq!(probe["new"], "default");
+                assert_eq!(probe["fork"], "default");
+            }
+            assert_eq!(settled_live_agents(&database), 0);
+            assert_eq!(
+                fs::read_to_string(native.join("config.toml")).unwrap(),
+                provider_config
+            );
+            run(&["unset", "--global", "codex.service_tier"]);
+        }
+    }
+}
+
+#[test]
 fn codex_startup_failures_preserve_input_and_allow_reconnect() {
     for failure in [
         "fail-server",

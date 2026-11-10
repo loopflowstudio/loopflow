@@ -537,6 +537,7 @@ pub fn generate_pr_copy(
 
     let launch = AgentConfig {
         chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),

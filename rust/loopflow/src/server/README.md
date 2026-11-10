@@ -52,7 +52,15 @@ rather than the connection. The root accepts any message either side sends;
 `$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
-on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
+on the wire, and `x-result` beside it names what `response.result` carries.
+For a write, that schema derives from the Rust type the operation returns.
+For example, `task.ship` returns `TaskShip`: its `state` is `shipping`,
+`already_shipping` or `at_end`, with the fields described by that variant.
+`lf --task <issue> ship --json` prints the same result. Use the operation's
+`x-result` to decode it; `response.result` adds no extra result-type tag.
+
+Where a recorded exchange exists, `examples` holds the request's operation and
+`x-result-example` what it answered, from the same fixtures the tests check. A
 subscription frame's `body` refers to `$defs/Untyped`, because its shape is the
 `x-result` of the read that opened it. The serialize contract keeps a nullable
 field required, as both sides send it.

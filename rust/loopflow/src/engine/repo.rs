@@ -26,13 +26,17 @@ pub fn release(
     version: Option<&str>,
     target: Option<&str>,
 ) -> Result<launch::Launched> {
+    launch::start(directory, &spell_release(version, target))
+}
+
+pub(super) fn spell_release(version: Option<&str>, target: Option<&str>) -> Vec<String> {
     let mut args = ["repo", "release", "run"].map(str::to_owned).to_vec();
     args.extend(version.map(str::to_owned));
     if let Some(target) = target {
         args.extend(["--target".to_owned(), target.to_owned()]);
     }
     args.push("--json".to_owned());
-    launch::start(directory, &args)
+    args
 }
 
 /// `lf repo release run` in this process: the whole workflow, through

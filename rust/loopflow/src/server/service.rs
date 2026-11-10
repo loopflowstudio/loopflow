@@ -850,7 +850,7 @@ async fn operate(
             }
             effect(target, id, instance, trace_id, move || {
                 let _held = reservation;
-                crate::lf::commands::account::served(|| change.run())
+                crate::lf::commands::account::served(|| Ok(serde_json::to_value(change.run()?)?))
             })
             .await
         }

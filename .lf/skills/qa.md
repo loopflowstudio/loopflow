@@ -86,6 +86,9 @@ with the production DTOs. Plan reads take a positional Wave:
 Check the resulting state through the CLI as well as the socket. Dashboard
 queries accept `task:<id>`; hide/show members use that same selector.
 `lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.
+Save Dashboard slots with `desktop.dashboard.slots`; `desktop.layout.save`
+accepts Task, Wave and repository pane layouts. A Task layout holds one Session,
+shell and browser pane and includes its `work` key and current `revision`.
 Paged Session reads return `entries` and `next`; the unpaged `session.list`
 subscription returns an array. Stop and reap every server child,
 including on failure; no service installation is needed for this isolated run.
@@ -148,6 +151,11 @@ Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
+Before `task.ship`, place the Task with `lf checkout <id> --json`; creating or
+binding a prepared Session alone does not place its checkout. `task.ship` returns
+the shipping Process ID. Inspect its Graph through `lf task status <id> --json`
+and pass that Graph's ID to `lf process show`; the shipping carrier is not a Graph.
+
 For a checkout without launching a Graph, run `lf wt create qa --json`, take
 its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.
 Creation returns a receipt containing the Task: use `task.id`.

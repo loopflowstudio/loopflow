@@ -180,24 +180,39 @@ fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
             cached: true,
         })
     };
+    // Served reads share observations; commands and bare reads stay direct.
+    let observed = |field: &str, expected: Value| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let current = report();
+            if current["accounts"][0][field] == expected {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "account {field} did not become {expected}: {current}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
     let login = "codex=work@".to_owned();
     assert!(server_write(Write::AccountPause {
         login: login.clone()
     })
     .is_null());
-    assert_eq!(report()["accounts"][0]["routing"], "explicit_only");
+    observed("routing", "explicit_only".into());
     read(
         repo.path(),
         home.path(),
         &["account", "unpause", &login],
         None,
     );
-    assert_eq!(report()["accounts"][0]["routing"], "automatic");
+    observed("routing", "automatic".into());
     assert!(server_write(Write::AccountUse {
         login: login.clone()
     })
     .is_null());
-    assert_eq!(report()["accounts"][0]["held"], true);
+    observed("held", true.into());
     let cli: Value = serde_json::from_str(&read(
         repo.path(),
         home.path(),
@@ -223,16 +238,16 @@ fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
         login: "auto".into()
     })
     .is_null());
-    assert_eq!(report()["accounts"][0]["held"], false);
+    observed("held", false.into());
     read(
         repo.path(),
         home.path(),
         &["account", "pause", &login],
         None,
     );
-    assert_eq!(report()["accounts"][0]["routing"], "explicit_only");
+    observed("routing", "explicit_only".into());
     assert!(server_write(Write::AccountUnpause { login }).is_null());
-    assert_eq!(report()["accounts"][0]["routing"], "automatic");
+    observed("routing", "automatic".into());
 }
 
 #[test]

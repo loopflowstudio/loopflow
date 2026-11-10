@@ -36,9 +36,10 @@ or row changes. Each must reach the actual dependent reading. An unrelated
 external fact must not rerun it, and a changed unselected field must not emit
 a frame. These are the existing acceptance requirements, not new design work.
 
-Remaining: gate must verify the affected callers and quiet-time transitions.
-QA exercised live served Git/file reads, process exit and missing-checkout recovery.
-Full clippy and CI remain unverified here; the live QA results are in `scratch/qa.html`. No product decision is open.
+Remaining: hosted CI and landing. Local checks now cover the affected callers,
+quiet-time transitions and full clippy. QA exercised live served Git/file reads,
+process exit and missing-checkout recovery; results are in `scratch/qa.html`.
+No product decision is open.
 Fetching origin/main during realign found it still at the checkout base
 `28b0af568`; delivery still needs a fresh sync if main advances.
 
@@ -74,3 +75,27 @@ unexercised in the private home, which has no provider/GitHub login.
 - `uv run python scratch/qa_served.py` — passed with Swift-encoded live messages (QA).
 - `uv run python scratch/qa_cli_subscription.py` — passed, no server running (QA).
 - `scripts/test_desktop.sh --filter 'WorkCLISubscriptionTests/serverReplacementKeepsWorkCurrent|DesktopHeadlessTests/workStates' -Xswiftc -gnone` — 2 passed with inherited LF variables unset and stdin closed (QA).
+
+Publication check, 2026-11-09: `lf sync` succeeded with main still at
+`28b0af568`. The affected Rust run passed 232/233 tests; served account routing
+still asserted an immediate answer after editing configuration. Updated that
+test to await the expected observed answer after each mutation, retaining its
+CLI parity assertions. The repaired test and clippy still need to run.
+Website and architecture passed. Swift stopped in
+`PortfolioServiceTests.desktopWritesReadBackThroughCLI`: the mutation returned
+the imported repository but the following served read retained the old folder
+selection. That fixture now waits for observation convergence, and requires the
+repository count before indexing. Stopped its orphaned private server (PID 63832).
+The first recheck ran no product suites: resource inventory exceeded its
+15-second deadline measuring `/Users/jack/.cache/uv`; the preceding postflight
+reported 131.1 GiB free. Rechecking through the normal runner.
+The recheck passed all 111 selected tests (the repaired account test and Git,
+config, Wave and server callers). Full clippy found one needless borrow in
+`ops/human_session/workspace.rs`; removed it. Swift and final clippy are pending.
+
+Final publication checks (inherited LF variables unset):
+- `scripts/test.py --reuse-passing --rust-filter <Gate coverage above>` — architecture passed; 232 Rust tests passed, one repaired account assertion; website 73 passed. The initial Swift run stopped at the repaired portfolio assertion.
+- `scripts/test.py --base HEAD --reuse-passing --rust-filter 'test(account_holds_and_rotation_use_the_same_machine_state_as_the_cli) | test(git::tests::) | test(config::tests::) | test(lf::commands::waves::tests::) | test(server::)'` — all 111 Rust tests passed; full headless Swift 782 tests passed, app launch-and-quit passed, Swift boundaries passed. Clippy's one needless borrow was fixed afterward.
+- `cargo fmt`, `git diff --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed after that fix.
+No private server remained after verification. Real GitHub/provider QA and
+mounted-window interaction retain the limits in `scratch/qa.html`.

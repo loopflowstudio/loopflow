@@ -918,6 +918,7 @@ mod tests {
         resolve_layers, select_invocation, ConfigDeclarations, ConfigSource, OccurrenceSettings,
         SettingScope,
     };
+    use crate::config::CodexServiceTier;
     use crate::graph::Skill;
     use serde_yaml_ng::Value;
 
@@ -941,6 +942,94 @@ mod tests {
         }));
         skill
     }
+    #[test]
+    fn codex_service_tier_is_optional_and_typed() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        assert_eq!(
+            resolve_layers(&[], None).unwrap().config.codex.service_tier,
+            None
+        );
+        for (value, expected) in [
+            ("default", CodexServiceTier::Default),
+            ("standard", CodexServiceTier::Default),
+            ("priority", CodexServiceTier::Priority),
+            ("fast", CodexServiceTier::Priority),
+        ] {
+            assert!(super::parse_value("codex.service_tier", value).is_ok());
+            let resolved = resolve_layers(
+                &[layer(
+                    ConfigSource::Personal,
+                    SettingScope::Global,
+                    &format!("codex: {{service_tier: {value}}}"),
+                )],
+                None,
+            )
+            .unwrap();
+            assert_eq!(resolved.config.codex.service_tier, Some(expected));
+        }
+        for value in ["slow", "true", "null", "42"] {
+            assert!(super::parse_value("codex.service_tier", value).is_err());
+        }
+    }
+
+    #[test]
+    fn codex_service_tier_uses_normal_precedence() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let layers = [
+            layer(
+                ConfigSource::Repository,
+                SettingScope::Repository,
+                "codex: {service_tier: priority}",
+            ),
+            layer(
+                ConfigSource::Personal,
+                SettingScope::Global,
+                "codex: {service_tier: standard}",
+            ),
+            layer(
+                ConfigSource::Personal,
+                SettingScope::Repository,
+                "codex: {service_tier: fast}",
+            ),
+        ];
+        for (count, expected) in [
+            (1, CodexServiceTier::Priority),
+            (2, CodexServiceTier::Default),
+            (3, CodexServiceTier::Priority),
+        ] {
+            assert_eq!(
+                resolve_layers(&layers[..count], None)
+                    .unwrap()
+                    .config
+                    .codex
+                    .service_tier,
+                Some(expected)
+            );
+        }
+        let _environment = crate::lf::commands::graph::EnvVarGuard::set(
+            "LF_SETTINGS",
+            "codex: {service_tier: default}",
+        );
+        assert_eq!(
+            resolve_layers(&layers, None)
+                .unwrap()
+                .config
+                .codex
+                .service_tier,
+            Some(CodexServiceTier::Default)
+        );
+        let _cli =
+            select_invocation(serde_yaml_ng::from_str("codex: {service_tier: fast}").unwrap());
+        assert_eq!(
+            resolve_layers(&layers, None)
+                .unwrap()
+                .config
+                .codex
+                .service_tier,
+            Some(CodexServiceTier::Priority)
+        );
+    }
+
     #[test]
     fn choices_precede_fallbacks_before_source_scope_and_target() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();

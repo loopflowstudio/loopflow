@@ -96,6 +96,7 @@ pub struct AgentProcessRequest {
     pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
     pub skip_permissions: bool,
     pub chrome: Option<bool>,
+    pub codex_service_tier: Option<crate::config::CodexServiceTier>,
 }
 
 impl AgentProcessRequest {
@@ -122,6 +123,7 @@ impl AgentProcessRequest {
             execution_boundary: config.execution_boundary.clone(),
             skip_permissions: config.skip_permissions,
             chrome: config.chrome,
+            codex_service_tier: config.codex_service_tier,
         })
     }
 

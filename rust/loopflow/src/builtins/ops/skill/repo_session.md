@@ -40,9 +40,10 @@ watch, check back or follow up.
   lands and repairs it; reading its status restarts one that died. Nothing
   resumes a stopped Graph: look at its history and effects before starting fresh
   with `lf task run`.
-- `lf task run <issue>` launches a Task. `lf -b task run` and `lf ship` approve
-  Auto-Ship, which may merge its PR: run them only when asked to ship or land,
-  and never to re-ship a Task someone stopped.
+- `lf task run <issue>` launches a Task. `lf -b task run`, `lf ship` and an
+  `lf task run` with no interactive step left ahead approve Auto-Ship, which
+  may merge its PR: run them only when asked to ship or land, and never to
+  re-ship a Task someone stopped.
 - This conversation keeps the instructions it launched with. `lf session new`
   restarts it on a fresh thread with current instructions and what this one knew.
 

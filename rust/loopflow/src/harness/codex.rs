@@ -809,10 +809,16 @@ impl CodexHarness {
             // starts with /new or /fork gets it too. A reconnect joins a server
             // that already has it.
             let instructions = thread_params.remove("developerInstructions");
-            if connection.is_none() {
+            if connection.is_some() {
+                // Rejoining a live server must keep the conversation's current tier.
+                thread_params.remove("serviceTier");
+            } else {
                 let mut config = self
                     .conversation_config(command.as_std(), launch, tool_environment)
                     .await?;
+                if let Some(tier) = launch.codex_service_tier {
+                    config["service_tier"] = tier.as_str().into();
+                }
                 if let Some(instructions) = instructions {
                     config["developer_instructions"] = instructions;
                 }

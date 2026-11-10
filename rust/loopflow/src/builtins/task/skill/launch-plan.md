@@ -102,8 +102,9 @@ part in the Task conversation, and the next `lf task run <issue>` continues
 after it. `--from <step>` goes back or skips ahead; `lf task run <issue>
 <graph>` takes up another graph. `lf --task <issue> graph <graph>` runs any
 Graph without moving the Task. `lf -b task run` and `lf ship` approve
-Auto-Ship and run headless to `end`, which may merge the PR: use them only when
-shipping or landing was asked for.
+Auto-Ship and run headless to `end`, which may merge the PR, and so does `lf
+task run` with no interactive step left ahead: use them only when shipping or
+landing was asked for.
 
 Put intent, constraints and "Done when" somewhere that outlives scratch
 cleanup.

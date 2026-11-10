@@ -162,6 +162,7 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
+    let _observations = crate::observe::Cache::shared();
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -822,7 +823,9 @@ async fn operate(
     match operation {
         Operation::Read(query) => tokio::task::spawn_blocking(move || {
             let _held = reservation;
-            crate::journal::request::isolate(|| query.read())
+            crate::journal::request::isolate(|| {
+                crate::observe::Cache::shared().capture(|| query.read()).0
+            })
         })
         .await
         .map_err(unavailable)?

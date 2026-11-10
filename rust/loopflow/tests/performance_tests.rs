@@ -95,7 +95,7 @@ fn task_wait_reuses_its_store_and_builds_status_only_on_return() {
     .unwrap();
     assert!(output.status.success(), "{output:?}");
     let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let id = created["id"].as_str().unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
     let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     connection.execute("UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", rusqlite::params![id, repo.path().to_string_lossy()]).unwrap();
     for _ in 0..16 {

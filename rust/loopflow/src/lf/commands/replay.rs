@@ -58,6 +58,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         execution_boundary: request.execution_boundary.clone(),
         skip_permissions: request.skip_permissions,
         chrome: request.chrome,
+        codex_service_tier: request.codex_service_tier,
         ..AgentConfig::default()
     };
     config.apply_agent_override();
@@ -250,6 +251,7 @@ for line in sys.stdin:
             .to_string(),
             account_id,
             max_turns: Some(3),
+            codex_service_tier: None,
             write_scope: crate::agent::AgentWriteScope::Worktree,
             execution_boundary: None,
             skip_permissions: true,

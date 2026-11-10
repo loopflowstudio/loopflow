@@ -82,7 +82,7 @@ by a test and every server fixture must decode.
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
 → {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null}
-← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","graph_process":"…","log":"…"}}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
@@ -153,11 +153,28 @@ After editing a Task's checkout, request its changed files on the same connectio
 {"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null}
 ```
 
-The response reflects Git state read for this request, even while subscriptions
-are active. One-shot reads and served writes consult Git afresh. Only subscription
-readings reuse retained Git answers, shared across subscriptions so listing
-checkouts side by side stays fast. Git observations are not an atomic snapshot
-of a checkout being edited.
+The response uses the server's latest observed Git state. Served requests and
+subscriptions share observations of process liveness, checkout Git state, PR/CI
+status and repository files. The server refreshes these facts on a loop, so an
+external change appears after it is observed. Ordinary CLI reads call the same
+observation functions directly and need no running server. Served writes still
+consult Git afresh. Git observations are not an atomic snapshot of a checkout
+being edited.
+
+`observe.rs` owns the fact observers and in-memory cache. Bounded workers inherit
+the reading scope; a mutation runs outside it. File and process observations,
+Git commands and GitHub requests refresh independently, so a slow provider does
+not hold up local observations. Facts no longer read expire from memory.
+
+Observed answers and their revisions live only in process memory, never in
+SQLite; server replacement starts with new observations. CLI `--subscribe`
+readings use the same cache in their own process. A subscription follows the
+observed facts it reads alongside the existing store revisions (all domains
+except usage). Changes to those facts or revisions wake it; an unchanged
+selected answer sends no new reading. External dependencies come from the read
+itself, without a separate clock, checkout or probe policy for each operation.
+Database-derived joins retain their transactional snapshot; external
+observations do not share that transaction.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
@@ -299,7 +316,7 @@ part of what a phone or bot client is offered.
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
   detached under its own execution owner and answers what that process
-  reports once it knows: `{state: running, graph_process, log}` when the
+  reports once it knows: `{state: running, ships, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
   {process, log}`, or the refusal it printed. The connection never waits on
   the run. `approve` is `-b`: every step headless to `end`, approving
